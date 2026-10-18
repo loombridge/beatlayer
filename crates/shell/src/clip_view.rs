@@ -838,7 +838,7 @@ fn check_amount(amount: Option<u8>) -> Result<(), EditFailure> {
 /// `signature`: a spacing of whole bars counts bars from 1.1.1, as the
 /// editing grid's bar steps do; anything else is a spacing of ticks laid
 /// out inside each bar.
-fn quantize_step(grid: Ticks, signature: TimeSignature) -> Step {
+pub(crate) fn quantize_step(grid: Ticks, signature: TimeSignature) -> Step {
     let bar = signature.bar_length();
     let bars =
         (grid >= bar && grid.get().rem_euclid(bar.get()) == 0).then(|| grid.get() / bar.get());
@@ -883,7 +883,7 @@ fn quantize_note(
 
 /// `at` moved `amount` percent of the way toward `to`, rounded to the
 /// nearest tick.
-fn toward(at: Ticks, to: Ticks, amount: u8) -> Ticks {
+pub(crate) fn toward(at: Ticks, to: Ticks, amount: u8) -> Ticks {
     let distance = i128::from(to.get()) - i128::from(at.get());
     let rounded = (distance * i128::from(amount) + 50).div_euclid(100);
     let moved = i64::try_from(rounded).unwrap_or(if rounded.is_negative() {

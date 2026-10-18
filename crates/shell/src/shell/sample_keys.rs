@@ -12,11 +12,12 @@ use bl_model::ClipId;
 use super::*;
 
 /// The commands a key or menu item runs on the Sample Editor's selection.
-const KEYED: [&str; 4] = [
+const KEYED: [&str; 5] = [
     "clip.insert_warp_marker",
     "clip.delete_warp_markers",
     "clip.insert_transient",
     "clip.delete_transients",
+    "clip.quantize_audio",
 ];
 
 /// The commands whose gesture frames the shell checks against the files and
@@ -243,6 +244,21 @@ impl Shell {
                 })?;
                 fields.insert("clip".to_owned(), json!(shown));
                 fields.insert("time".to_owned(), json!(time));
+                id
+            }
+            "clip.quantize_audio" => {
+                let map = warped()?;
+                fields.insert("clip".to_owned(), json!(shown));
+                if let Some((from, to)) = selection {
+                    fields.insert(
+                        "from".to_owned(),
+                        json!(Ticks(map.time_to_beat(from).round() as i64)),
+                    );
+                    fields.insert(
+                        "to".to_owned(),
+                        json!(Ticks(map.time_to_beat(to).round() as i64)),
+                    );
+                }
                 id
             }
             _ => {

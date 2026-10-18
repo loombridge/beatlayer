@@ -447,3 +447,82 @@ fn a_replaced_sample_keeps_its_markers_only_at_the_same_length() {
     // The Start marker keeps its place in the audio, now in seconds.
     assert_eq!(shorter.start, 0.0);
 }
+
+// Spec: warping R49, R50
+#[test]
+fn quantising_audio_moves_each_lines_nearest_transient() {
+    let scratch = Scratch::new("quantise-audio");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let steps = |shell: &Shell| shell.editor().undo_history().len();
+    let initial_markers = audio(&shell, clip).warp_markers;
+    let initial_steps = steps(&shell);
+
+    // 100% quantise: moves nearest transient to each grid line.
+    shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 100, "grid": 480 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), initial_steps + 1, "one undo step");
+    let quantised_100 = audio(&shell, clip).warp_markers;
+    assert_ne!(initial_markers, quantised_100);
+    for m in &quantised_100 {
+        assert_eq!(
+            m.beat.get() % 480,
+            0,
+            "marker at beat {} landed on grid",
+            m.beat.get()
+        );
+    }
+
+    // Undo restores the initial markers
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(audio(&shell, clip).warp_markers, initial_markers);
+
+    // Redo restores quantised markers
+    shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(audio(&shell, clip).warp_markers, quantised_100);
+
+    // Undo back to start
+    shell.run("edit.undo", json!({})).unwrap();
+
+    // 50% quantise: moves halfway toward grid lines
+    shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 50, "grid": 480 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), initial_steps + 1);
+    let quantised_50 = audio(&shell, clip).warp_markers;
+    assert_ne!(initial_markers, quantised_50);
+    assert_ne!(quantised_100, quantised_50);
+
+    // An unwarped clip is refused
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": false }))
+        .unwrap();
+    let err = shell.run("clip.quantize_audio", json!({ "clip": clip }));
+    assert!(err.is_err(), "unwarped clip is refused");
+}
+
+// Spec: warping R49
+#[test]
+fn quantising_at_zero_changes_nothing() {
+    let scratch = Scratch::new("quantise-zero");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let steps = |shell: &Shell| shell.editor().undo_history().len();
+    let initial_markers = audio(&shell, clip).warp_markers;
+    let initial_steps = steps(&shell);
+
+    let res = shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 0, "grid": 480 }),
+        )
+        .unwrap();
+    assert_eq!(res, serde_json::Value::Null);
+    assert_eq!(audio(&shell, clip).warp_markers, initial_markers);
+    assert_eq!(steps(&shell), initial_steps, "0% is no undo step");
+}

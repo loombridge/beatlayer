@@ -52,6 +52,7 @@ A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`)
 - **R17.** `midi.import_file` reads a Standard MIDI File at `path` with `import_tempo` off unless it is given, putting the file's tracks at `at` (the insert marker when it is left out) on `track`, or on new MIDI tracks. Placed over other clips, each clip replaces what it covers, as a drop from the browser does (arrangement-editing R6). It is one undo step and changes nothing when the file can't be read or holds no notes. (S8)
 - **R18.** With `import_tempo`, a file whose tempo is steady sets the song's tempo everywhere, writing no automation. A file whose tempo changes writes Song Tempo automation over the clip's span, placing the file's tempo map at the clip's position, and restores the tempo in force before the clip at the clip's end. Either way it writes a time-signature marker with the file's signature at the clip's start and one restoring the signature in force before the clip at the clip's end, even when the two are the same. Without it, the song's tempo, automation and markers are untouched. (S8)
 - **R19.** `midi.export_clip` writes the clip's notes as a type 1 Standard MIDI File at `path`, with one tempo event carrying the song's tempo where the clip starts and the clip's Signature as the time signature, both at tick 0. It refuses an audio clip, and a file already at `path` unless `replace` is true. (decided 15 October 2026)
+- **R20.** A MIDI file over 64 MiB is refused from its length, before it's read. (decided 18 October 2026)
 
 ## Tests
 
@@ -73,3 +74,4 @@ A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`)
 | R17 | `crates/shell/tests/midi_files.rs`, `a_clip_goes_on_a_given_midi_track_and_a_multi_chunk_file_is_refused`, `an_import_over_a_clip_replaces_what_it_covers`, `a_bad_file_changes_nothing`; `crates/cli/tests/agent_midi_files.rs`, `an_agent_imports_and_exports_midi_files`, `without_autonomous_a_midi_file_import_is_refused` | unit |
 | R18 | `crates/shell/tests/midi_files.rs`, `import_tempo_sets_the_song_tempo_for_a_single_tempo_file`, `import_tempo_writes_automation_for_a_changing_tempo`, `import_tempo_writes_time_signature_markers` | unit |
 | R19 | `crates/shell/tests/midi_files.rs`, `a_clip_round_trips_through_export_and_import` | unit |
+| R20 | `crates/interop/tests/midi_files.rs`, `a_file_past_the_size_cap_is_refused_before_it_is_read`, `bytes_past_the_size_cap_are_refused`; the `midi_file` fuzz target | unit, fuzz |

@@ -10,6 +10,7 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::error::MediaError;
+use crate::limits;
 
 /// The marker that sizes are in the `ds64` chunk.
 const SIZE_IN_DS64: u32 = 0xFFFF_FFFF;
@@ -105,6 +106,7 @@ impl<R: Read + Seek> Rf64Reader<R> {
                     // A file cut short keeps the frames it has.
                     let available = size.min(length.saturating_sub(position));
                     let frames = available / fmt.block_align as u64;
+                    limits::check_header(u64::from(fmt.channels), fmt.sample_rate, Some(frames))?;
                     return Ok(Self {
                         reader,
                         format: Rf64Format {

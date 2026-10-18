@@ -1050,14 +1050,21 @@ impl WarpScratch {
                 beats: plan,
             };
             let (before, after) = mode.reach(&request);
-            let (lo, hi) = if fill.neutral {
-                (run[0].round() as i64, run[n - 1].round() as i64 + 1)
-            } else {
-                (
-                    run[0].floor() as i64 - before as i64,
-                    run[n - 1].floor() as i64 + after as i64 + 1,
-                )
-            };
+            // The window holds every position the run reads, whichever way it
+            // runs: a Back-and-Forth pass reads backwards, so the run's first
+            // and last frames don't bound it.
+            let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+            for &position in run {
+                if fill.neutral {
+                    let frame = position.round() as i64;
+                    lo = lo.min(frame);
+                    hi = hi.max(frame + 1);
+                } else {
+                    let floor = position.floor() as i64;
+                    lo = lo.min(floor - before as i64);
+                    hi = hi.max(floor + after as i64 + 1);
+                }
+            }
             let len = usize::try_from(hi - lo).unwrap_or(usize::MAX);
             if len <= WINDOW_FRAMES {
                 break (request, lo, len);

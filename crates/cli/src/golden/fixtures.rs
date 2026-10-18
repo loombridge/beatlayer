@@ -30,7 +30,8 @@ use bl_engine::{
 };
 use bl_model::{
     AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
+    DeviceKind, Editor, ParamId, Preserve, SendTap, TrackId, TrackKind, TransientLoopMode,
+    WarpMarker, WarpMode,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
@@ -201,6 +202,103 @@ pub(super) const FIXTURES: &[Fixture] = &[
         name: "warped-loop-140",
         about: "The same loop in a 140 BPM song, through the cheaper interpolator (HiQ off).",
         build: warped_loop_140,
+    },
+    Fixture {
+        name: "beats-120",
+        about: "A one-bar drum loop warped at 120 BPM in Beats at the clip's own tempo, Preserve \
+                Transients and Loop Forward: at this tempo every Preserve and loop mode plays it \
+                to the bit (warp-modes R4, R14).",
+        build: beats_120,
+    },
+    Fixture {
+        name: "beats-bar-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1 Bar, Loop Off.",
+        build: beats_bar_off_60,
+    },
+    Fixture {
+        name: "beats-bar-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1 Bar, Loop Forward.",
+        build: beats_bar_forward_60,
+    },
+    Fixture {
+        name: "beats-bar-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1 Bar, Loop Back-and-Forth.",
+        build: beats_bar_backandforth_60,
+    },
+    Fixture {
+        name: "beats-half-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/2, Loop Off.",
+        build: beats_half_off_60,
+    },
+    Fixture {
+        name: "beats-half-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/2, Loop Forward.",
+        build: beats_half_forward_60,
+    },
+    Fixture {
+        name: "beats-half-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/2, Loop Back-and-Forth.",
+        build: beats_half_backandforth_60,
+    },
+    Fixture {
+        name: "beats-quarter-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/4, Loop Off.",
+        build: beats_quarter_off_60,
+    },
+    Fixture {
+        name: "beats-quarter-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/4, Loop Forward.",
+        build: beats_quarter_forward_60,
+    },
+    Fixture {
+        name: "beats-quarter-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/4, Loop Back-and-Forth.",
+        build: beats_quarter_backandforth_60,
+    },
+    Fixture {
+        name: "beats-eighth-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/8, Loop Off.",
+        build: beats_eighth_off_60,
+    },
+    Fixture {
+        name: "beats-eighth-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/8, Loop Forward.",
+        build: beats_eighth_forward_60,
+    },
+    Fixture {
+        name: "beats-eighth-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/8, Loop Back-and-Forth.",
+        build: beats_eighth_backandforth_60,
+    },
+    Fixture {
+        name: "beats-sixteenth-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/16, Loop Off.",
+        build: beats_sixteenth_off_60,
+    },
+    Fixture {
+        name: "beats-sixteenth-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/16, Loop Forward.",
+        build: beats_sixteenth_forward_60,
+    },
+    Fixture {
+        name: "beats-sixteenth-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/16, Loop Back-and-Forth.",
+        build: beats_sixteenth_backandforth_60,
+    },
+    Fixture {
+        name: "beats-thirtysecond-off-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/32, Loop Off.",
+        build: beats_thirtysecond_off_60,
+    },
+    Fixture {
+        name: "beats-thirtysecond-forward-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/32, Loop Forward.",
+        build: beats_thirtysecond_forward_60,
+    },
+    Fixture {
+        name: "beats-thirtysecond-backandforth-60",
+        about: "The drum loop in a 60 BPM song, Preserve 1/32, Loop Back-and-Forth.",
+        build: beats_thirtysecond_backandforth_60,
     },
 ];
 
@@ -1236,4 +1334,86 @@ fn warped_loop_120() -> Scene {
 
 fn warped_loop_140() -> Scene {
     warped_loop(140.0, false)
+}
+
+/// Spec: warp-modes R14 to R17. A Beats clip of the one-bar drum loop
+/// (`drum_bar`, 4/4 at 120 BPM) warped at its own tempo in a song at
+/// `song_bpm`, with `preserve` and `loop_mode`: at the clip's own tempo every
+/// setting reads it to the bit (R4), and at half tempo each segment runs out
+/// of its own audio and its loop mode fills the rest (R15), the transient
+/// envelope shaping each segment (R16).
+fn beats(song_bpm: f64, preserve: Preserve, loop_mode: TransientLoopMode) -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(song_bpm)),
+    });
+    let bar = drum_bar();
+    let file = song.file("drums.wav", 48_000, &[bar.clone(), bar]);
+    // The loop's hits, a transient every eighth: kick on 1 and 3, snare on 2
+    // and 4, hats between.
+    song.media
+        .set_transients(file, (0..8).map(|n| f64::from(n) * 0.25).collect());
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let mut audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: 2.0,
+                beat: Ticks::WHOLE,
+            },
+        ],
+        tempo: Some(120.0),
+        warp_mode: WarpMode::Beats,
+        looping: true,
+        loop_start: 0.0,
+        loop_end: Some(Ticks::WHOLE.get() as f64),
+        ..AudioData::new(file)
+    };
+    audio.warp_settings.beats.preserve = preserve;
+    audio.warp_settings.beats.transient_loop_mode = loop_mode;
+    audio.warp_settings.beats.transient_envelope = 100;
+    song.audio_clip(track, Ticks::ZERO, Ticks::WHOLE, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+fn beats_120() -> Scene {
+    beats(120.0, Preserve::Transients, TransientLoopMode::LoopForward)
+}
+
+/// The half-tempo Beats goldens (warp-modes R15, R16): one per Preserve and
+/// Transient Loop Mode, each a build over [`beats`].
+macro_rules! beats_fixtures {
+    ($($name:ident, $preserve:ident, $loop:ident;)*) => {
+        $(
+            fn $name() -> Scene {
+                beats(60.0, Preserve::$preserve, TransientLoopMode::$loop)
+            }
+        )*
+    };
+}
+
+beats_fixtures! {
+    beats_bar_off_60, Bar, LoopOff;
+    beats_bar_forward_60, Bar, LoopForward;
+    beats_bar_backandforth_60, Bar, LoopBackAndForth;
+    beats_half_off_60, Half, LoopOff;
+    beats_half_forward_60, Half, LoopForward;
+    beats_half_backandforth_60, Half, LoopBackAndForth;
+    beats_quarter_off_60, Quarter, LoopOff;
+    beats_quarter_forward_60, Quarter, LoopForward;
+    beats_quarter_backandforth_60, Quarter, LoopBackAndForth;
+    beats_eighth_off_60, Eighth, LoopOff;
+    beats_eighth_forward_60, Eighth, LoopForward;
+    beats_eighth_backandforth_60, Eighth, LoopBackAndForth;
+    beats_sixteenth_off_60, Sixteenth, LoopOff;
+    beats_sixteenth_forward_60, Sixteenth, LoopForward;
+    beats_sixteenth_backandforth_60, Sixteenth, LoopBackAndForth;
+    beats_thirtysecond_off_60, ThirtySecond, LoopOff;
+    beats_thirtysecond_forward_60, ThirtySecond, LoopForward;
+    beats_thirtysecond_backandforth_60, ThirtySecond, LoopBackAndForth;
 }

@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        119,
+        126,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -62,8 +62,9 @@ fn every_document_command_is_registered() {
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
-         set_clip_launch_mode, WP-5.1 fifteen for racks and their chains, WP-5.12 the two \
-         Compare commands, and WP-5.10 map_modulator, unmap_modulator and set_shape"
+         set_clip_launch_mode, WP-4.1 seven for the warp map, WP-5.1 fifteen for racks and \
+         their chains, WP-5.12 the two Compare commands, and WP-5.10 map_modulator, \
+         unmap_modulator and set_shape"
     );
 
     for op in &ops {
@@ -477,7 +478,14 @@ fn every_command_runs_by_id() {
         "clip.set_fades",
         json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
     );
-    let ClipData::Audio(audio) = agent.editor.document().clip(loop_clip).unwrap().data else {
+    let ClipData::Audio(audio) = agent
+        .editor
+        .document()
+        .clip(loop_clip)
+        .unwrap()
+        .data
+        .clone()
+    else {
         panic!("an audio clip");
     };
     assert_eq!(
@@ -498,6 +506,87 @@ fn every_command_runs_by_id() {
     agent.run(
         "clip.set_region",
         json!({ "clip": loop_clip, "start": 0.0, "end": null }),
+    );
+    // The warp map (WP-4.1). The clip is looped over seconds 1 to 2 of its
+    // file, and switching Warp on starts it at the set's tempo.
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": true }));
+    let warped = |agent: &Agent| {
+        let ClipData::Audio(audio) = agent
+            .editor
+            .document()
+            .clip(loop_clip)
+            .unwrap()
+            .data
+            .clone()
+        else {
+            panic!("an audio clip");
+        };
+        audio
+    };
+    let audio = warped(&agent);
+    assert!(audio.warp);
+    let ticks_per_second = audio.tempo.unwrap() * quarter as f64 / 60.0;
+    assert_eq!(
+        (audio.loop_start, audio.loop_end),
+        (
+            ticks_per_second.round(),
+            Some((2.0 * ticks_per_second).round())
+        ),
+        "the brace converts to ticks"
+    );
+    // A warped clip's positions are ticks; seconds are refused, and so is
+    // the other way round.
+    let refused = |agent: &mut Agent, id: &str, args: Value| {
+        registry::run(&mut agent.editor, id, args).expect_err("refused")
+    };
+    refused(
+        &mut agent,
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0.0, "end": null }),
+    );
+    agent.run(
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0, "end": null, "ticks": true }),
+    );
+    agent.run(
+        "clip.set_loop",
+        json!({ "clip": loop_clip, "start": quarter, "end": bar, "ticks": true }),
+    );
+    agent.run(
+        "clip.insert_warp_marker",
+        json!({ "clips": [loop_clip], "beat": bar }),
+    );
+    agent.run(
+        "clip.insert_warp_marker",
+        json!({ "clips": [loop_clip], "time": 1.0 }),
+    );
+    agent.run(
+        "clip.shift_warp_marker",
+        json!({ "clips": [loop_clip], "marker": 1, "by": 0.01 }),
+    );
+    agent.run(
+        "clip.move_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [2], "by": quarter / 4 }),
+    );
+    agent.run(
+        "clip.set_segment_bpm",
+        json!({ "clip": loop_clip, "marker": 0, "bpm": 100.0 }),
+    );
+    agent.run(
+        "clip.scale_tempo",
+        json!({ "clip": loop_clip, "factor": 2.0 }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 3);
+    agent.run(
+        "clip.delete_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [2] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 2);
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": false }));
+    let audio = warped(&agent);
+    assert!(
+        !audio.warp && audio.warp_markers.len() == 2,
+        "the map stays"
     );
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
@@ -1626,6 +1715,7 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 start: 0.125,
                 end: Some(1.5),
+                ticks: false,
             },
         ),
         (
@@ -1634,6 +1724,7 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 start: 0.5,
                 end: None,
+                ticks: false,
             },
         ),
         (
@@ -1667,6 +1758,50 @@ fn schemas_match_what_commands_serialise() {
                 fade_in: 0.004,
                 fade_out: 1.5,
             },
+        ),
+        ("clip.set_warp", Command::SetClipWarp { clip, warp: true }),
+        (
+            "clip.insert_warp_marker",
+            Command::InsertWarpMarker {
+                clips: vec![clip],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+            },
+        ),
+        (
+            "clip.move_warp_markers",
+            Command::MoveWarpMarkers {
+                clips: vec![clip],
+                markers: vec![0, 1],
+                by: Ticks::SIXTEENTH,
+            },
+        ),
+        (
+            "clip.shift_warp_marker",
+            Command::ShiftWarpMarker {
+                clips: vec![clip],
+                marker: 1,
+                by: -0.25,
+            },
+        ),
+        (
+            "clip.delete_warp_markers",
+            Command::DeleteWarpMarkers {
+                clips: vec![clip],
+                markers: vec![1],
+            },
+        ),
+        (
+            "clip.set_segment_bpm",
+            Command::SetSegmentBpm {
+                clip,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+        ),
+        (
+            "clip.scale_tempo",
+            Command::ScaleTempo { clip, factor: 0.5 },
         ),
         (
             "clip.set_legato",

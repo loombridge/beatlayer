@@ -1360,6 +1360,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
+    let sample_editor =
+        LaterView("the Sample Editor and the Audio Utilities panel's warp controls (WP-4.10)");
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
@@ -1927,6 +1929,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 Key::ArrowDown,
             ),
         ),
+        ("clip.set_warp", Exception(sample_editor)),
+        ("clip.insert_warp_marker", Exception(sample_editor)),
+        ("clip.move_warp_markers", Exception(sample_editor)),
+        ("clip.shift_warp_marker", Exception(sample_editor)),
+        ("clip.delete_warp_markers", Exception(sample_editor)),
+        ("clip.set_segment_bpm", Exception(sample_editor)),
+        ("clip.scale_tempo", Exception(sample_editor)),
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),

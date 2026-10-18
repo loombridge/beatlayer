@@ -53,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        163,
+        165,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -69,7 +69,8 @@ fn every_document_command_is_registered() {
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
          three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
-         four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, and WP-5.3 set_chain_zone"
+         four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
+         WP-3.18 the two for Cue mode and the Cue Volume, and WP-5.3 set_chain_zone"
     );
 
     for op in &ops {
@@ -192,6 +193,13 @@ fn every_command_runs_by_id() {
     let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
     assert!(changes.settings);
     agent.run("mixer.set_crossfader", json!({ "position": 0.75 }));
+    agent.run(
+        "routing.set_cue_out",
+        json!({ "channel": { "type": "pair", "channel": 3 } }),
+    );
+    let changes = agent.run("mixer.set_cue_mode", json!({ "enabled": true }));
+    assert!(changes.settings);
+    agent.run("mixer.set_cue_volume", json!({ "volume": 0.5 }));
     let changes = agent.run(
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
@@ -1852,6 +1860,11 @@ fn schemas_match_what_commands_serialise() {
             "mixer.set_crossfader",
             Command::SetCrossfader { position: 0.25 },
         ),
+        ("mixer.set_cue_mode", Command::SetCueMode { enabled: true }),
+        (
+            "mixer.set_cue_volume",
+            Command::SetCueVolume { volume: 0.5 },
+        ),
         (
             "mixer.set_crossfade_assign",
             Command::SetCrossfadeAssign {
@@ -2956,7 +2969,7 @@ fn bad_requests_change_nothing() {
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 16] = [
+    let cases: [(&str, Value, Expected<'_>); 18] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -3023,6 +3036,19 @@ fn bad_requests_change_nothing() {
             matches!(
                 e,
                 RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        // Spec: mixer R24, R27
+        ("mixer.set_cue_volume", json!({ "volume": 2.5 }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        ("mixer.set_cue_mode", json!({ "enabled": true }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::CueOverlapsMain))
             )
         }),
         (

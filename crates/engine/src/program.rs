@@ -134,6 +134,10 @@ pub struct EngineProgram {
     /// The tracks that play on the device's channels instead of into Main
     /// (Audio To set to Ext. Out), in display order.
     pub(crate) ext_outs: Vec<ExtOut>,
+    /// The task that sums the cue-switched tracks, in Cue mode (WP-3.18):
+    /// the last of `ext_outs`, and no track of the set's, so it has no
+    /// meters.
+    pub(crate) cue: Option<u32>,
     /// The maps the program plays under: the set's, or the ones a launched
     /// scene put in place (WP-3.5), which the audio thread switches to and
     /// from among [`Program::scene_maps`] and the set's own below, so no map
@@ -782,9 +786,10 @@ impl EngineProgram {
     }
 
     /// The tracks, in the order the audio thread runs them.
-    pub fn track_order(&self) -> impl ExactSizeIterator<Item = TrackId> + '_ {
+    pub fn track_order(&self) -> impl Iterator<Item = TrackId> + '_ {
         self.order
             .iter()
+            .filter(|&&task| Some(task) != self.cue)
             .map(|&task| self.tasks[task as usize].track)
     }
 

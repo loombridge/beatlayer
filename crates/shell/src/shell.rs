@@ -153,6 +153,7 @@ pub enum Area {
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
 /// switch (M-OPT-025).
 const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
+const CUE_MODE: &str = "mixer.set_cue_mode";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -4578,6 +4579,18 @@ impl Shell {
         }
     }
 
+    /// Whether a menu item that runs `id` with `args` is the chosen one of
+    /// its group now, for the radio pairs a menu shows with a check mark
+    /// (Options: Solo Switches and Cue Switches). `None` for commands that
+    /// aren't choices.
+    #[must_use]
+    pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
+        match id {
+            CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            _ => None,
+        }
+    }
+
     /// Whether a switch-like command is on now: the state a menu shows as a
     /// check mark. `None` for commands that aren't switches.
     #[must_use]
@@ -4745,6 +4758,12 @@ impl Shell {
                 };
             }
             _ => {}
+        }
+        if id == CUE_MODE {
+            // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
+            // Main strip's button, are dimmed while Cue Out and Main Out
+            // share a channel.
+            return self.editor.document().cue_available();
         }
         if capture_ids::handles(id) {
             // Spec: capture-midi R1. Nothing played, nothing to capture.

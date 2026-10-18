@@ -1944,7 +1944,7 @@ impl Processor {
         }
         if let Some(program) = &self.program {
             let program = program.get();
-            for &task in &program.order {
+            for &task in program.order.iter().filter(|&&t| Some(t) != program.cue) {
                 let reading = program.meters(task);
                 let meter = TrackMeter {
                     track: program.tasks[task as usize].track,

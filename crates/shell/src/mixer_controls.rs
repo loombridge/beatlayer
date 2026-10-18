@@ -54,6 +54,10 @@ pub const SEND_GESTURE: &str = "Change \"Send\"";
 /// observed; it matches the command's own.)
 pub const CROSSFADER_GESTURE: &str = "Change crossfader";
 
+/// The undo step a Cue Volume drag makes, named as Live names it (observed,
+/// 18 October 2026).
+pub const CUE_VOLUME_GESTURE: &str = "Change \"Preview Volume\"";
+
 /// Points of vertical drag that turn a send from −∞ to 0 dB: the pan
 /// knob's travel, as Live's send knob's isn't observed.
 pub const SEND_DRAG_TRAVEL: f32 = PAN_DRAG_TRAVEL;
@@ -86,6 +90,39 @@ pub fn volume_spoken(gain: f64) -> String {
 #[must_use]
 pub fn volume_readout(gain: f64) -> String {
     format!("Track Volume: {} dB", volume_text(gain))
+}
+
+/// What the Status Bar shows while the Cue Volume knob is dragged (observed:
+/// the knob is named Preview Volume in both modes).
+#[must_use]
+pub fn cue_volume_readout(gain: f64) -> String {
+    format!("Preview Volume: {} dB", volume_text(gain))
+}
+
+/// The command that sets the Cue Volume to `gain`, kept within the knob's
+/// range, −∞ to +6 dB.
+#[must_use]
+pub fn set_cue_volume(gain: f64) -> Invocation {
+    Invocation::new(
+        "mixer.set_cue_volume",
+        json!({ "volume": gain.clamp(0.0, bl_model::MAX_CUE_VOLUME) }),
+    )
+}
+
+/// The Cue Volume after a drag of `delta` points up from `start`, along the
+/// fader's scale as the volume fader's drag moves it.
+#[must_use]
+pub fn cue_volume_moved(start: f64, delta: f64) -> Invocation {
+    set_cue_volume(fader_gain(
+        fader_position(start) + delta / FADER_TRAVEL_POINTS,
+    ))
+}
+
+/// The Cue Volume after Up or Down: `steps` dB, tenths with `fine`, as the
+/// volume fader's keys step.
+#[must_use]
+pub fn cue_volume_stepped(gain: f64, steps: i32, fine: bool) -> Invocation {
+    set_cue_volume(step_volume(gain, steps, fine))
 }
 
 /// Pan as the mixer shows it: `C`, or a number from 1 to 50 and `L` or `R`.

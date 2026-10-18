@@ -78,6 +78,13 @@ pub fn item_state_in(
                     |command| resolved(&command.id, Value::Object(command.args.clone()), chord),
                 )
         }
+        Action::Choice(id, args) => {
+            let args: Value = serde_json::from_str(args).expect("a menu item's arguments are JSON");
+            ItemState {
+                checked: shell.choice_state(id, &args),
+                ..resolved(id, args, None)
+            }
+        }
         Action::Pending(shortcut) => {
             inert(shortcut.and_then(|s| keymap.chord_for_shortcut(s, platform)))
         }

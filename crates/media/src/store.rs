@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 use std::time::SystemTime;
 
 use crate::decode::{Decoder, MediaInfo};
+use crate::edits::{Edit, apply};
 use crate::error::MediaError;
 use crate::hash::ContentHash;
 use crate::resample::convert_sample_rate;
@@ -84,7 +85,13 @@ pub struct MediaStore {
     /// load shares it instead of decoding again. Weak, so audio nobody uses
     /// is freed.
     loaded: Mutex<HashMap<(ContentHash, u32), Weak<SampleData>>>,
+    /// The same with an edit list applied (the multisampler spec, R57), so
+    /// the same source with the same edits is rendered once and shared.
+    edited: Mutex<HashMap<EditedKey, Weak<SampleData>>>,
 }
+
+/// A source, a rate and the edit list applied to it.
+type EditedKey = (ContentHash, u32, Vec<Edit>);
 
 impl std::fmt::Debug for MediaStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -278,6 +285,58 @@ impl MediaStore {
         Ok(self.remember(hash, rate, converted))
     }
 
+    /// The media with `edits` applied, at its own sample rate (the
+    /// multisampler spec, R57). While any copy of the returned `Arc` lives,
+    /// loading the same source with the same edits shares it.
+    ///
+    /// # Errors
+    ///
+    /// As for [`MediaStore::open`], or if an edit doesn't fit the sample.
+    pub fn load_edited(
+        &self,
+        hash: ContentHash,
+        edits: &[Edit],
+    ) -> Result<Arc<SampleData>, MediaError> {
+        let info = self.info(hash)?;
+        self.load_edited_at_rate(hash, info.sample_rate, edits)
+    }
+
+    /// The media with `edits` applied (at its own rate, where their ranges
+    /// count) and then converted to a sample rate such as the engine's.
+    ///
+    /// # Errors
+    ///
+    /// As for [`MediaStore::load_edited`], or if the rate is zero.
+    pub fn load_edited_at_rate(
+        &self,
+        hash: ContentHash,
+        rate: u32,
+        edits: &[Edit],
+    ) -> Result<Arc<SampleData>, MediaError> {
+        if edits.is_empty() {
+            return self.load_at_rate(hash, rate);
+        }
+        let key = (hash, rate, edits.to_vec());
+        if let Some(data) = self.edited().get(&key).and_then(Weak::upgrade) {
+            return Ok(data);
+        }
+        let native = self.load(hash)?;
+        let rendered = apply(&native, edits)?;
+        let rendered = if rendered.sample_rate() == rate {
+            rendered
+        } else {
+            convert_sample_rate(&rendered, rate)?
+        };
+        let mut edited = self.edited();
+        edited.retain(|_, weak| weak.strong_count() > 0);
+        if let Some(existing) = edited.get(&key).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+        let data = Arc::new(rendered);
+        edited.insert(key, Arc::downgrade(&data));
+        Ok(data)
+    }
+
     /// Looks for a file holding the media under the given folders, searching
     /// each one's subfolders too, and points the entry at the first match.
     /// Only files of the recorded length are hashed. Returns the new path, or
@@ -440,6 +499,12 @@ impl MediaStore {
 
     fn loaded(&self) -> MutexGuard<'_, HashMap<(ContentHash, u32), Weak<SampleData>>> {
         self.loaded
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn edited(&self) -> MutexGuard<'_, HashMap<EditedKey, Weak<SampleData>>> {
+        self.edited
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }

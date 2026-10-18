@@ -864,8 +864,8 @@ fn the_multisamplers_title_bar_menu_holds_its_options() {
     assert!(
         nodes
             .iter()
-            .any(|n| n.label == "Convert to Snapshot" && n.disabled),
-        "the conversion is WP-5.15's"
+            .any(|n| n.label == "Convert to Snapshot" && !n.disabled),
+        "the conversion is in the menu (multisampler R62)"
     );
     let b = fade.bounds.unwrap();
     h.click(pos2(

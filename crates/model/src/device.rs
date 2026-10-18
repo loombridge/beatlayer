@@ -14,6 +14,7 @@ use crate::ids::{ContentHash, DeviceId, ParamId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
+use crate::sample_edits::SampleEdit;
 use crate::track::Input;
 
 /// The most sample slots a device's media can fill.
@@ -97,6 +98,13 @@ pub struct Device {
         deserialize_with = "media_slots"
     )]
     pub media: Vec<Option<ContentHash>>,
+    /// The edits made to the sample in slot 0 (WP-5.15, IMP-28; the
+    /// multisampler spec, R55): applied in order to the media, which the
+    /// file is never written for. A multisampler's layers hold their own.
+    /// Loading another sample clears them. Left out of the saved set while
+    /// there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_edits: Vec<SampleEdit>,
     /// A multisampler's layers and the options of its layer list (WP-5.13,
     /// the multisampler spec, R2). Left out of the saved set for a device
     /// that holds none.
@@ -319,6 +327,7 @@ impl Device {
             floating: false,
             plugin: None,
             media: Vec::new(),
+            sample_edits: Vec::new(),
             layers: Layers::default(),
             mappings: Vec::new(),
             shape: None,
@@ -333,8 +342,12 @@ impl Device {
     }
 
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
-    /// trimming empty slots off its end.
+    /// trimming empty slots off its end. Another sample in slot 0 clears the
+    /// edits made to the one before it.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
+        if slot == 0 && self.media_at(0) != media {
+            self.sample_edits.clear();
+        }
         if self.media.len() <= slot {
             if media.is_none() {
                 return;

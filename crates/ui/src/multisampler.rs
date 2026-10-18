@@ -7,6 +7,7 @@
 //! `device.set_layer`, `device.select_layers`, ...), which an agent runs
 //! too. A drag on a zone or a marker is one undo step however far it goes.
 
+use crate::sample_display::{Channels, Flag, FlagMenu, Shown};
 use bl_model::{
     EditorSize, Layer, LayerId, LayerSettings, ReleaseMode, SamplerTab, SustainMode, Zone, ZoneKind,
 };
@@ -267,13 +268,6 @@ struct ZoneDrag {
     delta: i32,
 }
 
-/// A drag on one of the waveform's markers under way.
-#[derive(Clone, Debug)]
-struct MarkerDrag {
-    layer: LayerId,
-    marker: Marker,
-}
-
 /// The waveform's markers (R14).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Marker {
@@ -331,40 +325,17 @@ impl Marker {
     }
 }
 
-/// Which channels the waveform draws (R14): B, M, L and R.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Channels {
-    #[default]
-    Both,
-    Mono,
-    Left,
-    Right,
-}
-
-/// The audio the Sample tab draws, and how it's zoomed.
-struct Waveform {
-    media: bl_model::ContentHash,
-    audio: std::sync::Arc<bl_media::SampleData>,
-    /// The first frame shown, and how many frames the view spans.
-    first: f64,
-    span: f64,
-    /// A drawing-only vertical zoom (R14).
-    vertical: f32,
-    channels: Channels,
-}
-
 /// The multisampler's UI state between frames.
 #[derive(Default)]
 pub struct MultisamplerUi {
     drag: Option<ZoneDrag>,
-    marker: Option<MarkerDrag>,
     /// The layer being renamed in the list, and its text.
     renaming: Option<(LayerId, String, bool)>,
     /// The layer clicked last, where Shift-click extends from.
     anchor: Option<LayerId>,
-    /// Each multisampler's waveform, so two on a track don't decode each
-    /// other's sample every frame.
-    waveforms: std::collections::HashMap<bl_model::DeviceId, Waveform>,
+    /// Each multisampler's sample display (R14, R54), so two on a track
+    /// don't decode each other's sample every frame.
+    displays: crate::sample_display::Displays,
 }
 
 impl std::fmt::Debug for MultisamplerUi {
@@ -695,10 +666,7 @@ impl MultisamplerUi {
         ] {
             let rect = Rect::from_min_size(pos2(x, strip.top()), vec2(18.0, strip.height()));
             x += 20.0;
-            let current = self
-                .waveforms
-                .get(&frame.id)
-                .map_or(Channels::Both, |w| w.channels);
+            let current = self.displays.channels(frame.id);
             if button(
                 ui,
                 theme,
@@ -708,15 +676,16 @@ impl MultisamplerUi {
                 current == channels,
                 hint,
             )
-            .0 && let Some(waveform) = self.waveforms.get_mut(&frame.id)
+            .0
             {
-                waveform.channels = channels;
+                self.displays.set_channels(frame.id, channels);
             }
         }
     }
 
-    /// The waveform with its markers (R14), zoomed by Cmd or Ctrl and the
-    /// wheel.
+    /// The waveform with its markers (R14), drawn by the shared sample
+    /// display (R54): zoomed by Cmd or Ctrl and the wheel, panned and zoomed
+    /// by dragging, Shift-drag to select, a click to audition.
     #[expect(clippy::too_many_arguments, reason = "the waveform's inputs")]
     fn waveform(
         &mut self,
@@ -728,219 +697,79 @@ impl MultisamplerUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let c = &theme.colors;
-        if self
-            .waveforms
-            .get(&frame.id)
-            .is_none_or(|w| w.media != layer.media)
-        {
-            match shell.layer_audio(layer.media) {
-                Some(audio) => {
-                    self.waveforms.insert(
-                        frame.id,
-                        Waveform {
-                            media: layer.media,
-                            first: 0.0,
-                            span: audio.frames().max(1) as f64,
-                            audio,
-                            vertical: 1.0,
-                            channels: Channels::Both,
-                        },
-                    );
+        // The markers are in frames of the layer's (edited) sample at its
+        // own rate, which is the unit the display counts in.
+        let handles = Marker::ALL
+            .into_iter()
+            .filter(|marker| match marker {
+                Marker::LoopStart | Marker::LoopEnd => layer.sustain != SustainMode::Off,
+                Marker::ReleaseLoop => {
+                    layer.sustain != SustainMode::Off
+                        && matches!(layer.release, ReleaseMode::Loop | ReleaseMode::BackAndForth)
                 }
-                None => {
-                    self.waveforms.remove(&frame.id);
-                }
-            }
-        }
-        let Some(wave) = self.waveforms.get_mut(&frame.id) else {
-            ui.painter().text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "The sample's file is missing",
-                theme.small_font(),
-                c.text_dim.0,
-            );
-            return;
-        };
-        let id = Id::new(("waveform", frame.id));
-        let response = ui.interact(rect, id, Sense::hover());
-        // Cmd or Ctrl with the wheel zooms the time, about the pointer.
-        if response.hovered() {
-            // egui turns Cmd or Ctrl with the wheel (and a pinch) into a zoom.
-            let (zoom, pointer) = ui.input(|i| (i.zoom_delta(), i.pointer.latest_pos()));
-            if (zoom - 1.0).abs() > f32::EPSILON {
-                let total = wave.audio.frames().max(1) as f64;
-                let at = pointer.map_or(0.5, |p| f64::from((p.x - rect.left()) / rect.width()));
-                let anchor = wave.first + wave.span * at;
-                wave.span = (wave.span / f64::from(zoom)).clamp(64.0_f64.min(total), total);
-                wave.first = (anchor - wave.span * at).clamp(0.0, total - wave.span);
-            }
-            crate::mixer::show_readout(
-                ui.ctx(),
-                format!(
-                    "{}: {} frames, {} Hz, {} channel{}",
-                    layer.name,
-                    layer.length,
-                    layer.sample_rate,
-                    layer.channels,
-                    if layer.channels == 1 { "" } else { "s" }
-                ),
-            );
-        }
-        let painter = ui.painter_at(rect);
-        let frames_per_point = wave.span / f64::from(rect.width().max(1.0));
-        let conv = wave.audio.frames() as f64 / layer.length.max(1) as f64;
-        let channel_data: Vec<&[f32]> = match wave.channels {
-            Channels::Both | Channels::Mono => (0..wave.audio.channel_count())
-                .filter_map(|i| wave.audio.channel(i))
-                .collect(),
-            Channels::Left => wave.audio.channel(0).into_iter().collect(),
-            Channels::Right => wave
-                .audio
-                .channel(1)
-                .or_else(|| wave.audio.channel(0))
-                .into_iter()
-                .collect(),
-        };
-        let both = wave.channels == Channels::Both && channel_data.len() > 1;
-        let lanes = if both { 2 } else { 1 };
-        let lane_height = rect.height() / lanes as f32;
-        for lane in 0..lanes {
-            let centre = rect.top() + lane_height * (lane as f32 + 0.5);
-            let half = lane_height * 0.45 * wave.vertical;
-            for px in 0..rect.width() as usize {
-                let from = (wave.first + px as f64 * frames_per_point) as usize;
-                let to =
-                    ((wave.first + (px as f64 + 1.0) * frames_per_point) as usize).max(from + 1);
-                let (mut low, mut high) = (0.0f32, 0.0f32);
-                let sum = wave.channels == Channels::Mono;
-                // A long stretch per pixel is sampled, not read in full: at
-                // most 64 frames a column keep a big file's drawing quick.
-                let stride = ((to - from) / 64).max(1);
-                for frame_index in (from..to.min(wave.audio.frames())).step_by(stride) {
-                    let value = if sum {
-                        channel_data.iter().map(|d| d[frame_index]).sum::<f32>()
-                            / channel_data.len() as f32
-                    } else if both {
-                        channel_data[lane][frame_index]
-                    } else {
-                        channel_data[0][frame_index]
-                    };
-                    low = low.min(value);
-                    high = high.max(value);
-                }
-                let x = rect.left() + px as f32 + 0.5;
-                painter.line_segment(
-                    [
-                        pos2(x, centre - high.clamp(-1.0, 1.0) * half),
-                        pos2(x, centre - low.clamp(-1.0, 1.0) * half - 0.5),
-                    ],
-                    Stroke::new(1.0, c.accent.0),
-                );
-            }
-        }
-        // The markers, each a handle dragged as one undo step.
-        let x_of_frame = |frame_in_file: u64| {
-            rect.left() + ((frame_in_file as f64 * conv - wave.first) / frames_per_point) as f32
-        };
-        for marker in Marker::ALL {
-            if matches!(marker, Marker::LoopStart | Marker::LoopEnd)
-                && layer.sustain == SustainMode::Off
-            {
-                continue;
-            }
-            if marker == Marker::ReleaseLoop
-                && !(layer.sustain != SustainMode::Off
-                    && matches!(layer.release, ReleaseMode::Loop | ReleaseMode::BackAndForth))
-            {
-                continue;
-            }
-            let x = x_of_frame(marker.frame(layer));
-            if x < rect.left() - 4.0 || x > rect.right() + 4.0 {
-                continue;
-            }
-            let handle =
-                Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()));
-            let id = Id::new(("marker", frame.id, marker.name()));
-            let response = ui.interact(handle, id, Sense::drag());
-            let colour = match marker {
-                Marker::Start | Marker::End => c.text.0,
-                _ => c.focus.0,
-            };
-            painter.line_segment(
-                [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(if response.hovered() { 2.0 } else { 1.0 }, colour),
-            );
-            painter.add(Shape::convex_polygon(
-                vec![
-                    pos2(x - 4.0, rect.top()),
-                    pos2(x + 4.0, rect.top()),
-                    pos2(x, rect.top() + 6.0),
-                ],
-                colour,
-                Stroke::NONE,
-            ));
-            ui.ctx().accesskit_node_builder(id, |node| {
-                node.set_role(Role::Slider);
-                node.set_label(marker.name().to_owned());
-                node.set_value(marker.frame(layer).to_string());
-                node.set_bounds(egui::accesskit::Rect {
-                    x0: handle.min.x.into(),
-                    y0: handle.min.y.into(),
-                    x1: handle.max.x.into(),
-                    y1: handle.max.y.into(),
-                });
-            });
-            if response.drag_started() {
-                self.marker = Some(MarkerDrag {
-                    layer: layer.id,
+                _ => true,
+            })
+            .map(|marker| {
+                let (device, id) = (frame.id, layer.id);
+                let menu: Option<FlagMenu<'_>> = matches!(
                     marker,
+                    Marker::LoopStart | Marker::LoopEnd | Marker::ReleaseLoop
+                )
+                .then(|| {
+                    // A loop's marker menu snaps that loop's markers once
+                    // (R20).
+                    Box::new(move |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                        if ui.button("Snap Markers").clicked() {
+                            let which = if marker == Marker::ReleaseLoop {
+                                "release"
+                            } else {
+                                "sustain"
+                            };
+                            invoke(
+                                events,
+                                bl_shell::multisampler_commands::SNAP_LAYER_MARKERS,
+                                json!({ "device": device, "layers": [id], "loop": which }),
+                            );
+                            ui.close();
+                        }
+                    }) as FlagMenu<'_>
                 });
-                events.push(UiEvent::BeginGesture(MARKERS_STEP));
-            }
-            if response.dragged()
-                && let Some(drag) = self.marker.as_ref().filter(|d| d.marker == marker)
-                && let Some(pointer) = ui.input(|i| i.pointer.latest_pos())
-            {
-                let in_audio = wave.first + f64::from(pointer.x - rect.left()) * frames_per_point;
-                let frame_in_file =
-                    (in_audio / conv).round().clamp(0.0, layer.length as f64) as u64;
-                if frame_in_file != marker.frame(layer) {
-                    invoke(
-                        events,
-                        bl_shell::multisampler_commands::SET_LAYER,
-                        json!({ "device": frame.id, "layers": [drag.layer],
-                                "settings": marker.settings(frame_in_file) }),
-                    );
+                Flag {
+                    name: marker.name(),
+                    frame: marker.frame(layer),
+                    loop_marker: !matches!(marker, Marker::Start | Marker::End),
+                    gesture: MARKERS_STEP,
+                    drag: Box::new(move |frame| {
+                        vec![(
+                            bl_shell::multisampler_commands::SET_LAYER,
+                            json!({ "device": device, "layers": [id],
+                                    "settings": marker.settings(frame) }),
+                        )]
+                    }),
+                    menu,
                 }
-            }
-            if response.drag_stopped() {
-                self.marker = None;
-                events.push(UiEvent::EndGesture);
-            }
-            // A loop's marker menu snaps that loop's markers once (R20).
-            if matches!(
-                marker,
-                Marker::LoopStart | Marker::LoopEnd | Marker::ReleaseLoop
-            ) {
-                response.context_menu(|ui| {
-                    if ui.button("Snap Markers").clicked() {
-                        let which = if marker == Marker::ReleaseLoop {
-                            "release"
-                        } else {
-                            "sustain"
-                        };
-                        invoke(
-                            events,
-                            bl_shell::multisampler_commands::SNAP_LAYER_MARKERS,
-                            json!({ "device": frame.id, "layers": [layer.id], "loop": which }),
-                        );
-                        ui.close();
-                    }
-                });
-            }
-        }
+            })
+            .collect();
+        let shown = Shown {
+            device: frame.id,
+            layer: Some(layer.id),
+            media: layer.media,
+            edits: &layer.edits,
+            readout: format!(
+                "{}: {} frames, {} Hz, {} channel{}",
+                layer.name,
+                layer.length,
+                layer.sample_rate,
+                layer.channels,
+                if layer.channels == 1 { "" } else { "s" }
+            ),
+            handles,
+            brace: None,
+            slices: &[],
+            snapshot: false,
+            takes_drops: true,
+        };
+        self.displays.show(ui, shell, theme, &shown, rect, events);
     }
 
     /// The settings along the Sample tab's foot: Root Key, Detune, Volume,

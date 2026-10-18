@@ -1235,3 +1235,157 @@ fn a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts() {
     );
     assert!(underruns.load(Relaxed) > 0, "counted");
 }
+
+// Spec: multisampler R57
+#[test]
+fn an_edited_sample_reaches_the_node_off_the_audio_thread() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_engine::{EngineConfig, Offline, TransportCommand};
+    use bl_model::{
+        Clip, ClipData, Command, Device, DeviceKind, Editor, MidiData, Note, SampleEdit,
+        SampleEditKind, SampleRange, TrackId, TrackKind,
+    };
+    let hash = ContentHash([9u8; 32]);
+    let ramp = Arc::new(
+        bl_media::SampleData::new(
+            48_000,
+            vec![(0..96_000).map(|i| i as f32 / 96_000.0).collect()],
+        )
+        .unwrap(),
+    );
+    let mut media = bl_engine::MediaMap::new();
+    media.insert(hash, Arc::clone(&ramp));
+    let mut editor = Editor::new();
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device_id = editor.new_id();
+    let device = Device::new(
+        device_id,
+        "Mosaic",
+        DeviceKind::Native {
+            device_type: bl_devices::multisampler::MULTISAMPLER.to_owned(),
+        },
+    )
+    .with_role(DeviceRole::Instrument);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    editor
+        .apply(Command::InsertLayers {
+            device: device_id,
+            index: None,
+            layers: vec![Layer::new(LayerId(0), "Ramp", hash, 96_000, 48_000, 1)],
+        })
+        .unwrap();
+    let clip: bl_model::ClipId = editor.new_id();
+    let note = Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 2), 100);
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 2),
+                ClipData::Midi(MidiData::new([note])),
+            ),
+        })
+        .unwrap();
+    let mut registry = Registry::empty();
+    bl_devices::multisampler::register(&mut registry);
+    let registry = registry.with_media(Arc::new(media));
+    let mut offline = Offline::new(EngineConfig::new(RATE, 256), registry);
+    assert!(offline.sync(editor.document()).is_empty());
+    let render = |offline: &mut Offline| {
+        offline.sender().transport(TransportCommand::Stop);
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(48_000, |block| out.extend_from_slice(block.channel(0)));
+        out
+    };
+    let out = render(&mut offline);
+    assert!(
+        (out[1000] - 1000.0 / 96_000.0).abs() < 1e-3,
+        "the source: {}",
+        out[1000]
+    );
+    // A cut of the first second reaches the node as the layer's audio, and
+    // the layer's markers follow: the note starts at the ramp's middle.
+    editor
+        .apply(Command::AddSampleEdit {
+            device: device_id,
+            layer: Some(LayerId(1)),
+            edit: SampleEdit {
+                kind: SampleEditKind::Cut,
+                range: Some(SampleRange {
+                    from: 0,
+                    to: 48_000,
+                }),
+            },
+        })
+        .unwrap();
+    assert!(offline.sync(editor.document()).is_empty());
+    assert!(offline.missing_media().is_empty());
+    let out = render(&mut offline);
+    assert!(
+        (out[1000] - (0.5 + 1000.0 / 96_000.0)).abs() < 1e-3,
+        "edited: {}",
+        out[1000]
+    );
+    assert_eq!(offline.heap_operations(), 0, "no allocation in a block");
+}
+
+// Spec: multisampler R54
+#[test]
+fn a_click_in_the_sample_tab_auditions_one_layer_from_its_point() {
+    use bl_engine::Audition;
+    let sample = Arc::new(
+        bl_media::SampleData::new(
+            48_000,
+            vec![(0..48_000).map(|i| 0.25 + i as f32 / 96_000.0).collect()],
+        )
+        .unwrap(),
+    );
+    let mut rig = Rig::new(&[], 512);
+    let mut quiet = Layer::new(LayerId(1), "Quiet", ContentHash([1; 32]), 48_000, 48_000, 1);
+    // Its zones don't take any key: only an audition plays it.
+    quiet.key = Zone {
+        low: 100,
+        high: 101,
+        fade_low: 0,
+        fade_high: 0,
+    };
+    rig.give(vec![(quiet, Arc::clone(&sample))], false);
+    let press = |rig: &mut Rig, down| {
+        let data = rig.collector.handle().data(Audition {
+            layer: Some(LayerId(1)),
+            from: 0.5,
+            down,
+        });
+        rig.node.receive_data(data);
+    };
+    assert!(rig.render_with(512, &[], &[])[0].iter().all(|v| *v == 0.0));
+    press(&mut rig, true);
+    let played = rig.render_with(512, &[], &[]);
+    assert!(
+        (played[0][10] - (0.25 + 24_010.0 / 96_000.0)).abs() < 1e-3,
+        "{}",
+        played[0][10]
+    );
+    press(&mut rig, false);
+    let faded = rig.render_with(512, &[], &[]);
+    let silent = rig.render_with(512, &[], &[]);
+    assert!(faded[0][0] > 0.0, "it faded rather than cut");
+    assert!(silent[0].iter().all(|v| *v == 0.0), "and ended");
+}

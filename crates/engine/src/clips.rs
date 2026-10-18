@@ -33,7 +33,10 @@ use std::sync::Arc;
 use bl_core::time::{SampleRate, TempoMap};
 use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfig, Transition};
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
-use bl_model::{AudioData, Clip, ClipData, ClipId, ContentHash, SceneId, Track, TrackId};
+use bl_model::{
+    AudioData, Clip, ClipData, ClipId, ContentHash, SampleEdit, SampleEditKind, SceneId, Track,
+    TrackId,
+};
 
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
@@ -96,6 +99,23 @@ pub trait MediaLibrary: Send + Sync {
         None
     }
 
+    /// The media with a sampler's `edits` applied, at `rate` (the
+    /// multisampler spec, R57): the edit list rendered over the decoded
+    /// sample at its own rate, off the audio thread, and shared by source
+    /// and list. `None` where the library can't (the default, for a list
+    /// that isn't empty), or the media is missing or an edit doesn't fit.
+    fn edited_sample(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        edits: &[SampleEdit],
+    ) -> Option<Arc<SampleData>> {
+        if edits.is_empty() {
+            return self.sample(media, rate);
+        }
+        None
+    }
+
     /// A file at the engine's own rate that a sampler reads by frame, its
     /// first `head` frames decoded now and the rest by a thread of its own
     /// (WP-5.13, the multisampler spec, R23); `None` where the library can't
@@ -131,6 +151,25 @@ fn progressive_of(
     Some(sample)
 }
 
+/// A sampler's edit list as `bl-media` renders it.
+#[must_use]
+pub fn media_edits(edits: &[SampleEdit]) -> Vec<bl_media::Edit> {
+    edits
+        .iter()
+        .map(|edit| bl_media::Edit {
+            kind: match edit.kind {
+                SampleEditKind::Trim => bl_media::EditKind::Trim,
+                SampleEditKind::Cut => bl_media::EditKind::Cut,
+                SampleEditKind::Reverse => bl_media::EditKind::Reverse,
+                SampleEditKind::FadeIn => bl_media::EditKind::FadeIn,
+                SampleEditKind::FadeOut => bl_media::EditKind::FadeOut,
+                SampleEditKind::Normalize => bl_media::EditKind::Normalize,
+            },
+            range: edit.range.map(|range| (range.from, range.to)),
+        })
+        .collect()
+}
+
 /// A decoded sample for one of a device's sample slots: what the compiler
 /// sends a node that plays media, once per filled slot (WP-2.16, WP-5.17).
 /// The sampler has the one slot, 0.
@@ -141,6 +180,22 @@ pub struct SlotSample {
     pub slot: usize,
     /// The audio, at the engine's rate.
     pub sample: Arc<SampleData>,
+}
+
+/// A request to a sampler's node to play a sample from a point, as a click in
+/// its display does (WP-5.15; the multisampler spec, R54): the node starts a
+/// voice at the sample's root pitch, through its settings, and ends it when
+/// the button is released. It reaches the node as node data and changes
+/// nothing in the set.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Audition {
+    /// The layer a multisampler plays; `None` for a device's own sample.
+    pub layer: Option<bl_model::LayerId>,
+    /// Where in the sample the voice starts, as a share of its length from
+    /// 0 to 1.
+    pub from: f64,
+    /// Whether the button went down (`true`) or came up.
+    pub down: bool,
 }
 
 /// A source in memory over `data`, which is at the engine's rate.
@@ -162,6 +217,17 @@ impl MediaLibrary for MediaStore {
     fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.load_at_rate(hash, rate.hz()).ok()
+    }
+
+    fn edited_sample(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        edits: &[SampleEdit],
+    ) -> Option<Arc<SampleData>> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.load_edited_at_rate(hash, rate.hz(), &media_edits(edits))
+            .ok()
     }
 
     fn progressive(
@@ -284,6 +350,18 @@ impl MediaLibrary for MediaStreams {
         self.store.load_at_rate(hash, rate.hz()).ok()
     }
 
+    fn edited_sample(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        edits: &[SampleEdit],
+    ) -> Option<Arc<SampleData>> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.store
+            .load_edited_at_rate(hash, rate.hz(), &media_edits(edits))
+            .ok()
+    }
+
     /// Only for playing in real time: a render that must repeat decodes
     /// whole.
     fn progressive(
@@ -369,6 +447,21 @@ impl MediaLibrary for MediaMap {
             return Some(Arc::clone(audio));
         }
         convert_sample_rate(audio, rate.hz()).ok().map(Arc::new)
+    }
+
+    /// Renders the edits each time it's asked, with no sharing.
+    fn edited_sample(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        edits: &[SampleEdit],
+    ) -> Option<Arc<SampleData>> {
+        let audio = self.files.get(&media)?;
+        let edited = bl_media::edits::apply(audio, &media_edits(edits)).ok()?;
+        if edited.sample_rate() == rate.hz() {
+            return Some(Arc::new(edited));
+        }
+        convert_sample_rate(&edited, rate.hz()).ok().map(Arc::new)
     }
 }
 

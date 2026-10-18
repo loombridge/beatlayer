@@ -336,7 +336,64 @@ def encode_command(encoding: dict, src: Path, dst: Path) -> list[str]:
     raise ValueError(tool)
 
 
+# A small SFZ instrument for the multisampler's import tests (multisampler
+# spec, R47 to R53): three key zones, two velocity layers in the lowest, a
+# round-robin pair in the middle one that crossfades into the highest, and a
+# loop in the highest. Every sample is a mono 16-bit sine of whole cycles, so
+# the loop is seamless and a test can read each sample's pitch off the render.
+SFZ_OUT = HERE.parent / "sfz"
+SFZ_RATE = 48000
+SFZ_FRAMES = 4800
+SFZ_SAMPLES = {
+    "low_soft": 110.0,
+    "low_hard": 165.0,
+    "mid_a": 330.0,
+    "mid_b": 495.0,
+    "high": 660.0,
+}
+SFZ_TEXT = """// Sine Bank: written by tests/fixtures/gen/gen_media.py --sfz; don't edit by hand.
+<control>
+default_path=samples\\
+<global>
+amp_veltrack=0
+ampeg_release=0.05
+// The low zone: two velocity layers.
+<group> lokey=36 hikey=47 pitch_keycenter=40
+<region> sample=low_soft.wav lovel=1 hivel=63
+<region> sample=low_hard.wav lovel=64 hivel=127
+// The middle zone: a round-robin pair, fading out across keys 56 to 59.
+<group> lokey=48 hikey=59 xfout_lokey=56 xfout_hikey=59 seq_length=2 pitch_keycenter=54
+<region> sample=mid_a.wav seq_position=1
+<region> sample=mid_b.wav seq_position=2
+// The high zone: fading in across the same keys, looping while held.
+<group> lokey=56 hikey=71 xfin_lokey=56 xfin_hikey=59 loop_mode=loop_continuous group=1
+<region> sample=high.wav pitch_keycenter=64 loop_start=0 loop_end=4800
+// A region whose sample isn't there, which the import names and leaves out.
+<region> sample=missing.wav key=100
+"""
+
+
+def write_sfz_instrument() -> None:
+    samples = SFZ_OUT / "samples"
+    samples.mkdir(parents=True, exist_ok=True)
+    for name, hz in SFZ_SAMPLES.items():
+        data = b"".join(
+            quantise(LEVEL * math.sin(2 * math.pi * hz * n / SFZ_RATE), "s16")
+            for n in range(SFZ_FRAMES)
+        )
+        fmt_body = struct.pack("<HHIIHH", 1, 1, SFZ_RATE, SFZ_RATE * 2, 2, 16)
+        chunks = chunk(b"fmt ", fmt_body) + chunk(b"data", data)
+        (samples / f"{name}.wav").write_bytes(
+            b"RIFF" + struct.pack("<I", 4 + len(chunks)) + b"WAVE" + chunks
+        )
+    (SFZ_OUT / "Sine Bank.sfz").write_text(SFZ_TEXT)
+    print(f"wrote the SFZ instrument to {SFZ_OUT}")
+
+
 def main() -> int:
+    if "--sfz" in sys.argv[1:]:
+        write_sfz_instrument()
+        return 0
     missing = sorted({
         e["tool"] for e in ENCODINGS
         if e["tool"] not in ("bw64", "soundfile") and not shutil.which(e["tool"])
@@ -390,6 +447,7 @@ def main() -> int:
             encoder=encoder, command=command,
         ))
 
+    write_sfz_instrument()
     manifest = dict(
         generator="tests/fixtures/gen/gen_media.py",
         note="Generated; don't edit by hand. Rerun the generator instead.",

@@ -27,9 +27,9 @@ use bl_shell_spec::devices::{
     DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry, DevicePanel,
     DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs, FloatingWindow,
     FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, HotSwapChainArgs,
-    LoadPresetArgs, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame,
-    SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetRackViewArgs,
-    SetWindowArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs, Ungrouped,
+    LoadPresetArgs, MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs,
+    PresetResult, RackFrame, SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs,
+    SetRackViewArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -291,13 +291,21 @@ impl DeviceView {
         if let Some(key) = Self::plugin_key(&device.kind) {
             return Some(self.plugin_panel(description, &device.params, &key));
         }
+        let mut shown = description.clone();
+        if Self::is_multisampler(device) {
+            // Spec: multisampler R1. The tab that shows has its controls.
+            shown.layout = bl_shell_spec::multisampler::tab_layout(
+                &shown.layout,
+                self.multisampler_view(device.id).tab,
+            );
+        }
         Some(DevicePanel {
             values: description
                 .params
                 .iter()
                 .map(|p| description.value(&device.params, p.id).unwrap_or(p.default))
                 .collect(),
-            description: description.clone(),
+            description: shown,
             plugin: false,
             selected_slot: self.slot_of(device),
             loaded_slots: device.media.iter().map(Option::is_some).collect(),
@@ -501,12 +509,10 @@ impl DeviceView {
 
     /// What a modulator's panel shows beside its parameters.
     fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
-        use bl_model::modulator::{CURVE_MOD, default_shape, is_modulator_kind};
+        use bl_model::modulator::{default_shape_of, has_shape_kind, is_modulator_kind};
         if !is_modulator_kind(&d.kind) {
             return None;
         }
-        let curve =
-            matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
         Some(ModulatorFrame {
             mappings: d
                 .mappings
@@ -521,7 +527,8 @@ impl DeviceView {
                 .armed
                 .filter(|(device, _)| *device == d.id)
                 .map(|(_, slot)| slot),
-            shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
+            shape: has_shape_kind(&d.kind)
+                .then(|| d.shape.clone().unwrap_or_else(|| default_shape_of(&d.kind))),
         })
     }
 
@@ -990,6 +997,16 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            midi_sidechain: d
+                .midi_sidechain
+                .as_ref()
+                .map(|sidechain| MidiSidechainSection {
+                    shown: self.sidechains_shown.contains(&d.id),
+                    source: sidechain.source.map_or_else(
+                        || "No Input".to_owned(),
+                        |track| crate::routing::track_label(doc, track),
+                    ),
+                }),
             display_view: self.display_view(d),
             rack: d.rack_kind().map(|kind| self.rack_frame(doc, d, kind)),
             modulator: self.modulator_frame(doc, d),
@@ -1060,9 +1077,10 @@ impl DeviceView {
             ids::EXPAND => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
-            ids::SHOW_SIDECHAIN => self
-                .target(doc, named)
-                .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
+            ids::SHOW_SIDECHAIN => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| d.sidechain.is_some() || d.midi_sidechain.is_some())
+            }),
             ids::DUPLICATE => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
                     .is_some_and(|d| d.role != DeviceRole::Instrument)
@@ -1323,7 +1341,7 @@ impl DeviceView {
                 if editor
                     .document()
                     .device(device)
-                    .is_none_or(|d| d.sidechain.is_none())
+                    .is_none_or(|d| d.sidechain.is_none() && d.midi_sidechain.is_none())
                 {
                     return Err(DeviceError::Unavailable(format!(
                         "{device} has no sidechain input"
@@ -1700,10 +1718,16 @@ impl DeviceView {
                         "{device} isn't a modulator"
                     )));
                 }
-                if slot >= bl_model::modulator::SLOTS {
+                let slots = editor
+                    .document()
+                    .device(device)
+                    .map_or(bl_model::modulator::SLOTS, |d| {
+                        bl_model::modulator::slots_of(&d.kind)
+                    });
+                if slot >= slots {
                     return Err(DeviceError::InvalidArgs(format!(
-                        "a modulator's slots are 0 to {}",
-                        bl_model::modulator::SLOTS - 1
+                        "that modulator's slots are 0 to {}",
+                        slots - 1
                     )));
                 }
                 let lit = self.armed == Some((device, slot));
@@ -2619,6 +2643,9 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs) -> Device {
         .with_role(args.device.role);
     if args.device.sidechain {
         device = device.with_sidechain();
+    }
+    if args.device.midi_sidechain {
+        device = device.with_midi_sidechain();
     }
     device
 }

@@ -84,8 +84,10 @@ bl_rt::install_trap!();
 
 mod automation;
 pub mod capture;
+mod clip_source;
 pub mod clips;
 mod compiler;
+pub mod controller_take;
 mod disjoint;
 pub mod display;
 pub mod drum;
@@ -115,6 +117,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 pub mod transport;
+mod warped;
 
 #[doc(hidden)]
 pub mod testing;
@@ -127,7 +130,8 @@ pub use automation::{
 };
 pub use capture::{CAPTURE_RING, CapturedMidi};
 pub use clips::{
-    ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
+    Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
+    SourceCues, media_edits,
 };
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};

@@ -27,12 +27,14 @@ use crate::layers::{
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{CHAIN_COLOURS, Chain, ChainSend, RackKind, Receive};
+use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
-use crate::warp::MarkerAt;
+use crate::warp::{MarkerAt, TransientEdits};
+use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -731,6 +733,63 @@ pub enum Command {
         /// beat the map already places it. Give this or `beat`.
         #[serde(default)]
         time: Option<f64>,
+        /// Also put markers at the transients either side of the new one
+        /// (WP-4.3): Cmd (Ctrl) held on a pseudo-warp marker. Needs one clip.
+        #[serde(default)]
+        pin_neighbours: bool,
+        /// The clip's transients, as times in the file, that `pin_neighbours`
+        /// looks among. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts warp markers in a range of a warped clip's contents (WP-4.3): at
+    /// every transient in it, or at its start and its end when it holds none.
+    InsertWarpMarkers {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The start of the range, in ticks from the clip's 1.1.1.
+        from: Ticks,
+        /// The end of the range, in ticks, after `from`.
+        to: Ticks,
+        /// The clip's transients, as times in the file, that the range is
+        /// searched for. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts a transient into an audio clip's file at a time (WP-4.3).
+    InsertTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The time in the file, in seconds.
+        #[schemars(range(min = 0.0))]
+        time: f64,
+    },
+    /// Takes transients out of an audio clip (WP-4.3).
+    DeleteTransients {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transients to take out, by their times in the file as
+        /// `clip.transients` lists them.
+        times: Vec<f64>,
+    },
+    /// Takes away an audio clip's transient edits (WP-4.3): the ones made by
+    /// hand go, and the detected ones taken away come back.
+    ResetTransients {
+        /// The audio clip.
+        clip: ClipId,
+    },
+    /// Moves a transient to another time in the file (WP-4.3); no audio
+    /// changes.
+    MoveTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transient's time in the file, in seconds, as `clip.transients`
+        /// lists it.
+        #[schemars(range(min = 0.0))]
+        from: f64,
+        /// Where it goes, in seconds.
+        #[schemars(range(min = 0.0))]
+        to: f64,
     },
     /// Moves warp markers by the same ticks, each keeping its time in the
     /// file (WP-4.1).
@@ -781,6 +840,45 @@ pub enum Command {
         clip: ClipId,
         /// What to multiply by: 2 for ×2, 0.5 for ÷2.
         factor: f64,
+    },
+    /// Sets a warped or unwarped audio clip's warp mode (WP-4.2).
+    SetClipWarpMode {
+        /// The audio clip.
+        clip: ClipId,
+        /// The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro.
+        mode: WarpMode,
+    },
+    /// Sets controls of an audio clip's warp modes (WP-4.2): any of them, by
+    /// mode, in one step.
+    SetClipWarpSettings {
+        /// The audio clip.
+        clip: ClipId,
+        /// Beats' controls to change.
+        #[serde(default)]
+        beats: Option<BeatsUpdate>,
+        /// Tones' controls to change.
+        #[serde(default)]
+        tones: Option<TonesUpdate>,
+        /// Texture's controls to change.
+        #[serde(default)]
+        texture: Option<TextureUpdate>,
+        /// Complex Pro's controls to change.
+        #[serde(default)]
+        complex_pro: Option<ComplexProUpdate>,
+    },
+    /// Switches an audio clip's RAM mode (WP-4.2).
+    SetClipRamMode {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip's whole file is held in memory.
+        ram: bool,
+    },
+    /// Switches an audio clip's high-quality interpolation (WP-4.2).
+    SetClipHighQuality {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip is resampled by the band-limited interpolator.
+        high_quality: bool,
     },
     /// Switches a Session clip's Legato: on, it takes over the play position
     /// of the clip playing on its track when it launches.
@@ -1243,6 +1341,47 @@ pub enum Command {
         /// Its channels.
         channels: u8,
     },
+    /// Adds an edit to the end of a sample's edit list (WP-5.15, R55): a
+    /// layer's, or with no `layer` the sample in slot 0 of a device such as
+    /// Snapshot. A layer's length and markers follow the audio (R56). The
+    /// selection must be a span of the sample as the earlier edits left it;
+    /// a layer's is checked here, a device's by `device.edit_sample`, which
+    /// knows the sample.
+    AddSampleEdit {
+        /// The device.
+        device: DeviceId,
+        /// The layer, or `null` for the device's own sample.
+        layer: Option<LayerId>,
+        /// The edit.
+        edit: SampleEdit,
+    },
+    /// Clears a sample's edit list (R58). The sample is `length` frames long
+    /// again, which a layer's markers keep their share of; a device's own
+    /// sample ignores `length`.
+    ClearSampleEdits {
+        /// The device.
+        device: DeviceId,
+        /// The layer, or `null` for the device's own sample.
+        layer: Option<LayerId>,
+        /// The unedited sample's length in frames at its own rate.
+        length: u64,
+    },
+    /// Replaces a layer's sample with a processed copy of its edited sample
+    /// (R59), which holds the edits already: the list empties. `crop` is the
+    /// span of the edited sample the copy keeps, which moves the markers as
+    /// a Trim does; a copy of the whole sample leaves them in place.
+    SetProcessedLayerSample {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// The copy, by content hash.
+        media: ContentHash,
+        /// Its length in frames at its own rate.
+        length: u64,
+        /// The edited sample's span the copy keeps, or `null` for all of it.
+        crop: Option<SampleRange>,
+    },
     /// Spreads layers' ranges (R12): equally over the range of the zone
     /// editor in view (`kind`), or key zones around the layers' root keys,
     /// without fades. With one layer or none listed, every layer.
@@ -1287,6 +1426,16 @@ pub enum Command {
         device: DeviceId,
         /// Whether the sidechain is on.
         enabled: bool,
+    },
+    /// Sets the MIDI track a device's MIDI sidechain listens to, or none.
+    /// The device must have a MIDI sidechain input.
+    SetMidiSidechainSource {
+        /// The device.
+        device: DeviceId,
+        /// The MIDI track whose notes and channel messages the device
+        /// hears (its own track too), or `None` for No Input.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<TrackId>,
     },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
@@ -1566,9 +1715,19 @@ impl Command {
             // Beatlayer's name the edit.
             Self::SetClipWarp { .. } => "Switch Warp",
             Self::InsertWarpMarker { .. } => "Insert Warp Marker",
+            Self::InsertWarpMarkers { .. } => "Insert Warp Markers",
+            Self::InsertTransient { .. } => "Insert Transient",
+            Self::DeleteTransients { .. } => "Delete Transient",
+            Self::ResetTransients { .. } => "Reset Transients",
+            Self::MoveTransient { .. } => "Move Transient",
             Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
             Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
             Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
+            // WP-4.2. Live's names for these are to observe.
+            Self::SetClipWarpMode { .. } => "Change Warp Mode",
+            Self::SetClipWarpSettings { .. } => "Change Warp Settings",
+            Self::SetClipRamMode { .. } => "Switch RAM Mode",
+            Self::SetClipHighQuality { .. } => "Switch High Quality",
             // WP-3.4. Live's undo names for the Launch panel's controls are
             // to observe; Beatlayer's name the edit.
             Self::SetClipLegato { .. } => "Switch Legato",
@@ -1640,6 +1799,10 @@ impl Command {
             Self::SetLayerZones { .. } => "Change Zones",
             Self::UpdateLayers { .. } => "Change Sample Settings",
             Self::SetLayerMedia { .. } => "Replace Sample",
+            Self::AddSampleEdit { edit, .. } => edit.kind.name(),
+            Self::ClearSampleEdits { .. } => "Revert Edits",
+            Self::SetProcessedLayerSample { crop: Some(_), .. } => "Crop",
+            Self::SetProcessedLayerSample { crop: None, .. } => "Reverse",
             Self::DistributeLayers {
                 how: Distribution::Equally,
                 ..
@@ -1651,7 +1814,9 @@ impl Command {
             Self::SetLayerOptions { .. } => "Change Sample Options",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
-            Self::SetSidechainInput { .. } => "Change \"Routing\"",
+            Self::SetSidechainInput { .. } | Self::SetMidiSidechainSource { .. } => {
+                "Change \"Routing\""
+            }
             Self::SetSidechainEnabled { .. } => "Change \"Sidechain On\"",
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
@@ -2075,8 +2240,17 @@ impl Document {
                 let owner = self.clip_owner(*clip)?;
                 check_clip_fits(self.track_ref(owner)?, data)?;
                 check_clip_data(data)?;
-                if self.clip_ref(*clip)?.data != *data {
-                    self.clip_mut(*clip)?.data = data.clone();
+                let mut data = data.clone();
+                // Transient edits belong to the file they were made on
+                // (the warping spec, R27).
+                if let (ClipData::Audio(next), ClipData::Audio(now)) =
+                    (&mut data, &self.clip_ref(*clip)?.data)
+                    && next.media != now.media
+                {
+                    next.transient_edits = TransientEdits::default();
+                }
+                if self.clip_ref(*clip)?.data != data {
+                    self.clip_mut(*clip)?.data = data;
                 }
                 Ok(())
             }
@@ -2118,6 +2292,12 @@ impl Document {
                 })
             }
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
+                // Spec: warping R14. Only a warped audio clip can switch its
+                // loop on; an older set's looped unwarped clip can switch it
+                // off.
+                ClipData::Audio(audio) if *enabled && !audio.warp => Err(ModelError::InvalidInput(
+                    "only a warped audio clip can loop: switch Warp on first",
+                )),
                 ClipData::Audio(_) => self.edit_markers(*clip, |audio| audio.looping = *enabled),
                 ClipData::Midi(_) => self.edit_midi_markers(*clip, |midi| midi.looping = *enabled),
             },
@@ -2137,7 +2317,13 @@ impl Document {
                 let set_tempo = self.settings.tempo.bpm_at(at);
                 self.edit_markers_with(*clip, |audio| audio.with_warp(*warp, set_tempo))
             }
-            Command::InsertWarpMarker { clips, beat, time } => {
+            Command::InsertWarpMarker {
+                clips,
+                beat,
+                time,
+                pin_neighbours,
+                transients,
+            } => {
                 let at = match (beat, time) {
                     (Some(beat), None) => MarkerAt::Beat(*beat),
                     (None, Some(time)) => MarkerAt::Time(*time),
@@ -2147,7 +2333,41 @@ impl Document {
                         ));
                     }
                 };
-                self.edit_each(clips, |audio| audio.with_marker_inserted(at))
+                if !*pin_neighbours {
+                    return self.edit_each(clips, |audio| audio.with_marker_inserted(at));
+                }
+                if clips.len() != 1 {
+                    return Err(ModelError::InvalidInput(
+                        "pin_neighbours works on one clip, whose transients it reads",
+                    ));
+                }
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_each(clips, |audio| {
+                    audio.with_marker_inserted_pinned(at, transients)
+                })
+            }
+            Command::InsertWarpMarkers {
+                clip,
+                from,
+                to,
+                transients,
+            } => {
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_markers_with(*clip, |audio| {
+                    audio.with_markers_in_range(*from, *to, transients)
+                })
+            }
+            Command::InsertTransient { clip, time } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_inserted(*time))
+            }
+            Command::DeleteTransients { clip, times } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transients_deleted(times))
+            }
+            Command::ResetTransients { clip } => {
+                self.edit_markers_with(*clip, |audio| Ok(audio.with_transients_reset()))
+            }
+            Command::MoveTransient { clip, from, to } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_moved(*from, *to))
             }
             Command::MoveWarpMarkers { clips, markers, by } => {
                 self.edit_each(clips, |audio| audio.with_markers_moved(markers, *by))
@@ -2157,6 +2377,31 @@ impl Document {
             }
             Command::DeleteWarpMarkers { clips, markers } => {
                 self.edit_each(clips, |audio| audio.with_markers_deleted(markers))
+            }
+            Command::SetClipWarpMode { clip, mode } => {
+                self.edit_audio(*clip, |audio| audio.warp_mode = *mode)
+            }
+            Command::SetClipWarpSettings {
+                clip,
+                beats,
+                tones,
+                texture,
+                complex_pro,
+            } => {
+                let ClipData::Audio(audio) = &self.clip_ref(*clip)?.data else {
+                    return Err(ModelError::NotAudioClip(*clip));
+                };
+                let settings =
+                    audio
+                        .warp_settings
+                        .updated(*beats, *tones, *texture, *complex_pro)?;
+                self.edit_audio(*clip, |audio| audio.warp_settings = settings)
+            }
+            Command::SetClipRamMode { clip, ram } => {
+                self.edit_audio(*clip, |audio| audio.ram = *ram)
+            }
+            Command::SetClipHighQuality { clip, high_quality } => {
+                self.edit_audio(*clip, |audio| audio.high_quality = *high_quality)
             }
             Command::SetSegmentBpm { clip, marker, bpm } => {
                 self.edit_markers_with(*clip, |audio| audio.with_segment_bpm(*marker, *bpm))
@@ -2450,6 +2695,42 @@ impl Document {
             } => self.edit_layers(*device, |l| {
                 l.replace_media(*layer, *media, *length, *sample_rate, *channels)
             }),
+            Command::AddSampleEdit {
+                device,
+                layer: Some(layer),
+                edit,
+            } => self.edit_layers(*device, |l| l.add_edit(*layer, *edit)),
+            Command::AddSampleEdit {
+                device,
+                layer: None,
+                edit,
+            } => {
+                // Whether the selection fits the sample is for the caller
+                // that knows it; this checks the edit itself.
+                edit.length_after(u64::MAX)?;
+                self.device_mut(*device)?.sample_edits.push(*edit);
+                Ok(())
+            }
+            Command::ClearSampleEdits {
+                device,
+                layer: Some(layer),
+                length,
+            } => self.edit_layers(*device, |l| l.clear_edits(*layer, *length)),
+            Command::ClearSampleEdits {
+                device,
+                layer: None,
+                ..
+            } => {
+                self.device_mut(*device)?.sample_edits.clear();
+                Ok(())
+            }
+            Command::SetProcessedLayerSample {
+                device,
+                layer,
+                media,
+                length,
+                crop,
+            } => self.edit_layers(*device, |l| l.set_processed(*layer, *media, *length, *crop)),
             Command::DistributeLayers {
                 device,
                 layers,
@@ -2470,6 +2751,16 @@ impl Document {
             Command::SetSidechainInput { device, input } => {
                 let input = input.clone();
                 self.edit_sidechain(*device, |s| s.input = input)?;
+                self.check_routing(self.device_owner(*device)?)
+            }
+            Command::SetMidiSidechainSource { device, track } => {
+                let mut sidechain = self
+                    .device_ref(*device)?
+                    .midi_sidechain
+                    .clone()
+                    .ok_or(ModelError::NoMidiSidechain(*device))?;
+                sidechain.source = *track;
+                self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
             Command::SetSidechainEnabled { device, enabled } => {
@@ -4627,6 +4918,7 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
     if audio.warp || !audio.warp_markers.is_empty() {
         audio.warp_map()?;
     }
+    audio.warp_settings.check()?;
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
         "fade-in length",
@@ -5478,9 +5770,23 @@ mod tests {
             ticks: false,
         })
         .unwrap();
-        song.apply(Command::SetClipLoopEnabled {
+        // Spec: warping R14. The Loop switch can't come on for an unwarped
+        // clip; an older set's looped clip arrives with it on, through its
+        // data, which is what this checks the markers of.
+        assert!(matches!(
+            song.reject(Command::SetClipLoopEnabled {
+                clip,
+                enabled: true,
+            }),
+            ModelError::InvalidInput(_)
+        ));
+        let looped = AudioData {
+            looping: true,
+            ..audio(&song)
+        };
+        song.apply(Command::SetClipData {
             clip,
-            enabled: true,
+            data: ClipData::Audio(looped),
         })
         .unwrap();
         song.apply(Command::SetClipGain { clip, gain: 0.5 })
@@ -5576,13 +5882,15 @@ mod tests {
             ticks: false,
         })
         .unwrap();
-        // And then the loop can't come on.
+        // And then the loop can't come on (an unwarped clip can't loop, R14,
+        // and for a warped one the Start marker must be before the brace's
+        // end, which `warped_clips_loop_only_inside_their_brace` checks).
         assert!(matches!(
             song.reject(Command::SetClipLoopEnabled {
                 clip,
                 enabled: true,
             }),
-            ModelError::InvalidValue { .. }
+            ModelError::InvalidInput(_)
         ));
 
         // A MIDI clip has none of these settings.

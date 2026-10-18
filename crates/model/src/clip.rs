@@ -32,7 +32,8 @@ use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
-use crate::warp::WarpMarker;
+use crate::warp::{TransientEdits, WarpMarker};
+use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -484,6 +485,26 @@ pub struct AudioData {
     /// `null` (or nothing) means the song's signature at the clip's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<TimeSignature>,
+    /// The warp mode (the warp modes spec, R1): Beats unless given. An
+    /// unwarped clip keeps it for when Warp goes back on.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub warp_mode: WarpMode,
+    /// Every mode's controls (R2): each at the table's default unless given.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub warp_settings: WarpSettings,
+    /// The RAM switch (R11): off unless given. On, the clip's whole file is
+    /// held in memory instead of streamed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ram: bool,
+    /// The HiQ switch (R12): on unless given. On, the clip is resampled by a
+    /// band-limited interpolator wherever it is read at another rate than 1.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub high_quality: bool,
+    /// The clip's edits to its file's detected transients (the warping spec,
+    /// R23): none unless given. They belong to the file, so replacing the
+    /// file drops them (R27).
+    #[serde(default, skip_serializing_if = "TransientEdits::is_empty")]
+    pub transient_edits: TransientEdits,
 }
 
 impl AudioData {
@@ -506,6 +527,11 @@ impl AudioData {
             warp_markers: Vec::new(),
             tempo: None,
             signature: None,
+            warp_mode: WarpMode::Beats,
+            warp_settings: WarpSettings::default(),
+            ram: false,
+            high_quality: true,
+            transient_edits: TransientEdits::default(),
         }
     }
 
@@ -599,6 +625,18 @@ fn is_zero(value: &f64) -> bool {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 fn unity() -> f64 {

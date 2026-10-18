@@ -79,6 +79,25 @@ pub trait NativeDevice: Send + 'static {
     fn control(&mut self, modulation: &mut Modulation<'_, '_>, params: &ParamBank) {
         let _ = (modulation, params);
     }
+
+    /// Whether the device is a modulator driven by the audio, notes or MIDI
+    /// it hears at its place in the chain (WP-5.11): it writes its rows in
+    /// [`process`](Self::process), with [`Audio::row_mut`], while its track
+    /// runs, and in [`lag`](Self::lag) the rows of what it wrote 32 frames
+    /// before. Unlike [`is_modulator`](Self::is_modulator), `process` is
+    /// called.
+    fn is_signal_modulator(&self) -> bool {
+        false
+    }
+
+    /// A signal modulator's rows of what it wrote 32 frames before the
+    /// part's frames, before the part runs: what a target that runs before
+    /// the modulator in its own chain reads (the modulation spec, R28). The
+    /// part is no longer than 32 frames.
+    fn lag(&mut self, modulation: &mut Modulation<'_, '_>) {
+        let _ = modulation;
+    }
+
     /// How many values the device's display data has (the framework spec,
     /// R35): 0 for a device with no display to draw from the audio. Asked
     /// once, when the node is made.
@@ -238,6 +257,14 @@ impl<'a> Audio<'_, 'a> {
         self.block.transport().playing
     }
 
+    /// Row `index` of the rows a signal modulator writes ([`bl_engine::modbus::ROWS`] of them,
+    /// a contribution row and a hold row per slot), over the stretch; empty
+    /// for a block that has no rows to write.
+    pub fn row_mut(&mut self, index: usize) -> &mut [f32] {
+        let range = self.range.clone();
+        self.block.row_mut(index).get_mut(range).unwrap_or_default()
+    }
+
     /// One channel's samples in the stretch.
     ///
     /// # Panics
@@ -330,6 +357,12 @@ impl ParamBank {
     /// Where parameter `id` is in the bank: its place in the description.
     #[must_use]
     pub fn index(&self, id: ParamId) -> Option<usize> {
+        // Most devices list their parameters in the order of their IDs, so
+        // the place named by the ID is usually the one.
+        let guess = id.0 as usize;
+        if self.slots.get(guess).is_some_and(|s| s.descriptor.id == id) {
+            return Some(guess);
+        }
         self.slots.iter().position(|s| s.descriptor.id == id)
     }
 
@@ -538,6 +571,11 @@ impl DelayLine {
         self.samples[(self.at + len - delay % len) % len]
     }
 
+    /// Forgets everything written.
+    pub(crate) fn clear(&mut self) {
+        self.samples.fill(0.0);
+    }
+
     pub(crate) fn write(&mut self, sample: f32) {
         let len = self.samples.len();
         self.samples[self.at] = sample;
@@ -639,6 +677,11 @@ impl<D: NativeDevice> Node for NativeNode<D> {
     }
 
     fn control(&mut self, ctl: &mut Control<'_>) -> bool {
+        if self.device.is_signal_modulator() {
+            let range = 0..ctl.frames;
+            self.device.lag(&mut Modulation { ctl, range });
+            return true;
+        }
         if !self.device.is_modulator() {
             return false;
         }

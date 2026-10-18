@@ -31,6 +31,7 @@
 //! an [`AudioSource`], whose reads are real-time safe.
 
 mod decode;
+pub mod edits;
 pub mod encode;
 mod error;
 mod hash;
@@ -45,12 +46,13 @@ mod store;
 pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
+pub use edits::{Edit, EditKind};
 pub use encode::{
     AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, Quantiser, wav_bytes,
 };
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};
-pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};
+pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks, write_atomically};
 pub use progressive::{Fill, ProgressiveSample};
 pub use resample::{RateConverter, convert_sample_rate, converted_len};
 pub use sample_data::SampleData;

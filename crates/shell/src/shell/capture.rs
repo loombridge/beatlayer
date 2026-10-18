@@ -1,36 +1,45 @@
 //! Capture MIDI (WP-3.14): the notes played on monitoring MIDI tracks, as a
 //! clip on each track that was played.
 //!
-//! The engine logs the notes ([`bl_engine::CapturedMidi`]); the shell keeps
-//! the latest of them per track in a [`Buffer`] until a capture or a
-//! recording uses them. The rules for the tempo, the loop and the merge are
+//! The engine logs the notes and controllers ([`bl_engine::CapturedMidi`]);
+//! the shell keeps the latest of them per track in a [`Buffer`] until a
+//! capture or a recording uses them. The rules for the tempo, the loop and the merge are
 //! in `crate::capture_midi`; this places the result in the Session View.
 
+use std::collections::BTreeMap;
+
+use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, TempoMap};
 use bl_engine::SessionCommand;
-use bl_model::{Clip, ClipData, ClipId, Command, MidiData, Note, SceneId};
+use bl_engine::controller_take::give_pressure;
+use bl_model::{
+    AutomationTarget, Clip, ClipData, ClipId, Command, EnvelopeKind, MidiData, Note, SceneId,
+};
 use bl_shell_spec::capture_midi::{Captured, CapturedClip};
 
 use super::session_recording::{Pick, pick, playing};
 use super::*;
-use bl_engine::capture::{self, Fit, Played, Timing};
+use crate::recording::write_moves;
+use bl_engine::capture::{self, CapturedMidi, Fit, Played, Timing};
 
 /// The undo step a capture is.
 const UNDO_LABEL: &str = "Capture MIDI";
 
 /// What one track's capture does, before the document is touched.
 enum Work {
-    /// Notes added to the clip playing in a slot.
+    /// Notes and controller moves added to the clip playing in a slot.
     Merge {
         scene: SceneId,
-        clip: Clip,
+        clip: Box<Clip>,
         notes: Vec<Note>,
+        moves: Vec<(Ticks, MidiMessage)>,
     },
     /// A new clip in the slot of `scene`, or of a scene added at the end.
     New {
         scene: Option<SceneId>,
         data: MidiData,
         length: Ticks,
+        moves: Vec<(Ticks, MidiMessage)>,
     },
 }
 
@@ -94,6 +103,11 @@ impl Shell {
             return Err(unavailable("the tracks that were played are gone"));
         }
         let ticks = |frames: Frames| tempo.frames_to_ticks(frames, rate);
+        // Spec: midi-controller-data R15. Controllers up to the last note-off.
+        let controllers: BTreeMap<TrackId, Vec<CapturedMidi>> = heard
+            .iter()
+            .map(|(track, messages)| (*track, capture::controllers(messages)))
+            .collect();
         let stamped = tracks
             .iter()
             .flat_map(|(_, notes)| notes.iter().filter_map(|n| n.song_on))
@@ -156,11 +170,23 @@ impl Shell {
                 let (Some((scene, clip)), Some(started)) = (slot, started) else {
                     continue;
                 };
-                let notes = launch_relative(notes, started, &ticks);
-                work.push((*track, Work::Merge { scene, clip, notes }));
+                let mut notes = launch_relative(notes, started, &ticks);
+                let moves = launch_moves(&controllers[track], started, &ticks);
+                give_pressure(&mut notes, &moves);
+                work.push((
+                    *track,
+                    Work::Merge {
+                        scene,
+                        clip: Box::new(clip),
+                        notes,
+                        moves,
+                    },
+                ));
                 continue;
             }
-            let placed = capture::place(notes, timing, ticks, phrase, bar);
+            let mut placed = capture::place(notes, timing, ticks, phrase, bar);
+            let moves = capture::place_controllers(&controllers[track], timing, ticks);
+            give_pressure(&mut placed.notes, &moves);
             let data = MidiData {
                 looping: true,
                 start: placed.loop_start,
@@ -175,6 +201,7 @@ impl Shell {
                     scene,
                     data,
                     length,
+                    moves,
                 },
             ));
         }
@@ -228,6 +255,23 @@ fn launch_relative(
         .collect()
 }
 
+/// The controller moves with their positions counted from the frame the
+/// clip launched on, like [`launch_relative`]'s.
+fn launch_moves(
+    controllers: &[CapturedMidi],
+    started: Frames,
+    ticks: &impl Fn(Frames) -> Ticks,
+) -> Vec<(Ticks, MidiMessage)> {
+    let begin = ticks(started);
+    controllers
+        .iter()
+        .filter_map(|c| {
+            let at = ticks(c.song?);
+            (at >= begin).then_some((at - begin, c.message))
+        })
+        .collect()
+}
+
 /// Applies a capture's work inside the open transaction: the tempo, the
 /// scene a track needs at the end, the new clips and the merged ones.
 fn apply(
@@ -244,19 +288,48 @@ fn apply(
     let mut made = Vec::new();
     for (track, work) in work {
         match work {
-            Work::Merge { scene, clip, notes } => {
+            Work::Merge {
+                scene,
+                clip,
+                notes,
+                moves,
+            } => {
                 let ClipData::Midi(data) = &clip.data else {
                     continue;
                 };
-                let (data, length) = capture::merge(data, clip.length, notes);
+                // Spec: midi-controller-data R15. The moves stand where the
+                // notes do, and a clip that doesn't loop takes those before
+                // its end.
+                let marker = data.start;
+                let end = data
+                    .end
+                    .unwrap_or(marker + clip.length)
+                    .min(marker + clip.length);
+                let moves: Vec<_> = moves
+                    .into_iter()
+                    .map(|(at, message)| (marker + at, message))
+                    .filter(|(at, _)| data.looping || *at < end)
+                    .collect();
+                let reach = moves.iter().map(|(at, _)| *at - marker).max();
+                let (merged, length) =
+                    capture::merge(data, clip.length, notes, reach.unwrap_or(Ticks::ZERO));
+                // A loop that moved on takes the controllers' loop with it.
+                let before = capture::loop_span(data, clip.length);
+                let after = capture::loop_span(&merged, length);
+                let copies = (after.1 - before.1).get() / (before.1 - before.0).get();
                 editor.apply(Command::SetClipLength {
                     clip: clip.id,
                     length,
                 })?;
                 editor.apply(Command::SetClipData {
                     clip: clip.id,
-                    data: ClipData::Midi(data),
+                    data: ClipData::Midi(merged),
                 })?;
+                for envelope in clip.envelopes().filter(|e| e.target.is_midi()) {
+                    let points: Vec<_> = envelope.envelope.points().collect();
+                    repeat_loop(editor, clip.id, envelope.target, &points, before, copies)?;
+                }
+                write_moves(editor, clip.id, &moves, None)?;
                 made.push(CapturedClip {
                     track,
                     scene,
@@ -268,6 +341,7 @@ fn apply(
                 scene,
                 data,
                 length,
+                moves,
             } => {
                 let scene = match scene.or(inserted) {
                     Some(scene) => scene,
@@ -285,6 +359,7 @@ fn apply(
                     scene,
                     clip: Clip::new(clip, Ticks::ZERO, length, ClipData::Midi(data)),
                 })?;
+                write_moves(editor, clip, &moves, None)?;
                 made.push(CapturedClip {
                     track,
                     scene,
@@ -295,4 +370,35 @@ fn apply(
         }
     }
     Ok(made)
+}
+
+/// Copies one controller envelope's loop into the `copies` passes a capture
+/// added to the clip, as the notes are.
+fn repeat_loop(
+    editor: &mut Editor,
+    clip: ClipId,
+    target: AutomationTarget,
+    points: &[bl_model::Breakpoint],
+    span: (Ticks, Ticks),
+    copies: i64,
+) -> Result<(), bl_model::EditError> {
+    for point in capture::repeat_points(points, span, copies) {
+        editor.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target,
+            kind: EnvelopeKind::Modulation,
+            at: point.at,
+            value: point.value,
+        })?;
+        if point.bend != 0.0 {
+            editor.apply(Command::SetClipEnvelopeCurve {
+                clip,
+                target,
+                kind: EnvelopeKind::Modulation,
+                at: point.at,
+                bend: point.bend,
+            })?;
+        }
+    }
+    Ok(())
 }

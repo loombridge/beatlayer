@@ -21,7 +21,8 @@
 //! Beatlayer ships its first native devices: the compressor ([`compressor`]),
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
-//! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
+//! ([`delay`]), the Utility device ([`utility`], WP-2.18b) and the multiband
+//! dynamics ([`multiband_dynamics`], WP-5.22); [`register`]
 //! adds them to the engine, with the three delays of WP-5.25
 //! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments
 //! are the polysynth
@@ -49,25 +50,36 @@ pub mod eq;
 pub mod filter_delay;
 mod framework;
 pub mod gate;
+pub mod gate_mod;
 pub mod grain_delay;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
+pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod multiband_dynamics;
 pub mod multisampler;
+mod multisampler_tabs;
+pub mod overdrive;
+pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+pub mod saturator;
 mod sections;
+pub mod shifter;
+mod signal_mod;
 pub mod stack;
+pub mod strike_mod;
 pub mod testing;
 pub mod three_band_eq;
 pub mod touch;
+pub mod tube;
 pub mod utility;
 pub mod wax;
 
@@ -93,14 +105,19 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
+pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
-pub use sampler::{Sampler, sampler_type};
+pub use sampler::{Sampler, sampler_type, slice_boundaries};
+pub use saturator::{SATURATOR, saturator_type};
+pub use shifter::{SHIFTER, shifter_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
+pub use tube::{TUBE, tube_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -127,7 +144,24 @@ pub fn display(
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
+        SATURATOR => Some(saturator::display(device, description, values, data)),
+        OVERDRIVE => Some(overdrive::display(device, description, values, data)),
+        TUBE => Some(tube::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
+        bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
+        bl_model::modulator::STRIKE_MOD => {
+            Some(strike_mod::display(device, description, values, data))
+        }
+        bl_model::modulator::GATE_MOD => Some(gate_mod::display(device, description, values, data)),
+        bl_model::modulator::LEVEL_MOD => {
+            Some(level_mod::display(device, description, values, data))
+        }
+        MULTIBAND_DYNAMICS => Some(multiband_dynamics::display(
+            device,
+            description,
+            values,
+            data,
+        )),
         _ => None,
     }
 }
@@ -155,6 +189,10 @@ pub fn register(registry: &mut Registry) {
     drum_sampler::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
+    level_mod::register(registry);
+    gate_mod::register(registry);
+    strike_mod::register(registry);
+    play_mod::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);
@@ -165,7 +203,12 @@ pub fn register(registry: &mut Registry) {
     crusher::register(registry);
     wax::register(registry);
     auto_filter::register(registry);
+    saturator::register(registry);
+    overdrive::register(registry);
+    tube::register(registry);
     beat_repeat::register(registry);
+    multiband_dynamics::register(registry);
+    shifter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

@@ -120,8 +120,56 @@ pub fn draw(
         let fill = Rect::from_min_size(strip.min, vec2(strip.width(), strip.height() * depth));
         painter.rect_filled(fill, 0.0, ink);
     }
+    modulator_readings(&painter, theme, cell, ink, display);
     if views.len() > 1 {
         view_buttons(ui, theme, cell, display, views, enabled, events);
+    }
+}
+
+/// What a modulator's display shows beside its curves (WP-5.11; the
+/// modulation spec, R24 to R26): the Level Mod's Direct and S.C. meters in
+/// dB from -60 to 0, a bar for a modulator's level, and the LED that flashes
+/// on each start, in the cell's top-right corner.
+fn modulator_readings(
+    painter: &Painter,
+    theme: &Theme,
+    cell: Rect,
+    ink: Color32,
+    display: &DeviceDisplay,
+) {
+    let c = &theme.colors;
+    let strip = |at: f32, share: f32| {
+        let rect = Rect::from_min_max(
+            pos2(at, cell.top() + 4.0),
+            pos2(at + METER_WIDTH, cell.bottom() - 4.0),
+        );
+        painter.rect_filled(rect, 0.0, c.window.0);
+        let fill = Rect::from_min_max(
+            pos2(
+                rect.left(),
+                rect.bottom() - rect.height() * share.clamp(0.0, 1.0),
+            ),
+            rect.max,
+        );
+        painter.rect_filled(fill, 0.0, ink);
+    };
+    let mut left = cell.left() + 4.0;
+    for name in ["Direct", "S.C."] {
+        if let Some(reading) = display.reading(name) {
+            strip(left, (reading.value + 60.0) / 60.0);
+            left += METER_WIDTH + 4.0;
+        }
+    }
+    if let Some(level) = display.reading("Level") {
+        strip(cell.right() - METER_WIDTH - 4.0, level.value / 100.0);
+    }
+    if let Some(trigger) = display.reading("Trigger") {
+        let at = pos2(cell.right() - METER_WIDTH - 14.0, cell.top() + 8.0);
+        if trigger.value > 0.5 {
+            painter.circle_filled(at, 3.0, ink);
+        } else {
+            painter.circle_stroke(at, 3.0, Stroke::new(1.0, c.separator.0));
+        }
     }
 }
 

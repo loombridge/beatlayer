@@ -658,6 +658,24 @@ impl AudioHost {
         Ok(())
     }
 
+    /// Sends a sampler's node a click in its display (WP-5.15, the
+    /// multisampler spec, R54): the node plays its sample from a point until
+    /// the button comes up. Nothing is written to the set.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn audition(
+        &mut self,
+        device: bl_model::DeviceId,
+        audition: bl_engine::Audition,
+    ) -> Result<(), String> {
+        let engine = self.running_engine()?;
+        engine.send_data(bl_engine::NodeKey::Device(device), engine.data(audition));
+        Ok(())
+    }
+
     /// Sends a Session View command (WP-3.2): a slot or a scene launch, or
     /// a stop, which the engine runs at the start of its next block and
     /// lands on the launch quantisation grid.

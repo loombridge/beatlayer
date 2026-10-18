@@ -433,6 +433,8 @@ pub fn run(args: Args) -> Result<(), String> {
     if !args.null_audio {
         shell.use_midi_backend(Box::new(bl_midi_io::MidirBackend::new()));
     }
+    // The files' analyses are kept beside the peaks (WP-4.3).
+    shell.use_platform_analysis_cache();
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
@@ -466,6 +468,11 @@ pub fn run(args: Args) -> Result<(), String> {
                 let _ = proxy.send_event(UserEvent::Browser);
             }
         }));
+    }
+    if !args.benchmark_scene {
+        // Live scans its plug-ins at launch: so does Beatlayer, in the
+        // background, so the first frame doesn't wait (WP-2.9b).
+        shell.start_plugin_scan();
     }
     for (id, command_args) in &args.commands {
         if let Err(error) = shell.invoke(id, command_args.clone()) {

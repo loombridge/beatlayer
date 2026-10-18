@@ -1,0 +1,19 @@
+// Sine Bank: written by tests/fixtures/gen/gen_media.py --sfz; don't edit by hand.
+<control>
+default_path=samples\
+<global>
+amp_veltrack=0
+ampeg_release=0.05
+// The low zone: two velocity layers.
+<group> lokey=36 hikey=47 pitch_keycenter=40
+<region> sample=low_soft.wav lovel=1 hivel=63
+<region> sample=low_hard.wav lovel=64 hivel=127
+// The middle zone: a round-robin pair, fading out across keys 56 to 59.
+<group> lokey=48 hikey=59 xfout_lokey=56 xfout_hikey=59 seq_length=2 pitch_keycenter=54
+<region> sample=mid_a.wav seq_position=1
+<region> sample=mid_b.wav seq_position=2
+// The high zone: fading in across the same keys, looping while held.
+<group> lokey=56 hikey=71 xfin_lokey=56 xfin_hikey=59 loop_mode=loop_continuous group=1
+<region> sample=high.wav pitch_keycenter=64 loop_start=0 loop_end=4800
+// A region whose sample isn't there, which the import names and leaves out.
+<region> sample=missing.wav key=100

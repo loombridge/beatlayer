@@ -446,6 +446,7 @@ impl DeviceView {
                     name,
                     role: DeviceRole::Instrument,
                     sidechain: false,
+                    midi_sidechain: false,
                 },
                 track: None,
                 chain: None,

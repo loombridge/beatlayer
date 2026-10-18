@@ -11,8 +11,9 @@ use bl_core::time::{
     Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor, MidiData, Note,
-    ParamId, PluginFormat, TrackId, TrackKind, WarpMarker,
+    AudioData, Clip, ClipData, Command, ComplexProSettings, ContentHash, Device, DeviceKind,
+    Editor, MidiData, Note, ParamId, PluginFormat, TonesSettings, TrackId, TrackKind, WarpMarker,
+    WarpMode, WarpSettings,
 };
 use bl_project::{Media, MediaPath, MediaRef, Project};
 use proptest::prelude::*;
@@ -327,6 +328,32 @@ fn audio_data(byte: u8) -> AudioData {
             looping: byte % 4 == 1,
             loop_start: ticks as f64,
             loop_end: Some((50 * ticks) as f64),
+            // The warp mode, its controls and the RAM and HiQ switches
+            // (WP-4.2).
+            warp_mode: [
+                WarpMode::Beats,
+                WarpMode::Tones,
+                WarpMode::Texture,
+                WarpMode::RePitch,
+                WarpMode::Complex,
+                WarpMode::ComplexPro,
+            ][usize::from(byte) % 6],
+            warp_settings: WarpSettings {
+                tones: TonesSettings {
+                    grain_size: 10.0 + f64::from(byte % 90),
+                },
+                complex_pro: ComplexProSettings {
+                    formants: f64::from(byte % 101),
+                    envelope: 8 + u32::from(byte),
+                },
+                ..WarpSettings::default()
+            },
+            ram: byte.is_multiple_of(5),
+            high_quality: !byte.is_multiple_of(7),
+            transient_edits: bl_model::TransientEdits {
+                added: vec![0.5, 1.0],
+                removed: vec![f64::from(byte) / 128.0],
+            },
             ..audio
         };
     }

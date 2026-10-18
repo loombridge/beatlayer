@@ -192,6 +192,7 @@ fn factories_offer_device_types_with_their_roles() {
             testing::gain_type(),
             testing::through_type(),
             testing::key_type(),
+            testing::hear_type(),
             testing::instrument_type(),
         ]
     );
@@ -200,6 +201,15 @@ fn factories_offer_device_types_with_their_roles() {
     let key = testing::key_type().device(bl_model::DeviceId(bl_core::id::Id::new(8).unwrap()));
     assert_eq!(key.sidechain, Some(bl_model::Sidechain::default()));
     assert!(!testing::gain_type().sidechain);
+    // And one that declares a MIDI sidechain input, devices that have one
+    // (WP-5.27).
+    let hear = testing::hear_type().device(bl_model::DeviceId(bl_core::id::Id::new(7).unwrap()));
+    assert_eq!(
+        hear.midi_sidechain,
+        Some(bl_model::MidiSidechain::default())
+    );
+    assert_eq!(hear.sidechain, None);
+    assert_eq!(key.midi_sidechain, None);
     let gain = registry.device_type(&testing::gain_type().kind).unwrap();
     let device = gain.device(bl_model::DeviceId(bl_core::id::Id::new(9).unwrap()));
     assert_eq!(

@@ -17,6 +17,9 @@ bl-dsp.workspace = true
 bl-media.workspace = true
 # The compiler reads documents (WP-0.9).
 bl-model.workspace = true
+# A warped clip's table from song frames to file positions, and the warp
+# modes that play it (WP-4.2).
+bl-stretch.workspace = true
 # The lock-free logger for the audio thread.
 bl-rt.workspace = true
 # Pure-Rust maths for the test tone, so it renders alike on every platform
@@ -44,6 +47,9 @@ serde_json = "1"
 libc = "0.2"
 
 [dev-dependencies]
+# The analysis cache runs in the background beside blocks rendered under the
+# allocation trap (WP-4.3).
+bl-analysis.workspace = true
 # The stress test plays through the null device, which counts dropouts and
 # heap use on its audio thread.
 bl-audio-io.workspace = true

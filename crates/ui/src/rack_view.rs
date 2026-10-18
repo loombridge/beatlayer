@@ -948,7 +948,7 @@ impl DeviceViewUi {
             self.chain_slider(ui, theme, row, rects.volume, "volume", events);
             self.chain_slider(ui, theme, row, rects.pan, "pan", events);
         }
-        self.drum_cells(ui, theme, rack, row, rects, clip, events);
+        self.drum_cells(ui, theme, rack, row, rects, events);
     }
 
     /// A chain's name, or the text field it's being renamed in.

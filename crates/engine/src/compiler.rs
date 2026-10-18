@@ -1967,11 +1967,14 @@ fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modul
 /// has a mixer made with its state, so only chains in both documents count,
 /// wherever they sit in them.
 fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mut Vec<ParamEvent>) {
-    /// What a chain's nodes hold: its mixer, and for a drum chain its note
-    /// routing and the levels of its sends to the rack's return chains.
+    /// A drum chain's note routing and the levels of its sends to the
+    /// rack's return chains.
+    type Drum = ([(ParamId, f64); 3], Vec<(ChainId, f64)>);
+    /// What a chain's nodes hold: its mixer, and for a drum chain its drum
+    /// settings.
     struct State {
         mixer: Mixer,
-        drum: Option<([(ParamId, f64); 3], Vec<(ChainId, f64)>)>,
+        drum: Option<Drum>,
     }
     fn states(document: &Document, ids: &[DeviceId]) -> BTreeMap<ChainId, State> {
         let mut states = BTreeMap::new();

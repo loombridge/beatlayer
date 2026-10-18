@@ -15,7 +15,7 @@ fn rejected(editor: &mut Editor, command: Command) -> ModelError {
     }
 }
 
-struct Kit {
+struct Drums {
     editor: Editor,
     track: TrackId,
     rack: DeviceId,
@@ -25,7 +25,7 @@ struct Kit {
 
 /// A MIDI track holding a drum rack of `drums` pads from note 36 and
 /// `returns` return chains.
-fn kit(drums: usize, returns: usize) -> Kit {
+fn kit(drums: usize, returns: usize) -> Drums {
     let mut editor = Editor::new();
     let track: TrackId = editor.new_id();
     editor
@@ -68,7 +68,7 @@ fn kit(drums: usize, returns: usize) -> Kit {
             device: rack,
         })
         .unwrap();
-    Kit {
+    Drums {
         editor,
         track,
         rack: id,
@@ -88,7 +88,7 @@ fn effect(editor: &mut Editor) -> Device {
     .with_role(DeviceRole::AudioEffect)
 }
 
-fn chain(kit: &Kit, id: ChainId) -> Chain {
+fn chain(kit: &Drums, id: ChainId) -> Chain {
     kit.editor.document().chain(id).unwrap().clone()
 }
 

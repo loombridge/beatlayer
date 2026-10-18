@@ -131,11 +131,6 @@ const DEVICE: &[Row] = &[
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
     ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
-    (
-        "C-DEVICE-013",
-        "Group to Drum Rack",
-        Cmd(crate::pads::GROUP_TO_DRUM_RACK),
-    ),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
     (IMP_14, "Float", Cmd(SET_FLOATING)),
     (
@@ -162,6 +157,23 @@ const DEVICE: &[Row] = &[
 #[must_use]
 pub fn device() -> Vec<MenuItem> {
     items(DEVICE)
+}
+
+/// The row of Group to Drum Rack (C-DEVICE-013), which a device's menu
+/// offers straight after Group wherever the selection could sit in one
+/// chain of a drum rack (the drum racks spec, R25).
+pub const GROUP_TO_DRUM_RACK_ROW: &str = "C-DEVICE-013";
+
+/// The Group to Drum Rack item, which the UI adds after Group while the
+/// command can run.
+#[must_use]
+pub fn group_to_drum_rack() -> MenuItem {
+    items(&[(
+        GROUP_TO_DRUM_RACK_ROW,
+        "Group to Drum Rack",
+        Cmd(crate::pads::GROUP_TO_DRUM_RACK),
+    )])
+    .remove(0)
 }
 
 /// The row of Beatlayer's own Ungroup in a rack's menu (racks spec, R26),

@@ -13,8 +13,8 @@ use bl_model::{
     ClipData, ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
     DeviceKind, EditError, Editor, FollowAction, FollowActions, FollowPatch, Input, LaunchMode,
     LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError, Monitor,
-    Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId,
-    TrackKind,
+    Note, Output, ParamId, PluginFormat, RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap,
+    TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        139,
+        144,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -65,8 +65,8 @@ fn every_document_command_is_registered() {
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
-         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, and \
-         WP-3.10 the two for follow actions"
+         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-3.10 the \
+         two for follow actions, and WP-5.6 five for a drum rack's chains"
     );
 
     for op in &ops {
@@ -1038,6 +1038,53 @@ fn every_command_runs_by_id() {
         json!({ "chain": first, "enabled": false }),
     );
     agent.run("chain.set_solo", json!({ "chain": second, "solo": true }));
+    // WP-5.6: a drum rack's chain takes its notes, choke group and sends,
+    // and its return chain a place to send its output.
+    let drum: DeviceId = agent.editor.new_id();
+    let (pad, ret): (ChainId, ChainId) = (agent.editor.new_id(), agent.editor.new_id());
+    let midi: TrackId = agent.editor.new_id();
+    agent.run(
+        "track.create",
+        json!({ "id": midi, "kind": "midi", "name": "Drums", "parent": null, "index": 0 }),
+    );
+    let return_track: TrackId = agent.editor.new_id();
+    agent.run(
+        "track.create",
+        json!({ "id": return_track, "kind": "return", "name": "Reverb", "parent": null, "index": 0 }),
+    );
+    agent
+        .editor
+        .apply(Command::InsertDevice {
+            track: midi,
+            index: 0,
+            device: Device::rack(drum, RackKind::Drum)
+                .with_chain(Chain::for_pad(pad, "Kick", 36))
+                .with_chain(Chain::new_return(ret, "Room")),
+        })
+        .unwrap();
+    agent.run(
+        "chain.set_receive",
+        json!({ "chain": pad, "receive": { "note": 38 } }),
+    );
+    agent.run("chain.set_play", json!({ "chain": pad, "play": 62 }));
+    agent.run("chain.set_choke", json!({ "chain": pad, "choke": 2 }));
+    agent.run(
+        "chain.set_send",
+        json!({ "chain": pad, "to": ret, "level": 0.5 }),
+    );
+    agent.run(
+        "chain.set_audio_to",
+        json!({ "chain": ret, "track": return_track }),
+    );
+    let kick = agent.editor.document().chain(pad).unwrap();
+    assert_eq!(
+        (kick.receive, kick.play, kick.choke, kick.send(ret)),
+        (bl_model::Receive::Note(38), 62, Some(2), 0.5)
+    );
+    assert_eq!(
+        agent.editor.document().chain(ret).unwrap().audio_to,
+        Some(return_track)
+    );
     agent.run(
         "chain.move",
         json!({ "chain": second, "rack": rack, "index": 0 }),
@@ -2261,6 +2308,42 @@ fn schemas_match_what_commands_serialise() {
             Command::SetChainSolo {
                 chain: ChainId(fresh_id),
                 solo: true,
+            },
+        ),
+        (
+            "chain.set_receive",
+            Command::SetChainReceive {
+                chain: ChainId(fresh_id),
+                receive: bl_model::Receive::Note(38),
+            },
+        ),
+        (
+            "chain.set_play",
+            Command::SetChainPlay {
+                chain: ChainId(fresh_id),
+                play: 62,
+            },
+        ),
+        (
+            "chain.set_choke",
+            Command::SetChainChoke {
+                chain: ChainId(fresh_id),
+                choke: Some(2),
+            },
+        ),
+        (
+            "chain.set_send",
+            Command::SetChainSend {
+                chain: ChainId(fresh_id),
+                to: ChainId(fresh_id),
+                level: 0.5,
+            },
+        ),
+        (
+            "chain.set_audio_to",
+            Command::SetChainAudioTo {
+                chain: ChainId(fresh_id),
+                track: Some(TrackId(fresh_id)),
             },
         ),
         (

@@ -528,7 +528,6 @@ impl DeviceView {
 
     /// `pad.drop` (drum racks spec, R14 to R16): drops samples, a device or
     /// a preset on a pad. `samples` are the files the shell imported.
-    #[expect(clippy::too_many_lines, reason = "one drop per kind of item")]
     pub(crate) fn pad_drop(
         &mut self,
         editor: &mut Editor,

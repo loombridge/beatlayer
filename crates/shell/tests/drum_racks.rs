@@ -54,14 +54,14 @@ impl Drop for Scratch {
     }
 }
 
-struct Kit {
+struct Drums {
     shell: Shell,
     track: TrackId,
     rack: DeviceId,
 }
 
 /// The default set with its MIDI track selected and a drum rack on it.
-fn kit() -> Kit {
+fn kit() -> Drums {
     let mut shell = Shell::headless();
     let track = shell
         .editor()
@@ -87,7 +87,7 @@ fn kit() -> Kit {
             .unwrap(),
     )
     .unwrap();
-    Kit {
+    Drums {
         shell,
         track,
         rack: added.device,
@@ -99,7 +99,7 @@ fn effect() -> Value {
     json!({ "kind": t.kind, "name": "Gain", "role": t.role })
 }
 
-fn drop_on(kit: &mut Kit, note: u8, args: Value) -> PadDropped {
+fn drop_on(kit: &mut Drums, note: u8, args: Value) -> PadDropped {
     let mut full = json!({ "rack": kit.rack, "note": note });
     for (key, value) in args.as_object().unwrap() {
         full[key] = value.clone();
@@ -107,7 +107,7 @@ fn drop_on(kit: &mut Kit, note: u8, args: Value) -> PadDropped {
     serde_json::from_value(kit.shell.invoke("pad.drop", full).unwrap()).unwrap()
 }
 
-fn chains_on(kit: &Kit, note: u8) -> Vec<ChainId> {
+fn chains_on(kit: &Drums, note: u8) -> Vec<ChainId> {
     let rack = kit.shell.editor().document().device(kit.rack).unwrap();
     rack.chains
         .iter()
@@ -116,7 +116,7 @@ fn chains_on(kit: &Kit, note: u8) -> Vec<ChainId> {
         .collect()
 }
 
-fn devices_of(kit: &Kit, chain: ChainId) -> Vec<(DeviceRole, DeviceId)> {
+fn devices_of(kit: &Drums, chain: ChainId) -> Vec<(DeviceRole, DeviceId)> {
     kit.shell
         .editor()
         .document()
@@ -128,7 +128,7 @@ fn devices_of(kit: &Kit, chain: ChainId) -> Vec<(DeviceRole, DeviceId)> {
         .collect()
 }
 
-fn media_of(kit: &Kit, chain: ChainId) -> Vec<ContentHash> {
+fn media_of(kit: &Drums, chain: ChainId) -> Vec<ContentHash> {
     kit.shell
         .editor()
         .document()
@@ -157,7 +157,7 @@ fn state(shell: &mut Shell) -> DeviceViewState {
     serde_json::from_value(shell.invoke("device_view.state", json!({})).unwrap()).unwrap()
 }
 
-fn pads(kit: &mut Kit) -> PadFrame {
+fn pads(kit: &mut Drums) -> PadFrame {
     state(&mut kit.shell)
         .devices
         .into_iter()
@@ -507,7 +507,7 @@ fn preview_plays_one_chain_while_held_and_changes_nothing() {
     kit.shell
         .invoke("chain.preview", json!({ "chain": a, "on": true }))
         .unwrap();
-    let row = |kit: &mut Kit| {
+    let row = |kit: &mut Drums| {
         state(&mut kit.shell)
             .devices
             .into_iter()
@@ -688,7 +688,7 @@ fn deleting_the_return_track_sends_the_chain_home() {
 fn a_return_chain_takes_audio_effects_only_and_six_at_most() {
     let mut kit = kit();
     let rack = kit.rack;
-    let create = |kit: &mut Kit, device: Value| {
+    let create = |kit: &mut Drums, device: Value| {
         kit.shell.invoke(
             "chain.create",
             json!({ "rack": rack, "device": device, "returns": true }),
@@ -790,7 +790,7 @@ fn a_chain_from_the_list_takes_its_devices_and_from_the_mixer_its_notes() {
 fn a_return_chain_dragged_to_the_mixer_makes_a_return_track() {
     let mut kit = kit();
     let rack = kit.rack;
-    let make = |kit: &mut Kit| -> ChainId {
+    let make = |kit: &mut Drums| -> ChainId {
         let added: bl_shell::device_commands::ChainAdded = serde_json::from_value(
             kit.shell
                 .invoke(

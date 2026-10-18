@@ -211,6 +211,7 @@ fn dropped_items(ui: &Ui, released: bool) -> Option<(Vec<String>, bool)> {
 
 impl DeviceViewUi {
     /// A drum rack's pad view.
+    #[expect(clippy::too_many_arguments, reason = "the pad view's inputs")]
     pub(crate) fn pad_view(
         &mut self,
         ui: &mut Ui,
@@ -234,7 +235,7 @@ impl DeviceViewUi {
             self.pad(ui, theme, frame, pads, pad, rects, drag.as_deref(), events);
             if pointer.is_some_and(|p| rects.pad.contains(p)) {
                 hint = Some(pad.hover.clone());
-                self.pad_drop(ui, frame, pad, rects, drag.as_deref(), released, events);
+                self.pad_drop(ui, frame, pad, drag.as_deref(), released, events);
             }
         }
         let key = Id::new(("pad-hint", frame.id));
@@ -785,18 +786,15 @@ impl DeviceViewUi {
 
     /// What dropping on a pad does: a pad dragged onto it swaps (Cmd
     /// layers), files and presets land on it, a device moves onto it.
-    #[expect(clippy::too_many_arguments, reason = "the drop's inputs")]
     fn pad_drop(
         &self,
         ui: &Ui,
         frame: &DeviceFrame,
         pad: &PadState,
-        rects: &PadRects,
         drag: Option<&PadDrag>,
         released: bool,
         events: &mut Vec<UiEvent>,
     ) {
-        let _ = rects;
         if let Some(pad_drag) = drag {
             if released && pad_drag.rack == frame.id && pad_drag.note != pad.note {
                 DragAndDrop::clear_payload(ui.ctx());
@@ -839,7 +837,6 @@ impl DeviceViewUi {
 
     /// A drum chain's Input/Output controls and send sliders, and a return
     /// chain's Audio To, in its row (drum racks spec, R6, R8, R21).
-    #[expect(clippy::too_many_arguments, reason = "the controls' inputs")]
     pub(crate) fn drum_cells(
         &self,
         ui: &mut Ui,
@@ -847,11 +844,8 @@ impl DeviceViewUi {
         rack: &RackFrame,
         row: &ChainRow,
         rects: &ChainRowRects,
-        clip: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let painter = ui.painter_at(clip);
-        let _ = &painter;
         if let (Some(drum), Some(io)) = (&row.drum, &rects.io) {
             let preview_id = drum_control_id(row.id, "preview");
             let response = ui.interact(io.preview, preview_id, Sense::click_and_drag());
@@ -1076,7 +1070,6 @@ impl DeviceViewUi {
                 );
             }
         }
-        let _ = clip;
     }
 
     /// A drum chain's send to a return chain: a drag sets it where the
@@ -1104,8 +1097,6 @@ impl DeviceViewUi {
         };
         let position =
             |x: f32| volume_at(f64::from(((x - at.left()) / at.width()).clamp(0.0, 1.0)));
-        let name = "Send \"Change\"";
-        let _ = name;
         let (steps, reset) = Self::slider_keys(ui, &response);
         if reset || response.double_clicked() {
             events.push(UiEvent::BeginNamedGesture(format!(

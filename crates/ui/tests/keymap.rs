@@ -617,7 +617,12 @@ fn d_switches_hot_swap_between_the_rack_and_its_pad() {
             vec![Context::DeviceView, Context::Global],
         ] {
             let hit = keymap
-                .resolve(platform, Key::D, mods(false, false, false, false), &contexts)
+                .resolve(
+                    platform,
+                    Key::D,
+                    mods(false, false, false, false),
+                    &contexts,
+                )
                 .map(|hit| hit.command.id.clone());
             assert_eq!(
                 hit.as_deref(),

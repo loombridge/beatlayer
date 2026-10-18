@@ -513,6 +513,4 @@ fn the_view_column_shows_input_output_send_and_return() {
         list.rows[1].audio_to.is_some(),
         "a return chain has Audio To"
     );
-    let _ = (chains, Element::Message);
-    let _ = (Receive::AllNotes, pad_layout);
 }

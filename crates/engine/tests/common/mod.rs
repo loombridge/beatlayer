@@ -218,6 +218,16 @@ impl Rig {
         Self::build(max_frames, set, |_| {})
     }
 
+    /// A rig as [`Rig::with_config`] makes it, whose registry also has
+    /// whatever `extend` adds.
+    pub fn with_config_and_registry(
+        max_frames: usize,
+        set: impl FnOnce(&mut EngineConfig),
+        extend: impl FnOnce(&mut Registry),
+    ) -> Self {
+        Self::build(max_frames, set, extend)
+    }
+
     /// A rig whose registry has the test nodes and whatever `extend` adds.
     fn configured(
         max_frames: usize,

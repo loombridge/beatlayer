@@ -616,3 +616,203 @@ fn a_chain_tap_lines_up() {
         );
     }
 }
+
+/// The audio device's input, as a cable from its outputs to its inputs
+/// makes it: each input channel carries the output channel of the same
+/// index, `delay` frames late.
+struct Loopback {
+    delay: usize,
+    /// Every frame played on each device output channel so far.
+    played: Vec<Vec<f32>>,
+    /// The input for the block being processed.
+    block: Vec<Vec<f32>>,
+}
+
+impl bl_engine::DeviceInput for Loopback {
+    fn channels(&self) -> usize {
+        self.block.len()
+    }
+
+    fn channel(&self, index: usize) -> &[f32] {
+        &self.block[index]
+    }
+}
+
+impl Loopback {
+    fn new(channels: usize, delay: usize) -> Self {
+        Self {
+            delay,
+            played: vec![Vec::new(); channels],
+            block: vec![Vec::new(); channels],
+        }
+    }
+
+    /// Processes `frames` frames, feeding the input what the outputs played
+    /// `delay` frames ago, and returns Main's left channel.
+    fn block(&mut self, rig: &mut Rig, frames: usize) -> Vec<f32> {
+        let from = self.played[0].len();
+        for (c, block) in self.block.iter_mut().enumerate() {
+            *block = (0..frames)
+                .map(|i| {
+                    (from + i)
+                        .checked_sub(self.delay)
+                        .map_or(0.0, |at| self.played[c][at])
+                })
+                .collect();
+        }
+        rig.block_with_input(frames, &*self);
+        let output = rig.processor.output();
+        for (c, played) in self.played.iter_mut().enumerate() {
+            if c < output.ext_channels() {
+                played.extend_from_slice(&output.ext_channel(c)[..frames]);
+            } else {
+                played.extend(std::iter::repeat_n(0.0, frames));
+            }
+        }
+        output.channel(0).to_vec()
+    }
+}
+
+/// The set the loopback tests play: a track playing +0.5 into Main, a
+/// track playing -0.5 on Ext. Out 3/4, and an external instrument bringing
+/// 3/4 back, on an interface with four channels each way and 300 frames of
+/// round trip.
+fn loopback_rig(
+    rate: bl_core::time::SampleRate,
+    latency: bl_model::HardwareLatency,
+) -> Rig {
+    use bl_model::{Channel, External};
+    use common::dc;
+
+    let mut rig = Rig::with_config(64, |config| {
+        config.sample_rate = rate;
+        config.input_channels = 4;
+        config.output_channels = 4;
+        config.round_trip_latency = LOOPBACK_ROUND_TRIP;
+    });
+    let ed = &mut rig.editor;
+    let reference = track(ed, TrackKind::Audio, None);
+    dc(ed, reference, 0.5);
+    let sender = track(ed, TrackKind::Audio, None);
+    dc(ed, sender, -0.5);
+    run(
+        ed,
+        "routing.set_output",
+        json!({ "track": sender, "output": { "type": "external",
+            "channel": { "type": "pair", "channel": 3 } } }),
+    );
+    let hardware_track = track(ed, TrackKind::Midi, None);
+    let id = ed.new_id();
+    let mut instrument = Device::new(
+        id,
+        "Hardware",
+        DeviceKind::Native {
+            device_type: bl_engine::testing::EXTERNAL.to_owned(),
+        },
+    )
+    .with_role(bl_model::DeviceRole::Instrument)
+    .with_external();
+    instrument.external = Some(External {
+        port: None,
+        channel: 1,
+        audio_from: Channel::Pair(3),
+        hardware_latency: latency,
+    });
+    ed.apply(Command::InsertDevice {
+        track: hardware_track,
+        index: 0,
+        device: instrument,
+    })
+    .unwrap();
+    rig.sync();
+    rig
+}
+
+/// The interface's output and input latency, which a loopback through it
+/// takes.
+const LOOPBACK_ROUND_TRIP: u32 = 300;
+
+/// The peak of Main over `4 * total_latency + 512` frames with a cable that
+/// takes `cable` frames.
+fn loopback_peak(rig: &mut Rig, total_latency: usize, cable: usize) -> f32 {
+    let mut cable = Loopback::new(4, cable);
+    let mut out = Vec::new();
+    while out.len() < 4 * total_latency + 512 {
+        out.extend(cable.block(rig, 64));
+    }
+    out.iter().fold(0.0f32, |m, &s| m.max(s.abs()))
+}
+
+// Spec: external-devices R13
+#[test]
+fn an_external_instruments_round_trip_lines_up_at_main() {
+    use bl_core::time::SampleRate;
+    use bl_model::HardwareLatency;
+
+    // Hardware Latency in milliseconds follows the sample rate, and in
+    // samples it doesn't.
+    for (rate, latency, hardware) in [
+        (SampleRate::HZ_48000, HardwareLatency::Milliseconds { value: 4.0 }, 192),
+        (SampleRate::HZ_48000, HardwareLatency::Samples { value: 100 }, 100),
+        (SampleRate::HZ_96000, HardwareLatency::Milliseconds { value: 4.0 }, 384),
+        (SampleRate::HZ_96000, HardwareLatency::Samples { value: 100 }, 100),
+    ] {
+        let total = LOOPBACK_ROUND_TRIP as usize + hardware;
+        // The reference reaches Main `total` frames late, and the
+        // instrument's sound comes back `total` frames late: they cancel on
+        // every frame.
+        let aligned = loopback_peak(&mut loopback_rig(rate, latency), total, total);
+        assert!(aligned < 1e-6, "{rate:?} {latency:?}: peak {aligned}");
+        // A cable one frame longer than the device reports shows as a
+        // click, so the test can tell.
+        let off_by_one = loopback_peak(&mut loopback_rig(rate, latency), total, total + 1);
+        assert!(off_by_one > 0.4, "{rate:?} {latency:?}: peak {off_by_one}");
+    }
+}
+
+// Spec: external-devices R13
+#[test]
+fn a_round_trip_that_changes_reaches_the_running_song() {
+    use bl_model::External;
+
+    let mut rig = Rig::with_config(64, |config| config.round_trip_latency = 100);
+    let ed = &mut rig.editor;
+    let reference = track(ed, TrackKind::Audio, None);
+    common::dc(ed, reference, 0.5);
+    let hardware_track = track(ed, TrackKind::Midi, None);
+    let id = ed.new_id();
+    let mut instrument = Device::new(
+        id,
+        "Hardware",
+        DeviceKind::Native {
+            device_type: bl_engine::testing::EXTERNAL.to_owned(),
+        },
+    )
+    .with_role(bl_model::DeviceRole::Instrument)
+    .with_external();
+    instrument.external = Some(External::default());
+    ed.apply(Command::InsertDevice {
+        track: hardware_track,
+        index: 0,
+        device: instrument,
+    })
+    .unwrap();
+    rig.sync();
+    // With 100 frames of round trip, the reference reaches Main 100 frames
+    // late.
+    let first = rig.render(256, 64);
+    assert_eq!(first[99], 0.0);
+    assert!(first[100] > 0.0);
+    // The device reports 300 now.
+    let update = rig.compiler.round_trip(300);
+    assert!(update.program.is_some());
+    rig.sender.send_update(update);
+    assert!(rig.sender.flush());
+    let out = rig.render(512, 64);
+    let delayed = out.iter().position(|&s| s.abs() > 1e-6).unwrap_or(out.len());
+    // The new delay line starts empty: silence for 300 frames, then the
+    // reference.
+    assert_eq!(delayed, 300, "{delayed}");
+    // The same figure again changes nothing.
+    assert!(rig.compiler.round_trip(300).program.is_none());
+}

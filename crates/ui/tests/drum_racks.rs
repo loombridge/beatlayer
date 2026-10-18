@@ -6,11 +6,10 @@
 
 mod common;
 
-use bl_model::{ChainId, DeviceId, RackView, Receive, TrackKind};
+use bl_model::{ChainId, DeviceId, RackView, TrackKind};
 use bl_shell::device_commands::{DeviceAdded, DeviceFrame, RackFrame};
 use bl_shell::pad_commands::{PadFrame, PadKind, PadSwitch};
-use bl_ui::drum_view::{PadLayout, pad_layout};
-use bl_ui::layout::Element;
+use bl_ui::drum_view::PadLayout;
 use bl_ui::rack_view::{self, RackLayout};
 use common::{Harness, Window};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2};
@@ -448,7 +447,7 @@ fn auto_select_selects_each_chain_its_note_reaches() {
 #[test]
 fn the_view_column_shows_input_output_send_and_return() {
     let mut h = harness();
-    let (rack, chains) = kit(&mut h, &[36]);
+    let (rack, _) = kit(&mut h, &[36]);
     let layout = layout_of(&mut h, rack);
     let order: Vec<RackView> = layout.selectors.iter().map(|(v, _)| *v).collect();
     assert_eq!(

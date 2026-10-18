@@ -1,11 +1,13 @@
-//! The framework's test effects device and Sweep under RealtimeSanitizer
-//! (WP-5.42, WP-5.20, WP-5.21). The test effects device runs the effects' shared
+//! The framework's test effects device, Sweep and Stutter under
+//! RealtimeSanitizer (WP-5.42, WP-5.20, WP-5.21, WP-5.26). The test effects device runs the effects' shared
 //! parts (an LFO that locks to the song's tempo map and position, an
 //! envelope follower, and a seeded random source) on a track that plays,
 //! while its waveform, rate mode, output, Hold, and menu option change.
 //! Sweep runs every filter type, the oversampled path, the LFO's waves,
 //! rate modes and quantiser, and Clip while they change. Strip, Triad,
-//! Shutter and Bond run with their parameters moving. RTSan stops the process at the first allocation, free, lock, or
+//! Shutter and Bond run with their parameters moving. Stutter runs its
+//! intervals, grids, Chance, Variation and its modes, output modes, filter
+//! and Repeat button while they change. RTSan stops the process at the first allocation, free, lock, or
 //! blocking call, and the allocation trap, installed as in every Beatlayer
 //! test binary, fails the test at any heap use it sees.
 //!
@@ -647,6 +649,107 @@ fn the_three_delays_pass_under_rtsan() {
     eprintln!(
         "2,000 blocks of the three delays under RealtimeSanitizer: {} parameter changes",
         state.counters.events_applied
+    );
+}
+
+#[test]
+fn stutter_passes_under_rtsan() {
+    use bl_devices::beat_repeat::{
+        BEAT_REPEAT, CHANCE, FILTER, GRID, INTERVAL, MODE, PITCH, REPEAT, VARIATION, VARIATION_MODE,
+    };
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut stutter = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: BEAT_REPEAT.to_owned(),
+        },
+    );
+    stutter.params.insert(INTERVAL, 1.0);
+    stutter.params.insert(VARIATION, 70.0);
+    stutter.params.insert(PITCH, 7.0);
+    stutter.params.insert(FILTER, 1.0);
+    let stutter_id = stutter.id;
+    for (index, device) in [tone, stutter].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: stutter_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // interval, the grid, Chance, Variation and its mode, the output
+        // mode, and the Repeat button.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(INTERVAL, (step % 8) as f64)),
+            2 => Some(set(GRID, (step % 7) as f64)),
+            4 => Some(set(CHANCE, ((step * 37) % 101) as f64)),
+            5 => Some(set(VARIATION_MODE, (step % 5) as f64)),
+            7 => Some(set(MODE, (step % 3) as f64)),
+            9 => Some(set(REPEAT, (step % 2) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Stutter under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
     );
 }
 

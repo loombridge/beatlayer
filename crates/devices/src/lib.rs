@@ -35,6 +35,7 @@
 
 pub mod alignment_delay;
 pub mod auto_filter;
+pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod compressor;
@@ -75,6 +76,7 @@ pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
+pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
@@ -175,6 +177,7 @@ pub fn register(registry: &mut Registry) {
     saturator::register(registry);
     overdrive::register(registry);
     tube::register(registry);
+    beat_repeat::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

@@ -327,6 +327,43 @@ fn sends_start_silent_and_go_with_their_return_chain() {
     assert_eq!(chain(&kit, a).send(kit.returns[0]), 0.5);
 }
 
+// Spec: drum-racks R6
+#[test]
+fn a_copied_kit_keeps_its_sends_to_its_own_return_chains() {
+    let mut kit = kit(1, 1);
+    let (pad, ret) = (kit.drums[0], kit.returns[0]);
+    kit.editor
+        .apply(Command::SetChainSend {
+            chain: pad,
+            to: ret,
+            level: 0.5,
+        })
+        .unwrap();
+    let mut copy = kit.editor.document().device(kit.rack).unwrap().clone();
+    let editor = &mut kit.editor;
+    copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+    let (new_pad, new_ret) = (&copy.chains[0], copy.chains[1].id);
+    assert_ne!(new_ret, ret);
+    assert_eq!(new_pad.send(new_ret), 0.5);
+    let other: TrackId = kit.editor.new_id();
+    kit.editor
+        .apply(Command::CreateTrack {
+            id: other,
+            kind: TrackKind::Midi,
+            name: "Copy".to_owned(),
+            parent: None,
+            index: 1,
+        })
+        .unwrap();
+    kit.editor
+        .apply(Command::InsertDevice {
+            track: other,
+            index: 0,
+            device: copy,
+        })
+        .unwrap();
+}
+
 // Spec: drum-racks R6, G2
 #[test]
 fn sends_are_automation_targets() {
@@ -386,6 +423,45 @@ fn sends_are_automation_targets() {
         error,
         bl_model::EditError::Command(ModelError::NotADrumChain(_))
     ));
+}
+
+// Spec: drum-racks R6, G2
+#[test]
+fn a_send_envelope_goes_when_its_chain_leaves_the_rack_on_its_track() {
+    let mut kit = kit(1, 1);
+    let target = AutomationTarget::ChainSend {
+        chain: kit.drums[0],
+        to: kit.returns[0],
+    };
+    kit.editor
+        .apply(Command::SetAutomationBreakpoint {
+            track: kit.track,
+            target,
+            at: Ticks::ZERO,
+            value: 0.25,
+        })
+        .unwrap();
+    let effects = Device::rack(kit.editor.new_id(), RackKind::AudioEffect);
+    let effects_id = effects.id;
+    kit.editor
+        .apply(Command::InsertDevice {
+            track: kit.track,
+            index: 1,
+            device: effects,
+        })
+        .unwrap();
+    kit.editor
+        .apply(Command::MoveChain {
+            chain: kit.drums[0],
+            rack: effects_id,
+            index: 0,
+        })
+        .unwrap();
+    let track = kit.editor.document().track(kit.track).unwrap();
+    assert!(track.automation().all(|(t, _)| *t != target));
+    kit.editor.undo().unwrap();
+    let track = kit.editor.document().track(kit.track).unwrap();
+    assert!(track.automation().any(|(t, _)| *t == target));
 }
 
 // Spec: drum-racks R8

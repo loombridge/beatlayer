@@ -81,36 +81,33 @@ impl Gone {
 /// track, and the clip envelopes that modulate their parameters (automation
 /// R11, WP-3.15).
 fn forget(track: &mut Track, gone: &Gone) {
-    for target in track.automation.keys().copied().collect::<Vec<_>>() {
-        let names_gone = match target {
-            AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
-            AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
-            AutomationTarget::ChainSend { chain, to } => {
-                gone.chains.contains(&chain) || gone.chains.contains(&to)
-            }
-            _ => false,
-        };
-        if names_gone {
-            track.automation.remove(&target);
-        }
-    }
-    let names_gone = |envelope: &ClipEnvelope| match envelope.target {
+    forget_where(track, |target| match *target {
         AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
         AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
         AutomationTarget::ChainSend { chain, to } => {
             gone.chains.contains(&chain) || gone.chains.contains(&to)
         }
         _ => false,
-    };
+    });
+}
+
+/// Forgets the track's envelopes, and its clips' envelopes, whose targets
+/// `names_gone` picks.
+fn forget_where(track: &mut Track, names_gone: impl Fn(&AutomationTarget) -> bool) {
+    for target in track.automation.keys().copied().collect::<Vec<_>>() {
+        if names_gone(&target) {
+            track.automation.remove(&target);
+        }
+    }
     let clips: Vec<ClipId> = track
         .clips()
         .chain(track.slots().map(|(_, clip)| clip))
-        .filter(|clip| clip.envelopes.iter().any(names_gone))
+        .filter(|clip| clip.envelopes.iter().any(|e| names_gone(&e.target)))
         .map(|clip| clip.id)
         .collect();
     for id in clips {
         if let Some(clip) = track.clip_mut(id) {
-            clip.envelopes.retain(|e| !names_gone(e));
+            clip.envelopes.retain(|e| !names_gone(&e.target));
         }
     }
 }
@@ -4249,6 +4246,11 @@ impl Document {
         if from != to {
             self.index.add_chain(&moved, to);
             self.forget_in(from, &Gone::chain(&moved))?;
+        } else if holder_id != rack {
+            // Its sends, and those to it, stayed in the rack it left.
+            forget_where(self.track_mut(from)?, |target| {
+                matches!(*target, AutomationTarget::ChainSend { chain, to } if chain == id || to == id)
+            });
         }
         check_chain(self.track_ref(to)?)
     }

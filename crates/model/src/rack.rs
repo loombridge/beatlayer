@@ -798,8 +798,19 @@ impl Device {
         self.id = DeviceId(next());
         self.floating = false;
         self.set_both(self.params.clone());
+        let old: Vec<ChainId> = self.chains.iter().map(|c| c.id).collect();
         for chain in &mut self.chains {
             chain.reassign_ids(next);
+        }
+        // A drum chain's sends follow its rack's return chains to their new
+        // IDs.
+        let new: Vec<ChainId> = self.chains.iter().map(|c| c.id).collect();
+        for chain in &mut self.chains {
+            for send in &mut chain.sends {
+                if let Some(i) = old.iter().position(|&id| id == send.to) {
+                    send.to = new[i];
+                }
+            }
         }
     }
 

@@ -240,6 +240,11 @@ pub struct Layer {
     /// How the voice is retuned inside a loop, in cents (R19).
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub loop_detune: f64,
+    /// Whether the layer's voices play on to Sample End whatever the note
+    /// does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ
+    /// import does, and `device.update_layers`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub one_shot: bool,
 }
 
 #[expect(
@@ -298,6 +303,7 @@ impl Layer {
             release_loop: length,
             crossfade_ms: 0.0,
             loop_detune: 0.0,
+            one_shot: false,
         }
     }
 
@@ -428,6 +434,10 @@ pub struct LayerSettings {
     /// The loop's Detune, −50 to 50 cents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loop_detune: Option<f64>,
+    /// Whether the layer's voices play on to Sample End whatever the note
+    /// does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_shot: Option<bool>,
 }
 
 impl LayerSettings {
@@ -476,7 +486,8 @@ impl LayerSettings {
             loop_end,
             release_loop,
             crossfade_ms,
-            loop_detune
+            loop_detune,
+            one_shot
         );
         // Markers the settings leave alone follow the ones they move: a loop
         // that no longer fits inside the sample's new span is held to it.

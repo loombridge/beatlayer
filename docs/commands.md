@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-403 commands in 34 areas.
+404 commands in 34 areas.
 
 ## Permission classes
 
@@ -184,6 +184,7 @@ Each command has:
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
+| [`device.import_sfz`](#deviceimport_sfz) | Import SFZ | `external` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | Insert Device in Chain | `edit` |  |  |
 | [`device.insert_layers`](#deviceinsert_layers) | Add Samples | `edit` |  |  |
@@ -3182,6 +3183,24 @@ Arguments:
 
 Result: [`MultisamplerState`](#multisamplerstate).
 
+#### `device.import_sfz`
+
+**Import SFZ**. Permission: `external`. Contexts: `device-view`.
+
+Imports an SFZ multisample instrument, the open text format, as a multisampler: each region becomes a layer (its sample, key and velocity zones with their crossfades as fades, Root Key, tuning, Volume, Pan, start and end points, loop and loop mode), and the device-wide settings most regions agree on (the volume, filter, filter and pitch envelopes, Vel > Vol, Pitch Bend Range, reverse, the fade law) set the new device's controls. Sequences (`seq_length`) turn Round Robin on in Forward mode, random windows (`lorand`) in Random mode. With `device`, a multisampler, only the layers are added, at the end of its list; otherwise a multisampler is made on `track`, or on a new MIDI track below the last. The samples join the set's media where they lie. Regions whose sample is missing or isn't audio, or whose `trigger` isn't `attack`, are left out and named in `left_out`; opcodes the import doesn't read are listed in `unread`. A file with no region left changes nothing. One undo step. It reads files outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The `.sfz` file. |
+| `device` | [`DeviceId`](#deviceid) or null | no | A multisampler to add the regions to as layers, at the end of its list. Left out, the import makes a multisampler: on `track`, or on a new MIDI track below the last track. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track to put a new multisampler on, after its other devices. Ignored with `device`. |
+
+Result: [`SfzImported`](#sfzimported).
+
 #### `device.insert`
 
 **Insert Device**. Permission: `edit`. Contexts: `device-view`, `browser`.
@@ -3998,7 +4017,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Change Sample Settings**. Permission: `edit`. Contexts: `device-view`.
 
-Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
+Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
 
 Default keys: none.
 
@@ -7566,6 +7585,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
 | [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
+| [`device.import_sfz`](#deviceimport_sfz) | the query tool's `device` | `layers` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
 | [`device.insert_layers`](#deviceinsert_layers) | the query tool's `device` | `layers` |
@@ -13338,6 +13358,7 @@ One of:
 
 - `"folder"`: A folder.
 - `"audio"`: An audio file Beatlayer can open.
+- `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
@@ -13357,6 +13378,11 @@ One of:
     {
       "const": "audio",
       "description": "An audio file Beatlayer can open.",
+      "type": "string"
+    },
+    {
+      "const": "sfz",
+      "description": "An SFZ multisample instrument, which imports as a multisampler (WP-5.14).",
       "type": "string"
     },
     {
@@ -13997,6 +14023,7 @@ One sample of a multisample (R2).
 | `detune` | number | no | Its tuning, in cents from −50 to 50. |
 | `link` | boolean | no | Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off. |
 | `loop_detune` | number | no | How the voice is retuned inside a loop, in cents (R19). |
+| `one_shot` | boolean | no | Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`. |
 | `pan` | number | no | Its place in the stereo field, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) | no | What the note's end does inside a sustain loop (R18). |
 | `sustain` | [`SustainMode`](#sustainmode) | no | The sustain loop's kind (R17). |
@@ -14073,6 +14100,10 @@ One sample of a multisample (R2).
     "name": {
       "description": "Its name: the file's name until renamed.",
       "type": "string"
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`.",
+      "type": "boolean"
     },
     "pan": {
       "description": "Its place in the stereo field, −50 to 50.",
@@ -14227,6 +14258,7 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
 | `loop_detune` | number or null | no | The loop's Detune, −50 to 50 cents. |
 | `loop_end` | integer or null | no | Loop End, in frames. |
 | `loop_start` | integer or null | no | Loop Start, in frames. |
+| `one_shot` | boolean or null | no | Whether the layer's voices play on to Sample End whatever the note does. |
 | `pan` | number or null | no | Pan, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) or null | no | Release Mode. |
 | `release_loop` | integer or null | no | The Release Loop point, in frames. |
@@ -14297,6 +14329,13 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
       "minimum": 0,
       "type": [
         "integer",
+        "null"
+      ]
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does.",
+      "type": [
+        "boolean",
         "null"
       ]
     },
@@ -19084,6 +19123,154 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "plug_ins",
     "agents",
     "assistant"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzCount`
+
+An opcode or header the import left unread or settled device-wide, with how many regions use it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The opcode, or the header in angle brackets. |
+| `regions` | integer, at least 0 | yes | How many regions use it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An opcode or header the import left unread or settled device-wide, with how many regions use it.",
+  "properties": {
+    "name": {
+      "description": "The opcode, or the header in angle brackets.",
+      "type": "string"
+    },
+    "regions": {
+      "description": "How many regions use it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "regions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzImported`
+
+What `device.import_sfz` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The multisampler. |
+| `track` | [`TrackId`](#trackid) | yes | Its track. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The new layers, in list order: now the selected layers. |
+| `unread` | array of [`SfzCount`](#sfzcount) | yes | Opcodes and headers left unread. |
+| `settled` | array of [`SfzCount`](#sfzcount) | yes | Opcodes most regions agree on, which set the device's own controls. |
+| `left_out` | array of [`SfzLeftOut`](#sfzleftout) | yes | Regions left out, each with why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.import_sfz` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The multisampler."
+    },
+    "layers": {
+      "description": "The new layers, in list order: now the selected layers.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    },
+    "left_out": {
+      "description": "Regions left out, each with why.",
+      "items": {
+        "$ref": "#/$defs/SfzLeftOut"
+      },
+      "type": "array"
+    },
+    "settled": {
+      "description": "Opcodes most regions agree on, which set the device's own controls.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "Its track."
+    },
+    "unread": {
+      "description": "Opcodes and headers left unread.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "track",
+    "layers",
+    "unread",
+    "settled",
+    "left_out"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzLeftOut`
+
+A region the import left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `region` | integer, at least 0 | yes | Its place among the file's regions, from 1. |
+| `sample` | string | yes | Its sample as the file names it. |
+| `reason` | string | yes | Why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A region the import left out.",
+  "properties": {
+    "reason": {
+      "description": "Why.",
+      "type": "string"
+    },
+    "region": {
+      "description": "Its place among the file's regions, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sample": {
+      "description": "Its sample as the file names it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "region",
+    "sample",
+    "reason"
   ],
   "type": "object"
 }

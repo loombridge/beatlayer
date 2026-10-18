@@ -12,18 +12,14 @@ mod common;
 use std::sync::Arc;
 
 use bl_core::time::{Bpm, Frames, TempoMap};
-use bl_devices::multisampler::{
-    ENV_ATTACK, ENV_ATTACK_SLOPE, ENV_DECAY, ENV_INITIAL, ENV_LOOP, ENV_LOOP_TIME, ENV_PEAK,
-    ENV_RELEASE, ENV_REPEAT, ENV_SUSTAIN, ENV_TIME_VEL, FADE_MODE, INTERPOLATION, PAN, PAN_RND,
-    RESET_INTERVAL, RETRIGGER, REVERSE, ROUND_ROBIN, RR_MODE, SELECTOR, TIME, TIME_KEY, VEL_VOL,
-    VOICES, VOLUME, multisampler_type,
-};
+use bl_devices::multisampler::*;
 use bl_engine::{
     Block, Collector, DeviceLayers, LayerAudio, LayerSample, Node, NodeEvent, NoteBuffer,
     NoteEvent, NoteKind, ParamValue, Registry, TransportInfo,
 };
 use bl_model::{ContentHash, DeviceRole, Layer, LayerId, ReleaseMode, SustainMode, Zone};
 use common::{CHANNELS, RATE, device, node};
+use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
 
 /// The block sizes every test runs at.
 const BLOCKS: [usize; 4] = [1, 100, 512, 4096];
@@ -1234,4 +1230,977 @@ fn a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts() {
         "then silence"
     );
     assert!(underruns.load(Relaxed) > 0, "counted");
+}
+
+// ----- WP-5.14: the Pitch/Osc, Filter/Global, Modulation and MIDI tabs ----------
+
+/// A layer of a looping sine of `hz`, a whole number of cycles long.
+fn tone(id: u32, hz: f64) -> (Layer, Arc<bl_media::SampleData>) {
+    let sine = sample(4800, |i| {
+        (core::f64::consts::TAU * hz * i as f64 / HZ).sin() as f32
+    });
+    let mut l = layer(id, &sine);
+    l.sustain = SustainMode::Loop;
+    (l, sine)
+}
+
+/// A rig playing one tone.
+fn tone_rig(params: &[(bl_model::ParamId, f64)], hz: f64, block: usize) -> Rig {
+    let mut rig = Rig::new(params, block);
+    let (l, s) = tone(1, hz);
+    rig.give(vec![(l, s)], false);
+    rig
+}
+
+/// The amplitude of `hz` in a channel's `frames` frames from `from`.
+fn amp(channel: &[f32], hz: f64, from: usize, frames: usize) -> f64 {
+    fit(channel, from, frames, hz).0
+}
+
+fn db(ratio: f64) -> f64 {
+    20.0 * ratio.log10()
+}
+
+// Spec: multisampler R32
+#[test]
+fn transpose_detune_and_spread_move_the_pitch() {
+    for block in BLOCKS {
+        let count = |params: &[(bl_model::ParamId, f64)]| {
+            let mut rig = tone_rig(params, 1000.0, block);
+            let out = rig.render(12_800, &[on(0, 60, 1.0)]);
+            rising(&out[0][4800..12_800])
+        };
+        // 8,000 frames of 1 kHz hold 166.7 cycles.
+        assert!((165..=168).contains(&count(&[])));
+        assert!((332..=335).contains(&count(&[(TRANSPOSE, 12.0)])));
+        assert!((82..=85).contains(&count(&[(TRANSPOSE, -12.0)])));
+        assert!(
+            (170..=173).contains(&count(&[(DETUNE, 50.0)])),
+            "50 cents up"
+        );
+        // Spread: two voices 25 cents either side, half the level each, that
+        // count as one voice.
+        let mut rig = tone_rig(&[(SPREAD, 100.0), (VOICES, 1.0)], 1000.0, block);
+        let out = rig.render(12_800, &[on(0, 60, 1.0)]);
+        let up = 1000.0 * 2f64.powf(25.0 / 1200.0);
+        let down = 1000.0 * 2f64.powf(-25.0 / 1200.0);
+        for hz in [up, down] {
+            let a = amp(&out[0], hz, 4800, 8000);
+            assert!((a - 0.5).abs() < 0.08, "{hz}: {a}");
+        }
+    }
+}
+
+// Spec: multisampler R33
+#[test]
+fn key_zone_shift_chooses_other_layers_at_the_same_pitch() {
+    for block in BLOCKS {
+        let impulse = |at: usize| sample(4800, move |i| if i == at { 1.0 } else { 0.0 });
+        let first = |out: &[Vec<f32>]| out[0].iter().position(|s| s.abs() > 0.9);
+        let play = |shift: f64, key: u8| {
+            let mut rig = Rig::new(&[(KEY_ZONE_SHIFT, shift), (ENV_RELEASE, 0.0)], block);
+            let (a, b) = (impulse(300), impulse(1000));
+            let mut low = layer(1, &a);
+            low.key = Zone::new(0, 59);
+            low.root_key = 48;
+            let mut high = layer(2, &b);
+            high.key = Zone::new(60, 127);
+            high.root_key = 72;
+            rig.give(vec![(low, a), (high, b)], false);
+            first(&rig.render(6000, &[on(0, key, 1.0)]))
+        };
+        assert_eq!(
+            play(0.0, 48),
+            Some(300),
+            "key 48 plays the low layer at its root"
+        );
+        // Shifted an octave up, key 48 chooses the high layer, and plays it
+        // 24 semitones below its root: four times as long to the impulse.
+        assert_eq!(play(12.0, 48), Some(4000));
+        // And the pitch doesn't follow the shift for the same layer.
+        assert_eq!(
+            play(-12.0, 72),
+            Some(1000),
+            "key 60 chooses the high layer at its root"
+        );
+    }
+}
+
+/// The peak magnitude of a channel's `frames` frames from `from`.
+fn peak(channel: &[f32], from: usize, frames: usize) -> f32 {
+    channel[from..from + frames]
+        .iter()
+        .fold(0.0, |m, s| m.max(s.abs()))
+}
+
+// Spec: multisampler R34
+#[test]
+fn glide_and_portamento_slide_as_snapshots_do() {
+    for block in BLOCKS {
+        let play = |mode: f64| {
+            let mut rig = tone_rig(&[(GLIDE, mode), (GLIDE_TIME, 100.0)], 1000.0, block);
+            rig.render(14_000, &[on(0, 60, 1.0), on(6000, 72, 1.0)])
+        };
+        // Glide takes the sounding note over: it starts the slide at 1 kHz,
+        // ends at 2 kHz, and never doubles.
+        let out = play(1.0);
+        let start = rising(&out[0][6000..6480]);
+        assert!(
+            (9..=12).contains(&start),
+            "the slide starts at 1 kHz: {start}"
+        );
+        assert!(
+            (82..=85).contains(&rising(&out[0][11_000..13_000])),
+            "and ends at 2 kHz"
+        );
+        assert!(peak(&out[0], 6000, 8000) < 1.05, "one voice");
+        // Portamento gives the new note a voice of its own: the first goes
+        // on at 1 kHz while the second slides up to 2 kHz.
+        let out = play(2.0);
+        assert!(amp(&out[0], 1000.0, 11_000, 2000) > 0.8);
+        assert!(amp(&out[0], 2000.0, 11_000, 2000) > 0.8);
+        // A note already released is not taken over: the new one sounds.
+        let mut rig = tone_rig(&[(GLIDE, 1.0), (ENV_RELEASE, 2000.0)], 1000.0, block);
+        let out = rig.render(9000, &[on(0, 60, 1.0), off(100, 60), on(200, 72, 1.0)]);
+        assert!(
+            amp(&out[0], 2000.0, 4000, 2000) > 0.8,
+            "the new note starts afresh"
+        );
+        let mut rig = tone_rig(&[(GLIDE, 0.0)], 1000.0, block);
+        let out = rig.render(14_000, &[on(0, 60, 1.0), on(6000, 72, 1.0)]);
+        assert!(amp(&out[0], 1000.0, 11_000, 2000) > 0.8, "Off: no slide");
+        assert!(amp(&out[0], 2000.0, 6000, 480) > 0.8);
+    }
+}
+
+// Spec: multisampler R35
+#[test]
+fn the_pitch_envelope_moves_the_pitch_by_its_amount() {
+    for block in BLOCKS {
+        let count = |params: &[(bl_model::ParamId, f64)], from: usize, frames: usize| {
+            let mut all = vec![(PITCH_ENV_AMOUNT, 12.0), (ENV_RELEASE, 500.0)];
+            all.extend_from_slice(params);
+            let mut rig = tone_rig(&all, 1000.0, block);
+            let out = rig.render(24_000, &[on(0, 60, 1.0), off(14_000, 60)]);
+            rising(&out[0][from..from + frames])
+        };
+        // At full level the envelope moves the pitch by its Amount: 12
+        // semitones is 2 kHz.
+        assert!((332..=335).contains(&count(&[], 4800, 8000)));
+        assert!((166..=168).contains(&count(&[(PITCH_ENV_AMOUNT, 0.0)], 4800, 8000)));
+        assert!((248..=252).contains(&count(&[(PITCH_ENV_AMOUNT, 7.0)], 4800, 8000)));
+        assert!(
+            (41..=43).contains(&count(&[(PITCH_ENV_AMOUNT, -12.0)], 4800, 4000)),
+            "down an octave"
+        );
+        // A slow attack takes the pitch up over its time, and the release
+        // takes it back to End (0 %) over its own.
+        let slow = [(PITCH_ENV.attack, 200.0), (PITCH_ENV.release, 100.0)];
+        let early = count(&slow, 0, 480);
+        assert!((9..=11).contains(&early), "starts at Initial: {early}");
+        assert!(
+            (165..=168).contains(&count(&slow, 10_000, 4000)),
+            "reaches Peak"
+        );
+        assert!(
+            (82..=85).contains(&count(&slow, 14_000 + 6000, 4000)),
+            "back at End"
+        );
+    }
+}
+
+// Spec: multisampler R36
+#[test]
+fn fm_and_am_make_the_sidebands_their_laws_give() {
+    for block in BLOCKS {
+        // A 100 Hz oscillator on a 1 kHz carrier, in whole cycles of 100 Hz.
+        let sidebands = |params: &[(bl_model::ParamId, f64)]| {
+            let mut all = vec![
+                (OSC_ON, 1.0),
+                (OSC_FIXED, 1.0),
+                (OSC_FREQ, 100.0),
+                (OSC_MULTI, 2.0),
+            ];
+            all.extend_from_slice(params);
+            let mut rig = tone_rig(&all, 1000.0, block);
+            let out = rig.render(14_400, &[on(0, 60, 1.0)]);
+            [900.0, 1000.0, 1100.0].map(|hz| amp(&out[0], hz, 4800, 9600))
+        };
+        // FM swings the read rate by 2^(2 · depth · osc): at 2 % the carrier's
+        // frequency moves by 2.8 %, an index of 0.277, whose first sidebands
+        // are J1/J0 = 0.140 of the carrier.
+        let [lower, carrier, upper] = sidebands(&[(OSC_VOLUME, 2.0)]);
+        assert!((carrier - 0.98).abs() < 0.03, "{carrier}");
+        for side in [lower, upper] {
+            assert!((side / carrier - 0.14).abs() < 0.02, "{}", side / carrier);
+        }
+        // AM multiplies the level by 1 − depth · (1 − osc) / 2: at full depth
+        // a carrier of one half and sidebands of a quarter each.
+        let [lower, carrier, upper] = sidebands(&[(OSC_MODE, 1.0), (OSC_VOLUME, 100.0)]);
+        assert!((carrier - 0.5).abs() < 0.02, "{carrier}");
+        assert!((lower - 0.25).abs() < 0.02 && (upper - 0.25).abs() < 0.02);
+        // Off, or at no depth, the oscillator changes nothing.
+        let [lower, carrier, _] = sidebands(&[(OSC_ON, 0.0), (OSC_VOLUME, 100.0)]);
+        assert!(carrier > 0.99 && lower < 0.01);
+        // Its envelope shapes the depth: a slow attack leaves the start clean.
+        let mut rig = tone_rig(
+            &[
+                (OSC_ON, 1.0),
+                (OSC_MODE, 1.0),
+                (OSC_FIXED, 1.0),
+                (OSC_VOLUME, 100.0),
+                (OSC_ENV.attack, 400.0),
+            ],
+            1000.0,
+            block,
+        );
+        let out = rig.render(24_000, &[on(0, 60, 1.0)]);
+        assert!(amp(&out[0], 1000.0, 0, 480) > 0.95);
+        assert!(amp(&out[0], 1000.0, 20_000, 2400) < 0.6);
+    }
+}
+
+/// `input` through one voice of the kit's filter, as the multisampler's
+/// filter runs it: the prototype the filter's types are held to.
+fn kit_run(
+    kind: FilterType,
+    hz: f32,
+    res: f32,
+    drive: f32,
+    character: f32,
+    input: &[f32],
+) -> Vec<f32> {
+    let mut bank = FilterBank::new(48_000.0, 1, 1);
+    bank.set_type(kind);
+    let stride = bank.stride();
+    bank.reset_voice(
+        0,
+        &VoiceParams {
+            resonance: res,
+            drive,
+            saturation: 0.0,
+            character,
+            stereo_offset: 0.0,
+            mix: 1.0,
+            level: 1.0,
+            morph_x: 0.0,
+            morph_y: 0.0,
+        },
+    );
+    let pitch = vec![pitch_of(hz, 440.0); input.len() * stride];
+    let mut audio = vec![0.0; input.len() * stride];
+    for (i, x) in input.iter().enumerate() {
+        audio[i * stride] = *x;
+    }
+    bank.process_voices(1, &pitch, &mut audio);
+    (0..input.len()).map(|i| audio[i * stride]).collect()
+}
+
+/// A tone of `hz` as the layers hold it, `frames` long.
+fn tone_samples(hz: f64, frames: usize, level: f32) -> Vec<f32> {
+    (0..frames)
+        .map(|i| (core::f64::consts::TAU * hz * (i % 4800) as f64 / HZ).sin() as f32 * level)
+        .collect()
+}
+
+// Spec: multisampler R37
+#[test]
+fn the_filters_types_and_morph_match_their_prototypes() {
+    let patch = |kind: f64, slope: f64, morph: f64| {
+        vec![
+            (FILTER_ON, 1.0),
+            (FILTER_TYPE, kind),
+            (FILTER_SLOPE, slope),
+            (FILTER_FREQ, 1000.0),
+            (FILTER_RES, 40.0),
+            (FILTER_MORPH, morph),
+            (FILTER_DRIVE, 12.0),
+        ]
+    };
+    for block in [1, 512, 4096] {
+        // Each type and slope, with Res and Drive, against the kit's filter.
+        let mut cases = Vec::new();
+        for (kind, types) in [
+            (0.0, [FilterType::Lp12, FilterType::Lp24]),
+            (1.0, [FilterType::Hp12, FilterType::Hp24]),
+            (2.0, [FilterType::Bp12, FilterType::Bp24]),
+            (3.0, [FilterType::Notch12, FilterType::Notch24]),
+        ] {
+            for (slope, prototype) in types.into_iter().enumerate() {
+                // Drive acts on low-pass, high-pass and band-pass.
+                let drive = if kind < 3.0 { 0.5 } else { 0.0 };
+                cases.push((patch(kind, slope as f64, 0.0), prototype, drive));
+            }
+        }
+        // Morph passes through low-pass, band-pass, high-pass, notch and
+        // low-pass again, at 0, 25, 50, 75 and 100 %; Drive isn't heard.
+        for (morph, prototype) in [
+            (0.0, FilterType::Lp12),
+            (25.0, FilterType::Bp12),
+            (50.0, FilterType::Hp12),
+            (75.0, FilterType::Notch12),
+            (100.0, FilterType::Lp12),
+        ] {
+            cases.push((patch(4.0, 0.0, morph), prototype, 0.0));
+        }
+        for (params, prototype, drive) in cases {
+            for hz in [250.0, 1000.0, 4000.0] {
+                let mut rig = tone_rig(&params, hz, block);
+                let out = rig.render(9600, &[on(0, 60, 1.0)]);
+                let want = kit_run(
+                    prototype,
+                    1000.0,
+                    0.4,
+                    drive,
+                    0.0,
+                    &tone_samples(hz, 9600, 1.0),
+                );
+                let (got, want) = (amp(&out[0], hz, 4800, 4800), amp(&want, hz, 4800, 4800));
+                assert!(
+                    db(got / want).abs() < 0.2,
+                    "{params:?} {prototype:?} at {hz}: {got} against {want}"
+                );
+            }
+        }
+    }
+}
+
+/// The low-pass patch the filter envelope and shaper tests run.
+fn low_pass(freq: f64) -> Vec<(bl_model::ParamId, f64)> {
+    vec![(FILTER_ON, 1.0), (FILTER_FREQ, freq)]
+}
+
+// Spec: multisampler R38
+#[test]
+fn the_filter_envelope_moves_the_cutoff_by_its_amount() {
+    for block in [1, 512, 4096] {
+        // The steady amplitude of a 1.5 kHz tone through the low-pass, and
+        // the kit's low-pass at `cutoff` for it.
+        let run = |extra: &[(bl_model::ParamId, f64)], from: usize, frames: usize| {
+            let mut params = low_pass(1000.0);
+            params.extend_from_slice(extra);
+            let mut rig = tone_rig(&params, 1500.0, block);
+            let out = rig.render(from + frames, &[on(0, 60, 1.0)]);
+            amp(&out[0], 1500.0, from, frames)
+        };
+        let prototype = |cutoff: f32| {
+            let out = kit_run(
+                FilterType::Lp12,
+                cutoff,
+                0.0,
+                0.0,
+                0.0,
+                &tone_samples(1500.0, 9600, 1.0),
+            );
+            amp(&out, 1500.0, 4800, 4800)
+        };
+        let close = |got: f64, want: f64| db(got / want).abs() < 0.2;
+        // F. Env off, or its Amount at 0, leaves the cutoff.
+        assert!(close(run(&[], 4800, 4800), prototype(1000.0)));
+        assert!(
+            close(run(&[(FENV_ON, 1.0)], 4800, 4800), prototype(1000.0)),
+            "Amount 0 does nothing"
+        );
+        // At its full level the envelope moves it by Amount: an octave up.
+        assert!(close(
+            run(&[(FENV_ON, 1.0), (FENV_AMOUNT, 12.0)], 4800, 4800),
+            prototype(2000.0)
+        ));
+        // A negative level moves it down.
+        let down = [
+            (FENV_ON, 1.0),
+            (FENV_AMOUNT, 12.0),
+            (FILTER_ENV.peak, -100.0),
+            (FILTER_ENV.sustain, -100.0),
+        ];
+        assert!(close(run(&down, 4800, 4800), prototype(500.0)));
+        // A slow attack starts at Initial, the cutoff as set.
+        let slow = [
+            (FENV_ON, 1.0),
+            (FENV_AMOUNT, 12.0),
+            (FILTER_ENV.attack, 2000.0),
+        ];
+        assert!(db(run(&slow, 4800, 480) / prototype(1000.0)).abs() < 1.0);
+        assert!(run(&slow, 4800, 480) < run(&[(FENV_ON, 1.0), (FENV_AMOUNT, 12.0)], 4800, 480));
+    }
+}
+
+/// The shaper's curve for `x` at `amount` (0 to 1): the spec's law.
+fn curve(kind: usize, amount: f32, x: f32) -> f32 {
+    let driven = x * 10f32.powf(amount * 24.0 / 20.0);
+    match kind {
+        0 => driven.tanh(),
+        1 => driven.clamp(-1.0, 1.0),
+        2 => driven.sin(),
+        _ => (driven * 8.0).round().clamp(-8.0, 7.0) / 8.0,
+    }
+}
+
+// Spec: multisampler R39
+#[test]
+fn the_shaper_curves_before_and_after_the_filter() {
+    for block in [1, 512, 4096] {
+        let (frames, level) = (9600, 0.5f32);
+        let input = tone_samples(1000.0, frames, level);
+        let play = |extra: &[(bl_model::ParamId, f64)]| {
+            let mut rig = Rig::new(extra, block);
+            let (mut l, s) = tone(1, 1000.0);
+            l.volume = f64::from(level);
+            rig.give(vec![(l, s)], false);
+            rig.render(frames, &[on(0, 60, 1.0)])
+        };
+        let near = |got: &[f32], want: &[f32]| {
+            got.iter()
+                .zip(want)
+                .skip(4800)
+                .all(|(g, w)| (g - w).abs() < 2e-4)
+        };
+        // Each curve, at 25 % (6 dB of drive), is what the spec says.
+        for kind in 0..4 {
+            let out = play(&[
+                (SHAPER_ON, 1.0),
+                (SHAPER_TYPE, kind as f64),
+                (SHAPER_AMOUNT, 25.0),
+            ]);
+            let want: Vec<f32> = input.iter().map(|x| curve(kind, 0.25, *x)).collect();
+            assert!(near(&out[0], &want), "curve {kind}");
+        }
+        // At 0 % the shaper is bypassed.
+        let out = play(&[(SHAPER_ON, 1.0), (SHAPER_AMOUNT, 0.0)]);
+        assert!(near(&out[0], &input));
+        // Before the filter (the default) the filter smooths the shaped
+        // signal; after it, the filtered signal is shaped.
+        let filter = [
+            (FILTER_ON, 1.0),
+            (FILTER_FREQ, 400.0),
+            (SHAPER_ON, 1.0),
+            (SHAPER_TYPE, 1.0),
+            (SHAPER_AMOUNT, 60.0),
+        ];
+        let pre = play(&filter);
+        let shaped: Vec<f32> = input.iter().map(|x| curve(1, 0.6, *x)).collect();
+        let want = kit_run(FilterType::Lp12, 400.0, 0.0, 0.0, 0.0, &shaped);
+        assert!(near(&pre[0], &want), "before the filter");
+        let mut after = filter.to_vec();
+        after.push((SHAPER_POST, 1.0));
+        let post = play(&after);
+        let filtered = kit_run(FilterType::Lp12, 400.0, 0.0, 0.0, 0.0, &input);
+        let want: Vec<f32> = filtered.iter().map(|x| curve(1, 0.6, *x)).collect();
+        assert!(near(&post[0], &want), "after the filter");
+        assert!(!near(&pre[0], &post[0]), "and the two differ");
+    }
+}
+
+/// A rig playing a constant 1.0, so the level of its output is the level
+/// the modulation gives.
+fn flat_rig(params: &[(bl_model::ParamId, f64)], block: usize) -> Rig {
+    let mut rig = Rig::new(params, block);
+    let (l, s) = flat(1, 1.0);
+    rig.give(vec![(l, s)], false);
+    rig
+}
+
+fn near(got: f32, want: f32) -> bool {
+    (got - want).abs() < 0.01
+}
+
+// Spec: multisampler R40
+#[test]
+fn the_aux_envelope_reaches_both_destinations() {
+    for block in BLOCKS {
+        let route = |amount_a: f64, amount_b: f64| {
+            vec![
+                (AUX_ON, 1.0),
+                (AUX_DEST_A, dest::VOLUME as f64),
+                (AUX_AMOUNT_A, amount_a),
+                (AUX_DEST_B, dest::PAN as f64),
+                (AUX_AMOUNT_B, amount_b),
+                (AUX_ENV.peak, 50.0),
+                (AUX_ENV.sustain, 50.0),
+            ]
+        };
+        // Half level, to Volume at 100 % and Pan at 50 %: 1 + 0.5 in level,
+        // and a quarter of the way to the right, which takes the left to
+        // half.
+        let out = flat_rig(&route(100.0, 50.0), block).render(3000, &[on(0, 60, 1.0)]);
+        assert!(
+            near(out[0][2000], 0.75) && near(out[1][2000], 1.5),
+            "{out:?}"
+        );
+        // A negative amount goes the other way.
+        let out = flat_rig(&route(-100.0, -50.0), block).render(3000, &[on(0, 60, 1.0)]);
+        assert!(
+            near(out[0][2000], 0.5) && near(out[1][2000], 0.25),
+            "{:?}",
+            out[1][2000]
+        );
+        // Off, it does nothing.
+        let mut off_params = route(100.0, 50.0);
+        off_params[0].1 = 0.0;
+        let out = flat_rig(&off_params, block).render(3000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][2000], 1.0) && near(out[1][2000], 1.0));
+        // Its envelope shapes the send: a 100 ms attack climbs to the level.
+        let mut slow = route(100.0, 0.0);
+        slow.push((AUX_ENV.attack, 100.0));
+        let out = flat_rig(&slow, block).render(6000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][0], 1.0) && near(out[0][2400], 1.25) && near(out[0][5500], 1.5));
+    }
+}
+
+/// LFO 2 sent to Volume at 100 %: the level follows `1 + the LFO`.
+fn lfo_two(extra: &[(bl_model::ParamId, f64)]) -> Vec<(bl_model::ParamId, f64)> {
+    let ids = LFOS[1];
+    let mut params = vec![
+        (ids.on, 1.0),
+        (ids.wave, 1.0),
+        (ids.extra(LFO_DEST_A), dest::VOLUME as f64),
+        (ids.extra(LFO_AMOUNT_A), 100.0),
+    ];
+    params.extend_from_slice(extra);
+    params
+}
+
+// Spec: multisampler R41
+#[test]
+fn the_lfos_rates_sync_retrigger_and_key_tracking() {
+    let ids = LFOS[1];
+    for block in BLOCKS {
+        // A square wave at 10 Hz, a period of 4,800 frames: up for the first
+        // half, down for the second.
+        let ten = lfo_two(&[(ids.rate, 10.0)]);
+        let out = flat_rig(&ten, block).render(10_000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][1000], 2.0) && near(out[0][3600], 0.0) && near(out[0][6000], 2.0));
+        // Synced to a quarter note at 120 bpm, a period of 24,000 frames.
+        let synced = lfo_two(&[(ids.sync, 1.0), (ids.division, 4.0)]);
+        let out = flat_rig(&synced, block).render(26_000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][6000], 2.0) && near(out[0][18_000], 0.0) && near(out[0][25_000], 2.0));
+        // Retrig starts the wave at Offset on each note, 180° into its cycle;
+        // without it a note takes up the free-running phase.
+        let mut retrig = ten.clone();
+        retrig.extend([(ids.retrig, 1.0), (ids.offset, 180.0)]);
+        let out = flat_rig(&retrig, block).render(8000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][500], 0.0) && near(out[0][3000], 2.0));
+        let notes = [
+            on(0, 60, 1.0),
+            off(1000, 60),
+            on(3600, 60, 1.0),
+            off(5000, 60),
+        ];
+        let mut free = ten.clone();
+        free.push((ENV_RELEASE, 0.0));
+        let out = flat_rig(&free, block).render(6000, &notes);
+        assert!(
+            near(out[0][500], 2.0) && near(out[0][3700], 0.0),
+            "free-running: {}",
+            out[0][3700]
+        );
+        free.extend([(ids.retrig, 1.0)]);
+        let out = flat_rig(&free, block).render(6000, &notes);
+        assert!(near(out[0][3700], 2.0), "retriggered");
+        // Key speeds it up with pitch: at 100 % an octave above C3 runs
+        // twice as fast.
+        let mut key = ten.clone();
+        key.push((ids.key, 100.0));
+        let out = flat_rig(&key, block).render(3000, &[on(0, 72, 1.0)]);
+        assert!(
+            near(out[0][1000], 2.0) && near(out[0][1800], 0.0),
+            "{}",
+            out[0][1800]
+        );
+        let out = flat_rig(&key, block).render(3000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][1800], 2.0));
+        // Attack brings it up to full intensity.
+        let mut attack = ten.clone();
+        attack.push((ids.attack, 1000.0));
+        let out = flat_rig(&attack, block).render(48_000, &[on(0, 60, 1.0)]);
+        assert!((out[0][1000] - 1.02).abs() < 0.02, "{}", out[0][1000]);
+        assert!(out[0][46_000] > 1.9 || out[0][47_000] < 0.1);
+    }
+}
+
+// Spec: multisampler R42
+#[test]
+fn lfo_one_moves_volume_pan_filter_and_pitch() {
+    let one = LFOS[0];
+    for block in BLOCKS {
+        let square = |part: u32, amount: f64| {
+            vec![
+                (one.on, 1.0),
+                (one.wave, 1.0),
+                (one.rate, 10.0),
+                (one.extra(part), amount),
+            ]
+        };
+        // Vol at 100 %: the level swings between full and silence.
+        let out = flat_rig(&square(LFO1_VOL, 100.0), block).render(5000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][1000], 1.0) && near(out[0][3600], 0.0));
+        // Pan at 100 %: from hard right (the wave up) to hard left.
+        let out = flat_rig(&square(LFO1_PAN, 100.0), block).render(5000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][1000], 0.0) && near(out[1][1000], 1.0));
+        assert!(near(out[0][3600], 1.0) && near(out[1][3600], 0.0));
+        // Pitch at 100 %: an octave up, then an octave down.
+        let mut rig = tone_rig(&square(LFO1_PITCH, 100.0), 1000.0, block);
+        let out = rig.render(5000, &[on(0, 60, 1.0)]);
+        assert!((82..=85).contains(&rising(&out[0][200..2200])), "up");
+        assert!((19..=22).contains(&rising(&out[0][2600..4600])), "down");
+        // Filter at 12 semitones: the cutoff moves an octave either way.
+        let mut params = low_pass(1000.0);
+        params.extend(square(LFO1_FILTER, 12.0));
+        let mut rig = tone_rig(&params, 1500.0, block);
+        let out = rig.render(5000, &[on(0, 60, 1.0)]);
+        let tone = tone_samples(1500.0, 9600, 1.0);
+        let at = |cutoff: f32| {
+            let want = kit_run(FilterType::Lp12, cutoff, 0.0, 0.0, 0.0, &tone);
+            amp(&want, 1500.0, 4800, 4800)
+        };
+        assert!(
+            db(amp(&out[0], 1500.0, 1400, 1000) / at(2000.0)).abs() < 1.0,
+            "up"
+        );
+        assert!(
+            db(amp(&out[0], 1500.0, 3800, 1000) / at(500.0)).abs() < 1.0,
+            "down"
+        );
+    }
+}
+
+// Spec: multisampler R42
+#[test]
+fn phase_and_spin_split_the_channels() {
+    let ids = LFOS[1];
+    for block in BLOCKS {
+        // Phase 180°: the right channel's wave runs half a cycle ahead.
+        let phase = lfo_two(&[(ids.rate, 10.0), (ids.extra(LFO_PHASE), 180.0)]);
+        let out = flat_rig(&phase, block).render(5000, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][1000], 2.0) && near(out[1][1000], 0.0));
+        assert!(near(out[0][3600], 0.0) && near(out[1][3600], 2.0));
+        // Spin 50 %: the right runs half as fast again, a period of 3,200.
+        let spin = lfo_two(&[(ids.rate, 10.0), (ids.extra(LFO_SPIN), 50.0)]);
+        let out = flat_rig(&spin, block).render(5000, &[on(0, 60, 1.0)]);
+        assert!(
+            near(out[0][1700], 2.0) && near(out[1][1700], 0.0),
+            "{} {}",
+            out[0][1700],
+            out[1][1700]
+        );
+        assert!(near(out[0][500], 2.0) && near(out[1][500], 2.0));
+    }
+}
+
+// Spec: multisampler R43
+#[test]
+fn each_midi_source_reaches_its_destinations() {
+    for block in BLOCKS {
+        // Each source sent to Volume at 100 % makes the level 1 + its value;
+        // the messages arrive before the note, except Release Velocity,
+        // which waits for its end, and Aftertouch, which a pressure moves
+        // while it sounds.
+        let send = |source: usize, a: f64, b: f64| {
+            vec![
+                (midi_param(source, 0), dest::VOLUME as f64),
+                (midi_param(source, 2), a),
+                (midi_param(source, 1), dest::PAN as f64),
+                (midi_param(source, 3), b),
+            ]
+        };
+        let control =
+            |controller: u8, value: f32| (0, NoteKind::Control { controller, value }, 0, 0.0);
+        let cases: [(usize, Vec<Played>, usize, f32); 7] = [
+            (0, vec![on(100, 76, 1.0)], 3000, 1.25),
+            (1, vec![on(100, 60, 0.5)], 3000, 1.5),
+            (
+                3,
+                vec![
+                    on(100, 60, 1.0),
+                    (500, NoteKind::ChannelPressure { value: 0.5 }, 0, 0.0),
+                ],
+                3000,
+                1.5,
+            ),
+            (4, vec![control(1, 0.5), on(100, 60, 1.0)], 3000, 1.5),
+            (5, vec![control(4, 0.25), on(100, 60, 1.0)], 3000, 1.25),
+            (
+                6,
+                vec![
+                    (0, NoteKind::PitchBend { value: 0.5 }, 0, 0.0),
+                    on(100, 60, 1.0),
+                ],
+                3000,
+                1.5,
+            ),
+            (
+                2,
+                vec![on(100, 60, 1.0), (1000, NoteKind::Off, 60, 0.8)],
+                3000,
+                1.8,
+            ),
+        ];
+        for (source, notes, at, want) in cases {
+            let mut params = send(source, 100.0, 0.0);
+            params.push((ENV_RELEASE, 20_000.0));
+            let with = flat_rig(&params, block).render(at + 1, &notes);
+            let mut params = send(source, 0.0, 0.0);
+            params.push((ENV_RELEASE, 20_000.0));
+            let without = flat_rig(&params, block).render(at + 1, &notes);
+            let ratio = with[0][at] / without[0][at];
+            assert!(
+                (ratio - want).abs() < 0.01,
+                "{}: {ratio}",
+                MIDI_SOURCES[source]
+            );
+        }
+        // The second destination: Velocity to Pan at 50 % at velocity 1 is
+        // half the pan's span, which takes it from the middle to the right.
+        let out = flat_rig(&send(1, 0.0, 50.0), block).render(500, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][300], 0.0) && near(out[1][300], 1.0));
+    }
+}
+
+// Spec: multisampler R44
+#[test]
+fn a_full_bend_moves_the_pitch_by_the_range() {
+    for block in BLOCKS {
+        let count = |range: Option<f64>, bend: f32| {
+            let params: Vec<_> = range.map(|r| (BEND_RANGE, r)).into_iter().collect();
+            let mut rig = tone_rig(&params, 1000.0, block);
+            let out = rig.render(
+                12_800,
+                &[
+                    (0, NoteKind::PitchBend { value: bend }, 0, 0.0),
+                    on(100, 60, 1.0),
+                ],
+            );
+            rising(&out[0][4800..12_800])
+        };
+        // 8,000 frames of 1 kHz hold 166.7 cycles.
+        assert!((165..=168).contains(&count(Some(5.0), 0.0)), "no bend");
+        assert!(
+            (221..=224).contains(&count(Some(5.0), 1.0)),
+            "5 semitones up: 222.4"
+        );
+        assert!(
+            (124..=126).contains(&count(Some(5.0), -1.0)),
+            "5 semitones down: 124.9"
+        );
+        assert!(
+            (187..=188).contains(&count(None, 1.0)),
+            "the range starts at 2: 187.1"
+        );
+        assert!(
+            (165..=168).contains(&count(Some(0.0), 1.0)),
+            "range 0: no movement"
+        );
+    }
+}
+
+// Spec: multisampler R45
+#[test]
+fn routings_scale_by_their_spans_add_and_clamp() {
+    for block in BLOCKS {
+        let wheel = |value: f32| {
+            (
+                0,
+                NoteKind::Control {
+                    controller: 1,
+                    value,
+                },
+                0,
+                0.0,
+            )
+        };
+        let foot = |value: f32| {
+            (
+                0,
+                NoteKind::Control {
+                    controller: 4,
+                    value,
+                },
+                0,
+                0.0,
+            )
+        };
+        let to = |source: usize, dest: usize, amount: f64| {
+            vec![
+                (midi_param(source, 0), dest as f64),
+                (midi_param(source, 2), amount),
+            ]
+        };
+        // Routings to one destination add: 0.5 and 0.25 make level 1.75; and
+        // the sum never takes the level below silence.
+        let mut sum = to(4, dest::VOLUME, 50.0);
+        sum.extend(to(5, dest::VOLUME, 25.0));
+        let out = flat_rig(&sum, block).render(500, &[wheel(1.0), foot(1.0), on(0, 60, 1.0)]);
+        assert!(near(out[0][300], 1.75));
+        let mut under = to(4, dest::VOLUME, -100.0);
+        under.extend(to(5, dest::VOLUME, -100.0));
+        let out = flat_rig(&under, block).render(500, &[wheel(1.0), foot(1.0), on(0, 60, 1.0)]);
+        assert!(
+            near(out[0][300], 0.0) && near(out[1][300], 0.0),
+            "clamped at silence"
+        );
+        // Pan moves across the whole width: half the span is hard right.
+        let out =
+            flat_rig(&to(4, dest::PAN, 100.0), block).render(500, &[wheel(0.5), on(0, 60, 1.0)]);
+        assert!(near(out[0][300], 0.0) && near(out[1][300], 1.0));
+        // Pitch by up to 24 semitones: Velocity at 50 % is 12.
+        let mut rig = tone_rig(&to(1, dest::PITCH, 50.0), 1000.0, block);
+        let out = rig.render(12_800, &[on(0, 60, 1.0)]);
+        assert!((332..=335).contains(&rising(&out[0][4800..12_800])));
+        // Filter Freq by up to 8 octaves: Velocity at 25 % is two, 1 kHz to
+        // 4 kHz.
+        let mut params = low_pass(1000.0);
+        params.extend(to(1, dest::FILTER_FREQ, 25.0));
+        let mut rig = tone_rig(&params, 3000.0, block);
+        let out = rig.render(9600, &[on(0, 60, 1.0)]);
+        let want = kit_run(
+            FilterType::Lp12,
+            4000.0,
+            0.0,
+            0.0,
+            0.0,
+            &tone_samples(3000.0, 9600, 1.0),
+        );
+        assert!(db(amp(&out[0], 3000.0, 4800, 4800) / amp(&want, 3000.0, 4800, 4800)).abs() < 0.2);
+        // Sample Start by up to the playback span: half of it starts the
+        // ramp halfway.
+        let mut rig = Rig::new(&to(1, dest::SAMPLE_START, 50.0), block);
+        let (l, s) = looped(SustainMode::Off, ReleaseMode::Off);
+        rig.give(vec![(l, s)], false);
+        let out = rig.render(100, &[on(0, 60, 1.0)]);
+        assert!(near(out[0][0], 0.5), "{}", out[0][0]);
+        // Loop Length by up to the same span: a shorter loop wraps to a
+        // later frame.
+        let wrapped = |amount: f64| {
+            let mut rig = Rig::new(&to(1, dest::LOOP_LENGTH, amount), block);
+            let (l, s) = looped(SustainMode::Loop, ReleaseMode::Off);
+            rig.give(vec![(l, s)], false);
+            rig.render(2100, &[on(0, 60, 1.0)])[0][2100 - 1]
+        };
+        assert!(
+            (wrapped(0.0) - 1099.0 / 4800.0).abs() < 0.01,
+            "{}",
+            wrapped(0.0)
+        );
+        // 10 % of the span is 480 frames, so the loop 1,000 long is 520 and starts at 1,480.
+        assert!(
+            (wrapped(-10.0) - 1579.0 / 4800.0).abs() < 0.01,
+            "{}",
+            wrapped(-10.0)
+        );
+        // Sample Selector by up to 127: the wheel at full plays the layer
+        // that takes 127.
+        let mut rig = Rig::new(&to(4, dest::SELECTOR, 100.0), block);
+        let (mut low, a) = flat(1, 1.0);
+        low.select = Zone::new(0, 126);
+        let (mut high, b) = flat(2, 3.0);
+        high.select = Zone::new(127, 127);
+        rig.give(vec![(low, a), (high, b)], false);
+        let out = rig.render(500, &[wheel(1.0), on(0, 60, 1.0)]);
+        assert!(near(out[0][300], 3.0));
+    }
+}
+
+// Spec: multisampler R46
+#[test]
+fn every_destination_is_reachable() {
+    // A patch with every stage on and every send listening, so Velocity
+    // (1.0 at this note) sent to any destination changes the sound.
+    let lfo_pitch = |n: usize| {
+        let ids = LFOS[n];
+        if n == 0 {
+            vec![
+                (ids.on, 1.0),
+                (ids.extra(LFO1_PITCH), 40.0),
+                (ids.extra(LFO1_VOL), 40.0),
+            ]
+        } else {
+            vec![
+                (ids.on, 1.0),
+                (ids.extra(LFO_DEST_A), dest::PITCH as f64),
+                (ids.extra(LFO_AMOUNT_A), 20.0),
+            ]
+        }
+    };
+    let mut patch = vec![
+        (FILTER_ON, 1.0),
+        (FILTER_RES, 30.0),
+        (FENV_ON, 1.0),
+        (SHAPER_ON, 1.0),
+        (OSC_ON, 1.0),
+        (OSC_MODE, 1.0),
+        (OSC_VOLUME, 30.0),
+        (ENV_ATTACK, 200.0),
+    ];
+    for n in 0..3 {
+        patch.extend(lfo_pitch(n));
+    }
+    let play = |extra: &[(bl_model::ParamId, f64)], dest: usize| {
+        let mut params = patch.clone();
+        params.extend_from_slice(extra);
+        // Morph's own destination needs the Morph type.
+        if dest == dest::FILTER_MORPH {
+            params.push((FILTER_TYPE, 4.0));
+        }
+        let mut rig = Rig::new(&params, 512);
+        let (mut low, a) = tone(1, 1000.0);
+        low.select = Zone::new(0, 126);
+        low.loop_start = 1000;
+        low.loop_end = 4000;
+        let (mut high, b) = tone(2, 2000.0);
+        high.select = Zone::new(127, 127);
+        rig.give(vec![(low, a), (high, b)], false);
+        rig.render(12_000, &[on(0, 60, 1.0)])
+    };
+    let base = play(&[], 0);
+    for (dest, name) in DESTINATIONS.iter().enumerate().skip(1) {
+        // Loop Length can only shorten the loop, and a whole turn of Morph is
+        // back where it started.
+        let amount = match dest {
+            dest::LOOP_LENGTH => -30.0,
+            dest::FILTER_MORPH => 50.0,
+            _ => 100.0,
+        };
+        let routed = play(
+            &[(midi_param(1, 0), dest as f64), (midi_param(1, 2), amount)],
+            dest,
+        );
+        let reference = if dest == dest::FILTER_MORPH {
+            play(&[], dest)
+        } else {
+            base.clone()
+        };
+        let change: f32 = routed[0]
+            .iter()
+            .zip(&reference[0])
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(change > 1.0, "{name} changes nothing: {change}");
+    }
+}
+
+// Spec: multisampler R50
+#[test]
+fn a_one_shot_layer_plays_to_sample_end_whatever_the_note_does() {
+    for block in BLOCKS {
+        let play = |one_shot: bool| {
+            let mut rig = Rig::new(&[(ENV_RELEASE, 0.0)], block);
+            let (mut l, s) = looped(SustainMode::Off, ReleaseMode::Off);
+            l.one_shot = one_shot;
+            rig.give(vec![(l, s)], false);
+            rig.render(6000, &[on(0, 60, 1.0), off(100, 60)])
+        };
+        let plain = play(false);
+        assert!(plain[0][1000] == 0.0, "the note's end stops it");
+        let shot = play(true);
+        assert!(
+            (shot[0][1000] - 1000.0 / 4800.0).abs() < 1e-3,
+            "{}",
+            shot[0][1000]
+        );
+        assert!(
+            (shot[0][4700] - 4700.0 / 4800.0).abs() < 1e-3,
+            "plays on to the end"
+        );
+        assert!(shot[0][4900] == 0.0, "and stops there");
+    }
 }

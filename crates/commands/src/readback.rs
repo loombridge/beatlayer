@@ -235,6 +235,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.duplicate", query(Track, "devices")),
     ("device.duplicate_layers", query(Device, "layers")),
     ("device.group", query(Track, "devices")),
+    ("device.import_sfz", query(Device, "layers")),
     ("device.insert", query(Track, "devices")),
     ("device.insert_in_chain", query(Device, "chains")),
     ("device.insert_layers", query(Device, "layers")),

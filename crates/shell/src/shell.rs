@@ -5043,6 +5043,28 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_sfz()
+        {
+            // Spec: multisampler R47. A selected SFZ instrument loads as a
+            // multisampler onto the selected track if it is a MIDI track,
+            // otherwise onto a new one.
+            Self::args::<NoArgs>(id, args)?;
+            let doc = self.editor.document();
+            let track = self
+                .arrangement
+                .selected_tracks()
+                .first()
+                .copied()
+                .filter(|track| {
+                    doc.track(*track)
+                        .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi)
+                });
+            return self.run_multisampler(
+                multisampler_ids::IMPORT_SFZ,
+                json!({ "path": path.to_string_lossy(), "track": track }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some((device, layer, path)) = self.hot_swapped_layer_file()
         {
             // Spec: multisampler R10. Loading a sample while hot-swapping a

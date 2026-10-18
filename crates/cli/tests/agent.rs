@@ -2416,3 +2416,66 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
         "seconds again: {off}"
     );
 }
+
+/// An agent imports an SFZ instrument by path, then reads its layers, its
+/// device settings and what the import left unread back (WP-5.14; the
+/// multisampler spec, R47 and R53).
+#[test]
+fn an_agent_imports_an_sfz_by_path() {
+    let sfz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/sfz/Sine Bank.sfz")
+        .to_string_lossy()
+        .into_owned();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let imported = call(
+        &mut client,
+        "run",
+        json!({ "label": "Import the kit", "commands": [
+            { "command": "device.import_sfz", "args": { "path": sfz } },
+        ] }),
+    );
+    let result = &imported["results"][0]["result"];
+    assert_eq!(result["layers"].as_array().unwrap().len(), 5);
+    assert_eq!(result["left_out"][0]["sample"], "missing.wav");
+    assert_eq!(result["unread"][0]["name"], "group");
+    let device = result["device"].clone();
+    // The layers read back, in the order a round robin takes them, with the
+    // zones the file gave.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device) }),
+    );
+    let layers = &found["layers"];
+    assert_eq!(layers["count"], 5);
+    let items = layers["list"]["items"].as_array().unwrap();
+    let names: Vec<&str> = items.iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["low_soft", "low_hard", "mid_a", "mid_b", "high"]);
+    assert_eq!(items[0]["key"]["low"], 36);
+    assert_eq!(items[0]["velocity"]["high"], 63);
+    assert_eq!(items[2]["key"]["fade_high"], 3);
+    assert_eq!(items[4]["sustain"], "loop");
+    // Round Robin is on in Forward mode, and Vel > Vol is the file's 0.
+    let parameters = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.parameters", "args": { "device": device } },
+        ] }),
+    );
+    let params = parameters["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let value = |name: &str| {
+        params
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    assert_eq!(value("Round Robin"), 1.0);
+    assert_eq!(value("Vel > Vol"), 0.0);
+    assert_eq!(value("Env Release"), 50.0);
+}

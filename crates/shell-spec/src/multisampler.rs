@@ -1,7 +1,8 @@
-//! The multisampler's commands that run on the shell (WP-5.13; the
-//! multisampler spec, R3, R7, R10, R11, R13, R20, R30): adding layers from
-//! files, changing their settings with Snap, replacing a layer's sample,
-//! normalising, and what the multisampler's views show.
+//! The multisampler's commands that run on the shell (WP-5.13 and WP-5.14;
+//! the multisampler spec, R3, R7, R10, R11, R13, R20, R30, R47): adding layers
+//! from files, importing an SFZ file, changing their settings with Snap,
+//! replacing a layer's sample, normalising, and what the multisampler's views
+//! show.
 //!
 //! The document's own layer commands (`device.insert_layers`,
 //! `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`,
@@ -14,14 +15,18 @@
 
 use bl_commands::Context::DeviceView;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
+use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode};
 use bl_model::{
-    DeviceId, EditorSize, LayerId, LayerSettings, MultisamplerView, SamplerTab, ZoneKind,
+    DeviceId, DeviceLayout, EditorSize, LayerId, LayerSettings, MultisamplerView, SamplerTab,
+    TrackId, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// `device.add_layers`: add layers from files (R3).
 pub const ADD_LAYERS: &str = "device.add_layers";
+/// `device.import_sfz`: import an SFZ file as a multisampler's layers (R47).
+pub const IMPORT_SFZ: &str = "device.import_sfz";
 /// `device.set_layer`: change layers' settings, snapping markers while
 /// Snap is on (R20).
 pub const SET_LAYER: &str = "device.set_layer";
@@ -44,9 +49,14 @@ pub const HOT_SWAP_LAYER: &str = "device.hot_swap_layer";
 /// dropping samples on its layer list is to observe.
 pub const ADD_LAYERS_STEP: &str = "Add Samples";
 
+/// The undo step's name for importing an SFZ file (to observe: Live has no
+/// such import).
+pub const IMPORT_SFZ_STEP: &str = "Import SFZ";
+
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
     ADD_LAYERS,
+    IMPORT_SFZ,
     SET_LAYER,
     SNAP_LAYER_MARKERS,
     SET_LAYER_SAMPLE,
@@ -55,6 +65,39 @@ pub const IDS: &[&str] = &[
     SELECT_LAYERS,
     HOT_SWAP_LAYER,
 ];
+
+/// The multisampler's layout as `tab` shows it (R1): its layout holds one
+/// group of nodes for each tab after Zone, in the tabs' order, and the tab
+/// shows its own, padded with an empty band to the width of the widest tab,
+/// so the device is as wide whichever tab shows. Any other layout is
+/// returned as it is.
+#[must_use]
+pub fn tab_layout(layout: &DeviceLayout, tab: SamplerTab) -> DeviceLayout {
+    let LayoutNode::Row(groups) = &layout.root else {
+        return layout.clone();
+    };
+    let index = match tab {
+        SamplerTab::Sample => 0,
+        SamplerTab::PitchOsc => 1,
+        SamplerTab::FilterGlobal => 2,
+        SamplerTab::Modulation => 3,
+        SamplerTab::Midi => 4,
+    };
+    let Some(group) = groups.get(index) else {
+        return layout.clone();
+    };
+    let width = |node: &LayoutNode| DeviceLayout::new(node.clone()).docked_size().width;
+    let widest = groups.iter().map(width).fold(0.0, f32::max);
+    DeviceLayout::new(LayoutNode::Row(vec![
+        group.clone(),
+        LayoutNode::Band(ControlBand {
+            width: (widest - width(group)).max(0.0),
+            height: BODY_HEIGHT,
+            controls: Vec::new(),
+            slots: None,
+        }),
+    ]))
+}
 
 /// Whether `id` is one of these commands.
 #[must_use]
@@ -86,6 +129,61 @@ pub struct LayersAdded {
     pub layers: Vec<LayerId>,
     /// The files that weren't added, each with why.
     pub skipped: Vec<String>,
+}
+
+/// Arguments of `device.import_sfz`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportSfzArgs {
+    /// The `.sfz` file.
+    pub path: String,
+    /// A multisampler to add the regions to as layers, at the end of its
+    /// list. Left out, the import makes a multisampler: on `track`, or on a
+    /// new MIDI track below the last track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The MIDI track to put a new multisampler on, after its other devices.
+    /// Ignored with `device`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+}
+
+/// An opcode or header the import left unread or settled device-wide, with
+/// how many regions use it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzCount {
+    /// The opcode, or the header in angle brackets.
+    pub name: String,
+    /// How many regions use it.
+    pub regions: usize,
+}
+
+/// A region the import left out.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzLeftOut {
+    /// Its place among the file's regions, from 1.
+    pub region: usize,
+    /// Its sample as the file names it.
+    pub sample: String,
+    /// Why.
+    pub reason: String,
+}
+
+/// What `device.import_sfz` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzImported {
+    /// The multisampler.
+    pub device: DeviceId,
+    /// Its track.
+    pub track: TrackId,
+    /// The new layers, in list order: now the selected layers.
+    pub layers: Vec<LayerId>,
+    /// Opcodes and headers left unread.
+    pub unread: Vec<SfzCount>,
+    /// Opcodes most regions agree on, which set the device's own controls.
+    pub settled: Vec<SfzCount>,
+    /// Regions left out, each with why.
+    pub left_out: Vec<SfzLeftOut>,
 }
 
 /// Arguments of `device.set_layer`.
@@ -285,6 +383,29 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<AddLayersArgs>()
             .result::<LayersAdded>(),
+    )?;
+    registry.register(
+        CommandSpec::new(IMPORT_SFZ, "Import SFZ")
+            .description(
+                "Imports an SFZ multisample instrument, the open text format, as a \
+                 multisampler: each region becomes a layer (its sample, key and velocity \
+                 zones with their crossfades as fades, Root Key, tuning, Volume, Pan, start \
+                 and end points, loop and loop mode), and the device-wide settings most \
+                 regions agree on (the volume, filter, filter and pitch envelopes, Vel > Vol, \
+                 Pitch Bend Range, reverse, the fade law) set the new device's controls. \
+                 Sequences (`seq_length`) turn Round Robin on in Forward mode, random windows \
+                 (`lorand`) in Random mode. With `device`, a multisampler, only the layers are \
+                 added, at the end of its list; otherwise a multisampler is made on `track`, \
+                 or on a new MIDI track below the last. The samples join the set's media where \
+                 they lie. Regions whose sample is missing or isn't audio, or whose `trigger` \
+                 isn't `attack`, are left out and named in `left_out`; opcodes the import \
+                 doesn't read are listed in `unread`. A file with no region left changes \
+                 nothing. One undo step. It reads files outside the set.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<ImportSfzArgs>()
+            .result::<SfzImported>(),
     )?;
     registry.register(
         CommandSpec::new(SET_LAYER, "Change Sample Settings")

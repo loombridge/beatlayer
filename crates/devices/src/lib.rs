@@ -50,6 +50,7 @@ pub mod limiter;
 mod midi_fx;
 pub mod modulator;
 pub mod multisampler;
+mod multisampler_tabs;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;

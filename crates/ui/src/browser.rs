@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use bl_core::time::Ticks;
-use bl_shell::browser::drop::{DropTarget, drop_target};
+use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
 use bl_shell::browser_commands::{self as ids, Item, ItemKind, Label, LabelInfo, Part, Section};
 use bl_shell::{Area, Invocation, MainView, Shell, WindowKind};
@@ -682,7 +682,7 @@ impl BrowserUi {
                 if item.open { Glyph::Down } else { Glyph::Right },
                 ink,
             ),
-            ItemKind::Audio => glyph(&painter, mark, Glyph::Wave, ink),
+            ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
             ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
@@ -722,6 +722,14 @@ impl BrowserUi {
                     json!({ "path": item.path, "keep_others": command(modifiers) }),
                 ),
                 ItemKind::Audio => invoke(events, ids::LOAD_SELECTED, json!({})),
+                // Spec: multisampler R47. An SFZ instrument loads as a
+                // multisampler.
+                ItemKind::Sfz => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 // Spec: device-chains R19. While a device is hot-swapped, a
                 // preset loads into it.
                 ItemKind::Preset => {
@@ -761,7 +769,7 @@ impl BrowserUi {
             } else {
                 vec![item.path.clone()]
             };
-            paths.retain(|p| is_audio(p));
+            paths.retain(|p| is_audio(p) || is_sfz(p));
             paths.sort_by_key(|p| view.position_of(Path::new(p)));
             if !paths.is_empty() {
                 DragAndDrop::set_payload(ui.ctx(), BrowserDrag { paths });
@@ -800,6 +808,7 @@ impl BrowserUi {
                 }
             }
             ItemKind::Audio => "audio file",
+            ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
             ItemKind::Plugin => "plug-in",
@@ -1138,7 +1147,11 @@ impl BrowserUi {
                     }
                 }
                 ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
-                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin | ItemKind::Device => {}
+                ItemKind::Sfz
+                | ItemKind::Set
+                | ItemKind::Preset
+                | ItemKind::Plugin
+                | ItemKind::Device => {}
             }
         }
         if left {
@@ -1170,7 +1183,7 @@ impl BrowserUi {
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
-        main_view: Rect,
+        (main_view, zone_editor): (Rect, Option<Rect>),
         events: &mut Vec<UiEvent>,
     ) {
         let ctx = ui.ctx().clone();
@@ -1181,7 +1194,7 @@ impl BrowserUi {
                 .dropped_files
                 .iter()
                 .map(|file| file.path().to_string_lossy().into_owned())
-                .filter(|path| is_audio(path))
+                .filter(|path| is_audio(path) || is_sfz(path))
                 .collect();
             (
                 dropped,
@@ -1197,6 +1210,9 @@ impl BrowserUi {
         if shell.main_view() != MainView::Arrangement {
             return;
         }
+        if pointer.is_some_and(|p| zone_editor.is_some_and(|editor| editor.contains(p))) {
+            return;
+        }
         let view = shell.arrangement();
         let doc = shell.editor().document();
         let pinned = bl_shell::arrangement::rows::pinned_tracks(doc).count();
@@ -1207,8 +1223,20 @@ impl BrowserUi {
         } else {
             modifiers.alt
         };
+        // An SFZ instrument goes on a MIDI track, where audio goes on an
+        // audio track (multisampler R47).
+        let sfz_drag = payload.as_ref().map_or_else(
+            || !dropped.is_empty() && dropped.iter().all(|path| is_sfz(path)),
+            |drag| drag.paths.iter().all(|path| is_sfz(path)),
+        );
+        let kind = if sfz_drag {
+            bl_model::TrackKind::Midi
+        } else {
+            bl_model::TrackKind::Audio
+        };
         let target = pointer.filter(|p| lanes.contains(*p)).and_then(|p| {
-            drop_target(
+            drop_target_on(
+                kind,
                 view,
                 doc,
                 lanes.height(),
@@ -1218,7 +1246,7 @@ impl BrowserUi {
             )
         });
         if let Some(target) = target {
-            draw_target(ui, theme, lanes, view, doc, &target);
+            draw_target(ui, theme, lanes, view, doc, &target, kind);
         } else if pointer.is_some_and(|p| main_view.contains(p)) {
             ctx.set_cursor_icon(CursorIcon::NoDrop);
         }
@@ -1226,6 +1254,22 @@ impl BrowserUi {
         // (I-DROP-003).
         let spread = command(modifiers);
         let add = |events: &mut Vec<UiEvent>, paths: &[String], target: Option<DropTarget>| {
+            if sfz_drag {
+                // One multisampler for each instrument, on the track the
+                // pointer is over or on a new one.
+                for path in paths {
+                    let mut args = json!({ "path": path });
+                    if let Some(track) = target.and_then(|t| t.track) {
+                        args["track"] = json!(track);
+                    }
+                    invoke(events, bl_shell::multisampler_commands::IMPORT_SFZ, args);
+                }
+                return;
+            }
+            let paths: Vec<String> = paths.iter().filter(|p| is_audio(p)).cloned().collect();
+            if paths.is_empty() {
+                return;
+            }
             let mut args = json!({ "paths": paths, "spread": spread });
             match target {
                 Some(target) => {
@@ -1267,6 +1311,7 @@ fn draw_target(
     view: &bl_shell::arrangement::ArrangementView,
     doc: &bl_model::Document,
     target: &DropTarget,
+    kind: bl_model::TrackKind,
 ) {
     let painter = ui.painter_at(lanes);
     let top = lanes.top() + target.top;
@@ -1292,7 +1337,11 @@ fn draw_target(
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            "Drop to make a new audio track",
+            if kind == bl_model::TrackKind::Midi {
+                "Drop to make a new MIDI track"
+            } else {
+                "Drop to make a new audio track"
+            },
             theme.small_font(),
             theme.colors.text.0,
         );
@@ -1330,6 +1379,15 @@ fn is_audio(path: &str) -> bool {
         .file_name()
         .and_then(|n| file_kind(&n.to_string_lossy()))
         == Some(ItemKind::Audio)
+}
+
+/// Whether `path` names an SFZ instrument, which a MIDI track or the drop
+/// area takes (multisampler R47).
+pub(crate) fn is_sfz(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| file_kind(&n.to_string_lossy()))
+        == Some(ItemKind::Sfz)
 }
 
 fn file_name(path: &str) -> String {

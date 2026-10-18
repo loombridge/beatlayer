@@ -472,6 +472,11 @@ impl MultisamplerUi {
             ("Modulation", Some(SamplerTab::Modulation)),
             ("MIDI", Some(SamplerTab::Midi)),
         ];
+        // R1: a tab's indicator is lit while a routing sends to a control in
+        // it.
+        let lit = frame.panel.as_ref().map_or([false; 5], |panel| {
+            bl_devices::multisampler::lit_tabs(&|id| param_value(panel, id))
+        });
         for ((label, tab), width) in names.into_iter().zip(WIDTHS) {
             let rect = Rect::from_min_size(
                 pos2(x, title.top() + 1.0),
@@ -482,6 +487,7 @@ impl MultisamplerUi {
                 None => state.view.zone_editor,
                 Some(tab) => state.view.tab == tab,
             };
+            let marked = tab.is_some_and(|tab| lit[bl_devices::multisampler::tab_index(tab)]);
             let (pressed, _) = button(
                 ui,
                 theme,
@@ -489,11 +495,22 @@ impl MultisamplerUi {
                 rect,
                 (label, label),
                 on,
-                match tab {
-                    None => "Shows or hides the zone editor above the Device View",
-                    Some(_) => "Shows this tab's controls in the device",
+                match (tab, marked) {
+                    (None, _) => "Shows or hides the zone editor above the Device View",
+                    (Some(_), false) => "Shows this tab's controls in the device",
+                    (Some(_), true) => {
+                        "Shows this tab's controls in the device; modulation is assigned in it"
+                    }
                 },
             );
+            if marked {
+                let c = &theme.colors;
+                ui.painter_at(rect).circle_filled(
+                    rect.right_top() + vec2(-4.0, 4.0),
+                    2.5,
+                    if on { c.accent_text.0 } else { c.accent.0 },
+                );
+            }
             if pressed {
                 let args = match tab {
                     None => json!({ "device": frame.id, "zone_editor": !state.view.zone_editor }),
@@ -524,31 +541,13 @@ impl MultisamplerUi {
             SamplerTab::Sample => {
                 self.sample_tab(ui, shell, theme, frame, state, panel, body, events);
             }
-            SamplerTab::FilterGlobal => {
-                // The envelope and output bands of the layout.
-                let mut shown = frame.clone();
-                if let (bl_model::device_layout::LayoutNode::Row(nodes), Some(shown_panel)) =
-                    (&panel.description.layout.root, shown.panel.as_mut())
-                {
-                    let keep: Vec<_> = nodes.iter().skip(2).cloned().collect();
-                    shown_panel.description.layout =
-                        bl_model::DeviceLayout::new(bl_model::device_layout::LayoutNode::Row(keep));
-                }
-                crate::device_panel::show(ui, theme, &shown, display, body, played, events);
-            }
-            SamplerTab::PitchOsc | SamplerTab::Modulation | SamplerTab::Midi => {
-                let name = match state.view.tab {
-                    SamplerTab::PitchOsc => "Pitch/Osc",
-                    SamplerTab::Modulation => "Modulation",
-                    _ => "MIDI",
-                };
-                ui.painter().text(
-                    body.center(),
-                    Align2::CENTER_CENTER,
-                    format!("The {name} tab's controls arrive with WP-5.14."),
-                    theme.small_font(),
-                    theme.colors.text_dim.0,
-                );
+            // The other tabs' controls are the device's own layout, which
+            // shows the tab's group of them.
+            SamplerTab::PitchOsc
+            | SamplerTab::FilterGlobal
+            | SamplerTab::Modulation
+            | SamplerTab::Midi => {
+                crate::device_panel::show(ui, theme, frame, display, body, played, events);
             }
         }
     }
@@ -1450,11 +1449,25 @@ impl MultisamplerUi {
         // list as scrolled (the first row sits at the list's top).
         let index =
             (((pointer.y - parts.bars.top() + offset) / row_h).max(0.0) as usize).min(count);
-        invoke(
-            events,
-            bl_shell::multisampler_commands::ADD_LAYERS,
-            json!({ "device": frame.id, "paths": dropped, "index": index }),
-        );
+        // Spec: multisampler R47. An SFZ instrument adds its regions as
+        // layers; the rest of the files are samples.
+        let (sfz, samples): (Vec<_>, Vec<_>) = dropped
+            .into_iter()
+            .partition(|path| crate::browser::is_sfz(path));
+        if !samples.is_empty() {
+            invoke(
+                events,
+                bl_shell::multisampler_commands::ADD_LAYERS,
+                json!({ "device": frame.id, "paths": samples, "index": index }),
+            );
+        }
+        for path in sfz {
+            invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "device": frame.id }),
+            );
+        }
     }
 
     /// Hot-Swap Sample, Auto, Lin/Pow, RR with its modes, and the

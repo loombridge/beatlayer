@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-411 commands in 35 areas.
+417 commands in 35 areas.
 
 ## Permission classes
 
@@ -141,14 +141,19 @@ Each command has:
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
+| [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` |  |  |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` |  |  |
+| [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` |  |  |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` |  |  |
+| [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
+| [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
@@ -171,6 +176,7 @@ Each command has:
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
 | [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -2425,6 +2431,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.delete_transients`
+
+**Delete Transients**. Permission: `edit`. Contexts: `clip-view`.
+
+Takes transients out of an audio clip: `times` are their times in the file, in seconds, as `clip.transients` lists them. A transient put in by hand is forgotten; a detected one is noted as taken away and stays away until `clip.reset_transients`. Refused for a time that is none of the clip's transients, once the file's analysis is ready. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `times` | array of number | yes | The transients to take out, by their times in the file as `clip.transients` lists them. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.delete_warp_markers`
 
 **Delete Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
@@ -2442,11 +2465,28 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.insert_transient`
+
+**Insert Transient**. Permission: `edit`. Contexts: `clip-view`.
+
+Puts a transient into an audio clip at `time`, seconds in its file: Insert Transient, at the Sample Editor's insert marker when the app runs it. Putting one where a detected transient was taken away brings that one back. The edit belongs to the clip, is saved with the set, and shows in `clip.transients`. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `time` | number, at least 0 | yes | The time in the file, in seconds. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.insert_warp_marker`
 
 **Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
 
-Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one.
+Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one. With `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at the transients just before and just after the new one, read from the clip's transients (`clip.transients`) unless `transients` lists them; it works on one clip.
 
 Default keys: none.
 
@@ -2456,7 +2496,28 @@ Arguments:
 |---|---|---|---|
 | `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
 | `beat` | [`Ticks`](#ticks) or null | no | The beat, in ticks from the clip's 1.1.1, to put the marker on, at the time in the file the map already places there. Give this or `time`. |
+| `pin_neighbours` | boolean | no | Also put markers at the transients either side of the new one (WP-4.3): Cmd (Ctrl) held on a pseudo-warp marker. Needs one clip. |
 | `time` | number or null | no | The time in the file, in seconds, to put the marker at, on the beat the map already places it. Give this or `beat`. |
+| `transients` | array or null | no | The clip's transients, as times in the file, that `pin_neighbours` looks among. Left out, the app uses the clip's current ones. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.insert_warp_markers`
+
+**Insert Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Puts warp markers in a range of a warped audio clip's contents, `from` to `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, when it holds none, at its start and its end. The transients are the clip's own (`clip.transients`) unless `transients` lists times in the file. Each marker sits on the beat the map already places its time, so nothing moves; a marker already there is left. Refused for a clip that isn't warped, or while the file's analysis is not ready and `transients` is left out. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `from` | [`Ticks`](#ticks) | yes | The start of the range, in ticks from the clip's 1.1.1. |
+| `to` | [`Ticks`](#ticks) | yes | The end of the range, in ticks, after `from`. |
+| `transients` | array or null | no | The clip's transients, as times in the file, that the range is searched for. Left out, the app uses the clip's current ones. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2534,6 +2595,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.move_transient`
+
+**Move Transient**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the transient at `from` (seconds in the file, as `clip.transients` lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no audio and no warp marker. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `from` | number, at least 0 | yes | The transient's time in the file, in seconds, as `clip.transients` lists it. |
+| `to` | number, at least 0 | yes | Where it goes, in seconds. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.move_warp_markers`
 
 **Move Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
@@ -2570,6 +2649,22 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.reset_transients`
+
+**Reset Transients**. Permission: `edit`. Contexts: `clip-view`.
+
+Takes away all of an audio clip's transient edits: the transients put in by hand go, and the detected ones that were taken away come back. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2975,6 +3070,22 @@ Arguments:
 | `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.transients`
+
+**Clip Transients**. Permission: `read`. Contexts: `clip-view`.
+
+Lists an audio clip's transients: where its file starts notes and hits, found once in the background and kept by the file's content hash, with the clip's own edits applied (`clip.insert_transient`, `clip.delete_transients`, `clip.move_transient`, `clip.reset_transients`). Each has its `time` in the file in seconds, its `beat` in ticks from the clip's 1.1.1 when the clip is warped, and whether it was put in `by_hand`. `analysis_ready` says whether the file's analysis is done; until it is, only the transients put in by hand are listed, and asking starts the analysis. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`ClipTransients`](#cliptransients).
 
 #### `clip.trim_start`
 
@@ -7717,14 +7828,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete`](#clipdelete) | the query tool's `track` | `clips` |
 | [`clip.delete_envelope`](#clipdelete_envelope) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_warp_markers`](#clipinsert_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
+| [`clip.move_transient`](#clipmove_transient) | `clip.transients` | `transients` |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
@@ -8638,6 +8754,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
 | `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
+| `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 
@@ -8721,6 +8838,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
         "number",
         "null"
       ]
+    },
+    "transient_edits": {
+      "$ref": "#/$defs/TransientEdits",
+      "description": "The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27)."
     },
     "warp": {
       "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
@@ -10534,6 +10655,105 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ClipTransient`
+
+One transient of a clip.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number | yes | Where it is in the file, in seconds. |
+| `beat` | [`Ticks`](#ticks) or null | yes | The beat of the clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped, which has no beats. |
+| `by_hand` | boolean | yes | Whether it was put in by hand rather than detected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One transient of a clip.",
+  "properties": {
+    "beat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The beat of the clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped, which has no beats."
+    },
+    "by_hand": {
+      "description": "Whether it was put in by hand rather than detected.",
+      "type": "boolean"
+    },
+    "time": {
+      "description": "Where it is in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "beat",
+    "by_hand"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClipTransients`
+
+What `clip.transients` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `analysis_ready` | boolean | yes | Whether the file's analysis is ready. Until it is, only the transients put in by hand are listed. |
+| `transients` | array of [`ClipTransient`](#cliptransient) | yes | The clip's transients in order of their time in the file: those detected, less the ones taken away, with the ones put in by hand. |
+| `analysis_error` | string or null | no | Why the analysis failed, if it did: the file is missing, changed, or can't be decoded. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.transients` returns.",
+  "properties": {
+    "analysis_error": {
+      "description": "Why the analysis failed, if it did: the file is missing, changed, or can't be decoded.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "analysis_ready": {
+      "description": "Whether the file's analysis is ready. Until it is, only the transients put in by hand are listed.",
+      "type": "boolean"
+    },
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "transients": {
+      "description": "The clip's transients in order of their time in the file: those detected, less the ones taken away, with the ones put in by hand.",
+      "items": {
+        "$ref": "#/$defs/ClipTransient"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clip",
+    "analysis_ready",
+    "transients"
+  ],
+  "type": "object"
 }
 ```
 
@@ -20994,6 +21214,44 @@ What `track.ungroup` returns.
   "required": [
     "tracks"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TransientEdits`
+
+A clip's edits to its file's detected transients, as times in the file in seconds: `added` are transients put in by hand, `removed` are detected transients taken away.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `added` | array of number | no | Transients put in by hand. |
+| `removed` | array of number | no | Detected transients taken away, at the times they were detected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A clip's edits to its file's detected transients, as times in the file in seconds: `added` are transients put in by hand, `removed` are detected transients taken away.",
+  "properties": {
+    "added": {
+      "description": "Transients put in by hand.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "removed": {
+      "description": "Detected transients taken away, at the times they were detected.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
   "type": "object"
 }
 ```

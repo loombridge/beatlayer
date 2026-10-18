@@ -603,7 +603,7 @@ impl Op {
                 // isn't warped, or with these numbers, and must then change
                 // nothing; the ones that land are one undo step.
                 let ticks = Ticks((*a * 100_000.0) as i64);
-                match which % 12 {
+                match which % 17 {
                     5 => {
                         return Command::SetClipWarp {
                             clip,
@@ -615,6 +615,8 @@ impl Op {
                             clips: vec![clip],
                             beat: Some(ticks),
                             time: None,
+                            pin_neighbours: false,
+                            transients: None,
                         };
                     }
                     7 => {
@@ -645,6 +647,35 @@ impl Op {
                         };
                     }
                     11 => return Command::ScaleTempo { clip, factor: *a },
+                    // Transient edits and ranged markers (WP-4.3).
+                    12 => {
+                        return Command::InsertTransient {
+                            clip,
+                            time: *a - 1.0,
+                        };
+                    }
+                    13 => {
+                        return Command::DeleteTransients {
+                            clip,
+                            times: vec![*a - 1.0, *b],
+                        };
+                    }
+                    14 => {
+                        return Command::MoveTransient {
+                            clip,
+                            from: *a - 1.0,
+                            to: *b,
+                        };
+                    }
+                    15 => return Command::ResetTransients { clip },
+                    16 => {
+                        return Command::InsertWarpMarkers {
+                            clip,
+                            from: ticks - Ticks(150_000),
+                            to: ticks + Ticks(150_000),
+                            transients: Some(vec![*a, *b]),
+                        };
+                    }
                     _ => {}
                 }
                 match which % 5 {

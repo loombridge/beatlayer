@@ -4248,9 +4248,10 @@ impl Document {
             self.forget_in(from, &Gone::chain(&moved))?;
         } else if holder_id != rack {
             // Its sends, and those to it, stayed in the rack it left.
-            forget_where(self.track_mut(from)?, |target| {
-                matches!(*target, AutomationTarget::ChainSend { chain, to } if chain == id || to == id)
-            });
+            forget_where(
+                self.track_mut(from)?,
+                |target| matches!(*target, AutomationTarget::ChainSend { chain, to } if chain == id || to == id),
+            );
         }
         check_chain(self.track_ref(to)?)
     }

@@ -514,7 +514,10 @@ fn a_plug_in_loaded_on_a_hot_swapped_pad_leaves_the_kit_in_place() {
         .unwrap();
     let folder = kit.shell.invoke("browser.state", json!({})).unwrap()["rows"][0]["path"].clone();
     kit.shell
-        .invoke("browser.open_folder", json!({ "path": folder, "open": true }))
+        .invoke(
+            "browser.open_folder",
+            json!({ "path": folder, "open": true }),
+        )
         .unwrap();
     kit.shell
         .invoke(
@@ -531,7 +534,11 @@ fn a_plug_in_loaded_on_a_hot_swapped_pad_leaves_the_kit_in_place() {
     kit.shell
         .invoke("rack.switch_hot_swap_target", json!({}))
         .unwrap();
-    assert!(kit.shell.invoke("browser.load_selected", json!({})).is_err());
+    assert!(
+        kit.shell
+            .invoke("browser.load_selected", json!({}))
+            .is_err()
+    );
     assert!(kit.shell.editor().document().device(kit.rack).is_some());
 }
 

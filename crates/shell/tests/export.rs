@@ -1299,3 +1299,62 @@ fn midi_track_with_audio_effect_and_no_instrument_renders_silence() {
     assert!(decoded.channel(0).unwrap().iter().all(|&s| s == 0.0));
     assert!(decoded.channel(1).unwrap().iter().all(|&s| s == 0.0));
 }
+
+/// Spec: external-devices R8.
+#[test]
+fn an_offline_render_sends_nothing_to_midi_ports() {
+    use bl_core::time::Ticks;
+    use bl_midi_io::{Direction, TestBackend};
+    use bl_model::{MidiData, Note};
+
+    let scratch = Scratch::new("midi-out");
+    let mut shell = shell_with_a_clip(&scratch);
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Synth");
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "track": true }),
+        )
+        .unwrap();
+    // An engine is attached, as a running one is, so anything an export
+    // sent would arrive.
+    let _engine = shell.midi().output().attach(1024);
+
+    // A MIDI track sending to the port, playing a note.
+    let track = shell.editor().document().top_level().next().unwrap();
+    let id: bl_model::ClipId = shell.new_id();
+    let clip = bl_model::Clip::new(
+        id,
+        Ticks::ZERO,
+        Ticks(BAR),
+        bl_model::ClipData::Midi(MidiData::new([Note::new(
+            60,
+            Ticks::ZERO,
+            Ticks(BAR / 4),
+            100,
+        )])),
+    );
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": serde_json::to_value(&clip).unwrap() }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "routing.set_midi_output",
+            json!({ "track": track, "to": { "name": "Synth", "channel": 1 } }),
+        )
+        .unwrap();
+
+    let result = export(
+        &mut shell,
+        json!({ "path": text(&scratch.path("out.wav")), "bit_depth": 24, "sample_rate": 48000 }),
+    );
+    assert!(result.frames > 0);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(test.sent("Synth").is_empty());
+    assert_eq!(shell.midi().output().stats().snapshot().sent, 0);
+}

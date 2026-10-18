@@ -11,11 +11,11 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Chain, ChainId, Change, ChangeSet,
     Channel, Clip, ClipData, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, FileBeats, FollowAction,
-    FollowActions, FollowPatch, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
-    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
-    Preserve, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom,
-    WarpMode, WarpPoint,
+    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
+    FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
+    Monitor, Note, Output, ParamId, PluginFormat, Preserve, SceneId, SendTap, TakeClip, TakeLane,
+    Tap, TonesUpdate, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -53,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        156,
+        157,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -68,8 +68,8 @@ fn every_document_command_is_registered() {
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
          three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
-         warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, and \
-         WP-4.9 four for auto-warp"
+         warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, \
+         WP-4.9 four for auto-warp, and WP-5.34 set_external"
     );
 
     for op in &ops {
@@ -251,7 +251,30 @@ fn every_command_runs_by_id() {
     );
     assert_eq!(
         document.track(keys).unwrap().routing().midi_output,
-        Some(bass)
+        Some(MidiTo::Track(bass))
+    );
+    // Spec: external-devices R2. A port takes its name and channel, and the
+    // choice reads back as the agent gave it.
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": { "name": "Synth", "channel": 3 } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(keys)
+            .unwrap()
+            .routing()
+            .midi_output,
+        Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 3
+        })
+    );
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": bass }),
     );
     // Ext. In with a channel, and Main's Main Out (WP-2.13): the agent API
     // sets both, as an agent recording from an interface would.
@@ -1164,6 +1187,57 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_midi_sidechain_source",
         json!({ "device": hear }),
+    );
+    // An external device (WP-5.34): routed to a port, then to samples of
+    // latency; the choices read back.
+    let outboard: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": outboard, "name": "Outboard", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.outboard" } },
+            "external": {},
+        } }),
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "midi_to": { "type": "port", "name": "Synth" },
+            "channel": 5, "audio_from": { "type": "pair", "channel": 3 } }),
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "hardware_latency": { "unit": "samples", "value": 96 } }),
+    );
+    let external = agent
+        .editor
+        .document()
+        .device(outboard)
+        .unwrap()
+        .external
+        .clone()
+        .unwrap();
+    assert_eq!(external.port.as_deref(), Some("Synth"));
+    assert_eq!(external.channel, 5);
+    assert_eq!(external.audio_from, Channel::Pair(3));
+    assert_eq!(
+        external.hardware_latency,
+        HardwareLatency::Samples { value: 96 }
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "midi_to": { "type": "none" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(outboard)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .port,
+        None
     );
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
@@ -2490,6 +2564,18 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMidiSidechainSource {
                 device,
                 track: None,
+            },
+        ),
+        (
+            "device.set_external",
+            Command::SetExternal {
+                device,
+                midi_to: Some(ExternalPort::Port {
+                    name: "Synth".to_owned(),
+                }),
+                channel: Some(2),
+                audio_from: Some(Channel::Pair(3)),
+                hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
             },
         ),
         (

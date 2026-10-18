@@ -69,6 +69,7 @@ pub mod device_layout;
 mod document;
 mod editor;
 mod error;
+mod external;
 pub mod fader;
 mod follow;
 pub mod graph;
@@ -112,6 +113,9 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub use external::{
+    External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
+};
 pub use follow::{
     FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
     FollowPatch,
@@ -136,7 +140,7 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
-    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};

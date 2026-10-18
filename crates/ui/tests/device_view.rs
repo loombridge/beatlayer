@@ -538,6 +538,125 @@ fn the_midi_sidechain_strip_shows_the_section_and_its_chooser_sets_the_source() 
     assert_eq!(last_step(&h), "Change \"Routing\"");
 }
 
+fn hardware() -> Value {
+    let t = bl_devices::hardware_instrument_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role })
+}
+
+fn external_of(h: &Harness, device: DeviceId) -> bl_shell::device_commands::ExternalSection {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.external)
+        .unwrap()
+}
+
+// Spec: external-devices R9, R12, R15 (an external instrument's section)
+#[test]
+fn the_external_instruments_choosers_route_it() {
+    use bl_midi_io::{Direction, TestBackend};
+    use bl_model::HardwareLatency;
+    use bl_ui::external::rows;
+
+    let mut h = harness();
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "track": true }),
+        )
+        .unwrap();
+    let device = add(&mut h, hardware());
+    let frame = frame_of(&mut h, device);
+    // A new device is routed nowhere: channel 1, the first input pair,
+    // 0 ms; its section sits left of its body.
+    let section = external_of(&h, device);
+    assert_eq!(section.port, None);
+    assert_eq!(section.channel, 1);
+    assert_eq!(section.hardware_latency, HardwareLatency::default());
+    let nodes = Harness::nodes(&h.settle());
+    for (name, value) in [
+        ("External MIDI To", "No Output"),
+        ("External MIDI Channel", "1"),
+        ("External Audio From", "1/2"),
+        ("Hardware Latency", "0.00 ms"),
+        ("Hardware Latency Unit", "ms"),
+    ] {
+        assert_eq!(Harness::node(&nodes, name).value, value, "{name}");
+    }
+    let [midi_to, channel, _, latency, unit] = rows(frame);
+
+    // MIDI To lists the port; choosing it is a routing change.
+    h.click(midi_to.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "Synth" && n.bounds.is_some())
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(external_of(&h, device).port.as_deref(), Some("Synth"));
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+
+    // Its channel.
+    h.click(channel.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "5" && n.bounds.is_some_and(|b| b.y1 - b.y0 > 8.0))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(external_of(&h, device).channel, 5);
+
+    // A drag on Hardware Latency is one undo step.
+    let steps = h.shell.editor().undo_history().len();
+    let from = latency.center();
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from - egui::vec2(0.0, 5.0 * step as f32),
+        )]);
+    }
+    h.frame(vec![press(
+        from - egui::vec2(0.0, 25.0),
+        false,
+        PointerButton::Primary,
+    )]);
+    h.settle();
+    let HardwareLatency::Milliseconds { value } = external_of(&h, device).hardware_latency else {
+        panic!("still in milliseconds");
+    };
+    assert!(value > 150.0 && value < 250.0, "{value}");
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Hardware Latency\"");
+
+    // The unit switch converts the value at the open rate (48 kHz with no
+    // device), to whole samples.
+    h.click(unit.center());
+    h.settle();
+    let HardwareLatency::Samples { value: samples } = external_of(&h, device).hardware_latency
+    else {
+        panic!("samples now");
+    };
+    assert_eq!(f64::from(samples), (value * 48.0).round());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Hardware Latency Unit").value, "smp");
+}
+
 /// A file dropped into the window, as the app's drag and drop gives egui.
 #[derive(Debug)]
 struct DroppedFile(std::path::PathBuf);

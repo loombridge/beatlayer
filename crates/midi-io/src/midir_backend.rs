@@ -1,9 +1,15 @@
 //! The platform's MIDI system through `midir`: Core MIDI on macOS, the ALSA
-//! sequencer on Linux, and Windows Multimedia MIDI on Windows.
+//! sequencer on Linux, and Windows Multimedia MIDI on Windows. `midir` lists
+//! the ports and opens inputs everywhere; it opens outputs only where it is
+//! the one that sends, since it can't schedule a message for later: macOS and
+//! Linux open outputs with their own scheduled output, and Windows wraps
+//! `midir`'s in a timer thread.
 
 use std::time::Instant;
 
-use midir::{MidiIO, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+use midir::MidiOutputConnection;
+use midir::{MidiIO, MidiInput, MidiInputConnection, MidiOutput};
 
 use crate::backend::{
     Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
@@ -14,6 +20,11 @@ use crate::stamp::StampClock;
 const CLIENT: &str = "Beatlayer";
 
 /// The platform's MIDI system, through `midir`.
+///
+/// Each output sends a message on its stamp's moment, to within the
+/// resolution of the system: Core MIDI and the ALSA sequencer are given the
+/// message ahead of time with its time, and Windows has a timer thread send
+/// it (`docs/specs/external-devices.md`, R5).
 ///
 /// Each input's handler gets the time each message reached the system:
 /// `midir`'s stamp mapped onto an [`Instant`] by a [`StampClock`] where the
@@ -103,11 +114,34 @@ impl MidiBackend for MidirBackend {
     }
 
     fn open_output(&mut self, name: &str) -> Result<Box<dyn OutputConnection>, MidiError> {
-        let output = MidiOutput::new(CLIENT).map_err(system)?;
-        let port = find(&output, name)?;
-        let connection = output.connect(&port, CLIENT).map_err(system)?;
-        Ok(Box::new(Output(connection)))
+        open_output(name)
     }
+}
+
+/// Core MIDI output, which takes each message with its time stamp.
+#[cfg(target_os = "macos")]
+fn open_output(name: &str) -> Result<Box<dyn OutputConnection>, MidiError> {
+    Ok(Box::new(crate::coremidi_out::CoreMidiOutput::open(name)?))
+}
+
+/// ALSA sequencer output, which queues each message with its time.
+#[cfg(target_os = "linux")]
+fn open_output(name: &str) -> Result<Box<dyn OutputConnection>, MidiError> {
+    Ok(Box::new(crate::alsa_out::AlsaOutput::open(name)?))
+}
+
+/// `midir`'s output, which sends at once; on Windows a timer thread holds
+/// each message until its moment.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn open_output(name: &str) -> Result<Box<dyn OutputConnection>, MidiError> {
+    let output = MidiOutput::new(CLIENT).map_err(system)?;
+    let port = find(&output, name)?;
+    let connection = output.connect(&port, CLIENT).map_err(system)?;
+    let connection: Box<dyn OutputConnection> = Box::new(Output(connection));
+    #[cfg(windows)]
+    let connection: Box<dyn OutputConnection> =
+        Box::new(crate::timed::TimedOutput::new(connection));
+    Ok(connection)
 }
 
 /// An open input; `midir` closes it when dropped.
@@ -116,8 +150,10 @@ struct Input(#[expect(dead_code, reason = "held to keep the port open")] MidiInp
 impl InputConnection for Input {}
 
 /// An open output; `midir` closes it when dropped.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 struct Output(MidiOutputConnection);
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl OutputConnection for Output {
     fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError> {
         self.0.send(bytes).map_err(system)

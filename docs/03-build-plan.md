@@ -4,7 +4,7 @@ The build is packaged as work packages (WPs), each sized for one agent session, 
 
 ## Progress
 
-Phases 0 and 1 are done, and Phase 2 is under way: the packages marked `in progress` or `review` in the status table at the end are the open work, and the first alpha is tagged when Phase 2's exit demo (M2) passes. The status table is the live work queue.
+Phases 0, 1 and 3 are done, and Phase 2 is done but for its release package, 2.22: the first alpha, 0.2, carries Phases 2 and 3 together. Phases 4 and 5 are under way. The packages marked `in progress` or `review` in the status table at the end are the open work; the status table is the live work queue.
 
 ## How an agent uses this plan
 
@@ -33,7 +33,7 @@ Rules that never bend during the build:
 ## Phases and dependencies
 
 ```
-Phase 0 Foundations ─▶ Phase 1 Playback core (M1) ─▶ Phase 2 Make a track (M2, alpha 0.1) ─┬─▶ Phase 3 Session view (M3) ──┬─▶ Phase 7 Control and sync (M7)
+Phase 0 Foundations ─▶ Phase 1 Playback core (M1) ─▶ Phase 2 Make a track (M2) ────────────┬─▶ Phase 3 Session view (M3) ──┬─▶ Phase 7 Control and sync (M7)
                                                                                            │                              │
                                                                                            ├─▶ Phase 4 Warping (M4) ──────┤
                                                                                            │                              ▼
@@ -176,7 +176,7 @@ Every UI package, in this phase and after, also: cites the layout rows it implem
 
 **M1 exit demo:** drag eight stems in, arrange them, loop a section, mix with faders, export a WAV, save, quit, and reopen identically. Ten minutes of playback at 128 frames without a dropout. Then an agent does the same through the agent API, headless.
 
-## Phase 2: Make a track (M2, public alpha 0.1)
+## Phase 2: Make a track (M2)
 
 Goal: make a whole song from scratch with MIDI, instruments, plug-ins, recording, and automation.
 
@@ -222,7 +222,7 @@ Each package lists its full acceptance criteria and traps in its pull request's 
 
 **M2 exit demo:** the built-in assistant, on a local model (through an OpenAI-compatible local server such as LM Studio or Ollama) and on a cloud model, builds a 16-bar track from a prompt, and every change it made can be undone. Then make a three-minute song from scratch with a MIDI keyboard, the native sampler and synth, a third-party CLAP, VST3, and (on macOS) AU plug-in, a recorded vocal, filter automation, and sidechain compression through a send. Export it and reopen it identically.
 
-## Phase 3: Session view (M3, 0.2)
+## Phase 3: Session view (M3, public alpha 0.2)
 
 Goal: perform: launch clips and scenes with quantisation, follow actions, and record a performance into the arrangement.
 
@@ -431,7 +431,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.19b | done | 12 October 2026 | Returns' own sends wait for the track context menu |
 | 2.20 | done | 14 October 2026 | [#16](https://github.com/loombridge/beatlayer/pull/16): commands for tempo breakpoints and time-signature markers |
 | 2.21 | done | 15 October 2026 | [#35](https://github.com/loombridge/beatlayer/pull/35): Standard MIDI File import and export ([the spec](specs/midi-clips.md)) |
-| 2.22 | in progress | 17 October 2026 | [#34](https://github.com/loombridge/beatlayer/pull/34) and [#71](https://github.com/loombridge/beatlayer/pull/71): the release workflow, version 0.1.0 and the release notes; left: the `v0.1.0` tag and publishing |
+| 2.22 | in progress | 17 October 2026 | [#34](https://github.com/loombridge/beatlayer/pull/34) and [#71](https://github.com/loombridge/beatlayer/pull/71): the release workflow, version 0.2.0 (the first alpha carries Phase 3 too) and the release notes; left: the `v0.2.0` tag and publishing |
 | 2.23 | done | 16 October 2026 | [#45](https://github.com/loombridge/beatlayer/pull/45), [#51](https://github.com/loombridge/beatlayer/pull/51), [#56](https://github.com/loombridge/beatlayer/pull/56) and [#64](https://github.com/loombridge/beatlayer/pull/64): the assistant's providers and keys, agent loop, settings and panel ([permissions spec](specs/agent-permissions.md)); [#69](https://github.com/loombridge/beatlayer/pull/69): `bl-cli assistant` and the replayed M2 demo transcripts |
 | 2.24 | done | 15 October 2026 | [#24](https://github.com/loombridge/beatlayer/pull/24): the Info View ([the spec](specs/info-view.md)) |
 | 2.25 | done | 14 October 2026 | [#15](https://github.com/loombridge/beatlayer/pull/15): the default set, templates, Collect All and Save, and relinking missing files ([the spec](specs/file-management.md)) |

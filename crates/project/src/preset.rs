@@ -4,7 +4,7 @@
 //! A preset file (`.blpreset`) is UTF-8 JSON, Beatlayer's own format:
 //!
 //! ```json
-//! {"format":"beatlayer-preset","schema":1,"saved_by":"Beatlayer 0.1.0",
+//! {"format":"beatlayer-preset","schema":1,"saved_by":"Beatlayer 0.2.0",
 //!  "device":{"kind":{"native":{"device_type":"beatlayer.utility"}},
 //!            "role":"audio_effect","name":"Utility"},
 //!  "params":[[0,-6.0],[3,0.5]]}

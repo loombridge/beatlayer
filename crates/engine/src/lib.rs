@@ -118,6 +118,7 @@ mod sources;
 mod state;
 pub mod transport;
 mod warped;
+mod zones;
 
 #[doc(hidden)]
 pub mod testing;
@@ -213,6 +214,8 @@ pub struct EngineConfig {
     pub report_capacity: usize,
     /// Modulated parameters in [`EngineState::modulated`].
     pub max_modulated: usize,
+    /// Rack chains in [`EngineState::processing`].
+    pub max_processing: usize,
 }
 
 impl EngineConfig {
@@ -245,6 +248,7 @@ impl EngineConfig {
             max_slots: 2048,
             report_capacity: 1024,
             max_modulated: 1024,
+            max_processing: 1024,
         }
     }
 

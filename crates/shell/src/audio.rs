@@ -762,6 +762,15 @@ impl AudioHost {
         }
     }
 
+    /// The rack chains the engine found processing in the last block
+    /// (WP-5.3): what Auto Select follows. Empty while no engine runs.
+    pub fn processing_into(&mut self, out: &mut Vec<bl_model::ChainId>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().processing);
+        }
+    }
+
     /// Sends the engine's node `key` a parameter change that takes effect
     /// at the start of the next block, as a held Preview button does for a
     /// drum chain (the drum racks spec, R5). Nothing while no engine runs.

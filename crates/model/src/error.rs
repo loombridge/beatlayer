@@ -245,6 +245,15 @@ pub enum ModelError {
     },
     /// The chain is a MIDI effect rack's, which has no volume or pan.
     ChainHasNoMixer(ChainId),
+    /// The chain's rack doesn't give its chains a zone of this kind: an audio
+    /// effect rack's chains have only a chain select zone, and a drum
+    /// rack's none.
+    ChainHasNoZone {
+        /// The chain.
+        chain: ChainId,
+        /// The zone.
+        kind: crate::layers::ZoneKind,
+    },
     /// The chain has a note, choke group, send or output only a drum rack's
     /// chains have, and isn't in a drum rack (or is a return chain with a
     /// drum chain's settings).
@@ -285,6 +294,15 @@ impl fmt::Display for ModelError {
             Self::ChainNotInTrack { chain, track } => {
                 write!(f, "{chain} isn't in {track}'s chain")
             }
+            Self::ChainHasNoZone { chain, kind } => write!(
+                f,
+                "{chain} belongs to a rack whose chains have no {} zone",
+                match kind {
+                    crate::layers::ZoneKind::Key => "key",
+                    crate::layers::ZoneKind::Velocity => "velocity",
+                    crate::layers::ZoneKind::Select => "chain select",
+                }
+            ),
             Self::NotADrumChain(id) => write!(
                 f,
                 "{id} has a note, choke group, send or output that only a drum rack's chains \

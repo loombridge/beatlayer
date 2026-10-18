@@ -31,8 +31,9 @@ use bl_shell_spec::devices::{
     ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
     HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MidiSidechainSection,
     ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame, SaveChainPresetArgs,
-    SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetRackViewArgs,
-    SetWindowArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs, Ungrouped,
+    SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetAutoSelectArgs,
+    SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection,
+    SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -295,6 +296,9 @@ impl DeviceView {
     /// The description of devices of `kind`, if their type has one.
     #[must_use]
     pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {
+        if matches!(kind, DeviceKind::Rack { .. }) {
+            return Some(bl_model::rack_description());
+        }
         self.types
             .iter()
             .find(|t| t.kind == *kind)
@@ -308,6 +312,10 @@ impl DeviceView {
     /// the plug-in's first parameters or to the preferences' remap, with
     /// the rest of the body an open-editor target.
     fn panel(&self, device: &Device) -> Option<DevicePanel> {
+        // A rack's controls are its frame's, not a panel's.
+        if matches!(device.kind, DeviceKind::Rack { .. }) {
+            return None;
+        }
         let description = self.description(&device.kind)?;
         if let Some(key) = Self::plugin_key(&device.kind) {
             return Some(self.plugin_panel(description, &device.params, &key));
@@ -707,6 +715,7 @@ impl DeviceView {
                         pan: c.mixer.pan,
                         has_mixer: kind.chains_have_volume_and_pan(),
                         selected: selected.contains(&c.id),
+                        zones: c.zones,
                         drum: None,
                         output: None,
                     };
@@ -729,6 +738,14 @@ impl DeviceView {
                     .is_some_and(|a| rack.chains.iter().any(|c| c.id == a)),
             selected_chains: selected,
             devices,
+            selector: rack
+                .params
+                .get(&bl_model::CHAIN_SELECTOR)
+                .map_or(0, |v| v.round().clamp(0.0, 127.0) as u8),
+            filters_midi_ctrl: rack
+                .params
+                .get(&bl_model::FILTER_MIDI_CTRL)
+                .is_some_and(|v| *v >= 0.5),
         }
     }
 
@@ -741,6 +758,58 @@ impl DeviceView {
     /// Takes the window frames an opened set saved, or none for a new set.
     pub fn set_windows(&mut self, windows: DeviceWindows) {
         self.windows = windows;
+    }
+
+    /// The rack a view command acts on: `rack`, or the one in focus, and
+    /// its kind.
+    fn rack_to_view(
+        &self,
+        doc: &Document,
+        rack: Option<DeviceId>,
+    ) -> Result<(DeviceId, RackKind), DeviceError> {
+        let rack = rack
+            .or_else(|| self.focus_rack(doc).map(|d| d.id))
+            .ok_or_else(|| DeviceError::Unavailable("select a rack first".to_owned()))?;
+        let kind = doc
+            .device(rack)
+            .and_then(Device::rack_kind)
+            .ok_or_else(|| DeviceError::InvalidArgs(format!("{rack} isn't a rack")))?;
+        Ok((rack, kind))
+    }
+
+    /// Selects, in each rack whose Auto Select is on, the chains the engine
+    /// found processing (racks spec, R37); a rack with none processing keeps
+    /// its selection. Returns whether a selection changed.
+    pub fn follow_processing(&mut self, doc: &Document, processing: &[ChainId]) -> bool {
+        let mut changed = false;
+        for (&rack, views) in &self.rack_views {
+            if !views.auto_select {
+                continue;
+            }
+            let Some(rack) = doc.device(rack) else {
+                continue;
+            };
+            let chosen: Vec<ChainId> = rack
+                .chains
+                .iter()
+                .map(|c| c.id)
+                .filter(|c| processing.contains(c))
+                .collect();
+            let current: Vec<ChainId> = rack
+                .chains
+                .iter()
+                .map(|c| c.id)
+                .filter(|c| self.chains_selected.contains(c))
+                .collect();
+            if chosen.is_empty() || chosen == current {
+                continue;
+            }
+            self.chains_selected
+                .retain(|c| !rack.chains.iter().any(|r| r.id == *c));
+            self.chains_selected.extend(chosen);
+            changed = true;
+        }
+        changed
     }
 
     /// Which views each rack shows, for the next save.
@@ -1179,6 +1248,12 @@ impl DeviceView {
                     },
                 )
             }
+            ids::RACK_SET_ZONE_EDITOR | ids::RACK_SET_AUTO_SELECT => args
+                .get("rack")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .and_then(|d| doc.device(d))
+                .or_else(|| self.focus_rack(doc))
+                .is_some_and(|d| d.rack_kind().is_some()),
             pad_ids::SWITCH_HOT_SWAP_TARGET => {
                 self.hot_swap_pad.is_some()
                     || self.hot_swap.is_some_and(|rack| {
@@ -1697,6 +1772,29 @@ impl DeviceView {
                 let views = self.views_of(rack);
                 let shown = shown.unwrap_or(!views.shown(view));
                 self.rack_views.insert(rack, views.with(view, shown));
+                outcome.view_changed = true;
+            }
+            ids::RACK_SET_ZONE_EDITOR => {
+                let SetZoneEditorArgs { rack, editor: zone } = parse(args)?;
+                let (rack, kind) = self.rack_to_view(editor.document(), rack)?;
+                if let Some(zone) = zone
+                    && !kind.zone_kinds().contains(&zone)
+                {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{rack}'s chains have no {zone:?} zone"
+                    )));
+                }
+                let mut views = self.views_of(rack);
+                views.zone_editor = zone;
+                self.rack_views.insert(rack, views);
+                outcome.view_changed = true;
+            }
+            ids::RACK_SET_AUTO_SELECT => {
+                let SetAutoSelectArgs { rack, on } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                let mut views = self.views_of(rack);
+                views.auto_select = on.unwrap_or(!views.auto_select);
+                self.rack_views.insert(rack, views);
                 outcome.view_changed = true;
             }
             ids::SAVE_PRESET => {

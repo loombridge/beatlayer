@@ -33,6 +33,7 @@ use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
+use crate::zones::{self, ChainSelector, ZoneFilter};
 
 /// What the audio thread needs after an edit: a new program if the edit
 /// changed the song's structure, and parameter changes for nodes that keep
@@ -93,6 +94,10 @@ enum Identity {
     Mixer,
     Route,
     Sidechain,
+    /// A rack's chain selector (WP-5.3).
+    Selector,
+    /// The zone filter of a rack's chain (WP-5.3).
+    Zones,
     Drum,
 }
 
@@ -900,6 +905,7 @@ impl Compiler {
             task_inputs: build.inputs,
             steps: build.steps,
             merge: Shared::new(vec![MergeCursor::default(); build.rack_chains.len()]),
+            selects: Shared::new(vec![0.0; build.racks.len() * self.config.max_frames]),
             racks: build.racks,
             rack_chains: build.rack_chains,
             chain_sends: build.chain_sends,
@@ -1471,6 +1477,13 @@ impl Compiler {
                     )))
                 },
             );
+            let zones = self.place(
+                build,
+                NodeKey::ChainZones(chain.id),
+                Identity::Zones,
+                0,
+                || Instance::Zones(Box::new(ZoneFilter::new(&chain.zones, &config))),
+            );
             let notes = if kind == RackKind::Drum && !chain.is_return {
                 self.add_drum_notes(build, chain)
             } else {
@@ -1479,6 +1492,7 @@ impl Compiler {
             chains.push(RackChain {
                 steps,
                 mixer,
+                zones,
                 buffer: build.chain_buffers,
                 delay: NO_DELAY,
                 taps: [None; 3],
@@ -1489,6 +1503,13 @@ impl Compiler {
             });
             build.chain_buffers += 1;
         }
+        let selector = self.place(
+            build,
+            NodeKey::Device(device.id),
+            Identity::Selector,
+            0,
+            || Instance::Selector(Box::new(ChainSelector::new(device, &config))),
+        );
         let start = build.rack_chains.len() as u32;
         let drum_chains = device.chains.iter().take_while(|c| !c.is_return).count();
         let end = start + device.chains.len() as u32;
@@ -1528,6 +1549,7 @@ impl Compiler {
             returns: Span { start: middle, end },
             bypass: !device.enabled,
             latency: 0,
+            selector,
         });
         Some(build.racks.len() as u32 - 1)
     }
@@ -2379,6 +2401,21 @@ fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                 if sent.iter().any(|&(t, l)| t == to && l != level) {
                     let key = NodeKey::ChainSend { chain, to };
                     params.push(ParamEvent::now(key, route::LEVEL, level));
+                }
+            }
+        }
+    }
+    // The zones of the chains in both documents (WP-5.3): each number that
+    // changed.
+    for &id in &racks {
+        for chain in new.device(id).into_iter().flat_map(|rack| &rack.chains) {
+            let Some(was) = old.chain(chain.id) else {
+                continue;
+            };
+            let then: Vec<_> = zones::zone_values(&was.zones).collect();
+            for (param, value) in zones::zone_values(&chain.zones) {
+                if !then.contains(&(param, value)) {
+                    params.push(ParamEvent::now(NodeKey::ChainZones(chain.id), param, value));
                 }
             }
         }

@@ -1938,6 +1938,10 @@ impl Processor {
         if let Some(program) = &self.program {
             program.get().modulated(&mut state.modulated);
         }
+        state.processing.clear();
+        if let Some(program) = &self.program {
+            program.get().processing(&mut state.processing);
+        }
         if let Some(program) = &self.program {
             let program = program.get();
             for &task in program.order.iter().filter(|&&t| Some(t) != program.cue) {

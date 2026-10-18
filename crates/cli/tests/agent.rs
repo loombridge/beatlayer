@@ -1782,6 +1782,136 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
     assert_eq!(layers(&mut client)["count"], 3);
 }
 
+// Spec: racks R36. An agent zones the chains of an instrument rack, moves
+// its chain selector, and reads the zones, the selector and the editor shown
+// back: by command ID, one undo step each.
+#[test]
+fn an_agent_zones_a_rack_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("zones").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (midi, audio) = (tracks[0], tracks[2]);
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": midi, "index": 0, "device": {
+                "id": {"$new": "rack"}, "name": "Layers", "enabled": true, "params": [],
+                "role": "instrument",
+                "kind": { "rack": { "kind": "instrument" } },
+                "chains": [
+                    { "id": {"$new": "low"}, "name": "Low", "devices": [] },
+                    { "id": {"$new": "high"}, "name": "High", "devices": [] },
+                ],
+            } } },
+        ] }),
+    );
+    let (rack, low, high) = (
+        built["ids"]["rack"].as_u64().unwrap(),
+        built["ids"]["low"].as_u64().unwrap(),
+        built["ids"]["high"].as_u64().unwrap(),
+    );
+    let zones = |client: &mut Client<_>, chain: u64| {
+        call(client, "query", json!({ "id": chain }))["zones"].clone()
+    };
+    // A new chain passes everything.
+    assert_eq!(
+        zones(&mut client, low)["key"],
+        json!({ "low": 0, "high": 127, "fade_low": 0, "fade_high": 0 })
+    );
+
+    let ran = call(
+        &mut client,
+        "run",
+        json!({ "label": "Split the keys", "commands": [
+            { "command": "chain.set_zone", "args": { "chain": low, "kind": "key",
+                "zone": { "low": 0, "high": 59, "fade_high": 12 } } },
+            { "command": "chain.set_zone", "args": { "chain": high, "kind": "key",
+                "zone": { "low": 48, "high": 127, "fade_low": 12 } } },
+            { "command": "chain.set_zone", "args": { "chain": high, "kind": "select",
+                "zone": { "low": 1, "high": 4 } } },
+            { "command": "device.set_param", "args": { "device": rack, "param": 0, "value": 1 } },
+            { "command": "device.set_param", "args": { "device": rack, "param": 1, "value": 1 } },
+        ] }),
+    );
+    assert_eq!(ran["ran"], 5);
+    let one = |client: &mut Client<_>, command: &str, args: Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    one(
+        &mut client,
+        "rack.set_zone_editor",
+        json!({ "rack": rack, "editor": "key" }),
+    );
+    one(
+        &mut client,
+        "rack.set_auto_select",
+        json!({ "rack": rack, "on": true }),
+    );
+    assert_eq!(
+        zones(&mut client, low)["key"],
+        json!({ "low": 0, "high": 59, "fade_low": 0, "fade_high": 12 })
+    );
+    assert_eq!(
+        zones(&mut client, high)["select"],
+        json!({ "low": 1, "high": 4, "fade_low": 0, "fade_high": 0 })
+    );
+    // The selector and Chain Selector Filters MIDI Ctrl are the rack's
+    // parameters; the editor and Auto Select are in the Device View's state.
+    let parameters = one(&mut client, "device.parameters", json!({ "device": rack }));
+    let value = |name: &str| {
+        parameters["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {parameters}"))["value"]
+            .clone()
+    };
+    assert_eq!(value("Chain Selector"), json!(1.0));
+    assert_eq!(value("Chain Selector Filters MIDI Ctrl"), json!(1.0));
+    one(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [midi] }),
+    );
+    let state = one(&mut client, "device_view.state", json!({})).to_string();
+    assert!(state.contains("\"zone_editor\":\"key\""), "{state}");
+    assert!(state.contains("\"auto_select\":true"), "{state}");
+
+    // A zone the rack doesn't give its chains is refused with a reason.
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+                "id": {"$new": "effects"}, "name": "Layers", "enabled": true, "params": [],
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "chains": [{ "id": {"$new": "wet"}, "name": "Wet", "devices": [] }],
+            } } },
+        ] }),
+    );
+    let wet = built["ids"]["wet"].as_u64().unwrap();
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [
+                { "command": "chain.set_zone", "args": { "chain": wet, "kind": "key",
+                    "zone": { "low": 0, "high": 59 } } },
+            ] }),
+        )
+        .expect("the call reaches the server");
+    assert!(
+        refused.ok().is_err(),
+        "an audio effect rack's chain has no key zone"
+    );
+}
+
 // Spec: racks R17. An agent builds a nested rack by command ID, edits its
 // chains and groups and ungroups devices, and reads each result back
 // through the query tool's `device` object, chains and their IDs included.

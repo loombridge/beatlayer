@@ -10,9 +10,11 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
+use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
+use crate::sample_edits::SampleEdit;
 use crate::track::Input;
 
 /// The most sample slots a device's media can fill.
@@ -70,6 +72,12 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// The device's MIDI sidechain input, if its type declares one (the
+    /// routing spec, R32): a MIDI track whose notes and channel messages
+    /// the device hears beside its audio. Left out of the saved set for a
+    /// device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_sidechain: Option<MidiSidechain>,
     /// Whether the device floats in a window of its own rather than
     /// showing in the Device View (IMP-14, WP-2.5b), where its place in the
     /// chain shows as a strip. Only native devices float. Left out of the
@@ -96,6 +104,18 @@ pub struct Device {
         deserialize_with = "media_slots"
     )]
     pub media: Vec<Option<ContentHash>>,
+    /// The edits made to the sample in slot 0 (WP-5.15, IMP-28; the
+    /// multisampler spec, R55): applied in order to the media, which the
+    /// file is never written for. A multisampler's layers hold their own.
+    /// Loading another sample clears them. Left out of the saved set while
+    /// there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_edits: Vec<SampleEdit>,
+    /// A multisampler's layers and the options of its layer list (WP-5.13,
+    /// the multisampler spec, R2). Left out of the saved set for a device
+    /// that holds none.
+    #[serde(default, skip_serializing_if = "Layers::is_default")]
+    pub layers: Layers,
     /// The parameters a modulator maps, one per slot (the modulation spec,
     /// R19). Left out of the saved set for a device that maps none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -237,6 +257,21 @@ impl Default for Sidechain {
     }
 }
 
+/// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
+/// whose notes and channel messages the device hears, played before that
+/// track's own devices. A new device has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
+                   channel messages the device hears, or absent for No Input."
+)]
+pub struct MidiSidechain {
+    /// The MIDI track it listens to, or `None` (No Input), as on a new
+    /// device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<TrackId>,
+}
+
 /// Reads a device's media: a list of slots, or the one hash (or `null`) a
 /// set saved before sample slots held, which is slot 0.
 fn media_slots<'de, D: serde::Deserializer<'de>>(
@@ -310,9 +345,12 @@ impl Device {
             b_active: false,
             other_params: None,
             sidechain: None,
+            midi_sidechain: None,
             floating: false,
             plugin: None,
             media: Vec::new(),
+            sample_edits: Vec::new(),
+            layers: Layers::default(),
             mappings: Vec::new(),
             shape: None,
             chains: Vec::new(),
@@ -326,8 +364,12 @@ impl Device {
     }
 
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
-    /// trimming empty slots off its end.
+    /// trimming empty slots off its end. Another sample in slot 0 clears the
+    /// edits made to the one before it.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
+        if slot == 0 && self.media_at(0) != media {
+            self.sample_edits.clear();
+        }
         if self.media.len() <= slot {
             if media.is_none() {
                 return;
@@ -407,6 +449,13 @@ impl Device {
         self
     }
 
+    /// The same device with a MIDI sidechain input, as a new device has.
+    #[must_use]
+    pub fn with_midi_sidechain(mut self) -> Self {
+        self.midi_sidechain = Some(MidiSidechain::default());
+        self
+    }
+
     /// The same device with another role.
     #[must_use]
     pub fn with_role(mut self, role: DeviceRole) -> Self {
@@ -426,13 +475,18 @@ impl Device {
     }
 
     /// What its title bar shows: its preset's or given name while Show
-    /// Preset Name is on, and its own name while it's off.
+    /// Preset Name is on, and its own name while it's off. A multisampler
+    /// that nothing has named shows its first layer's name while it's on.
     #[must_use]
     pub fn title(&self) -> &str {
-        if self.show_preset_name {
-            &self.name
-        } else {
-            self.own_name()
+        if !self.show_preset_name {
+            return self.own_name();
+        }
+        // A multisampler no preset or Rename has named shows its first
+        // layer's name (the multisampler spec, R29).
+        match self.layers.list.first() {
+            Some(layer) if self.own_name.is_empty() => &layer.name,
+            _ => &self.name,
         }
     }
 

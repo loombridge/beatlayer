@@ -18,7 +18,8 @@ use bl_shell::audio::{
 };
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
-    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
+    SessionAutomationTracks, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
+    zoom_step,
 };
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
@@ -606,9 +607,10 @@ const fn switch_row(label: &'static str, package: &'static str) -> Pending {
     }
 }
 
-/// The Record section of Record, Warp & Launch, as observed in Live 12.4.6:
-/// none of it is built.
-const RECORD: [Pending; 7] = [
+/// The Record section of Record, Warp & Launch, as observed in Live 12.4.6,
+/// without Record Session automation in (WP-3.12), which is built and sits
+/// between its fifth row and its last. None of the rest is built.
+const RECORD: [Pending; 6] = [
     chooser_row("File Type", "WP-2.13").showing("WAV"),
     chooser_row("Bit Depth", "WP-2.13").showing("24"),
     chooser_row("Count-In", "WP-2.15").showing("None"),
@@ -622,7 +624,6 @@ const RECORD: [Pending; 7] = [
         value: "",
     },
     chooser_row("Clip Update Rate", "WP-2.13").showing("1/16"),
-    chooser_row("Record Session automation in", "M3").showing("Armed Tracks"),
     switch_row("Start Transport With Record", "WP-2.13").showing("On"),
 ];
 
@@ -651,7 +652,36 @@ fn record_warp_launch_page(
     events: &mut Vec<UiEvent>,
 ) {
     rows.heading(ui, "Record");
-    for row in &RECORD {
+    let (before, after) = RECORD.split_at(RECORD.len() - 1);
+    for row in before {
+        rows.pending(ui, row);
+    }
+    let choices = [
+        (SessionAutomationTracks::ArmedTracks, "Armed Tracks"),
+        (SessionAutomationTracks::AllTracks, "All Tracks"),
+    ]
+    .map(|(value, label)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    });
+    let rect = rows.row(ui, "Record Session automation in", SettingsLayout::CHOOSER);
+    if let Some(tracks) = chooser(
+        ui,
+        theme,
+        "record-session-automation-in",
+        "Record Session automation in",
+        rect,
+        &choices,
+        Some(&shell.record_session_automation_in()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+            json!({ "tracks": tracks }),
+        )));
+    }
+    for row in after {
         rows.pending(ui, row);
     }
     rows.heading(ui, "Warp/Fades");

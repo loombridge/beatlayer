@@ -19,9 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
-    AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer, Monitor, Note,
-    ParamId, PluginFormat, Routing, SceneId, SendTap, TrackId, TrackKind,
+    AudioData, BeatsUpdate, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
+    Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer,
+    Monitor, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TonesUpdate, TrackId,
+    TrackKind, WarpMode,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -599,16 +600,138 @@ impl Op {
                 let clip = at.audio_clip(c);
                 // Past 3 seconds (or not a number), an end is the file's.
                 let end = (*b <= 3.0).then_some(*b);
+                // Warp edits (WP-4.1): most are refused on a clip that
+                // isn't warped, or with these numbers, and must then change
+                // nothing; the ones that land are one undo step.
+                let ticks = Ticks((*a * 100_000.0) as i64);
+                match which % 21 {
+                    5 => {
+                        return Command::SetClipWarp {
+                            clip,
+                            warp: *a > 1.0,
+                        };
+                    }
+                    6 => {
+                        return Command::InsertWarpMarker {
+                            clips: vec![clip],
+                            beat: Some(ticks),
+                            time: None,
+                            pin_neighbours: false,
+                            transients: None,
+                        };
+                    }
+                    7 => {
+                        return Command::MoveWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![0],
+                            by: ticks - Ticks(150_000),
+                        };
+                    }
+                    8 => {
+                        return Command::ShiftWarpMarker {
+                            clips: vec![clip],
+                            marker: 0,
+                            by: *a - 1.0,
+                        };
+                    }
+                    9 => {
+                        return Command::DeleteWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![1],
+                        };
+                    }
+                    10 => {
+                        return Command::SetSegmentBpm {
+                            clip,
+                            marker: (*b > 1.0).then_some(0),
+                            bpm: *a * 60.0,
+                        };
+                    }
+                    11 => return Command::ScaleTempo { clip, factor: *a },
+                    // Transient edits and ranged markers (WP-4.3).
+                    12 => {
+                        return Command::InsertTransient {
+                            clip,
+                            time: *a - 1.0,
+                        };
+                    }
+                    13 => {
+                        return Command::DeleteTransients {
+                            clip,
+                            times: vec![*a - 1.0, *b],
+                        };
+                    }
+                    14 => {
+                        return Command::MoveTransient {
+                            clip,
+                            from: *a - 1.0,
+                            to: *b,
+                        };
+                    }
+                    15 => return Command::ResetTransients { clip },
+                    16 => {
+                        return Command::InsertWarpMarkers {
+                            clip,
+                            from: ticks - Ticks(150_000),
+                            to: ticks + Ticks(150_000),
+                            transients: Some(vec![*a, *b]),
+                        };
+                    }
+                    // Warp modes (WP-4.2): a value out of range is refused
+                    // and changes nothing.
+                    17 => {
+                        return Command::SetClipWarpMode {
+                            clip,
+                            mode: match (*a * 3.0) as u8 % 6 {
+                                0 => WarpMode::Beats,
+                                1 => WarpMode::Tones,
+                                2 => WarpMode::Texture,
+                                3 => WarpMode::RePitch,
+                                4 => WarpMode::Complex,
+                                _ => WarpMode::ComplexPro,
+                            },
+                        };
+                    }
+                    18 => {
+                        return Command::SetClipWarpSettings {
+                            clip,
+                            beats: Some(BeatsUpdate {
+                                transient_envelope: Some((*a * 40.0) as u32),
+                                ..BeatsUpdate::default()
+                            }),
+                            tones: (*b > 1.0).then_some(TonesUpdate {
+                                grain_size: Some(*a * 40.0),
+                            }),
+                            texture: None,
+                            complex_pro: None,
+                        };
+                    }
+                    19 => {
+                        return Command::SetClipRamMode {
+                            clip,
+                            ram: *a > 1.0,
+                        };
+                    }
+                    20 => {
+                        return Command::SetClipHighQuality {
+                            clip,
+                            high_quality: *a > 1.0,
+                        };
+                    }
+                    _ => {}
+                }
                 match which % 5 {
                     0 => Command::SetClipRegion {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     1 => Command::SetClipLoop {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     2 => Command::SetClipLoopEnabled {
                         clip,

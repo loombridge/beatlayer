@@ -22,10 +22,14 @@
 //!   any route, carries nothing. A device listening to its own track
 //!   before its devices (Pre FX) hears it, as the signal is there before
 //!   the chain runs; after them it would hear itself, and carries nothing.
+//! - MIDI sidechains come after those (WP-5.27): each device's MIDI source,
+//!   in display order, under the same rule. A device listening to its own
+//!   track hears the notes its clips and input play, which are there
+//!   before the chain runs.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bl_model::{DeviceId, Document, Input, SendTap, Tap, TrackId, TrackKind};
+use bl_model::{ChainId, DeviceId, Document, Input, SendTap, Tap, TrackId, TrackKind};
 
 /// How a signal travels from one track into another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +56,18 @@ impl Via {
     }
 }
 
+/// A MIDI track's notes and channel messages reaching a device's MIDI
+/// sidechain (WP-5.27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MidiLink {
+    /// The MIDI track whose notes the device hears.
+    pub from: TrackId,
+    /// The track of the device.
+    pub to: TrackId,
+    /// The device.
+    pub device: DeviceId,
+}
+
 /// One route in the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Edge {
@@ -63,6 +79,9 @@ pub struct Edge {
     pub via: Via,
     /// Where in the source the signal is taken.
     pub tap: Tap,
+    /// The chain of a rack in the source whose signal at `tap` it carries,
+    /// instead of the source's own (the racks spec, R38).
+    pub chain: Option<ChainId>,
     /// Whether the destination's Monitor switch decides if it's heard: a
     /// track's own input, or another track's output into its Track In.
     pub monitored: bool,
@@ -73,6 +92,8 @@ pub struct Edge {
 pub struct Graph {
     /// Every route the engine plays, sends included.
     pub edges: Vec<Edge>,
+    /// The MIDI sidechains the engine plays.
+    pub midi_links: Vec<MidiLink>,
     /// Routings the document asks for that the engine plays as silence,
     /// because they would close a loop: (from, to).
     pub broken: Vec<(TrackId, TrackId)>,
@@ -105,6 +126,7 @@ impl Graph {
             to,
             via: Via::Output,
             tap: Tap::PostMixer,
+            chain: None,
             monitored: monitored_into(to),
         };
         for &id in &order {
@@ -128,7 +150,11 @@ impl Graph {
             }
         }
         for &id in &order {
-            if let Some(Input::Track { track: from, tap }) = input_of(document, id)
+            if let Some(Input::Track {
+                track: from,
+                tap,
+                chain,
+            }) = input_of(document, id)
                 && inner(from)
                 && inner(id)
             {
@@ -137,6 +163,7 @@ impl Graph {
                     to: id,
                     via: Via::Input,
                     tap,
+                    chain,
                     monitored: true,
                 });
             }
@@ -205,6 +232,7 @@ impl Graph {
                             to,
                             via: Via::Send,
                             tap,
+                            chain: None,
                             monitored: false,
                         });
                     }
@@ -216,14 +244,20 @@ impl Graph {
                     to: id,
                     via: Via::Input,
                     tap: Tap::PostMixer,
+                    chain: None,
                     monitored: true,
                 }),
-                Some(Input::Track { track: from, tap }) if !inner(from) => {
+                Some(Input::Track {
+                    track: from,
+                    tap,
+                    chain,
+                }) if !inner(from) => {
                     graph.edges.push(Edge {
                         from,
                         to: id,
                         via: Via::Input,
                         tap,
+                        chain,
                         monitored: true,
                     });
                 }
@@ -231,6 +265,7 @@ impl Graph {
             }
         }
         graph.add_sidechains(document, &order);
+        graph.add_midi_links(document, &order);
         graph
     }
 
@@ -243,14 +278,16 @@ impl Graph {
                 continue;
             };
             for device in track.devices_deep() {
-                if let Some(Input::Track { track: from, tap }) =
-                    device.sidechain.as_ref().map(|s| &s.input)
+                if let Some(Input::Track {
+                    track: from, tap, ..
+                }) = device.sidechain.as_ref().map(|s| &s.input)
                 {
                     wanted.push(Edge {
                         from: *from,
                         to: id,
                         via: Via::Sidechain(device.id),
                         tap: *tap,
+                        chain: None,
                         monitored: false,
                     });
                 }
@@ -276,6 +313,45 @@ impl Graph {
             } else {
                 all.entry(edge.from).or_default().push(edge.to);
                 self.edges.push(edge);
+            }
+        }
+    }
+
+    /// Adds the MIDI sidechains' links, after every audio route, leaving
+    /// out each that would close a loop.
+    fn add_midi_links(&mut self, document: &Document, order: &[TrackId]) {
+        let mut all: BTreeMap<TrackId, Vec<TrackId>> = BTreeMap::new();
+        for edge in &self.edges {
+            all.entry(edge.from).or_default().push(edge.to);
+        }
+        for &id in order {
+            let Some(track) = document.track(id) else {
+                continue;
+            };
+            for device in track.devices_deep() {
+                let Some(from) = device.midi_sidechain.as_ref().and_then(|s| s.source) else {
+                    continue;
+                };
+                if document.track(from).is_none() {
+                    continue;
+                }
+                // Its own track's notes are there before its chain runs.
+                if from == id {
+                    self.midi_links.push(MidiLink {
+                        from,
+                        to: id,
+                        device: device.id,
+                    });
+                } else if reaches(&all, id, from) {
+                    self.broken.push((from, id));
+                } else {
+                    all.entry(from).or_default().push(id);
+                    self.midi_links.push(MidiLink {
+                        from,
+                        to: id,
+                        device: device.id,
+                    });
+                }
             }
         }
     }

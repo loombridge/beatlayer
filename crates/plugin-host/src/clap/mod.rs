@@ -420,6 +420,7 @@ impl ClapHost {
                     role,
                     description: DeviceDescription::new(params),
                     sidechain: false,
+                    midi_sidechain: false,
                 },
                 vendor,
                 version,

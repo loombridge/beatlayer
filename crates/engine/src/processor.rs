@@ -18,9 +18,10 @@ use crate::message::{
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
-use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
-use crate::program::{EngineProgram, Resolved};
+use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
+use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
+use crate::sched::{Lane, Pool};
 use crate::session::{
     Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
     SlotState, SlotStatus,
@@ -275,8 +276,11 @@ pub struct Processor {
     pending: Vec<Pending>,
     /// This block's parameter changes, sorted by slot, frame, and arrival.
     resolved: Vec<Resolved>,
-    /// One node's changes, handed to it.
-    scratch: Vec<NodeEvent>,
+    /// What the audio thread keeps to itself while it runs tasks.
+    lane: Lane,
+    /// The workers that run tasks beside the audio thread, if the engine
+    /// has any (WP-5.37).
+    pool: Option<Pool>,
     scheduled: Vec<Scheduled>,
     seq: u64,
     swaps: u64,
@@ -335,7 +339,8 @@ impl Processor {
             timed: Vec::with_capacity(config.max_scheduled),
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
-            scratch: Vec::with_capacity(config.max_pending_events),
+            lane: Lane::new(&config),
+            pool: None,
             scheduled: Vec::with_capacity(config.max_scheduled),
             seq: 0,
             swaps: 0,
@@ -350,6 +355,21 @@ impl Processor {
             captured,
             config,
         }
+    }
+
+    /// Gives the processor a pool of workers to run tasks with from the next
+    /// block on (the multicore scheduler, WP-5.37), and returns the pool it
+    /// had. The output is the same to the bit with or without one. Dropping
+    /// a pool stops its workers, so a caller on the audio thread hands the
+    /// old one to another thread to drop.
+    pub fn set_pool(&mut self, pool: Option<Pool>) -> Option<Pool> {
+        std::mem::replace(&mut self.pool, pool)
+    }
+
+    /// The pool of workers, if there is one.
+    #[must_use]
+    pub fn pool(&self) -> Option<&Pool> {
+        self.pool.as_ref()
     }
 
     /// The engine's settings.
@@ -1300,6 +1320,12 @@ impl Processor {
                 self.config.sample_rate,
             );
             self.session.repeat(playhead);
+            // Spec: follow-actions R2. A follow due at this frame runs
+            // before the scene maps and the clips below read the launcher.
+            if let Some(program) = self.program.as_ref() {
+                self.session
+                    .run_follow(program.get(), playhead, self.position);
+            }
             // Spec: session-view R22. A launched scene's tempo and signature
             // apply on its launch frame.
             while let Some(scene) = self.session.take_due_scene(self.position) {
@@ -1540,12 +1566,16 @@ impl Processor {
             Some(program) => {
                 let program = program.get_mut();
                 self.counters.events_applied += program.run(
-                    length,
-                    offset as u32,
-                    &self.resolved,
-                    &mut self.scratch,
-                    transport,
-                    &self.session_playback,
+                    self.pool.as_mut(),
+                    &mut self.lane,
+                    Blk {
+                        frames: length,
+                        from: offset as u32,
+                        until: offset as u32 + length as u32,
+                        events: &self.resolved,
+                        transport,
+                        session: &self.session_playback,
+                    },
                 );
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
@@ -1690,8 +1720,8 @@ impl Processor {
         }
     }
 
-    /// Copies the notes the monitoring MIDI tracks received in the frames
-    /// `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// Copies the notes and controllers the monitoring MIDI tracks received in
+    /// the frames `offset..offset + frames` of the block into Capture MIDI's ring,
     /// stamped with the engine clock and, while the song plays, the song
     /// frame (WP-3.14).
     fn log_captured(&mut self, offset: usize, frames: usize) {
@@ -1702,8 +1732,10 @@ impl Processor {
         for (track, events) in program.get().midi.monitored_inputs() {
             for event in events {
                 let at = event.offset as usize;
-                let note = event.message.is_note_on() || event.message.is_note_off();
-                if !note || at < offset || at >= offset + frames {
+                if !crate::recording::is_recorded(&event.message)
+                    || at < offset
+                    || at >= offset + frames
+                {
                     continue;
                 }
                 let into = (at - offset) as i64;

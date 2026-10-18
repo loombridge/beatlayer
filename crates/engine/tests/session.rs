@@ -135,6 +135,7 @@ fn a_launch_lands_on_its_grid_frame_at_any_block_size_and_value() {
                 .session(SessionCommand::SetQuantization(LaunchSettings {
                     quantization: value,
                     enabled: true,
+                    ..LaunchSettings::default()
                 }));
             rig.sender.transport(TransportCommand::Play);
             at_frame(&mut rig, at, block, |rig| {
@@ -410,6 +411,16 @@ fn render_session_audio(
     block: usize,
     cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
 ) -> Vec<f32> {
+    render_session_clip(AudioData::new(ContentHash([7; 32])), frames, block, cues)
+}
+
+/// [`render_session_audio`] for a slot clip with `audio`'s settings.
+fn render_session_clip(
+    audio: AudioData,
+    frames: u64,
+    block: usize,
+    cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
+) -> Vec<f32> {
     let mut media = MediaMap::new();
     media.insert(ContentHash([7; 32]), ramp(96_000));
     let registry = Registry::new().with_media(Arc::new(media));
@@ -421,7 +432,7 @@ fn render_session_audio(
         editor.new_id(),
         Ticks::ZERO,
         Ticks::WHOLE,
-        ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
+        ClipData::Audio(audio),
     );
     editor
         .apply(Command::CreateSlotClip { track, scene, clip })
@@ -479,6 +490,63 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     assert_eq!(out[95_999], 0.0);
     for (i, sample) in out[96_000..].iter().enumerate().take(600) {
         assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
+    }
+}
+
+// Spec: warping R15. A launched warped clip plays its Start marker's beat on
+// its launch frame and runs on at the set's tempo, its loop wrapping on exact
+// frames.
+#[test]
+fn a_launched_warped_clip_plays_its_start_beat_on_its_launch_frame() {
+    use bl_model::{WarpMarker, WarpMode};
+    let quarter = Ticks::QUARTER.get() as f64;
+    // The file runs at 60 BPM, so at the set's 120 BPM it is read at twice
+    // its speed. Its Start marker is the file's 0.25 s (a quarter of a
+    // beat) and its loop brace the first beat.
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(60.0),
+        warp_mode: WarpMode::RePitch,
+        high_quality: false,
+        looping: true,
+        start: quarter / 4.0,
+        loop_start: 0.0,
+        loop_end: Some(quarter),
+        ..AudioData::new(ContentHash([7; 32]))
+    };
+    let position = |sample: f32| f64::from(sample) / f64::from(STEP) - 1.0;
+    let mut reference = None;
+    for block in [1, 61, 512, 4_096] {
+        // Launched while the song plays: on the next bar line, frame 96,000.
+        let out = render_session_clip(audio.clone(), 160_000, block, |track, scene| {
+            vec![
+                (0, Cue::Transport(TransportCommand::Play)),
+                (
+                    24_001,
+                    Cue::Session(SessionCommand::Launch { track, scene }),
+                ),
+            ]
+        });
+        assert!(out[..96_000].iter().all(|&sample| sample == 0.0));
+        // The Start marker's frame of the file (0.25 s) is read on the
+        // launch frame, and two file frames to each song frame after it.
+        assert!((position(out[96_000]) - 12_000.0).abs() < 0.02);
+        assert!((position(out[96_001]) - 12_002.0).abs() < 0.02);
+        // The brace's end, the file's 1 s, comes after the three quarters of
+        // a beat left of it: 18,000 song frames. The loop then starts again
+        // from the file's start, and wraps every beat, 24,000 frames.
+        assert!((position(out[96_000 + 17_999]) - 47_998.0).abs() < 0.02);
+        assert!(position(out[96_000 + 18_000]).abs() < 0.02);
+        assert!((position(out[96_000 + 18_001]) - 2.0).abs() < 0.02);
+        assert!(position(out[96_000 + 18_000 + 24_000]).abs() < 0.02);
+        match &reference {
+            None => reference = Some(out),
+            Some(reference) => assert_eq!(&out, reference, "blocks of {block}"),
+        }
     }
 }
 
@@ -738,6 +806,7 @@ fn mode_rig(mode: LaunchMode, value: LaunchQuantization) -> (Rig, TrackId, Scene
         .session(SessionCommand::SetQuantization(LaunchSettings {
             quantization: value,
             enabled: true,
+            ..LaunchSettings::default()
         }));
     rig.sender.transport(TransportCommand::Play);
     (rig, track, scene)

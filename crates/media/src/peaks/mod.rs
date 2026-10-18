@@ -64,7 +64,7 @@ pub use build::{BuildOptions, BuildProgress};
 pub use cache::{
     PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, PruneReport, default_cache_dir,
 };
-pub use file::{FILE_EXTENSION, FORMAT_VERSION};
+pub use file::{FILE_EXTENSION, FORMAT_VERSION, write_atomically};
 
 /// Frames of the source under one peak at level 0.
 pub const FRAMES_PER_PEAK: u64 = WINDOW as u64;

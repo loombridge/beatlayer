@@ -9,7 +9,10 @@
 //! where Live lists them, disabled, and name the package. MIDI From lists the
 //! MIDI input ports the computer offers (WP-2.2).
 
-use bl_model::{Channel, DeviceId, Document, Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_model::{
+    Chain, Channel, Device, DeviceId, DeviceRole, Document, Input, Monitor, Output, RackKind, Tap,
+    TrackId, TrackKind,
+};
 use bl_shell_spec::commands::APP_SETTINGS;
 use serde_json::{Value, json};
 
@@ -257,7 +260,14 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
     Some(match t.kind() {
         TrackKind::Audio => InOut::Clips {
             input: audio_from(doc, track),
-            input_channel: input_channel(track, t.routing().input.clone(), None, false, interface),
+            input_channel: input_channel(
+                doc,
+                track,
+                t.routing().input.clone(),
+                None,
+                false,
+                interface,
+            ),
             monitor: monitor(track, t.routing().monitor),
             output: audio_to(doc, track),
             output_channel: output_channel(track, t.routing().output, interface.outputs),
@@ -265,6 +275,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
         TrackKind::Midi => InOut::Clips {
             input: midi_from(doc, track, &interface.midi_inputs),
             input_channel: input_channel(
+                doc,
                 track,
                 t.routing().input.clone(),
                 t.routing().channel,
@@ -366,8 +377,8 @@ fn interface_channels(
 }
 
 /// Audio From (observed): Ext. In · Configure… ─ Resampling ─ the group,
-/// audio, and return tracks and Main, in display order, without the track
-/// itself ─ No Input.
+/// audio, and return tracks, the MIDI tracks that hold an instrument, and
+/// Main, in display order, without the track itself ─ No Input.
 fn audio_from(doc: &Document, track: TrackId) -> Chooser {
     let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
@@ -400,10 +411,13 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
         let Some(source) = doc.track(id) else {
             continue;
         };
+        // A MIDI track is a source once it holds an instrument (the racks
+        // spec, R38).
         let listed = matches!(
             source.kind(),
             TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
-        );
+        ) || source.kind() == TrackKind::Midi
+            && source.devices().any(|d| d.role == DeviceRole::Instrument);
         if id == track || !listed {
             continue;
         }
@@ -482,6 +496,7 @@ fn midi_from(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
 /// MIDI port (the MIDI I/O spec, R7); All Channels, fixed, with All Ins or the
 /// computer keyboard; nothing otherwise.
 fn input_channel(
+    doc: &Document,
     track: TrackId,
     input: Input,
     channel: Option<u8>,
@@ -489,10 +504,12 @@ fn input_channel(
     interface: &Interface,
 ) -> Chooser {
     match input {
-        Input::Track { track: from, tap } => Chooser {
-            name: "Input Channel",
-            text: tap_label(tap).to_owned(),
-            entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+        Input::Track {
+            track: from,
+            tap,
+            chain,
+        } => {
+            let mut entries: Vec<Entry> = [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
                 .into_iter()
                 .map(|t| {
                     Entry::choice(
@@ -501,12 +518,44 @@ fn input_channel(
                             track,
                             json!({ "type": "track", "track": from, "tap": tap_name(t) }),
                         ),
-                        t == tap,
+                        chain.is_none() && t == tap,
                     )
                 })
-                .collect(),
-            pending: None,
-        },
+                .collect();
+            // Audio From goes on with the chains of the track's racks
+            // (the racks spec, R38, R39).
+            if !midi {
+                for (rack, c) in rack_chains(doc, from) {
+                    for t in [Tap::PreFx, Tap::PostFx, Tap::PostMixer] {
+                        entries.push(Entry::choice(
+                            chain_tap_label(rack, c, t),
+                            set_input(
+                                track,
+                                json!({ "type": "track", "track": from, "tap": tap_name(t),
+                                        "chain": c.id }),
+                            ),
+                            chain == Some(c.id) && t == tap,
+                        ));
+                    }
+                }
+            }
+            Chooser {
+                name: "Input Channel",
+                text: entries
+                    .iter()
+                    .find_map(|entry| match entry {
+                        Entry::Choice {
+                            label,
+                            chosen: true,
+                            ..
+                        } => Some(label.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| tap_label(tap).to_owned()),
+                entries,
+                pending: None,
+            }
+        }
         Input::External { channel } => Chooser {
             name: "Input Channel",
             text: channel.label(),
@@ -703,6 +752,39 @@ fn output_channel(track: TrackId, output: Output, outputs: u16) -> Chooser {
     }
 }
 
+/// The chains a track's racks offer to Audio From, in the order the chooser
+/// lists them (the racks spec, R38, R39): the racks in signal order, each
+/// chain followed by the racks inside it, with its rack. Instrument and
+/// audio effect racks only; a drum rack offers its return chains instead
+/// (the drum racks spec, R10).
+fn rack_chains(doc: &Document, track: TrackId) -> Vec<(&Device, &Chain)> {
+    fn walk<'a>(devices: impl Iterator<Item = &'a Device>, out: &mut Vec<(&'a Device, &'a Chain)>) {
+        for rack in devices {
+            let offered = matches!(
+                rack.rack_kind(),
+                Some(RackKind::Instrument | RackKind::AudioEffect)
+            );
+            for chain in &rack.chains {
+                if offered {
+                    out.push((rack, chain));
+                }
+                walk(chain.devices.iter(), out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(t) = doc.track(track) {
+        walk(t.devices(), &mut out);
+    }
+    out
+}
+
+/// A chain tap as the chooser reads it: the rack's title, the chain's name
+/// and the tap, with vertical bars between (the racks spec, R39).
+fn chain_tap_label(rack: &Device, chain: &Chain, tap: Tap) -> String {
+    format!("{} | {} | {}", rack.title(), chain.name, tap_label(tap))
+}
+
 /// A chooser showing its chosen entry.
 fn chooser(name: &'static str, entries: Vec<Entry>) -> Chooser {
     let text = entries
@@ -782,6 +864,44 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
     Some(chooser)
 }
 
+fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
+    let args = if track.is_null() {
+        json!({ "device": device })
+    } else {
+        json!({ "device": device, "track": track })
+    };
+    Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// A device's MIDI sidechain source chooser (WP-5.27; the routing spec,
+/// R34): the MIDI tracks in display order, the device's own among them,
+/// then ─ No Input. `None` for a device without a MIDI sidechain input.
+#[must_use]
+pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let current = doc.device(device)?.midi_sidechain.as_ref()?.source;
+    let mut entries = Vec::new();
+    for id in doc.track_order() {
+        if doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set_midi_sidechain_source(device, json!(id)),
+                current == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "No Input",
+        set_midi_sidechain_source(device, Value::Null),
+        current.is_none(),
+    ));
+    let mut chooser = chooser("MIDI Sidechain Source", entries);
+    if current.is_none() {
+        "No Input".clone_into(&mut chooser.text);
+    }
+    Some(chooser)
+}
+
 /// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with
 /// a track as the source, empty with No Input (observed). `None` for a
 /// device without a sidechain input.
@@ -789,7 +909,7 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
 pub fn sidechain_channel(doc: &Document, device: DeviceId) -> Option<Chooser> {
     let input = doc.device(device)?.sidechain.as_ref()?.input.clone();
     Some(match input {
-        Input::Track { track, tap } => Chooser {
+        Input::Track { track, tap, .. } => Chooser {
             name: "Sidechain Source Channel",
             text: tap_label(tap).to_owned(),
             entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]

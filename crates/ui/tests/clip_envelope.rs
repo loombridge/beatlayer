@@ -433,3 +433,139 @@ fn the_linked_switch_runs_the_command_and_unlinks_the_axis() {
     let (_, start) = e.lane();
     assert_eq!(start, Ticks::QUARTER, "linked, it follows the Start marker");
 }
+
+/// Opens the chooser `salt`, reads which of `labels` are marked with a dot
+/// in the modulation colour, and closes it.
+fn dotted(e: &mut Env, salt: &str, labels: &[String]) -> Vec<bool> {
+    use egui::{Id, Key, Shape, accesskit::Action};
+    let id = Id::new(("chooser", salt));
+    let nodes = Harness::nodes(&e.h.settle());
+    let b = nodes
+        .iter()
+        .find(|n| n.id == id.accesskit_id())
+        .and_then(|n| n.bounds)
+        .unwrap();
+    let chooser = Rect::from_min_max(
+        pos2(b.x0 as f32, b.y0 as f32),
+        pos2(b.x1 as f32, b.y1 as f32),
+    );
+    e.h.accesskit(id, Action::Click);
+    for _ in 0..12 {
+        e.h.frame(vec![]);
+    }
+    let dot = e.h.theme.colors.modulation.0;
+    let output = e.h.frame(vec![]);
+    let mut shapes = Vec::new();
+    fn walk(shape: &Shape, out: &mut Vec<Shape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut shapes);
+    }
+    let circles: Vec<Pos2> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Circle(c) if c.fill == dot => Some(c.center),
+            _ => None,
+        })
+        .collect();
+    let rows = labels
+        .iter()
+        .map(|label| {
+            shapes.iter().any(|shape| {
+                let Shape::Text(text) = shape else {
+                    return false;
+                };
+                let rect = text.galley.rect.translate(text.pos.to_vec2());
+                text.galley.text() == label
+                    && rect.min.x >= chooser.left() - 1.0
+                    && rect.max.x <= chooser.right() + 1.0
+                    && circles.iter().any(|c| {
+                        (rect.top() - 2.0..=rect.bottom() + 2.0).contains(&c.y)
+                            && (chooser.left()..=chooser.right()).contains(&c.x)
+                    })
+            })
+        })
+        .collect();
+    e.h.key(Key::Escape, Modifiers::NONE);
+    e.h.settle();
+    rows
+}
+
+// Spec: midi-controller-data R8. A MIDI clip's device chooser lists MIDI
+// Ctrl first; its control chooser lists Pitch Bend, Channel Pressure, then
+// the controllers by their General MIDI names, with a dot on each that has
+// an envelope; choosing MIDI Ctrl shows the first control with an envelope,
+// else Pitch Bend; pitch bend is drawn centred.
+#[test]
+fn midi_ctrl_lists_the_controllers_and_dots_the_ones_with_envelopes() {
+    use egui::{Id, Key, accesskit::Action};
+    let mut e = set();
+    let labels: Vec<String> = control_choices(&e.h.shell, e.doc(), AutomationDevice::MidiCtrl)
+        .into_iter()
+        .map(|choice| choice.label)
+        .collect();
+    assert_eq!(labels[0], "Pitch Bend");
+    assert_eq!(labels[1], "Channel Pressure");
+    assert_eq!(labels[2], "1 Modulation Wheel");
+    assert_eq!(labels[3], "2 Breath Controller");
+    assert!(labels.contains(&"31 Controller 31".to_owned()));
+    assert!(labels.contains(&"33 LSB for CC 1".to_owned()));
+    assert!(labels.contains(&"64 Sustain Pedal".to_owned()));
+    assert!(labels.contains(&"74 MPE Slide (Sound Controller 5)".to_owned()));
+    for missing in ["0 ", "32 ", "120 ", "127 "] {
+        assert!(
+            !labels.iter().any(|label| label.starts_with(missing)),
+            "{missing}"
+        );
+    }
+    assert_eq!(labels.len(), 2 + 31 + 87);
+
+    // Controllers 2 and 1 have envelopes in the clip.
+    for number in [2, 1] {
+        e.run(
+            "clip.set_envelope_breakpoint",
+            json!({
+                "clip": e.clip,
+                "target": { "type": "midi.cc", "number": number },
+                "at": 0,
+                "value": 50.0
+            }),
+        );
+    }
+    // Choosing MIDI Ctrl shows the first control that has an envelope.
+    e.h.accesskit(Id::new(("chooser", "clip-envelope-device")), Action::Focus);
+    e.h.key(Key::ArrowUp, Modifiers::NONE);
+    let nodes = Harness::nodes(&e.h.settle());
+    assert_eq!(Harness::node(&nodes, "Envelope Device").value, "MIDI Ctrl");
+    assert_eq!(
+        Harness::node(&nodes, "Envelope Control").value,
+        "1 Modulation Wheel"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "Clip Envelope").value,
+        "1 Modulation Wheel"
+    );
+
+    let dots = dotted(&mut e, "clip-envelope-control", &labels[..6]);
+    assert_eq!(dots, [false, false, true, true, false, false]);
+
+    // With no controller envelope in the clip, MIDI Ctrl shows Pitch Bend.
+    for number in [2, 1] {
+        e.run(
+            "clip.delete_envelope",
+            json!({ "clip": e.clip, "target": { "type": "midi.cc", "number": number } }),
+        );
+    }
+    e.run("view.clip_envelope", json!({ "target": PAN }));
+    e.h.accesskit(Id::new(("chooser", "clip-envelope-device")), Action::Focus);
+    e.h.key(Key::ArrowUp, Modifiers::NONE);
+    let nodes = Harness::nodes(&e.h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "Envelope Control").value,
+        "Pitch Bend"
+    );
+}

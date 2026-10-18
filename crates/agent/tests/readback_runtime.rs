@@ -344,3 +344,117 @@ fn view_state_reads_back_the_view_toggles() {
     assert_eq!(state["clip_view"]["visible"], true);
     assert_eq!(state["clip_view"]["draw_mode"], true);
 }
+
+/// Every transient edit is one undo step, run by ID, and reads back from
+/// `clip.transients` (the warping spec, R23 and R24).
+#[test]
+fn each_transient_edit_reads_back_from_clip_transients() {
+    let folder = std::env::temp_dir().join(format!("bl-agent-transients-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let loop_file = folder.join("drum-loop.wav");
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/drums/drum-loop.wav"
+        ),
+        &loop_file,
+    )
+    .unwrap();
+
+    let mut client = client();
+    let media = client
+        .transport()
+        .shell
+        .media_store()
+        .import(&loop_file)
+        .unwrap();
+    run(
+        &mut client,
+        "track.create",
+        json!({ "id": {"$new": "Drums"}, "kind": "audio", "name": "Drums", "index": 0 }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Drums")
+        .unwrap()
+        .id();
+    run(
+        &mut client,
+        "clip.create",
+        json!({ "track": track, "clip": {
+            "id": {"$new": "Loop"}, "name": "Loop", "start": 0, "length": BAR,
+            "mute": false, "data": { "audio": { "media": media.to_string() } } } }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .id;
+    client
+        .transport()
+        .shell
+        .wait_analysis(bl_model::ContentHash(*media.as_bytes()))
+        .unwrap();
+
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    let listed = |client: &mut Client<InProcess>| {
+        let result = run(client, "clip.transients", json!({ "clip": clip }));
+        assert_eq!(result["analysis_ready"], true);
+        result["transients"].as_array().unwrap().clone()
+    };
+    let edit = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        run(client, command, args);
+        assert_eq!(steps(client), before + 1, "{command} is one undo step");
+        listed(client)
+    };
+
+    let detected = listed(&mut client);
+    assert_eq!(detected.len(), 9);
+    let second = detected[1]["time"].as_f64().unwrap();
+
+    let inserted = edit(
+        &mut client,
+        "clip.insert_transient",
+        json!({ "clip": clip, "time": 0.1 }),
+    );
+    assert_eq!(inserted.len(), 10);
+    assert_eq!(
+        inserted[1],
+        json!({ "time": 0.1, "beat": null, "by_hand": true })
+    );
+
+    let deleted = edit(
+        &mut client,
+        "clip.delete_transients",
+        json!({ "clip": clip, "times": [second] }),
+    );
+    assert!(deleted.iter().all(|t| t["time"].as_f64() != Some(second)));
+
+    let moved = edit(
+        &mut client,
+        "clip.move_transient",
+        json!({ "clip": clip, "from": 0.1, "to": 0.15 }),
+    );
+    assert_eq!(moved[1]["time"], 0.15);
+
+    let reset = edit(
+        &mut client,
+        "clip.reset_transients",
+        json!({ "clip": clip }),
+    );
+    assert_eq!(reset, detected);
+
+    let _ = std::fs::remove_dir_all(&folder);
+}

@@ -16,6 +16,7 @@ cargo-fuzz = true
 
 [dependencies]
 bl-core = { path = "../crates/core" }
+bl-interop = { path = "../crates/interop" }
 bl-media = { path = "../crates/media" }
 bl-project = { path = "../crates/project" }
 libfuzzer-sys = "=0.4.13"
@@ -30,6 +31,13 @@ bench = false
 [[bin]]
 name = "preset"
 path = "fuzz_targets/preset.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sfz"
+path = "fuzz_targets/sfz.rs"
 test = false
 doc = false
 bench = false

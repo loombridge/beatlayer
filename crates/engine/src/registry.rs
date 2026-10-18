@@ -56,6 +56,10 @@ pub struct DeviceType {
     /// tracks can route into it, and its node reads what its detector
     /// hears with [`Block::sidechain`](crate::Block::sidechain).
     pub sidechain: bool,
+    /// Whether its devices have a MIDI sidechain input (WP-5.27): the
+    /// notes and channel messages of a MIDI track reach the device in its
+    /// block's notes ([`Block::notes`](crate::Block::notes)).
+    pub midi_sidechain: bool,
 }
 
 impl DeviceType {
@@ -70,6 +74,7 @@ impl DeviceType {
             role,
             description: DeviceDescription::default(),
             sidechain: false,
+            midi_sidechain: false,
         }
     }
 
@@ -87,16 +92,26 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, declaring a MIDI sidechain input.
+    #[must_use]
+    pub fn with_midi_sidechain(mut self) -> Self {
+        self.midi_sidechain = true;
+        self
+    }
+
     /// A new, switched-on device of this type with default parameters, and
-    /// a new sidechain input if the type declares one.
+    /// a new sidechain input and MIDI sidechain input if the type declares
+    /// them.
     #[must_use]
     pub fn device(&self, id: DeviceId) -> Device {
-        let device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
+        let mut device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
         if self.sidechain {
-            device.with_sidechain()
-        } else {
-            device
+            device = device.with_sidechain();
         }
+        if self.midi_sidechain {
+            device = device.with_midi_sidechain();
+        }
+        device
     }
 }
 

@@ -176,7 +176,10 @@ impl Document {
                 else {
                     continue;
                 };
-                for envelope in &mut envelopes {
+                for envelope in envelopes
+                    .iter_mut()
+                    .filter(|envelope| envelope.kind == crate::EnvelopeKind::Modulation)
+                {
                     envelope.envelope.map_values(|old| match envelope.target {
                         AutomationTarget::Mixer { param } => {
                             let mixer = &track.mixer;
@@ -209,6 +212,10 @@ impl Document {
                             ),
                         // A set from before relative modulation holds no racks.
                         AutomationTarget::Chain { .. } => old.clamp(-1.0, 1.0),
+                        // MIDI controllers came after relative modulation.
+                        AutomationTarget::MidiCc { .. }
+                        | AutomationTarget::MidiPitchBend
+                        | AutomationTarget::MidiChannelPressure => old,
                     });
                 }
                 if let Some(clip) = track.clip_mut(clip) {

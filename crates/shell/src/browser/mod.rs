@@ -1043,6 +1043,22 @@ impl BrowserView {
         self.selected_audio().is_empty()
     }
 
+    /// The SFZ instrument selected, if one file is and it is that.
+    #[must_use]
+    pub fn selected_sfz(&self) -> Option<PathBuf> {
+        match self.selected.as_slice() {
+            [one]
+                if one
+                    .file_name()
+                    .and_then(|n| file_kind(&n.to_string_lossy()))
+                    == Some(ItemKind::Sfz) =>
+            {
+                Some(one.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// The selected audio files, in the content pane's order.
     fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -1065,6 +1081,7 @@ impl BrowserView {
                 !self.selected_audio().is_empty()
                     || self.selected_plugin().is_some()
                     || self.selected_device().is_some()
+                    || self.selected_sfz().is_some()
             }
             ids::PREVIEW => args.get("path").is_some() || self.selected_audio().len() == 1,
             ids::REMOVE_FOLDER => args

@@ -28,6 +28,8 @@
 //!   selecting and folding devices, adding them, the device clipboard,
 //!   presets, and hot-swapping; [`context_menus`] holds the device title
 //!   bar's menu.
+//! - [`multisampler`]: the multisampler's commands that need the shell
+//!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
@@ -43,6 +45,7 @@
 //!   WP-5.9).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
+//! - [`warping`]: a clip's transients (`clip.transients`, WP-4.3).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -65,6 +68,7 @@ pub mod midi_files;
 pub mod midi_io;
 pub mod mixer_view;
 pub mod modulation;
+pub mod multisampler;
 pub mod notes;
 pub mod perception;
 pub mod plugins;
@@ -74,6 +78,7 @@ pub mod session_view;
 pub mod settings;
 pub mod tracks;
 pub mod transport;
+pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
 
@@ -96,6 +101,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_files::register(registry)?;
     midi_io::register(registry)?;
     devices::register(registry)?;
+    multisampler::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
@@ -104,5 +110,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     plugins::register(registry)?;
     settings::register(registry)?;
     modulation::register(registry)?;
-    perception::register(registry)
+    perception::register(registry)?;
+    warping::register(registry)
 }

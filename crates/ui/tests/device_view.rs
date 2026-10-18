@@ -471,6 +471,73 @@ fn the_sidechain_strip_shows_the_section_and_its_controls_set_the_sidechain() {
     assert!(section(&h, key).listen);
 }
 
+fn midi_section(h: &Harness, device: DeviceId) -> bl_shell::device_commands::MidiSidechainSection {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.midi_sidechain)
+        .unwrap()
+}
+
+// Spec: routing R34 (a device's MIDI sidechain strip and its MIDI source
+// chooser)
+#[test]
+fn the_midi_sidechain_strip_shows_the_section_and_its_chooser_sets_the_source() {
+    use bl_ui::sidechain::{rows, strip_buttons};
+    let mut h = harness();
+    let plain = add(&mut h, gain());
+    let t = testing::hear_type();
+    let hear = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true }),
+    );
+    let (fp, fh) = (frame_of(&mut h, plain), frame_of(&mut h, hear));
+    assert_eq!(
+        fh.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH,
+        "a MIDI sidechain has its strip"
+    );
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Show/Hide Sidechain").value, "off");
+
+    // The toggle shows the section, which changes only the view.
+    let steps = h.shell.editor().undo_history().len();
+    h.click(strip_buttons(fh)[0].center());
+    h.settle();
+    assert!(midi_section(&h, hear).shown);
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+    let fh = frame_of(&mut h, hear);
+    assert_eq!(
+        fh.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH
+            + bl_shell::device_commands::SIDECHAIN_SECTION_WIDTH
+    );
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Source").value,
+        "No Input"
+    );
+
+    // A source from the chooser's list.
+    let [_, source, ..] = rows(fh);
+    h.click(source.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "1-MIDI" && n.bounds.is_some_and(|b| b.y0 as f32 > source.top()))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(midi_section(&h, hear).source, "1-MIDI");
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+}
+
 /// A file dropped into the window, as the app's drag and drop gives egui.
 #[derive(Debug)]
 struct DroppedFile(std::path::PathBuf);
@@ -825,4 +892,55 @@ fn compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins() {
             .unwrap_or_else(|| panic!("no menu item {label:?}"));
         assert!(item.disabled, "{label} on a plug-in");
     }
+}
+
+// Spec: multisampler R29
+#[test]
+fn the_multisamplers_title_bar_menu_holds_its_options() {
+    let mut h = harness();
+    let tracks: Vec<TrackId> = h.shell.editor().document().top_level().collect();
+    h.shell
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
+        .unwrap();
+    h.shell.set_device_types(bl_devices::device_types());
+    let t = bl_devices::multisampler_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let frame = frame_of(&mut h, device);
+    h.click(button_rects(frame, false)[2].center());
+    let nodes = Harness::nodes(&h.settle());
+    // The device's own items, then the multisampler's.
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label.starts_with("Save as Default Preset"))
+    );
+    let fade = nodes
+        .iter()
+        .find(|n| n.label.starts_with("Use Constant Power Fade for Loops"))
+        .expect("the multisampler's option is in the menu");
+    assert!(
+        fade.selected == Some(true) || fade.toggled == Some(true),
+        "on in a new device: {fade:?}"
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Convert to Snapshot" && !n.disabled),
+        "the conversion is in the menu (multisampler R62)"
+    );
+    let b = fade.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    let layers = &h.shell.editor().document().device(device).unwrap().layers;
+    assert!(layers.linear_loop_fades, "off now: crossfades are linear");
+    assert_eq!(last_step(&h), "Change Sample Options");
 }

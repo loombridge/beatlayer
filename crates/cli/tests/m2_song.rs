@@ -825,7 +825,7 @@ impl Song {
         let ClipData::Midi(played) = &keys.clip.data else {
             panic!("the keyboard's take is a MIDI clip");
         };
-        let notes: Vec<Note> = played.notes.iter().copied().collect();
+        let notes: Vec<Note> = played.notes.iter().cloned().collect();
         for bar in (KEYS_BAR + 8..bars - 1).step_by(8) {
             add(
                 keys_track,
@@ -942,7 +942,7 @@ impl Song {
         let ClipData::Midi(data) = &take.clip.data else {
             panic!("the keyboard's take is a MIDI clip");
         };
-        let mut played: Vec<Note> = data.notes.iter().copied().collect();
+        let mut played: Vec<Note> = data.notes.iter().cloned().collect();
         played.sort_by_key(|note| note.start);
         assert_eq!(
             played.len(),

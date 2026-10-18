@@ -40,7 +40,7 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1040,13 +1040,15 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Moves an audio clip's Start and End markers, in seconds into its audio \
-            file: the clip starts playing its file at `start` when the song reaches the clip, \
-            and, while its loop is off, plays until `end` (`null` for the end of the file) or \
-            the clip's own end in the arrangement, whichever comes first, then is silent. \
-            Clips play unwarped, at the file's own speed. While the loop is on, `start` must \
-            be before the loop's end. Use `clip.set_length` to change how long the clip lasts \
-            in the arrangement.",
+        description: "Moves an audio clip's Start and End markers: the clip starts playing at \
+            `start` when the song reaches the clip, and, while its loop is off, plays until \
+            `end` (`null` for the end of the file) or the clip's own end in the arrangement, \
+            whichever comes first, then is silent. An unwarped clip plays at its file's own \
+            speed and its positions are seconds into the file (`ticks` false, the default). A \
+            warped clip (`clip.set_warp`) follows the set's tempo and its positions are ticks \
+            of its contents, from the clip's 1.1.1, with `ticks` true; a command in the other \
+            form is refused. While the loop is on, `start` must be before the loop's end. Use \
+            `clip.set_length` to change how long the clip lasts in the arrangement.",
     },
     Entry {
         id: "clip.set_loop",
@@ -1055,9 +1057,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Moves an audio clip's loop brace, in seconds into its audio file \
-            (`end` `null` for the end of the file), as the Clip View's loop Position and \
-            Length fields do. It doesn't switch the loop on or off: use \
+        description: "Moves an audio clip's loop brace, in seconds into its audio file for an \
+            unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a \
+            command in the other form is refused; `end` `null` for the end of the file), as \
+            the Clip View's loop Position and Length fields do. It doesn't switch the loop on \
+            or off: use \
             `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
             marker into the brace, then repeats the brace until the clip ends in the \
             arrangement; make the clip longer with `clip.set_length` to hear more repeats. A \
@@ -1101,7 +1105,9 @@ const ENTRIES: &[Entry] = &[
         description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
             where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
             for as long as it lasts in the arrangement; off, it plays from its Start marker to its \
-            End marker once. The Start marker must be before the brace's end to switch it on.",
+            End marker once. The Start marker must be before the brace's end to switch it on. \
+            An audio clip can only loop while Warp is on (`clip.set_warp`): switching the loop on \
+            for an unwarped audio clip is refused.",
     },
     Entry {
         id: "clip.set_gain",
@@ -1129,6 +1135,235 @@ const ENTRIES: &[Entry] = &[
             that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
             Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
             0.",
+    },
+    Entry {
+        id: "clip.set_warp",
+        action: Action::Apply("set_clip_warp"),
+        label: "Clip Warp On/Off",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's Warp on or off. Off, the clip plays at its \
+            file's own speed whatever the set's tempo, and its Start and End markers and loop \
+            brace are seconds into the file. On, it follows the set's tempo through its warp \
+            map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks \
+            from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the \
+            last marker), and its markers and brace are ticks of its contents. Switching on a \
+            clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's \
+            tempo there, so it goes on playing at the speed it did; switching off keeps the \
+            map. Either way the markers and brace convert, so each keeps its place in the \
+            audio, and the clip keeps its place and length in the arrangement. A warped clip \
+            plays through its warp map at the set's tempo, in its warp mode \
+            (`clip.set_warp_mode`); only a warped clip can loop, so switching Warp off also \
+            switches the clip's loop off in the same undo step.",
+    },
+    Entry {
+        id: "clip.insert_warp_marker",
+        action: Action::Apply("insert_warp_marker"),
+        label: "Insert Warp Marker",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Adds a warp marker to each of the warped audio clips `clips`, which must \
+            hold files of the same length: at a `beat` of the clip's contents (ticks from its \
+            1.1.1, negative before it), at the time in the file the map already places there, \
+            or at a `time` in the file (seconds), on the beat the map already places it. \
+            Give one of the two. Nothing moves; the audio either side stays where it is. \
+            Inserting where a marker is already changes nothing. Markers are named by their \
+            place in the map (`data.audio.warp_markers`), the first being 0. The edit is made \
+            to every clip in one undo step, or to none if it's refused for one. With \
+            `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at \
+            the transients just before and just after the new one, read from the clip's \
+            transients (`clip.transients`) unless `transients` lists them; it works on one \
+            clip.",
+    },
+    Entry {
+        id: "clip.insert_warp_markers",
+        action: Action::Apply("insert_warp_markers"),
+        label: "Insert Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts warp markers in a range of a warped audio clip's contents, `from` to \
+            `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, \
+            when it holds none, at its start and its end. The transients are the clip's own \
+            (`clip.transients`) unless `transients` lists times in the file. Each marker sits \
+            on the beat the map already places its time, so nothing moves; a marker already \
+            there is left. Refused for a clip that isn't warped, or while the file's analysis \
+            is not ready and `transients` is left out. One undo step.",
+    },
+    Entry {
+        id: "clip.insert_transient",
+        action: Action::Apply("insert_transient"),
+        label: "Insert Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts a transient into an audio clip at `time`, seconds in its file: Insert \
+            Transient, at the Sample Editor's insert marker when the app runs it. Putting one \
+            where a detected transient was taken away brings that one back. The edit belongs to \
+            the clip, is saved with the set, and shows in `clip.transients`. One undo step.",
+    },
+    Entry {
+        id: "clip.delete_transients",
+        action: Action::Apply("delete_transients"),
+        label: "Delete Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes transients out of an audio clip: `times` are their times in the \
+            file, in seconds, as `clip.transients` lists them. A transient put in by hand is \
+            forgotten; a detected one is noted as taken away and stays away until \
+            `clip.reset_transients`. Refused for a time that is none of the clip's transients, \
+            once the file's analysis is ready. One undo step.",
+    },
+    Entry {
+        id: "clip.reset_transients",
+        action: Action::Apply("reset_transients"),
+        label: "Reset Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes away all of an audio clip's transient edits: the transients put in \
+            by hand go, and the detected ones that were taken away come back. One undo step.",
+    },
+    Entry {
+        id: "clip.move_transient",
+        action: Action::Apply("move_transient"),
+        label: "Move Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the transient at `from` (seconds in the file, as `clip.transients` \
+            lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no \
+            audio and no warp marker. One undo step.",
+    },
+    Entry {
+        id: "clip.move_warp_markers",
+        action: Action::Apply("move_warp_markers"),
+        label: "Move Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the warp markers named in `markers` (their place in the map, the \
+            first being 0) of each of the warped audio clips `clips`, which must hold files of \
+            the same length, by the same number of ticks `by` (negative moves them earlier). \
+            Each keeps its time in the file, so the audio either side of it stretches or \
+            squeezes to fit. Refused, changing nothing, if a marker would pass or reach a \
+            neighbour that isn't moving with it. Moving the last marker sets the clip's tempo \
+            to the new last segment's, so the audio after it carries on at that speed.",
+    },
+    Entry {
+        id: "clip.shift_warp_marker",
+        action: Action::Apply("shift_warp_marker"),
+        label: "Shift Warp Marker",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the time in the file of warp marker `marker` (its place in the \
+            map, the first being 0) of each of the warped audio clips `clips`, which must hold \
+            files of the same length, by `by` seconds (negative moves it earlier), keeping \
+            its beat: the waveform moves under the marker. Refused, changing nothing, if the \
+            marker would pass a neighbour or leave the file.",
+    },
+    Entry {
+        id: "clip.delete_warp_markers",
+        action: Action::Apply("delete_warp_markers"),
+        label: "Delete Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes the warp markers named in `markers` (their place in the map, the \
+            first being 0) of each of the warped audio clips `clips`, which must hold files of \
+            the same length: the segments either side of each join into one straight segment. \
+            Deleting the last marker leaves the audio after the new last one at the clip's \
+            tempo. A warped clip keeps at least one marker: deleting them all is refused.",
+    },
+    Entry {
+        id: "clip.set_segment_bpm",
+        action: Action::Apply("set_segment_bpm"),
+        label: "Set Warp Segment BPM",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets a warped audio clip's BPM field. With `marker` (its place in the \
+            map, the first being 0), `bpm` is the tempo of the segment that starts at that \
+            marker: every later marker moves by the same number of ticks, so that segment \
+            alone changes and each later one keeps its tempo; for the last marker it is the \
+            clip's own tempo, from 1 to 1,000. Without `marker`, `bpm` is the first segment's \
+            tempo (the clip's when there's one marker) and every tempo of the clip scales by \
+            the same factor, as `clip.scale_tempo` does.",
+    },
+    Entry {
+        id: "clip.scale_tempo",
+        action: Action::Apply("scale_tempo"),
+        label: "Scale Clip Tempo",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Multiplies every segment's tempo and the clip's own tempo of a warped \
+            audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found \
+            at half or double. Each marker's distance in ticks from the first marker is \
+            multiplied by it, and the Start and End markers and loop brace move with them \
+            about the first marker, so each keeps its place in the audio. The clip's place \
+            and length in the arrangement don't change. Refused if the clip's tempo would \
+            leave 1 to 1,000 BPM.",
+    },
+    Entry {
+        id: "clip.set_warp_mode",
+        action: Action::Apply("set_clip_warp_mode"),
+        label: "Set Warp Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets how a warped audio clip's audio is fitted to the speed its warp map \
+            sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` \
+            (`data.audio.warp_mode`; a new clip is `beats`). `re_pitch` plays the file faster \
+            or slower, so its pitch moves with the speed. An unwarped clip keeps its mode for \
+            when Warp goes back on, and every mode's controls stay with the clip. Until the \
+            other modes are built, they play as `re_pitch` does.",
+    },
+    Entry {
+        id: "clip.set_warp_settings",
+        action: Action::Apply("set_clip_warp_settings"),
+        label: "Set Warp Settings",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets controls of an audio clip's warp modes, named by mode, any of them in \
+            one undo step (`data.audio.warp_settings`; a control at its default isn't listed \
+            there). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, \
+            `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, \
+            `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: \
+            `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, \
+            default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 \
+            %, default 100), `envelope` (8 to 512, default 128). Give at least one control; a \
+            value out of range refuses the whole command.",
+    },
+    Entry {
+        id: "clip.set_ram_mode",
+        action: Action::Apply("set_clip_ram_mode"),
+        label: "Set Clip RAM Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's RAM mode (`data.audio.ram`, off for a new clip). \
+            On, the clip's whole file is held in memory instead of streamed from disk, so it \
+            never underruns; the audio it plays is the same. Switching it while the clip plays \
+            leaves no gap.",
+    },
+    Entry {
+        id: "clip.set_high_quality",
+        action: Action::Apply("set_clip_high_quality"),
+        label: "Set Clip High Quality",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's high-quality interpolation (`data.audio.high_quality`, \
+            on for a new clip). On, the clip is resampled by a band-limited interpolator wherever \
+            it is read at a rate other than 1, as Re-Pitch does at any speed but 1, at more CPU \
+            and with less distortion; off, by a cheaper one. Where no resampling happens it \
+            changes nothing.",
     },
     Entry {
         id: "clip.set_legato",
@@ -1172,6 +1407,27 @@ const ENTRIES: &[Entry] = &[
             step; launching doesn't read it yet.",
     },
     Entry {
+        id: "clip.set_follow_actions",
+        action: Action::Apply("set_clip_follow_actions"),
+        label: "Set Clip Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Changes a Session clip's follow actions, as the Launch Properties panel \
+            does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the clip started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
+    },
+    Entry {
         id: "clip.set_envelope_breakpoint",
         action: Action::Apply("set_clip_envelope_breakpoint"),
         label: "Add Envelope Breakpoint",
@@ -1184,8 +1440,13 @@ const ENTRIES: &[Entry] = &[
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
             or a parameter of a device in its chain), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
-            own units. A parameter with no clip envelope gets one, linked to the clip, with \
-            this breakpoint as its first.",
+            own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
+            the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
+            31 or 33 to 119, value 0 to 127), `{\"type\": \"midi.pitch_bend\"}` (-8192 to 8191, \
+            0 at rest) or `{\"type\": \"midi.channel_pressure\"}` (0 to 127); the value is \
+            the message the clip sends to its track's devices while it plays, on any channel. \
+            A parameter with no clip envelope gets one, linked to the clip, with this \
+            breakpoint as its first.",
     },
     Entry {
         id: "clip.set_envelope_curve",
@@ -1380,6 +1641,28 @@ const ENTRIES: &[Entry] = &[
             left out or null switches the scene's tempo off, as double-clicking the field or \
             Return to Default does, so launching it leaves the set's tempo as it is. One undo \
             step.",
+    },
+    Entry {
+        id: "scene.set_follow_actions",
+        action: Action::Apply("set_scene_follow_actions"),
+        label: "Set Scene Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Changes a scene's follow actions, as the Scene View does: what the scene \
+            does after it was launched, over the scenes as a clip's do over its track's slots. \
+            `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the scene started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
     },
     Entry {
         id: "scene.set_time_signature",
@@ -1605,6 +1888,132 @@ const ENTRIES: &[Entry] = &[
             person does, use `device.load_sample`.",
     },
     Entry {
+        id: "device.insert_layers",
+        action: Action::Apply("insert_layers"),
+        label: "Add Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds layers to a multisampler at `index` (`null` for the end), each a sample named by content hash with its zones (every zone whole and unfaded in a new layer), Root Key, loop points and levels. The multisampler gives each layer the next of its own layer IDs, in order, ignoring the `id` you send; read them back from the device's `layers` in the query tool's `device` result. A sample must be in the media store to play; to add files from disk as a person does, use `device.add_layers`. One undo step.",
+    },
+    Entry {
+        id: "device.delete_layers",
+        action: Action::Apply("delete_layers"),
+        label: "Delete Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the listed layers from a multisampler, as the layer list's Delete does. A layer that isn't there refuses the whole command. One undo step.",
+    },
+    Entry {
+        id: "device.duplicate_layers",
+        action: Action::Apply("duplicate_layers"),
+        label: "Duplicate Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Copies the listed layers, each copy straight after its original with the next layer ID, as the layer list's Duplicate does. One undo step.",
+    },
+    Entry {
+        id: "device.rename_layer",
+        action: Action::Apply("rename_layer"),
+        label: "Rename Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Renames a layer, as the layer list's Rename does. The name is what the title bar shows for the first layer while Show Preset Name is on.",
+    },
+    Entry {
+        id: "device.move_layers",
+        action: Action::Apply("move_layers"),
+        label: "Move Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves the listed layers, keeping their order, so the first sits at `index` among the layers that stay; the list's order decides Round Robin's turns and which layer a sort leaves first.",
+    },
+    Entry {
+        id: "device.sort_layers",
+        action: Action::Apply("sort_layers"),
+        label: "Sort Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sorts a multisampler's layers by name, key, velocity or selector (the lowest value of that zone), ascending or `descending`, as the layer list's sorting items do. Layers that tie keep their order.",
+    },
+    Entry {
+        id: "device.set_layer_zone",
+        action: Action::Apply("set_layer_zones"),
+        label: "Change Zones",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets one kind of zone (`key` 0 to 127, `velocity` 1 to 127, or `select` 0 to 127) of the listed layers, each with its own `low`, `high` and fades (`fade_low` and `fade_high`, how many values each fade spans). A zone holds at least one value and its fades stay inside it. In a fade the layer is silent at the zone's edge and reaches full level at the fade's inner edge, linearly or constant-power as the device's Fade Mode says. One undo step, as one drag in the zone editor is.",
+    },
+    Entry {
+        id: "device.update_layers",
+        action: Action::Apply("update_layers"),
+        label: "Change Sample Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
+    },
+    Entry {
+        id: "device.set_layer_media",
+        action: Action::Apply("set_layer_media"),
+        label: "Replace Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.",
+    },
+    Entry {
+        id: "device.add_sample_edit",
+        action: Action::Apply("add_sample_edit"),
+        label: "Edit Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds one edit to the end of a sample's edit list without looking at the audio: `edit.kind` is `trim`, `cut`, `reverse`, `fade_in`, `fade_out` or `normalize`, and `edit.range` (`from` to `to`, in frames of the sample as the earlier edits left it) is its selection, left out for the whole sample (Trim and Cut need one). With a `layer` the edit joins that layer's list and its length and markers follow the audio; with none it joins the sample of the device itself, which this command doesn't check against the sample's length. The source file is never written. One undo step named for the edit. `device.edit_sample` checks the selection against the sample.",
+    },
+    Entry {
+        id: "device.clear_sample_edits",
+        action: Action::Apply("clear_sample_edits"),
+        label: "Revert Edits",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties a sample's edit list, a layer's (`layer`) or the device's own (none given). A layer's sample is `length` frames long again, the unedited sample's length at its own rate, and its markers keep their share of it. One undo step. `device.edit_sample` with `revert` reads the length itself.",
+    },
+    Entry {
+        id: "device.set_processed_layer_sample",
+        action: Action::Apply("set_processed_layer_sample"),
+        label: "Replace With Processed Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a layer's sample with a processed copy of its edited sample that is already in the media store (`media`, `length` frames at its own rate): the copy holds the edits, so the layer's list empties. `crop` is the span of the edited sample the copy keeps, which moves the markers as a Trim does; with none the markers stay where they are. One undo step, named Crop with a `crop` and Reverse without. `device.crop_sample` and `device.reverse_sample` write the copy.",
+    },
+    Entry {
+        id: "device.distribute_layers",
+        action: Action::Apply("distribute_layers"),
+        label: "Distribute Ranges",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Spreads the listed layers' ranges, in list order and without fades: `equally` gives each an equal share of the range of the zone named by `kind` (keys from 0 to 127, velocities 1 to 127, select 0 to 127), and `around_root_key` splits the keyboard between the layers' root keys, layers that share a root dividing its zone. With one layer or none listed, every layer. One undo step.",
+    },
+    Entry {
+        id: "device.set_layer_options",
+        action: Action::Apply("set_layer_options"),
+        label: "Change Sample Options",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the multisampler options that aren't parameters: `ram_mode` (decode every layer whole into memory; off, long layers stream from disk), `snap` (markers set afterwards land on zero crossings of the left channel) and `linear_loop_fades` (the title bar's Use Constant Power Fade for Loops, off when true). Options left out stay as they were.",
+    },
+    Entry {
         id: "device.set_sidechain_input",
         action: Action::Apply("set_sidechain_input"),
         label: "Set Sidechain Input",
@@ -1619,6 +2028,20 @@ const ENTRIES: &[Entry] = &[
             plays as before; the device only listens to it. The detector hears it only while \
             External is on (`device.set_sidechain_enabled`). To make a kick duck a bass, set \
             the bass compressor's source to the kick's track and switch External on.",
+    },
+    Entry {
+        id: "device.set_midi_sidechain_source",
+        action: Action::Apply("set_midi_sidechain_source"),
+        label: "Set MIDI Sidechain Source",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI \
+            source chooser in its sidechain parameters does: `track` is a MIDI track (the \
+            device's own track too), or left out for No Input, a new device's. The device \
+            hears the notes and channel messages that track's clips and input play, before \
+            its own devices change them; the track still plays as before. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
     },
     Entry {
         id: "device.set_sidechain_enabled",
@@ -1726,8 +2149,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("rename_chain"),
         label: "Rename Chain",
         permission: Permission::Edit,
-        contexts: &[DeviceView],
-        keys: &[],
+        contexts: &[RackChains],
+        keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
     },
     Entry {

@@ -707,6 +707,7 @@ version = "0.1.0"
 dependencies = [
  "bl-dsp",
  "bl-media",
+ "rayon",
  "realfft",
 ]
 
@@ -840,6 +841,7 @@ dependencies = [
 name = "bl-engine"
 version = "0.1.0"
 dependencies = [
+ "bl-analysis",
  "bl-audio-io",
  "bl-commands",
  "bl-core",
@@ -847,6 +849,8 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-rt",
+ "bl-stretch",
+ "libc",
  "libm",
  "rtgc",
  "rtrb",
@@ -913,6 +917,7 @@ version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
+ "bl-stretch",
  "imbl",
  "lspk-params",
  "proptest",
@@ -1018,6 +1023,7 @@ name = "bl-stretch"
 version = "0.1.0"
 dependencies = [
  "bl-dsp",
+ "proptest",
 ]
 
 [[package]]

@@ -86,6 +86,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 mod capture;
 mod multisampler;
 mod processed_files;
+mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
 mod session_recording;
@@ -398,6 +399,9 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// The sample being auditioned from a click in a display (WP-5.15,
+    /// R54): its device and layer, while the button is down. Not saved.
+    auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
     /// How files are analysed (WP-4.3): in memory only until the app says
     /// otherwise.
     analysis_options: bl_analysis::cache::AnalysisOptions,
@@ -729,6 +733,7 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
             analysed: std::collections::HashSet::new(),
@@ -1935,6 +1940,7 @@ impl Shell {
                             name: device_type.name.clone(),
                             role: device_type.role,
                             sidechain: false,
+                            midi_sidechain: false,
                         },
                         track,
                         chain: None,
@@ -1995,6 +2001,7 @@ impl Shell {
                             name: device_type.name.clone(),
                             role: device_type.role,
                             sidechain: false,
+                            midi_sidechain: false,
                         },
                         track,
                         chain: None,
@@ -5288,6 +5295,28 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_sfz()
+        {
+            // Spec: multisampler R47. A selected SFZ instrument loads as a
+            // multisampler onto the selected track if it is a MIDI track,
+            // otherwise onto a new one.
+            Self::args::<NoArgs>(id, args)?;
+            let doc = self.editor.document();
+            let track = self
+                .arrangement
+                .selected_tracks()
+                .first()
+                .copied()
+                .filter(|track| {
+                    doc.track(*track)
+                        .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi)
+                });
+            return self.run_multisampler(
+                multisampler_ids::IMPORT_SFZ,
+                json!({ "path": path.to_string_lossy(), "track": track }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some((device, layer, path)) = self.hot_swapped_layer_file()
         {
             // Spec: multisampler R10. Loading a sample while hot-swapping a
@@ -5326,6 +5355,7 @@ impl Shell {
                         name,
                         role: bl_model::DeviceRole::AudioEffect,
                         sidechain: false,
+                        midi_sidechain: false,
                     },
                     track: None,
                     chain: None,

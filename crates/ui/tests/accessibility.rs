@@ -1191,6 +1191,34 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The Test MIDI Sidechain on audio track 3, the selected track, its
+/// sidechain section shown, no device selected (WP-5.27).
+fn a_midi_sidechained_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::hear_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.show_sidechain",
+            json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A Wave Mod and a test utility on the selected audio track (WP-5.10),
 /// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
@@ -2030,6 +2058,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.set_warp", Exception(audio_panel)),
+        ("clip.set_warp_mode", Exception(audio_panel)),
+        ("clip.set_warp_settings", Exception(audio_panel)),
+        ("clip.set_ram_mode", Exception(audio_panel)),
+        ("clip.set_high_quality", Exception(audio_panel)),
         (
             "clip.insert_warp_markers",
             Exception(Equivalent(
@@ -2329,6 +2361,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "device.set_midi_sidechain_source",
+            main(
+                a_midi_sidechained_device,
+                device_view,
+                "MIDI Sidechain Source",
+                Key::ArrowUp,
+            ),
+        ),
+        (
             "device.set_sidechain_mix",
             main(a_sidechained_device, device_view, "Mix", Key::ArrowDown),
         ),
@@ -2393,6 +2434,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "device.import_sfz",
+            Exception(Equivalent(
+                "`browser.load_selected`, which Enter runs on a selected SFZ instrument in the \
+                 browser and loads as a multisampler (multisampler R47); this form names the \
+                 file, the track or the device",
+            )),
+        ),
+        (
             "device.add_layers",
             Exception(Gap(
                 "adding samples to the layer list is a drop of files on the zone editor; the \
@@ -2404,6 +2453,61 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Gap(
                 "dragging a zone's edge, body or fade in the zone editor has no keyboard \
                  form yet (multisampler R10)",
+            )),
+        ),
+        // Sample editing in the sampler devices (WP-5.15): the display's
+        // context menu, which the keyboard doesn't open yet, and gestures
+        // on the waveform.
+        (
+            "device.edit_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R55)",
+            )),
+        ),
+        (
+            "device.crop_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.reverse_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.audition_sample",
+            Exception(Gap(
+                "a click on the sample display, which has no keyboard form yet (multisampler R54)",
+            )),
+        ),
+        (
+            "device.convert",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R62)",
+            )),
+        ),
+        (
+            "device.add_sample_edit",
+            Exception(Equivalent(
+                "`device.edit_sample`, which checks the selection against the sample",
+            )),
+        ),
+        (
+            "device.clear_sample_edits",
+            Exception(Equivalent(
+                "`device.edit_sample` with `revert`, which reads the unedited length itself",
+            )),
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Exception(Equivalent(
+                "`device.crop_sample` and `device.reverse_sample`, which write the copy",
             )),
         ),
         (
@@ -2883,13 +2987,18 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         gaps,
         [
             "device.add_layers",
+            "device.audition_sample",
+            "device.convert",
+            "device.crop_sample",
             "device.delete_layers",
             "device.distribute_layers",
             "device.duplicate_layers",
+            "device.edit_sample",
             "device.load_sample",
             "device.move_layers",
             "device.normalize_layers",
             "device.rename_layer",
+            "device.reverse_sample",
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",

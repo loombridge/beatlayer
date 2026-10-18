@@ -51,6 +51,8 @@ pub(crate) struct DeviceDrag {
 /// scroll.
 pub struct DeviceViewUi {
     multisampler: crate::multisampler::MultisamplerUi,
+    /// Snapshot's sample displays (WP-5.15).
+    sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
     scroll: f32,
@@ -148,6 +150,7 @@ fn sample_drop(
     ui: &Ui,
     state: &DeviceViewState,
     placed: &[(DeviceId, Rect)],
+    rect: Rect,
     events: &mut Vec<UiEvent>,
 ) {
     let (dropped, pointer) = ui.input(|i| {
@@ -162,6 +165,37 @@ fn sample_drop(
     let (Some(path), Some(pointer)) = (dropped.into_iter().next(), pointer) else {
         return;
     };
+    // Spec: multisampler R47. An SFZ instrument dropped on a multisampler
+    // adds its regions as layers; anywhere else in a MIDI track's Device
+    // View it makes a multisampler on the track.
+    if crate::browser::is_sfz(&path) {
+        if !rect.contains(pointer) {
+            return;
+        }
+        let over = placed
+            .iter()
+            .find(|(_, frame)| frame.contains(pointer))
+            .filter(|(device, _)| {
+                state
+                    .devices
+                    .iter()
+                    .any(|frame| frame.id == *device && frame.multisampler.is_some())
+            });
+        match (over, state.track, state.track_kind) {
+            (Some((device, _)), _, _) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "device": device }),
+            ),
+            (None, Some(track), Some(bl_model::TrackKind::Midi)) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "track": track }),
+            ),
+            _ => {}
+        }
+        return;
+    }
     let Some((device, _)) = placed.iter().find(|(_, rect)| rect.contains(pointer)) else {
         return;
     };
@@ -202,6 +236,7 @@ impl DeviceViewUi {
     pub fn new() -> Self {
         Self {
             multisampler: crate::multisampler::MultisamplerUi::default(),
+            sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
             renaming_chain: None,
             scroll: 0.0,
@@ -323,7 +358,19 @@ impl DeviceViewUi {
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
-        sample_drop(ui, &state, &placed, events);
+        sample_drop(ui, &state, &placed, rect, events);
+    }
+
+    /// Where the zone editor is, if the selected multisampler has it open:
+    /// above the Device View in `detail` (R1).
+    #[must_use]
+    pub fn zone_editor_rect(shell: &Shell, detail: Rect) -> Option<Rect> {
+        shell.device_view_state().devices.iter().find_map(|d| {
+            d.multisampler
+                .as_ref()
+                .filter(|m| d.selected && m.view.zone_editor)
+                .map(|m| crate::multisampler::zone_editor_rect(detail, m.view.size))
+        })
     }
 
     /// Draws the zone editor of the selected multisampler whose editor is
@@ -498,15 +545,33 @@ impl DeviceViewUi {
                             &played,
                             events,
                         ),
-                        None => crate::device_panel::show(
-                            ui,
-                            theme,
-                            frame,
-                            display.as_ref(),
-                            body,
-                            &played,
-                            events,
-                        ),
+                        None => {
+                            crate::device_panel::show(
+                                ui,
+                                theme,
+                                frame,
+                                display.as_ref(),
+                                body,
+                                &played,
+                                events,
+                            );
+                            // Spec: multisampler R54. Snapshot's sample
+                            // display fills its first cell.
+                            if matches!(
+                                &frame.kind,
+                                bl_model::DeviceKind::Native { device_type }
+                                    if device_type == bl_devices::sampler::SAMPLER
+                            ) && let Some(panel) = frame.panel.as_ref()
+                                && let Some((_, cell, _)) =
+                                    crate::device_panel::place_shown(panel, frame.expanded, body)
+                                        .1
+                                        .into_iter()
+                                        .next()
+                            {
+                                self.sample_displays
+                                    .snapshot(ui, shell, theme, frame, cell, events);
+                            }
+                        }
                     }
                 }
                 self.title(
@@ -536,6 +601,8 @@ impl DeviceViewUi {
                 }
                 if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
+                    crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
             },
         );
@@ -886,8 +953,30 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
-            ui.add_enabled(false, egui::Button::new("Convert to Snapshot"))
-                .on_disabled_hover_text("Not built yet: arrives with WP-5.15.");
+            if ui.button("Convert to Snapshot").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "snapshot" }),
+                );
+                ui.close();
+            }
+        }
+        // Spec: multisampler R62. Snapshot's menu converts it the other way.
+        if matches!(
+            &frame.kind,
+            bl_model::DeviceKind::Native { device_type }
+                if device_type == bl_devices::sampler::SAMPLER
+        ) {
+            ui.separator();
+            if ui.button("Convert to Multisampler").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "multisampler" }),
+                );
+                ui.close();
+            }
         }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it

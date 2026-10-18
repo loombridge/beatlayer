@@ -61,6 +61,7 @@ pub mod menus;
 pub mod mixer;
 pub mod multisampler;
 pub mod rack_view;
+pub mod sample_display;
 pub mod sample_editor;
 pub mod scene_fields;
 pub mod scene_view;

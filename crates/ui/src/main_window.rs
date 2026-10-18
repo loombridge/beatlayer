@@ -408,8 +408,17 @@ impl MainWindowUi {
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Files dragged from the browser, or from Finder or Explorer,
             // land in the Arrangement (WP-1.10).
-            self.browser
-                .drop_overlay(ui, shell, theme, layout.main_view, &mut events);
+            // The zone editor, which sits over the foot of the Arrangement,
+            // takes the files dropped on it itself.
+            let zone_editor =
+                crate::device_view::DeviceViewUi::zone_editor_rect(shell, layout.detail);
+            self.browser.drop_overlay(
+                ui,
+                shell,
+                theme,
+                (layout.main_view, zone_editor),
+                &mut events,
+            );
             // The Status Bar draws before the Info View, so the elements
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);

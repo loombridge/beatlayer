@@ -245,6 +245,9 @@ pub enum ItemKind {
     Folder,
     /// An audio file Beatlayer can open.
     Audio,
+    /// An SFZ multisample instrument, which imports as a multisampler
+    /// (WP-5.14).
+    Sfz,
     /// A Beatlayer set.
     Set,
     /// A Beatlayer device preset, which loads into the device being

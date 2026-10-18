@@ -6,6 +6,7 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 |---|---|---|
 | `peak_file` | Bytes as read from a `.blpeaks` file: magic, header, run table, data block, and BLAKE3 checksum | No panic. Anything the reader accepts saves again and loads back as the same peaks. |
 | `preset` | Bytes as read from a `.blpreset` file: JSON format header, schema version, device info, and parameters | No panic. Anything the decoder accepts saves again and decodes to the same preset. |
+| `sfz` | Bytes as read from an `.sfz` file: comments, `#define`, headers and opcodes (no `#include` files) | No panic. Every region it reads has zones, a detune and a pan inside the layers' ranges. |
 | `set_file` | Bytes as read from a `.blset` file: zstd, its checksum, the JSON, migrations, and the document model's rules | No panic. Anything the loader accepts saves again, loads back as the same song, and gives an editor that hands out an unused ID. |
 | `set_json` | The JSON inside a set, skipping the compression and checksum that random bytes rarely get through | The same |
 
@@ -29,6 +30,8 @@ cargo +nightly fuzz run set_file corpus/set_file ../crates/project/tests/fixture
 cargo +nightly fuzz run peak_file corpus/peak_file -- \
   -max_total_time=300
 cargo +nightly fuzz run preset corpus/preset -- \
+  -max_total_time=300
+cargo +nightly fuzz run sfz corpus/sfz -- \
   -max_total_time=300
 ```
 

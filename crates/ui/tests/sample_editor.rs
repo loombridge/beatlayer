@@ -121,7 +121,9 @@ fn sample(name: &str, warp: bool) -> Sample {
     };
     h.shell.wait_analysis(media).unwrap();
     let mut peaks = MemoryPeaks::new();
-    let data = h.shell.layer_audio(media).unwrap();
+    // The same file, read again for its peaks.
+    let store = bl_media::MediaStore::new();
+    let data = store.load(store.import(&path).unwrap()).unwrap();
     peaks.insert(media, Arc::new(Peaks::from_samples(&data).unwrap()));
     h.main
         .arrangement_mut()

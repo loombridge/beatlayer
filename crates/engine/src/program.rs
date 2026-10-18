@@ -87,6 +87,11 @@ pub struct EngineProgram {
     pub(crate) sidechains: Vec<DeviceSidechain>,
     /// What each sidechain sums into its buffer.
     pub(crate) sidechain_inputs: Vec<Input>,
+    /// The MIDI sidechains of the devices each task runs (WP-5.27).
+    pub(crate) midi_sidechains: Vec<DeviceMidiSidechain>,
+    /// The notes of each MIDI track a MIDI sidechain listens to, kept for
+    /// the block: what its clips and input played, before its devices.
+    pub(crate) midi_kept: Shared<NoteBuffer>,
     /// One buffer per sidechain, holding what its device's detector
     /// hears.
     pub(crate) sidechain_pool: Shared<f32>,
@@ -547,6 +552,20 @@ pub(crate) struct DeviceSidechain {
     pub(crate) before: u32,
 }
 
+/// A device's MIDI sidechain in a task's chain (WP-5.27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeviceMidiSidechain {
+    /// The device's slot.
+    pub(crate) device: u32,
+    /// The task whose notes it hears, or [`NO_TASK`].
+    pub(crate) from: u32,
+    /// The source's notes in `midi_kept`, or [`NO_TASK`] with no source.
+    pub(crate) kept: u32,
+}
+
+/// No source task: a MIDI sidechain at No Input.
+pub(crate) const NO_TASK: u32 = u32::MAX;
+
 /// One track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Task {
@@ -561,6 +580,11 @@ pub(crate) struct Task {
     pub(crate) chain: Span,
     /// The sidechains of its devices, in `sidechains`.
     pub(crate) sidechains: Span,
+    /// The MIDI sidechains of its devices, in `midi_sidechains`.
+    pub(crate) midi_sidechains: Span,
+    /// Where it keeps the notes it plays for the MIDI sidechains that
+    /// listen to it, in `midi_kept`.
+    pub(crate) midi_keep: Option<u32>,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The delay line its clips are held back through so they line up with
@@ -1017,6 +1041,16 @@ impl EngineProgram {
         // its clips' notes, on its own frames.
         self.midi.play(task.track, from, until, turn.notes(notes));
 
+        // Spec: routing R32. What the track played, kept for the MIDI
+        // sidechains that listen to it.
+        if let Some(kept) = task.midi_keep {
+            let to = turn.keep_notes(kept);
+            to.clear();
+            for &note in turn.notes(notes).notes() {
+                to.push(note);
+            }
+        }
+
         // Its clips, held back to line up with its inputs.
         if task.clip_delay != NO_DELAY {
             let (line, ring) = turn.delay(task.clip_delay);
@@ -1382,8 +1416,8 @@ pub(crate) struct Blk<'a> {
 /// sidechains and clip player; its buffer, its rack chains' buffers, the
 /// copies it keeps of its signal, and its sidechains' buffers; the delay
 /// lines of its inputs, its clips and its rack chains; its pair of note
-/// buffers and its rack chains'; its rack chains' merge cursors; and its
-/// track's MIDI input. The compiler gives each part to one task and one
+/// buffers and its rack chains', and the notes it keeps for MIDI
+/// sidechains; its rack chains' merge cursors; and its track's MIDI input. The compiler gives each part to one task and one
 /// place in it, so two threads running different tasks, or different chains
 /// of one rack, never reach the same part. What a task reads from another
 /// is that task's finished output, or the copy it kept, which the
@@ -1492,6 +1526,26 @@ impl<'p> Turn<'p> {
     fn notes(&self, index: usize) -> &'p mut NoteBuffer {
         // SAFETY: the pairs are the task's and its chains' alone.
         unsafe { self.program.note_buffers.element(index) }
+    }
+
+    /// Kept-notes buffer `index`, to write the notes the task played.
+    fn keep_notes(&self, index: u32) -> &'p mut NoteBuffer {
+        // SAFETY: only the task that is the source of the MIDI sidechains
+        // that read it writes it.
+        unsafe { self.program.midi_kept.element(index as usize) }
+    }
+
+    /// Kept-notes buffer `index`, read: the notes a source task played,
+    /// finished before this task started or the task's own.
+    fn kept_notes(&self, index: u32) -> &'p NoteBuffer {
+        // SAFETY: the task that keeps it wrote it before it finished, or
+        // is this one and isn't writing it now.
+        unsafe {
+            &self
+                .program
+                .midi_kept
+                .view(index as usize..index as usize + 1)[0]
+        }
     }
 
     /// Two different note buffers of the task, in the order asked.
@@ -1607,6 +1661,16 @@ impl EngineProgram {
                 }
             }
             let [in_buf, out_buf] = turn.note_pair(pair + note_idx, pair + 1 - note_idx);
+            // Spec: routing R32. A device with a MIDI sidechain hears its
+            // source's notes, or none at No Input, in place of the chain's.
+            let heard_notes = match self.midi_sidechains[task.midi_sidechains.range()]
+                .iter()
+                .find(|m| m.device == slot)
+            {
+                Some(m) if m.kept == NO_TASK => Some(&[][..]),
+                Some(m) => Some(turn.kept_notes(m.kept).notes()),
+                None => None,
+            };
             // A modulator worked out its rows before the tasks ran and
             // leaves the chain's audio and notes as they are.
             if turn.slot(slot).modulator {
@@ -1643,7 +1707,7 @@ impl EngineProgram {
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
-                notes: in_buf.notes(),
+                notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: block.session,
                 modulation: Bus::new(&self.bus, stride, frames),

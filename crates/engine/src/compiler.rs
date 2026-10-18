@@ -21,8 +21,9 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, MergeCursor, Migration,
-    NO_CHAIN, NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input, Instance,
+    MergeCursor, Migration, NO_CHAIN, NO_DELAY, NO_TASK, NodeSlot, Rack, RackChain, RackMode, Span,
+    Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -363,6 +364,16 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
+            // A sampler whose sample's edits changed gets the edited sample
+            // again as node data, with no new program (R57).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.sample_edits != after.sample_edits
+                && before.media == after.media
+                && let Some(media) = after.media_at(0)
+            {
+                self.send_slot_sample(id, 0, media, &after.sample_edits, &mut update);
+            }
         }
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
@@ -449,6 +460,33 @@ impl Compiler {
         self.compile_with(&document, &Resend::default())
     }
 
+    /// Sends a sampler's node the audio of one of its sample slots, with
+    /// `edits` applied (WP-2.16, R57): the media library decodes and renders
+    /// here, on the compiler's thread, and shares the result with every
+    /// other reader of the same source and list; media it can't supply is
+    /// reported missing and plays silence.
+    fn send_slot_sample(
+        &mut self,
+        device: DeviceId,
+        slot: usize,
+        media: ContentHash,
+        edits: &[bl_model::SampleEdit],
+        update: &mut Update,
+    ) {
+        let rate = self.config.sample_rate;
+        match self
+            .registry
+            .media()
+            .and_then(|library| library.edited_sample(media, rate, edits))
+        {
+            Some(sample) => update.data.push((
+                NodeKey::Device(device),
+                self.gc.data(SlotSample { slot, sample }),
+            )),
+            None => update.missing.push(media),
+        }
+    }
+
     /// Sends a multisampler's node its layers, each with its decoded audio
     /// (WP-5.13, R31): the media library decodes here, on the compiler's
     /// thread, and shares each file with every other reader; a layer whose
@@ -469,7 +507,10 @@ impl Compiler {
                 // R23: with RAM Mode off, a layer over ten seconds is read
                 // in the background behind its held start; the rest decode
                 // whole.
+                // The edits are applied to the whole decoded sample (R57), so
+                // a layer that has some is read whole.
                 let long = !device.layers.ram_mode
+                    && layer.edits.is_empty()
                     && layer.length > u64::from(layer.sample_rate) * LONG_LAYER_SECONDS;
                 let held = self
                     .progressive
@@ -487,7 +528,7 @@ impl Compiler {
                 let sample = match progressive {
                     Some(sample) => Some(LayerSample::Progressive(sample)),
                     None => library
-                        .and_then(|library| library.sample(layer.media, rate))
+                        .and_then(|library| library.edited_sample(layer.media, rate, &layer.edits))
                         .map(LayerSample::Whole),
                 };
                 if sample.is_none() {
@@ -569,7 +610,15 @@ impl Compiler {
             .enumerate()
             .map(|(i, &id)| (id, i as u32))
             .collect();
-        let mut build = Build::default();
+        let build_midi_sources = graph
+            .midi_links
+            .iter()
+            .filter_map(|link| Some((link.device, *task_of.get(&link.from)?)))
+            .collect();
+        let mut build = Build {
+            midi_sources: build_midi_sources,
+            ..Build::default()
+        };
 
         // Each track's inputs, in the order the graph lists them.
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
@@ -635,6 +684,21 @@ impl Compiler {
                 *slot = Some(kept);
                 kept += 1;
             }
+        }
+
+        // Tasks whose notes a MIDI sidechain hears keep a copy of them.
+        let mut midi_kept = 0;
+        for at in 0..build.midi_sidechains.len() {
+            let from = build.midi_sidechains[at].from;
+            if from == NO_TASK {
+                continue;
+            }
+            let keep = &mut build.tasks[from as usize].midi_keep;
+            let index = *keep.get_or_insert_with(|| {
+                midi_kept += 1;
+                midi_kept - 1
+            });
+            build.midi_sidechains[at].kept = index;
         }
 
         // The chains that routes tap keep a copy at each tap too.
@@ -730,6 +794,12 @@ impl Compiler {
             sidechain_pool: Shared::new(vec![0.0; build.sidechains.len() * size]),
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
+            midi_sidechains: build.midi_sidechains,
+            midi_kept: Shared::new(
+                (0..midi_kept)
+                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .collect(),
+            ),
             pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
             tap_pool: Shared::new(vec![0.0; kept as usize * size]),
             delay_lines,
@@ -793,19 +863,8 @@ impl Compiler {
         // (WP-2.16). The update reaches the node after the program that
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
-        let rate = self.config.sample_rate;
-        for &(device, slot, media) in &build.media {
-            match self
-                .registry
-                .media()
-                .and_then(|library| library.sample(media, rate))
-            {
-                Some(sample) => update.data.push((
-                    NodeKey::Device(device),
-                    self.gc.data(SlotSample { slot, sample }),
-                )),
-                None => update.missing.push(media),
-            }
+        for (device, slot, media, edits) in &build.media {
+            self.send_slot_sample(*device, *slot, *media, edits, &mut update);
         }
         for &device in &build.layered {
             self.send_layers(document, device, &mut update);
@@ -1048,10 +1107,15 @@ impl Compiler {
             _ => None,
         };
         let sidechain_start = build.sidechains.len() as u32;
+        let midi_start = build.midi_sidechains.len() as u32;
         let chain = self.add_flow(build, track.devices(), sidechain_inputs, &mut dependencies);
         let sidechains = Span {
             start: sidechain_start,
             end: build.sidechains.len() as u32,
+        };
+        let midi_sidechains = Span {
+            start: midi_start,
+            end: build.midi_sidechains.len() as u32,
         };
         let mixer = self.place(
             build,
@@ -1073,6 +1137,8 @@ impl Compiler {
             player,
             chain,
             sidechains,
+            midi_sidechains,
+            midi_keep: None,
             mixer,
             clip_delay: NO_DELAY,
             pre_fx: None,
@@ -1118,7 +1184,14 @@ impl Compiler {
                         // with this compile's update (WP-2.16).
                         for (slot, media) in device.media.iter().enumerate() {
                             if let Some(media) = *media {
-                                build.media.push((device.id, slot, media));
+                                // Only slot 0 has edits (the sampler's one
+                                // sample).
+                                let edits = if slot == 0 {
+                                    device.sample_edits.clone()
+                                } else {
+                                    Vec::new()
+                                };
+                                build.media.push((device.id, slot, media, edits));
                             }
                         }
                         if !device.layers.is_default() {
@@ -1145,6 +1218,15 @@ impl Compiler {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
                 *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
                 self.add_sidechain(build, device.id, settings, slot, sources);
+            }
+            if device.midi_sidechain.is_some() {
+                let from = build.midi_sources.get(&device.id).copied();
+                *dependencies += u32::from(from.is_some_and(|from| from != own));
+                build.midi_sidechains.push(DeviceMidiSidechain {
+                    device: slot,
+                    from: from.unwrap_or(NO_TASK),
+                    kept: NO_TASK,
+                });
             }
         }
         let start = build.steps.len() as u32;
@@ -1360,6 +1442,9 @@ struct Build {
     chain_index: BTreeMap<ChainId, u32>,
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
+    /// The task each device's MIDI sidechain listens to (WP-5.27).
+    midi_sources: BTreeMap<DeviceId, u32>,
+    midi_sidechains: Vec<DeviceMidiSidechain>,
     unhosted: Vec<DeviceId>,
     /// The modulators' slots and devices, in the order their rows sit on the
     /// bus (WP-5.10).
@@ -1367,7 +1452,7 @@ struct Build {
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, usize, ContentHash)>,
+    media: Vec<(DeviceId, usize, ContentHash, Vec<bl_model::SampleEdit>)>,
     /// Devices new in this program that hold layers (WP-5.13): their layers,
     /// with each one's decoded audio, go with this compile's update.
     layered: Vec<DeviceId>,
@@ -1428,6 +1513,14 @@ fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
         for input in build.inputs[task.inputs.range()].iter().chain(sidechains) {
             dependents[input.from as usize].push(t as u32);
             waiting[t] += 1;
+        }
+        // A MIDI sidechain waits for the track whose notes it hears, unless
+        // that is its own track.
+        for midi in &build.midi_sidechains[task.midi_sidechains.range()] {
+            if midi.from != NO_TASK && midi.from as usize != t {
+                dependents[midi.from as usize].push(t as u32);
+                waiting[t] += 1;
+            }
         }
     }
     let mut left = waiting;
@@ -1761,6 +1854,7 @@ fn needs_program(
                     || before.enabled != after.enabled
                     || before.media != after.media
                     || was.map(|s| &s.input) != is.map(|s| &s.input)
+                    || before.midi_sidechain != after.midi_sidechain
                 {
                     recompile = true;
                 }
@@ -2507,6 +2601,90 @@ mod tests {
         assert_eq!(clips_in(&update, other), Some(1));
         // 2 audio track players and 2 MIDI track players.
         assert_eq!(update.data.len(), 4);
+    }
+
+    // Spec: warping R17. A warp edit, and the warp mode's settings, send the
+    // track's player its clips with their tables, and never a program.
+    #[test]
+    fn warp_edits_send_node_data_and_never_a_program() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, BeatsUpdate, Clip, ClipData, ContentHash, WarpMarker, WarpMode};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 96_000]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        f.sync();
+        let id = f.editor.new_id();
+        let data = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(100.0),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let update = f.apply(Command::CreateClip {
+            track: audio,
+            clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+        for command in [
+            Command::InsertWarpMarker {
+                clips: vec![id],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+                pin_neighbours: false,
+                transients: None,
+            },
+            Command::SetSegmentBpm {
+                clip: id,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+            Command::SetClipWarpMode {
+                clip: id,
+                mode: WarpMode::RePitch,
+            },
+            Command::SetClipWarpSettings {
+                clip: id,
+                beats: Some(BeatsUpdate {
+                    transient_envelope: Some(50),
+                    ..BeatsUpdate::default()
+                }),
+                tones: None,
+                texture: None,
+                complex_pro: None,
+            },
+            Command::SetClipHighQuality {
+                clip: id,
+                high_quality: false,
+            },
+            Command::SetClipRamMode {
+                clip: id,
+                ram: true,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: false,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: true,
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.program.is_none(), "{command:?} built a program");
+            assert_eq!(clips_in(&update, audio), Some(1), "{command:?}");
+        }
+        // A tempo change recompiles, and sends the tables under the new map.
+        let update = f.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(90.0).unwrap()),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
     }
 
     // Spec: audio-clips R18, R19

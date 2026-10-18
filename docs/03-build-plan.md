@@ -519,7 +519,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.34 | todo |  |  |
 | 5.35 | todo |  |  |
 | 5.36 | todo |  |  |
-| 5.37 | todo |  |  |
+| 5.37 | done | 18 October 2026 | [#152](https://github.com/loombridge/beatlayer/pull/152); a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains beside the audio thread, bit-identical to one thread; 128 tracks with an EQ and a compressor played ten minutes on an M1 Pro without a dropout; exports still render on one thread |
 | 5.38 | todo |  | IMP-15 waits on its acceptance |
 | 5.39 | todo |  |  |
 | 5.40 | todo |  |  |

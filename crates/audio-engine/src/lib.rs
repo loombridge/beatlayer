@@ -26,15 +26,18 @@
 #[cfg(test)]
 bl_rt::install_trap!();
 
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use bl_audio_io::{
-    AudioBuffer, AudioBufferMut, AudioCallback, BackendFactory, Error, ErrorKind, PowerMonitor,
-    ProcessContext, StreamClient, StreamInfo, StreamRequest, StreamStats, Supervisor,
+    AudioBuffer, AudioBufferMut, AudioCallback, BackendFactory, BackendKind, Error, ErrorKind,
+    PowerMonitor, ProcessContext, StreamClient, StreamInfo, StreamRequest, StreamStats, Supervisor,
+    ThreadReport, Workgroup,
 };
 use bl_core::time::SampleRate;
 use bl_engine::{
-    Carry, Engine, EngineConfig, EngineState, ParamEvent, Processor, Registry, Restarter,
+    Carry, Engine, EngineConfig, EngineState, ParamEvent, Pool, PoolConfig, Processor, Registry,
+    Restarter,
 };
 use rtrb::{Consumer, Producer, RingBuffer};
 
@@ -67,6 +70,8 @@ pub struct AudioEngine {
     // engine's threads still run.
     supervisor: Supervisor,
     engine: Engine,
+    /// What set-up did to each worker of the running stream's pool.
+    workers: Arc<Mutex<Vec<ThreadReport>>>,
 }
 
 impl AudioEngine {
@@ -110,21 +115,62 @@ impl AudioEngine {
         options: SupervisorOptions,
         power: Box<dyn PowerMonitor>,
     ) -> Result<Self, Error> {
+        Self::start_with_workers(config, registry, backend, request, options, power, None)
+    }
+
+    /// [`start_with_power`](Self::start_with_power), with a pool of real-time
+    /// workers beside each stream's audio thread (the multicore scheduler,
+    /// WP-5.37): `workers` of them, or, for `None`, as many as the stream's
+    /// workgroup allows or the machine's cores less one. A pool starts with
+    /// every stream the supervisor opens, and stops with it, so a device
+    /// change gives the new stream a pool of its own, joined to the new
+    /// device's workgroup.
+    ///
+    /// # Errors
+    ///
+    /// If the backend can't be made or a thread can't start.
+    pub fn start_with_workers(
+        config: EngineConfig,
+        registry: Registry,
+        backend: BackendFactory,
+        request: StreamRequest,
+        options: SupervisorOptions,
+        power: Box<dyn PowerMonitor>,
+        workers: Option<usize>,
+    ) -> Result<Self, Error> {
         let engine = Engine::start_detached(config, registry).map_err(|e| {
             Error::new(
                 ErrorKind::Backend,
                 format!("couldn't start the engine's threads: {e}"),
             )
         })?;
+        let reports = Arc::new(Mutex::new(Vec::new()));
         let client = EngineClient {
             restarter: engine.restarter(),
             base: config,
             returning: None,
             carry: None,
+            workers,
+            reports: Arc::clone(&reports),
         };
         let supervisor =
             Supervisor::start_with_power(backend, request, Box::new(client), options, power)?;
-        Ok(Self { supervisor, engine })
+        Ok(Self {
+            supervisor,
+            engine,
+            workers: reports,
+        })
+    }
+
+    /// What set-up did to each worker of the running stream's pool, in the
+    /// order they started: their priority, and whether each joined the
+    /// stream's audio workgroup (macOS). Empty while no stream runs.
+    #[must_use]
+    pub fn workers(&self) -> Vec<ThreadReport> {
+        self.workers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// The engine: sync documents to it, play, stop, schedule.
@@ -220,10 +266,19 @@ struct EngineClient {
     /// What the last processor handed on, for the next: `None` before the
     /// first stream, or if a processor never came back.
     carry: Option<Carry>,
+    /// How many workers each stream's pool has, if not what the stream
+    /// suggests.
+    workers: Option<usize>,
+    /// Where each pool says how its workers' set-up went.
+    reports: Arc<Mutex<Vec<ThreadReport>>>,
 }
 
 impl StreamClient for EngineClient {
-    fn open(&mut self, info: &StreamInfo) -> Result<Box<dyn AudioCallback>, Error> {
+    fn open(
+        &mut self,
+        info: &StreamInfo,
+        workgroup: Option<Workgroup>,
+    ) -> Result<Box<dyn AudioCallback>, Error> {
         let sample_rate = SampleRate::new(info.sample_rate)
             .ok_or_else(|| Error::new(ErrorKind::UnsupportedConfig, "the device runs at 0 Hz"))?;
         let config = EngineConfig {
@@ -238,7 +293,7 @@ impl StreamClient for EngineClient {
         // Taken, so a processor that never comes back can't leave a stale
         // position for the restart after.
         let carry = self.carry.take();
-        let Some(processor) = self
+        let Some(mut processor) = self
             .restarter
             .restart(config, carry.clone(), RESTART_TIMEOUT)
         else {
@@ -248,6 +303,28 @@ impl StreamClient for EngineClient {
                 "the engine's compiler didn't make a processor in time",
             ));
         };
+        // The pool is made here, where waiting is allowed, and goes to the
+        // audio thread with the processor. A pool that can't start leaves the
+        // audio thread to run the song alone.
+        let frames = info.buffer_size.unwrap_or(info.max_block_frames);
+        let period = Duration::from_secs_f64(f64::from(frames) / f64::from(info.sample_rate));
+        let promote = workgroup.is_some() || info.backend != BackendKind::Null;
+        let mut pool = PoolConfig::for_stream(period, workgroup, promote);
+        // The null device is a test's: it runs as fast as it can unless
+        // paced, and workers beside it are asked for, not assumed.
+        if let Some(workers) = self.workers {
+            pool.workers = workers;
+        } else if info.backend == BackendKind::Null {
+            pool.workers = 0;
+        }
+        let pool = Pool::start(&config, &pool)
+            .ok()
+            .filter(|pool| pool.workers() > 0);
+        *self.reports.lock().unwrap_or_else(PoisonError::into_inner) = pool
+            .as_ref()
+            .map(|pool| pool.reports().to_vec())
+            .unwrap_or_default();
+        processor.set_pool(pool);
         let (returns, returning) = RingBuffer::new(1);
         self.returning = Some(returning);
         Ok(Box::new(EngineCallback {
@@ -264,6 +341,12 @@ impl StreamClient for EngineClient {
         {
             self.carry = Some(processor.park());
         }
+        // The processor, and its pool, are gone: the workers have left the
+        // workgroup.
+        self.reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.restarter.detach();
     }
 }

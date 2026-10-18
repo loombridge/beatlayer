@@ -296,9 +296,10 @@ impl NoteBuffer {
             .iter()
             .rposition(|n| n.offset <= note.offset)
             .map_or(0, |i| i + 1);
-        // Anything but a note-on or a channel message goes before the
-        // note-ons on its frame.
-        if !(ons(&note) || note.kind.is_message()) {
+        // Anything but a note-on, a channel message or a note's expression
+        // goes before the note-ons on its frame.
+        let expression = matches!(note.kind, NoteKind::Expression { .. });
+        if !(ons(&note) || note.kind.is_message() || expression) {
             let frame = self.notes[..at]
                 .iter()
                 .rposition(|n| n.offset < note.offset)
@@ -653,6 +654,14 @@ impl<'a> Block<'a> {
     /// whose track is its own. Empty outside a program's run.
     pub fn session(&self) -> &'a [SessionPlayback] {
         self.session
+    }
+
+    /// The Session clip that sets `list`'s parameters in this block
+    /// (WP-3.12): the one playing on the list's track, or holding where it
+    /// stopped on a track that stays taken over.
+    #[must_use]
+    pub fn session_now(&self, list: &crate::AutomationList) -> crate::SessionNow<'a> {
+        list.now(self.session, self.tempo, self.sample_rate)
     }
 
     /// The song's tempo map, which places ticks on frames: the song

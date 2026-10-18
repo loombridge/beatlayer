@@ -10,7 +10,7 @@ use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::modbus::{Bus, Control};
 use bl_engine::{
     AutomationList, Block, DeviceType, DisplayReader, DisplayWriter, Node, NodeConfig, NodeData,
-    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, display_channel, segments,
+    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, SessionNow, display_channel, segments,
 };
 use bl_model::modulation::Travel;
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
@@ -373,13 +373,23 @@ impl ParamBank {
 
     /// Works out every parameter's value for the next `frames` frames: an
     /// automated one from its envelope, on the exact frame, when the song
-    /// plays at song frame `from`; a held one at the position a modulator
-    /// in Remote Control holds it at; then the clips' and the modulators'
-    /// modulation on top of that base (the modulation spec, R2, R3 and
-    /// R14), clamped to the parameter's range; the rest gliding toward
-    /// their values as always. `bus` holds the modulators' rows, whose
-    /// frame `offset` is the stretch's first.
-    fn advance(&mut self, frames: usize, from: Option<i64>, bus: Bus<'_>, offset: usize) {
+    /// plays at song frame `from`, or from the automation envelope of the
+    /// Session clip playing on the track (WP-3.12); a held one at the
+    /// position a modulator in Remote Control holds it at; then the clips'
+    /// and the modulators' modulation on top of that base (the modulation
+    /// spec, R2, R3 and R14), clamped to the parameter's range; the rest
+    /// gliding toward their values as always. `bus` holds the modulators'
+    /// rows, whose frame `offset` is the stretch's first. `block` says which
+    /// Session clip plays; a modulator's own parameters, worked out without
+    /// one, follow no Session clip.
+    fn advance(
+        &mut self,
+        frames: usize,
+        from: Option<i64>,
+        bus: Bus<'_>,
+        offset: usize,
+        block: Option<&Block<'_>>,
+    ) {
         self.frames = frames;
         let automation = self.automation.clone();
         let automation = automation
@@ -394,34 +404,34 @@ impl ParamBank {
                 Self::glide(slot, frames);
                 continue;
             };
-            let envelope = from.and_then(|_| list.envelope(id));
+            let driven = from.is_some() && list.drives(id);
             let modulates = list.modulates(id);
-            if envelope.is_none() && !modulates {
+            if !driven && !modulates {
                 Self::glide(slot, frames);
                 continue;
             }
-            // The base is a modulator's hold, else the envelope's value on
-            // each frame, else the control's, which glides as it always
-            // does; the modulation acts on it on the frame, without a glide
-            // of its own, and never changes it: when it goes, the parameter
-            // plays its base again.
+            let now = block.map_or(SessionNow::NONE, |block| block.session_now(list));
+            // The base is a modulator's hold, else the value an envelope
+            // sets on each frame, else the control's, which glides as it
+            // always does; the modulation acts on it on the frame, without a
+            // glide of its own, and never changes it: when it goes, the
+            // parameter plays its base again.
             let travel = Travel::Param(descriptor);
             let mut base = 0.0;
             let mut played = 0.0;
             let mut held = false;
+            let mut set = false;
             for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
                 let song = from.map(|from| from + i as i64);
                 let at = offset + i;
-                let control = if envelope.is_none() {
-                    slot.smoother.step()
-                } else {
-                    0.0
-                };
+                let driven = song.and_then(|frame| list.driven(id, frame, &now));
+                set = driven.is_some();
+                let control = if set { 0.0 } else { slot.smoother.step() };
                 let position = list.held(id, bus, at);
                 held = position.is_some();
-                base = match (position, envelope, song) {
-                    (Some(position), ..) => travel.value(position),
-                    (None, Some(envelope), Some(frame)) => envelope.value_at(frame),
+                base = match (position, driven) {
+                    (Some(position), _) => travel.value(position),
+                    (None, Some(value)) => value,
                     _ => control,
                 };
                 played = descriptor.clamp(list.played(travel, id, song, base, bus, at));
@@ -430,7 +440,9 @@ impl ParamBank {
             if frames == 0 {
                 continue;
             }
-            if envelope.is_some() && !held {
+            // A parameter an envelope set in the block's last frame leaves
+            // its control's glide at that value.
+            if set && !held {
                 slot.smoother.snap(descriptor.clamp(base));
             }
             slot.modulated =
@@ -615,8 +627,13 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             let from = transport
                 .playing
                 .then(|| transport.position.get() + segment.range.start as i64);
-            self.params
-                .advance(segment.range.len(), from, bus, segment.range.start);
+            self.params.advance(
+                segment.range.len(),
+                from,
+                bus,
+                segment.range.start,
+                Some(block),
+            );
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
@@ -646,8 +663,13 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             let from = transport
                 .playing
                 .then(|| transport.position.get() + segment.range.start as i64);
-            self.params
-                .advance(segment.range.len(), from, earlier, segment.range.start);
+            self.params.advance(
+                segment.range.len(),
+                from,
+                earlier,
+                segment.range.start,
+                None,
+            );
             let mut modulation = Modulation {
                 ctl: &mut *ctl,
                 range: segment.range,

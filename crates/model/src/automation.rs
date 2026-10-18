@@ -52,7 +52,10 @@ pub enum MixerParam {
 #[schemars(
     description = "Which parameter of the track an envelope drives: `mixer` with a `param`, \
                    `send` with the return track it feeds (`to`), `device` with the device \
-                   and its `param`, or `chain` with a rack's chain and its mixer `param`."
+                   and its `param`, or `chain` with a rack's chain and its mixer `param`. \
+                   A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` \
+                   with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or \
+                   `midi.channel_pressure`."
 )]
 pub enum AutomationTarget {
     /// A control of the track's mixer.
@@ -80,6 +83,93 @@ pub enum AutomationTarget {
         /// The control.
         param: MixerParam,
     },
+    /// A continuous controller of a MIDI clip's MIDI Ctrl envelopes
+    /// (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's
+    /// envelope names it; a track has no automation for it.
+    #[serde(rename = "midi.cc")]
+    MidiCc {
+        /// The controller number.
+        number: u8,
+    },
+    /// A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
+    #[serde(rename = "midi.pitch_bend")]
+    MidiPitchBend,
+    /// A MIDI clip's channel pressure envelope, from 0 to 127.
+    #[serde(rename = "midi.channel_pressure")]
+    MidiChannelPressure,
+}
+
+impl AutomationTarget {
+    /// The range of values a MIDI controller target holds, or `None` for a
+    /// parameter target (WP-2.29, the MIDI controller data spec, R1).
+    #[must_use]
+    pub fn midi_range(&self) -> Option<(f64, f64)> {
+        match *self {
+            Self::MidiCc { .. } | Self::MidiChannelPressure => Some((0.0, 127.0)),
+            Self::MidiPitchBend => Some((-8192.0, 8191.0)),
+            _ => None,
+        }
+    }
+
+    /// Whether this names a MIDI controller rather than a parameter.
+    #[must_use]
+    pub fn is_midi(&self) -> bool {
+        self.midi_range().is_some()
+    }
+
+    /// Whether a controller number is one a clip envelope can hold: 1 to 31
+    /// and 33 to 119. 0 and 32 select banks and 120 to 127 are channel mode
+    /// messages (the MIDI controller data spec, R1).
+    #[must_use]
+    pub fn is_clip_controller(number: u8) -> bool {
+        matches!(number, 1..=31 | 33..=119)
+    }
+
+    /// The controllers a clip can hold, in number order.
+    pub fn clip_controllers() -> impl Iterator<Item = u8> {
+        (1..=31).chain(33..=119)
+    }
+
+    /// The General MIDI name of a controller the clip can hold, such as
+    /// "Modulation Wheel" for 1 (the MIDI controller data spec, R8). The
+    /// controllers 33 to 63 are the least significant bytes of 1 to 31.
+    #[must_use]
+    pub fn controller_name(number: u8) -> String {
+        let fixed = match number {
+            1 => "Modulation Wheel",
+            2 => "Breath Controller",
+            4 => "Foot Controller",
+            5 => "Portamento Time",
+            6 => "Data Entry",
+            7 => "Channel Volume",
+            8 => "Balance",
+            10 => "Pan",
+            11 => "Expression Controller",
+            12 => "Effect Control 1",
+            13 => "Effect Control 2",
+            16..=19 => return format!("General Purpose Controller {}", number - 15),
+            33..=63 => return format!("LSB for CC {}", number - 32),
+            64 => "Sustain Pedal",
+            65 => "Portamento On/Off",
+            66 => "Sostenuto",
+            67 => "Soft Pedal",
+            68 => "Legato Footswitch",
+            69 => "Hold 2",
+            74 => "MPE Slide (Sound Controller 5)",
+            70..=79 => return format!("Sound Controller {}", number - 69),
+            80..=83 => return format!("General Purpose Controller {}", number - 75),
+            84 => "Portamento Control",
+            91..=95 => return format!("Effects {} Depth", number - 90),
+            96 => "Data Increment",
+            97 => "Data Decrement",
+            98 => "NRPN LSB",
+            99 => "NRPN MSB",
+            100 => "RPN LSB",
+            101 => "RPN MSB",
+            _ => return format!("Controller {number}"),
+        };
+        fixed.to_owned()
+    }
 }
 
 /// One breakpoint of an envelope: a position, the value there, and the bend

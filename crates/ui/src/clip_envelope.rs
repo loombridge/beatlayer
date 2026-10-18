@@ -38,7 +38,7 @@ use crate::arrangement::editing::EditKeys;
 use crate::clip_view::{grid_rect, paint_grid_lines, tick_at, x_of_tick};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::widgets::{self, Choice};
+use crate::widgets::{self, Choice, NO_LEDS};
 
 /// How tall the row under the editor is, in points: the device chooser, the
 /// control chooser and the Linked switch (L-CLIP-017).
@@ -57,6 +57,11 @@ const GAP: f32 = 3.0;
 /// −100 % to 100 % for the rest, not the parameter's own units.
 // Spec: modulation R9
 pub(crate) fn share_scale(target: AutomationTarget) -> LaneScale {
+    // A MIDI controller is drawn on its own range, pitch bend centred
+    // (midi-controller-data R8).
+    if let Some((min, max)) = target.midi_range() {
+        return LaneScale::Linear { min, max };
+    }
     let travel = if is_level(target) {
         Travel::Fader
     } else {
@@ -96,7 +101,7 @@ pub fn footer_rect(view: Rect) -> Rect {
 pub fn shown_target(shell: &Shell, doc: &Document, clip: ClipId) -> Option<AutomationTarget> {
     let target = shell.clip_view().envelope()?;
     let track = doc.clip_track(clip)?;
-    doc.check_automation_target(track, target).ok()?;
+    doc.check_clip_target(track, doc.clip(clip)?, target).ok()?;
     Some(target)
 }
 
@@ -151,6 +156,9 @@ struct Lane<'a> {
     start: Ticks,
     length: Ticks,
     scale: LaneScale,
+    /// Whether the envelope is a MIDI controller's, in the controller's own
+    /// units rather than shares.
+    midi: bool,
     /// The share that modulates nothing: 100 % for a level, 0 for the rest.
     rest: f64,
     envelope: Option<&'a Envelope>,
@@ -329,6 +337,7 @@ impl EnvelopeEditor {
                 start,
                 length: clip.length,
                 scale: share_scale(target),
+                midi: target.is_midi(),
                 rest: if is_level(target) { 1.0 } else { 0.0 },
                 envelope,
             };
@@ -341,16 +350,21 @@ impl EnvelopeEditor {
     fn paint(&self, ui: &Ui, theme: &Theme, lane: &Lane<'_>) {
         let painter = ui.painter_at(lane.rect);
         let colours = &theme.colors;
-        // Spec: modulation R9: the left axis reads in percent.
-        let low = lane.scale.value(0.0);
-        let ticks = [(1.0, Align2::LEFT_TOP), (low, Align2::LEFT_BOTTOM)]
+        // Spec: modulation R9: the left axis reads in percent, and a MIDI
+        // controller's in its own numbers.
+        let (low, high) = (lane.scale.value(0.0), lane.scale.value(1.0));
+        let ticks = [(high, Align2::LEFT_TOP), (low, Align2::LEFT_BOTTOM)]
             .into_iter()
             .chain((low < 0.0).then_some((0.0, Align2::LEFT_CENTER)));
         for (value, align) in ticks {
             painter.text(
                 pos2(lane.rect.left() + 2.0, lane.y_of_value(value)),
                 align,
-                format!("{:.0}%", value * 100.0),
+                if lane.midi {
+                    format!("{value:.0}")
+                } else {
+                    format!("{:.0}%", value * 100.0)
+                },
                 theme.small_font(),
                 colours.text_dim.0,
             );
@@ -550,12 +564,38 @@ impl EnvelopeEditor {
         if let Some(mixer) = devices.first_mut() {
             mixer.label = "Mixer".to_owned();
         }
+        // A MIDI clip's controllers come first, before the Mixer.
+        // Spec: midi-controller-data R8
+        if !clip.data.is_audio() {
+            devices.insert(
+                0,
+                Choice {
+                    label: "MIDI Ctrl".to_owned(),
+                    value: AutomationDevice::MidiCtrl,
+                    leds: NO_LEDS,
+                },
+            );
+        }
         let mut controls = device
             .map(|device| control_choices(shell, doc, device))
             .unwrap_or_default();
         if let Some(track) = track {
             mark_devices(&mut devices, doc, track, theme);
             mark_controls(&mut controls, doc, track, theme);
+        }
+        // A controller is marked by the clip's own envelopes: a dot on each
+        // control that has one.
+        let dot = |has: bool| [None, has.then_some(theme.colors.modulation.0)];
+        for choice in &mut controls {
+            if choice.value.is_midi() {
+                choice.leds = dot(clip.envelope(&choice.value).is_some());
+            }
+        }
+        if let Some(midi) = devices
+            .iter_mut()
+            .find(|choice| choice.value == AutomationDevice::MidiCtrl)
+        {
+            midi.leds = dot(clip.envelopes().any(|envelope| envelope.target.is_midi()));
         }
         let current_control = frame
             .target
@@ -573,11 +613,18 @@ impl EnvelopeEditor {
             device.as_ref(),
             true,
         ) {
-            invoke(
-                events,
-                "view.clip_envelope",
-                json!({ "target": default_target(shell, doc, chosen) }),
-            );
+            // MIDI Ctrl shows the first control that has an envelope, else
+            // Pitch Bend (midi-controller-data R8).
+            let target = if chosen == AutomationDevice::MidiCtrl {
+                control_choices(shell, doc, chosen)
+                    .into_iter()
+                    .map(|choice| choice.value)
+                    .find(|target| clip.envelope(target).is_some())
+                    .or_else(|| default_target(shell, doc, chosen))
+            } else {
+                default_target(shell, doc, chosen)
+            };
+            invoke(events, "view.clip_envelope", json!({ "target": target }));
         }
         if let Some(chosen) = widgets::chooser(
             ui,
@@ -674,4 +721,21 @@ fn linked_switch(
     }
     response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, "Linked"));
     pressed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Spec: midi-controller-data R8
+    #[test]
+    fn pitch_bend_is_drawn_centred_and_the_others_from_the_bottom() {
+        let bend = share_scale(AutomationTarget::MidiPitchBend);
+        assert!((bend.position(0.0) - 0.5).abs() < 0.001);
+        assert_eq!(bend.position(-8192.0), 0.0);
+        assert_eq!(bend.position(8191.0), 1.0);
+        let wheel = share_scale(AutomationTarget::MidiCc { number: 1 });
+        assert_eq!(wheel.position(0.0), 0.0);
+        assert_eq!(wheel.position(127.0), 1.0);
+    }
 }

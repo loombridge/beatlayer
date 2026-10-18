@@ -188,14 +188,54 @@ pub fn render_launching(
     cues: &[Cue],
     launches: &[Launch],
     settings: &Settings,
+    sink: impl FnMut(&Output<'_>),
+) -> Summary {
+    let script = Script {
+        schedule,
+        cues,
+        launches,
+    };
+    render_launching_with_workers(document, media, &script, settings, 0, sink)
+}
+
+/// What a render plays besides the document: the commands scheduled on it,
+/// the transport's moves, and the Session View's launches.
+#[derive(Clone, Copy, Debug)]
+pub struct Script<'a> {
+    pub schedule: &'a [ScheduledCommand],
+    pub cues: &'a [Cue],
+    /// Each on its frame, in order of frame.
+    pub launches: &'a [Launch],
+}
+
+/// [`render_launching`], with the engine's tasks run by `workers` real-time
+/// workers beside the rendering thread (the multicore scheduler, WP-5.37).
+/// The render is the same to the bit; `0` renders on the one thread.
+///
+/// # Panics
+///
+/// If `settings.block` is 0, or a worker can't start.
+pub fn render_launching_with_workers(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    script: &Script<'_>,
+    settings: &Settings,
+    workers: usize,
     mut sink: impl FnMut(&Output<'_>),
 ) -> Summary {
+    let Script {
+        schedule,
+        cues,
+        launches,
+    } = *script;
     let config = EngineConfig::new(settings.sample_rate, settings.block);
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
     let kit = bl_devices::kit_host();
     registry.add(kit.factory());
-    let mut offline = Offline::new(config, registry.with_media(media));
+    let registry = registry.with_media(media);
+    let mut offline =
+        Offline::with_workers(config, registry, workers).expect("the render's workers start");
     let unhosted = offline.sync(document);
     let missing_media = offline.missing_media().to_vec();
     for cue in cues {

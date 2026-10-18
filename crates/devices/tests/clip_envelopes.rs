@@ -103,6 +103,7 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
     // climbs from 1 to the gain's ceiling.
     editor
         .apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at: Ticks::ZERO,
@@ -111,6 +112,7 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
         .unwrap();
     editor
         .apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at: Ticks::WHOLE,
@@ -196,6 +198,7 @@ fn the_sum_is_clamped_to_the_parameters_range() {
     // clamped to the parameter's range, so the gain is its ceiling.
     editor
         .apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at: Ticks::ZERO,

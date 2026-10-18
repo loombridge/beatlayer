@@ -1,13 +1,13 @@
 # The multisampler, sample editing in the sampler devices, and the autosampler
 
-- **Status:** draft
+- **Status:** partial (WP-5.13, R1 to R31, is built; R32 to R73 are WP-5.14 to WP-5.16's)
 - **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27)
 - **Parity-matrix row:** Instruments: Sampler (multisample, zones, modulation), plus SFZ import; Instruments: Simpler (the display's edits); [the improvements](../05-improvements.md), IMP-27 and IMP-28
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 31, sections 31.10 "Sampler" (31.10.1 to 31.10.11) and 31.11 "Simpler" (its sample display and 31.11.7 "Context Menu Options for Simpler"); chapter 23, sections 23.2 and 23.2.4.1; and the SFZ format reference at sfzformat.com, read 17 October 2026
 
 ## The behaviour
 
-Beatlayer's equivalent of Live's Sampler (this spec calls it the multisampler; WP-5.13 gives it its name) is an instrument that plays a multisample: a list of sample layers, each a sample file with its own key zone, velocity zone and sample select zone, and its own root key, tuning, level, start and end points and loops. A note plays every layer whose three zones take it, each layer through the zones' fades, so neighbouring samples crossfade across the keyboard and across velocities. Round Robin turns layers that share a key zone into a rotation, one per note. The device's title bar carries six tabs, as Live's does: Zone opens the zone editor in a view of its own above the Device View, and the other five show their controls in the device: Sample (the selected layer's waveform and playback), Pitch/Osc, Filter/Global, Modulation and MIDI. Everything the tabs hold is the device's own; the per-voice modulation of the Modulation and MIDI tabs runs inside the device, on top of the device-wide modulation of WP-5.9.
+Beatlayer's equivalent of Live's Sampler (this spec calls it the multisampler; its name in the app is Mosaic) is an instrument that plays a multisample: a list of sample layers, each a sample file with its own key zone, velocity zone and sample select zone, and its own root key, tuning, level, start and end points and loops. A note plays every layer whose three zones take it, each layer through the zones' fades, so neighbouring samples crossfade across the keyboard and across velocities. Round Robin turns layers that share a key zone into a rotation, one per note. The device's title bar carries six tabs, as Live's does: Zone opens the zone editor in a view of its own above the Device View, and the other five show their controls in the device: Sample (the selected layer's waveform and playback), Pitch/Osc, Filter/Global, Modulation and MIDI. Everything the tabs hold is the device's own; the per-voice modulation of the Modulation and MIDI tabs runs inside the device, on top of the device-wide modulation of WP-5.9.
 
 An SFZ file, the open text format for multisample instruments, imports as a multisampler holding its regions as layers. Two improvements build on the sampler devices. IMP-28 adds non-destructive edits to the sample displays of the multisampler and of Snapshot, Beatlayer's equivalent of Simpler ([the sampler spec](sampler.md)): trim, cut, reverse, fade and normalise, each one undo step kept with the set, the source file untouched; Live's own Crop and Reverse stay in the context menu. IMP-27, the autosampler, renders an instrument across a range of notes and velocities, offline for software and in real time through the audio interface for hardware, into a new multisampler.
 
@@ -146,29 +146,29 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/devices/tests/multisampler.rs`, `the_multisampler_is_described_with_its_six_tabs`; `crates/ui/tests/zone_editor.rs`, `the_zone_tab_opens_the_editor_above_the_device_view` | unit; UI script |
-| R2 | `crates/model/src/layers.rs`, `layers_save_and_reopen_and_a_set_without_them_has_none`; `crates/shell/tests/multisampler.rs`, `five_hundred_and_twelve_layers_play_save_and_reopen`, `a_layer_with_missing_media_is_silent_and_reported` | unit; shell test |
-| R3 | `crates/shell/tests/multisampler.rs`, `added_layers_take_the_whole_ranges_and_the_files_root_key`; `crates/ui/tests/zone_editor.rs`, `dropping_samples_on_the_layer_list_adds_them_at_the_drop_point` | shell test; UI script |
+| R1 | `crates/devices/tests/multisampler.rs`, `the_multisampler_is_described_and_laid_out`; `crates/ui/tests/zone_editor.rs`, `the_zone_tab_opens_the_editor_above_the_device_view`; `crates/shell/tests/multisampler.rs`, `the_views_are_saved_with_the_set_and_are_no_undo_step` | unit; UI script; shell test |
+| R2 | `crates/model/src/layers.rs`, `layers_save_and_reopen_and_a_set_without_them_has_none`; `crates/project/tests/round_trip.rs`, the recipe round-trip; `crates/shell/tests/multisampler.rs`, `five_hundred_and_twelve_layers_play_save_and_reopen`, `a_layer_with_missing_media_is_silent_and_reported` | unit; property test; shell test |
+| R3 | `crates/shell/tests/multisampler.rs`, `added_layers_take_the_whole_ranges_and_the_files_root_key`; `crates/media/src/sampler_chunk.rs`, `the_sampler_chunk_gives_the_root_key_and_the_first_loop`; `crates/ui/tests/zone_editor.rs`, `dropping_samples_on_the_layer_list_adds_them_at_the_drop_point` | shell test; unit; UI script |
 | R4 | `crates/devices/tests/multisampler.rs`, `each_key_and_velocity_plays_the_layers_that_take_it` | engine test under the allocation trap |
-| R5 | `crates/devices/tests/multisampler.rs`, `neighbouring_zones_crossfade_over_their_fades_linear_and_constant_power` | engine test under the allocation trap |
-| R6 | `crates/devices/tests/multisampler.rs`, `the_sample_selector_chooses_new_notes_and_leaves_sounding_ones` | engine test under the allocation trap |
+| R5 | `crates/devices/tests/multisampler.rs`, `neighbouring_zones_crossfade_over_their_fades_linear_and_constant_power`; `crates/model/src/layers.rs`, `a_fade_runs_from_the_silent_edge_to_full_in_either_law` | engine test under the allocation trap; unit |
+| R6 | `crates/devices/tests/multisampler.rs`, `the_sample_selector_chooses_new_notes_and_leaves_sounding_ones`; `crates/ui/tests/zone_editor.rs`, `the_selector_indicator_drags_the_sample_selector` | engine test under the allocation trap; UI script |
 | R7 | `crates/shell/tests/multisampler.rs`, `auto_select_follows_the_incoming_note` | shell test |
 | R8 | `crates/devices/tests/multisampler.rs`, `round_robin_rotates_in_each_mode_and_renders_the_same_every_time` | engine test under the allocation trap |
 | R9 | `crates/devices/tests/multisampler.rs`, `the_reset_interval_restarts_each_mode_on_the_grid` | engine test under the allocation trap |
-| R10 | `crates/ui/tests/zone_editor.rs`, `dragging_an_edge_the_body_or_a_corner_is_one_undo_step`, `the_editor_zooms_and_hovering_shows_the_zone`; `crates/ui/tests/zone_editor.rs`, `the_hot_swap_button_replaces_the_selected_sample` | UI script |
+| R10 | `crates/ui/tests/zone_editor.rs`, `dragging_an_edge_the_body_or_a_corner_is_one_undo_step`, `a_drag_acts_on_every_selected_layer_alike`, `the_editor_zooms_and_hovering_shows_the_zone`, `the_hot_swap_button_replaces_the_selected_sample`; `crates/ui/src/multisampler.rs`, `dragging_keeps_a_value_and_the_fades_inside`; `crates/shell/tests/multisampler.rs`, `hot_swapping_a_layer_replaces_its_sample_and_keeps_its_zones` | UI script; unit; shell test |
 | R11 | `crates/ui/tests/zone_editor.rs`, `the_layer_lists_menu_holds_lives_items_in_order`; `crates/shell/tests/multisampler.rs`, `sorting_and_select_all_with_same_range` | UI script; shell test |
 | R12 | `crates/model/src/layers.rs`, `distributing_equally_and_around_root_keys` | unit |
 | R13 | `crates/shell/tests/multisampler.rs`, `normalize_volume_and_pan_set_each_layer` | shell test |
-| R14 | `crates/ui/tests/multisampler_sample_tab.rs`, `the_sample_tab_draws_the_selected_layer_and_its_markers` | UI script |
+| R14 | `crates/ui/tests/multisampler_sample_tab.rs`, `the_sample_tab_draws_the_selected_layer_and_its_markers`, `the_waveforms_hover_reads_the_sample_and_the_wheel_zooms` | UI script |
 | R15 | `crates/devices/tests/multisampler.rs`, `a_layer_plays_at_its_root_key_and_a_semitone_a_key` | engine test under the allocation trap |
-| R16 | `crates/devices/tests/multisampler.rs`, `a_voice_plays_from_sample_start_to_sample_end_and_link_starts_at_the_loop` | engine test under the allocation trap |
+| R16 | `crates/devices/tests/multisampler.rs`, `a_voice_plays_from_sample_start_to_sample_end_and_link_starts_at_the_loop`; `crates/model/src/layers.rs`, `markers_left_alone_follow_the_ones_that_move` | engine test under the allocation trap; unit |
 | R17 | `crates/devices/tests/multisampler.rs`, `each_sustain_mode_loops_as_it_says` | engine test under the allocation trap |
 | R18 | `crates/devices/tests/multisampler.rs`, `each_release_mode_plays_the_release_as_it_says` | engine test under the allocation trap |
 | R19 | `crates/devices/tests/multisampler.rs`, `the_loop_crossfade_has_no_click_in_either_law`, `loop_detune_retunes_inside_the_loop` | engine test under the allocation trap |
-| R20 | `crates/model/src/layers.rs`, `snap_puts_markers_on_left_channel_zero_crossings` | unit |
+| R20 | `crates/model/src/layers.rs`, `snap_puts_markers_on_left_channel_zero_crossings`; `crates/shell/tests/multisampler.rs`, `snap_puts_set_markers_on_zero_crossings` | unit; shell test |
 | R21 | `crates/devices/tests/multisampler.rs`, `reverse_plays_from_the_end_through_the_loop_to_the_start` | engine test under the allocation trap |
 | R22 | `crates/devices/tests/multisampler.rs`, `best_interpolation_keeps_aliases_eighty_db_down`, `the_root_key_plays_the_frames_exactly_in_every_mode` | engine test under the allocation trap |
-| R23 | `crates/shell/tests/multisampler.rs`, `a_long_layer_streams_with_ram_mode_off_and_never_waits`; `crates/engine/tests/streaming.rs`, `a_sampler_voice_reads_a_stream_without_an_underrun` | shell test; engine test |
+| R23 | `crates/devices/tests/multisampler.rs`, `a_long_layer_plays_from_its_held_start_while_the_rest_is_read`, `a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts`; `crates/engine/tests/device_chains.rs`, `a_long_layer_is_read_in_the_background_with_ram_mode_off`; `crates/shell/tests/multisampler.rs`, `a_long_layer_streams_with_ram_mode_off_and_never_waits` | engine test under the allocation trap; engine test; shell test |
 | R24 | `crates/devices/tests/multisampler.rs`, `the_envelope_takes_its_levels_times_and_slopes` | engine test under the allocation trap |
 | R25 | `crates/devices/tests/multisampler.rs`, `each_envelope_loop_mode_repeats_as_it_says`, `sync_repeats_land_on_the_song_grid` | engine test under the allocation trap |
 | R26 | `crates/devices/tests/multisampler.rs`, `time_time_key_and_time_vel_scale_the_segments` | engine test under the allocation trap |
@@ -176,7 +176,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R28 | `crates/devices/tests/rules.rs` over the shipped types; `crates/devices/tests/multisampler.rs`, `volume_velocity_pan_and_random_pan_place_the_note` | engine test under the allocation trap |
 | R29 | `crates/ui/tests/device_view.rs`, `the_multisamplers_title_bar_menu_holds_its_options`; `crates/shell/tests/multisampler.rs`, `the_title_shows_the_first_layers_name` | UI script; shell test |
 | R30 | `crates/cli/tests/agent.rs`, `an_agent_builds_a_multisample_by_command_and_reads_it_back`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/project/tests/round_trip.rs`, the recipe round-trip | agent test; property test |
-| R31 | every test in `crates/devices/tests/multisampler.rs` runs its blocks under the allocation trap; `crates/engine/tests/device_chains.rs`, `a_zone_edit_sends_data_and_no_program`; `rtsan/tests/multisampler.rs` | engine test; RealtimeSanitizer test |
+| R31 | every test in `crates/devices/tests/multisampler.rs` runs its blocks under the allocation trap; `crates/engine/tests/device_chains.rs`, `a_zone_edit_sends_data_and_no_program`; `rtsan/tests/multisampler.rs`, `a_multisampler_passes_under_rtsan` | engine test; RealtimeSanitizer test |
 | R32 | `crates/devices/tests/multisampler.rs`, `transpose_detune_and_spread_move_the_pitch` | engine test under the allocation trap |
 | R33 | `crates/devices/tests/multisampler.rs`, `key_zone_shift_chooses_other_layers_at_the_same_pitch` | engine test under the allocation trap |
 | R34 | `crates/devices/tests/multisampler.rs`, `glide_and_portamento_slide_as_snapshots_do` | engine test under the allocation trap |
@@ -221,6 +221,11 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R73 | `crates/shell/tests/autosample.rs`, `cancel_deletes_the_files_and_changes_nothing` | shell test |
 
 ## Not built yet
+
+- Auto Select (R7) follows the notes the shell sends, those of the computer keyboard; notes from hardware MIDI ports or clips go to the engine directly, so they select nothing yet (`shortcut:` in the shell, upgrade with the engine publishing the layers each node plays).
+- A layer over ten seconds is read in the background behind its held start, and its tail stays in memory once read (R23's streams hold only a window); upgrade to evicting what no voice is near. A file whose rate isn't the engine's, and a render that must repeat, decode whole.
+- The zone editor overlays the foot of the main view rather than making the detail area taller; the layer list's menu items, zone drags and marker drags have no keyboard form (the accessibility spec lists them); Manage Sample waits on the File Manager (WP-2.25), and Convert to Snapshot on WP-5.15.
+- The Best interpolation does not band-limit content above half the output rate when a layer is transposed up, so a sample with energy near the top of the spectrum can alias an octave up.
 
 - The filter's circuit models other than Clean (OSR, MS2, SMP and PRD) are not built, as in Snapshot; the multisampler's filter is the kit's state-variable filter with Drive in front.
 - The formats the manual's import names (REX files, ACID Loops and Soundtrack Loops) are not read; SFZ is Beatlayer's multisample import.

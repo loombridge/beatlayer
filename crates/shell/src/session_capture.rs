@@ -359,6 +359,7 @@ mod tests {
                     clip,
                     start: 0.0,
                     end: Some(0.25),
+                    ticks: false,
                 })
                 .unwrap();
             offline.sync(editor.document());

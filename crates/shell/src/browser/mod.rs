@@ -167,6 +167,7 @@ pub struct Polled {
 #[derive(Clone, Debug)]
 struct PendingPreview {
     path: PathBuf,
+    hash: bl_media::ContentHash,
     data: bl_media::SampleData,
     seconds: f64,
 }
@@ -1033,6 +1034,7 @@ impl BrowserView {
     pub fn poll(
         &mut self,
         audio: &mut AudioHost,
+        media: &bl_media::MediaStore,
         warping: crate::auto_warp::Warping<'_>,
         set_bpm: f64,
     ) -> Polled {
@@ -1076,24 +1078,35 @@ impl BrowserView {
                             Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
                         }
                     } else {
-                        match crate::auto_warp::preview_warp(
-                            &loaded.path,
-                            seconds,
-                            set_bpm,
-                            warping,
-                        ) {
-                            crate::auto_warp::PreviewWarp::Pending => {
+                        // The analysis cache reads files through the media
+                        // store, so a browsed file joins it first.
+                        let hash = media.import(&loaded.path);
+                        let warp =
+                            hash.as_ref()
+                                .map_or(crate::auto_warp::PreviewWarp::Unwarped, |hash| {
+                                    crate::auto_warp::preview_warp(
+                                        *hash,
+                                        &loaded.path,
+                                        seconds,
+                                        set_bpm,
+                                        warping,
+                                    )
+                                });
+                        match (warp, hash) {
+                            (crate::auto_warp::PreviewWarp::Pending, Ok(hash)) => {
                                 self.pending_warp = Some(PendingPreview {
                                     path: loaded.path,
+                                    hash,
                                     data,
                                     seconds,
                                 });
                             }
-                            crate::auto_warp::PreviewWarp::Warped(audio_data) => {
+                            (crate::auto_warp::PreviewWarp::Warped(audio_data), Ok(hash)) => {
                                 self.start_warped_preview(
                                     audio,
                                     PendingPreview {
                                         path: loaded.path,
+                                        hash,
                                         data,
                                         seconds,
                                     },
@@ -1102,22 +1115,20 @@ impl BrowserView {
                                     &mut polled,
                                 );
                             }
-                            crate::auto_warp::PreviewWarp::Unwarped => {
-                                match audio.play_preview(Box::new(MediaSamples(data))) {
-                                    Ok(generation) => {
-                                        self.playing = Some(Playing {
-                                            generation,
-                                            path: loaded.path,
-                                            started: false,
-                                            warp_map: None,
-                                            length_seconds: seconds,
-                                        });
-                                    }
-                                    Err(error) => {
-                                        polled.error = Some(format!("Couldn't preview: {error}"))
-                                    }
+                            _ => match audio.play_preview(Box::new(MediaSamples(data))) {
+                                Ok(generation) => {
+                                    self.playing = Some(Playing {
+                                        generation,
+                                        path: loaded.path,
+                                        started: false,
+                                        warp_map: None,
+                                        length_seconds: seconds,
+                                    });
                                 }
-                            }
+                                Err(error) => {
+                                    polled.error = Some(format!("Couldn't preview: {error}"))
+                                }
+                            },
                         }
                     }
                 }
@@ -1130,7 +1141,13 @@ impl BrowserView {
             }
         }
         if let Some(pending) = self.pending_warp.take() {
-            match crate::auto_warp::preview_warp(&pending.path, pending.seconds, set_bpm, warping) {
+            match crate::auto_warp::preview_warp(
+                pending.hash,
+                &pending.path,
+                pending.seconds,
+                set_bpm,
+                warping,
+            ) {
                 crate::auto_warp::PreviewWarp::Pending => {
                     self.pending_warp = Some(pending);
                 }

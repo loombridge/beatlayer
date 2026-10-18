@@ -3266,7 +3266,9 @@ impl Shell {
             .tempo
             .bpm_at(self.arrangement.transport().position)
             .get();
-        let polled = self.browser_view.poll(&mut self.audio, warping, set_bpm);
+        let polled = self
+            .browser_view
+            .poll(&mut self.audio, &self.media, warping, set_bpm);
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }

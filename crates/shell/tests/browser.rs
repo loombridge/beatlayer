@@ -1331,16 +1331,15 @@ fn a_100_bpm_loop_previews_at_the_sets_120_and_loops() {
         ids::SELECT,
         json!({ "paths": [text(&loop_file)] }),
     );
-    wait_until(&mut shell, "warped preview to play", |shell| {
-        shell.browser_preview().playing.is_some()
+    // Warped to 120 BPM the two bars last 4 seconds and start again; an
+    // unwarped preview would play its 4.8 seconds once and stop.
+    wait_until(&mut shell, "the preview to pass 3 seconds", |shell| {
+        shell.browser_preview().position_seconds > 3.0
     });
-    std::thread::sleep(Duration::from_millis(50));
-    shell.poll();
-    let preview = shell.browser_preview();
-    assert!(
-        preview.playing.is_some(),
-        "warped preview continues playing"
-    );
+    wait_until(&mut shell, "the preview to loop", |shell| {
+        let preview = shell.browser_preview();
+        preview.playing.is_some() && preview.position_seconds < 1.0
+    });
 }
 
 // Spec: browser R19.

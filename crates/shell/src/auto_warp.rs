@@ -217,19 +217,19 @@ pub enum PreviewWarp {
     Pending,
 }
 
-/// What warp settings a preview of `path` gets: saved defaults if present,
-/// otherwise the auto-warp settings for short or long samples, or unwarped.
-/// Returns `Pending` if analysis is needed and still running in the background.
+/// What warp settings a preview of `path`, whose content is `media_hash`,
+/// gets: saved defaults if present, otherwise the auto-warp settings for
+/// short or long samples, or unwarped. Returns `Pending` if analysis is
+/// needed and still running in the background. The file must be in the
+/// analysis cache's media store, or its analysis fails.
 #[must_use]
 pub fn preview_warp(
+    media_hash: MediaHash,
     path: &std::path::Path,
     seconds: f64,
     set_bpm: f64,
     warping: Warping<'_>,
 ) -> PreviewWarp {
-    let Ok(media_hash) = bl_media::ContentHash::of_file(path) else {
-        return PreviewWarp::Unwarped;
-    };
     let media = ContentHash(*media_hash.as_bytes());
     if let Some(audio) = clip_defaults::load(path, media)
         .and_then(|defaults| AudioData::new(media).with_defaults(&defaults).ok())

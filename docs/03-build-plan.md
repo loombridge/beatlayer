@@ -4,7 +4,7 @@ The build is packaged as work packages (WPs), each sized for one agent session, 
 
 ## Progress
 
-Phases 0, 1 and 3 are done, and Phase 2 is done but for its release package, 2.22: the first alpha, 0.2, carries Phases 2 and 3 together. Phases 4 and 5 are under way. The packages marked `in progress` or `review` in the status table at the end are the open work; the status table is the live work queue.
+Phases 0 to 3 are done, and the first alpha, [0.2](https://github.com/loombridge/beatlayer/releases/tag/v0.2.0), carries Phases 2 and 3 together. Phases 4 and 5 are under way. The packages marked `in progress` or `review` in the status table at the end are the open work; the status table is the live work queue.
 
 ## How an agent uses this plan
 
@@ -431,7 +431,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.19b | done | 12 October 2026 | Returns' own sends wait for the track context menu |
 | 2.20 | done | 14 October 2026 | [#16](https://github.com/loombridge/beatlayer/pull/16): commands for tempo breakpoints and time-signature markers |
 | 2.21 | done | 15 October 2026 | [#35](https://github.com/loombridge/beatlayer/pull/35): Standard MIDI File import and export ([the spec](specs/midi-clips.md)) |
-| 2.22 | in progress | 17 October 2026 | [#34](https://github.com/loombridge/beatlayer/pull/34) and [#71](https://github.com/loombridge/beatlayer/pull/71): the release workflow, version 0.2.0 (the first alpha carries Phase 3 too) and the release notes; left: the `v0.2.0` tag and publishing |
+| 2.22 | done | 18 October 2026 | [#34](https://github.com/loombridge/beatlayer/pull/34), [#71](https://github.com/loombridge/beatlayer/pull/71), [#210](https://github.com/loombridge/beatlayer/pull/210) and [#213](https://github.com/loombridge/beatlayer/pull/213): the release workflow, version 0.2.0 (the first alpha carries Phase 3 too) and the release notes; [v0.2.0](https://github.com/loombridge/beatlayer/releases/tag/v0.2.0) is published, with downloads for macOS, Windows and Linux |
 | 2.23 | done | 16 October 2026 | [#45](https://github.com/loombridge/beatlayer/pull/45), [#51](https://github.com/loombridge/beatlayer/pull/51), [#56](https://github.com/loombridge/beatlayer/pull/56) and [#64](https://github.com/loombridge/beatlayer/pull/64): the assistant's providers and keys, agent loop, settings and panel ([permissions spec](specs/agent-permissions.md)); [#69](https://github.com/loombridge/beatlayer/pull/69): `bl-cli assistant` and the replayed M2 demo transcripts |
 | 2.24 | done | 15 October 2026 | [#24](https://github.com/loombridge/beatlayer/pull/24): the Info View ([the spec](specs/info-view.md)) |
 | 2.25 | done | 14 October 2026 | [#15](https://github.com/loombridge/beatlayer/pull/15): the default set, templates, Collect All and Save, and relinking missing files ([the spec](specs/file-management.md)) |

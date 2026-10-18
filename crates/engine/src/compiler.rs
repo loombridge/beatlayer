@@ -25,6 +25,7 @@ use crate::program::{
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
@@ -747,6 +748,7 @@ impl Compiler {
             override_signatures,
             sample_rate: self.config.sample_rate,
             scene_slots: scene_slots(document),
+            follow: FollowTable::of(document),
             session_tracks: document
                 .track_order()
                 .into_iter()
@@ -1775,7 +1777,9 @@ fn needs_program(
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
-    recompile || scene_slots(old) != scene_slots(new)
+    recompile
+        || scene_slots(old) != scene_slots(new)
+        || FollowTable::of(old) != FollowTable::of(new)
 }
 
 /// Every modulator in track and chain order with its mappings: what decides

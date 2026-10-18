@@ -47,7 +47,7 @@ Every engine test runs its blocks under the allocation trap, and the shell test 
 
 ## Not built yet
 
-- A Session clip's automation envelopes (values, not modulation) and their writing into the track's automation. A clip's modulation envelopes are copied with it (R1).
+- A Session clip's Automation envelopes (values, not modulation) written into the track's Arrangement automation. A clip's envelopes of both kinds are copied with it (R1), and the Automation ones play on the copy's track as [session-automation.md](session-automation.md) describes only while the clip plays in the Session.
 - The scene tempo and time signature a launched scene sets, which the manual says are logged too.
 - Copies of a take that went round the Arrangement loop: it copies no Session clips.
 - Splitting an armed track's recorded input where Stop All Clips is pressed.

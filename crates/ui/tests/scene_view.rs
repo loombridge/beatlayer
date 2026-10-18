@@ -157,11 +157,30 @@ fn a_selected_scene_takes_the_detail_area_for_the_scene_view() {
     assert_eq!(view.label, "Scene View: Scene 1");
     let signature = field(&all, scene, SceneField::Numerator).expect("the signature field");
     assert_eq!(signature.value, "4");
-    // The follow-action controls are drawn in place, pending WP-3.10.
+    // Spec: follow-actions R14. The follow-action controls are live: the
+    // switch runs the scene command, and Longest stands in for Linked.
+    let switch = all
+        .iter()
+        .find(|node| node.label == "Scene 1 Follow Action")
+        .expect("the Follow Action switch");
+    assert!(!switch.disabled);
+    assert_eq!(switch.toggled, Some(false));
     assert!(
         all.iter()
-            .any(|node| node.label == "Scene 1 Follow Action" && node.disabled)
+            .any(|node| node.label == "Scene 1 Follow Time Longest")
     );
+    h.shell
+        .run(
+            "scene.set_follow_actions",
+            json!({ "scene": scene, "enabled": true }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    let switch = all
+        .iter()
+        .find(|node| node.label == "Scene 1 Follow Action")
+        .unwrap();
+    assert_eq!(switch.toggled, Some(true));
     // Setting the signature there runs the scene command.
     h.shell
         .run(

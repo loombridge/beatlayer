@@ -440,6 +440,7 @@ fn fixture() -> Project {
     apply(
         &mut editor,
         Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip: audio.id,
             target: volume,
             at: Ticks(0),
@@ -508,6 +509,24 @@ fn fixture() -> Project {
             amount: 0.5,
         },
     );
+    let follow = bl_model::FollowPatch {
+        enabled: Some(true),
+        ..bl_model::FollowPatch::default()
+    };
+    apply(
+        &mut editor,
+        Command::SetClipFollowActions {
+            clip: slot_clip_id,
+            patch: follow,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetSceneFollowActions {
+            scene: scenes[0],
+            patch: follow,
+        },
+    );
     apply(
         &mut editor,
         Command::SetSlotStopButton {
@@ -541,6 +560,7 @@ fn fixture() -> Project {
     Project::from_editor(&editor, Media::new()).with_launch(LaunchSettings {
         quantization: LaunchQuantization::Bars2,
         enabled: false,
+        ..LaunchSettings::default()
     })
 }
 

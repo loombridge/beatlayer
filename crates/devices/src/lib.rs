@@ -26,17 +26,24 @@
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16), the
 //! multisampler ([`multisampler`], WP-5.13) and the eight-slot drum sampler
 //! ([`kitbag`], WP-5.17). The
-//! rest of the core effects ship with WP-2.18. [`testing`] has the devices
+//! rest of the core effects ship with WP-2.18; the lo-fi effects are in
+//! [`degrade`], [`crusher`] and [`wax`] (WP-5.24). [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
 pub mod auto_filter;
+pub mod bus_compressor;
+pub mod channel_eq;
 pub mod compressor;
+pub mod crusher;
+pub mod degrade;
 pub mod delay;
 pub mod dice;
 pub mod drum_sampler;
+mod dynamics;
 pub mod eq;
 mod framework;
+pub mod gate;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -50,18 +57,26 @@ pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+mod sections;
 pub mod stack;
 pub mod testing;
+pub mod three_band_eq;
 pub mod touch;
 pub mod utility;
+pub mod wax;
 
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
+pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
+pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
+pub use crusher::{CRUSHER, crusher_type};
+pub use degrade::{DEGRADE, degrade_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
+pub use gate::{GATE, Shutter, gate_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -74,7 +89,9 @@ pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
 pub use stack::{STACK, stack_type};
+pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
+pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
@@ -94,6 +111,11 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
+        BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
+        GATE => Some(gate::display(device, description, values, data)),
+        THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
+        DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
@@ -111,6 +133,10 @@ pub fn register(registry: &mut Registry) {
     reverb::register(registry);
     utility::register(registry);
     eq::register(registry);
+    channel_eq::register(registry);
+    three_band_eq::register(registry);
+    gate::register(registry);
+    bus_compressor::register(registry);
     sampler::register(registry);
     multisampler::register(registry);
     drum_sampler::register(registry);
@@ -122,6 +148,9 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    degrade::register(registry);
+    crusher::register(registry);
+    wax::register(registry);
     auto_filter::register(registry);
 }
 

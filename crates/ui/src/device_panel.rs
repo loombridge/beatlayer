@@ -254,6 +254,13 @@ pub fn show(
             value,
             modulated: played(param),
             rect,
+            stops: if frame.multisampler.is_some()
+                && param == bl_devices::multisampler::FILTER_MORPH
+            {
+                &bl_devices::multisampler::MORPH_STOPS
+            } else {
+                &[]
+            },
         };
         match widget {
             Widget::Knob => control.knob(ui, theme, events),
@@ -399,6 +406,9 @@ struct Control<'a> {
     /// Its base and what it plays while a clip modulates it.
     modulated: Option<(f64, f64)>,
     rect: Rect,
+    /// For a knob whose context menu snaps it to a stop: the stops' names
+    /// and values (the multisampler's Morph, spec R37).
+    stops: &'static [(&'static str, f64)],
 }
 
 impl Control<'_> {
@@ -617,6 +627,16 @@ impl Control<'_> {
         );
         focus_ring(ui, theme, self.rect, &response);
         self.describe(ui, &response, Role::Slider);
+        if !self.stops.is_empty() {
+            response.context_menu(|ui| {
+                for (name, value) in self.stops {
+                    if ui.button(*name).clicked() {
+                        self.change(*value, events);
+                        ui.close();
+                    }
+                }
+            });
+        }
     }
 
     /// A number box: a dark box with the value centred and a fill showing

@@ -273,13 +273,21 @@ impl DeviceView {
         if let Some(key) = Self::plugin_key(&device.kind) {
             return Some(self.plugin_panel(description, &device.params, &key));
         }
+        let mut shown = description.clone();
+        if Self::is_multisampler(device) {
+            // Spec: multisampler R1. The tab that shows has its controls.
+            shown.layout = bl_shell_spec::multisampler::tab_layout(
+                &shown.layout,
+                self.multisampler_view(device.id).tab,
+            );
+        }
         Some(DevicePanel {
             values: description
                 .params
                 .iter()
                 .map(|p| description.value(&device.params, p.id).unwrap_or(p.default))
                 .collect(),
-            description: description.clone(),
+            description: shown,
             plugin: false,
             selected_slot: self.slot_of(device),
             loaded_slots: device.media.iter().map(Option::is_some).collect(),

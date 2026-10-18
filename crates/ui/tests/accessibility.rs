@@ -2032,6 +2032,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.set_warp", Exception(sample_editor)),
+        ("clip.set_warp_mode", Exception(sample_editor)),
+        ("clip.set_warp_settings", Exception(sample_editor)),
+        ("clip.set_ram_mode", Exception(sample_editor)),
+        ("clip.set_high_quality", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
         ("clip.insert_warp_markers", Exception(sample_editor)),
         ("clip.insert_transient", Exception(sample_editor)),
@@ -2356,6 +2360,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Hot-Swap Sample (`device.hot_swap_layer`), then Enter in the browser \
                  (`browser.load_selected`) on the file",
+            )),
+        ),
+        (
+            "device.import_sfz",
+            Exception(Equivalent(
+                "`browser.load_selected`, which Enter runs on a selected SFZ instrument in the \
+                 browser and loads as a multisampler (multisampler R47); this form names the \
+                 file, the track or the device",
             )),
         ),
         (

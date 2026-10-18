@@ -475,3 +475,50 @@ fn a_set_saved_before_warping_opens_unwarped_and_plays_as_it_did() {
     assert_eq!(clips, 2);
     assert_eq!(render(&loaded.document), expected);
 }
+
+// Spec: warping R14. A looped unwarped clip from a set saved before warping
+// keeps its loop and plays as it did; its loop can be switched off, and
+// comes back on only with Warp.
+#[test]
+fn an_older_looped_clip_keeps_its_loop() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    let looped = AudioData {
+        start: 0.125,
+        looping: true,
+        loop_start: 0.25,
+        loop_end: Some(0.5),
+        ..AudioData::new(MEDIA)
+    };
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE * 3, ClipData::Audio(looped)),
+        })
+        .unwrap();
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+
+    let project = Project::from_editor(&editor, Media::default());
+    let (loaded, _) =
+        decode_json(&encode_json(&project, 1).unwrap(), &LoadOptions::default()).unwrap();
+    assert_eq!(render(&loaded.document), expected);
+    let mut editor = loaded.editor();
+    let enabled = |enabled| Command::SetClipLoopEnabled { clip, enabled };
+    editor.apply(enabled(false)).unwrap();
+    assert!(editor.apply(enabled(true)).is_err());
+    editor
+        .apply(Command::SetClipWarp { clip, warp: true })
+        .unwrap();
+    editor.apply(enabled(true)).unwrap();
+}

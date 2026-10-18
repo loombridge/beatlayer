@@ -63,6 +63,7 @@ mod midi_fx;
 pub mod modulator;
 pub mod multiband_dynamics;
 pub mod multisampler;
+mod multisampler_tabs;
 pub mod overdrive;
 pub mod play_mod;
 pub mod polysynth;

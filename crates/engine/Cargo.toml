@@ -17,6 +17,9 @@ bl-dsp.workspace = true
 bl-media.workspace = true
 # The compiler reads documents (WP-0.9).
 bl-model.workspace = true
+# A warped clip's table from song frames to file positions, and the warp
+# modes that play it (WP-4.2).
+bl-stretch.workspace = true
 # The lock-free logger for the audio thread.
 bl-rt.workspace = true
 # Pure-Rust maths for the test tone, so it renders alike on every platform

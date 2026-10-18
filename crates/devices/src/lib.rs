@@ -43,13 +43,16 @@ pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod overdrive;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+pub mod saturator;
 pub mod stack;
 pub mod testing;
 pub mod touch;
+pub mod tube;
 pub mod utility;
 
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
@@ -64,12 +67,15 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
+pub use saturator::{SATURATOR, saturator_type};
 pub use stack::{STACK, stack_type};
 pub use touch::{TOUCH, touch_type};
+pub use tube::{TUBE, tube_type};
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
@@ -89,6 +95,9 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        SATURATOR => Some(saturator::display(device, description, values, data)),
+        OVERDRIVE => Some(overdrive::display(device, description, values, data)),
+        TUBE => Some(tube::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
@@ -115,6 +124,9 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    saturator::register(registry);
+    overdrive::register(registry);
+    tube::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

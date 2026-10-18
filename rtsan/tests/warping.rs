@@ -135,6 +135,8 @@ fn warped_playback_passes_under_rtsan() {
                 clips: vec![clip],
                 beat: Some(Ticks(100_000 + (round as i64 % 7) * 90_000)),
                 time: None,
+                pin_neighbours: false,
+                transients: None,
             }),
             15 => Some(Command::SetClipWarpSettings {
                 clip,

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-402 commands in 34 areas.
+421 commands in 35 areas.
 
 ## Permission classes
 
@@ -117,38 +117,50 @@ Each command has:
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
 | [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
-| [`chain.copy`](#chaincopy) | Copy Chain | `read` |  |  |
-| [`chain.cut`](#chaincut) | Cut Chain | `destructive` |  |  |
-| [`chain.duplicate`](#chainduplicate) | Duplicate Chain | `edit` |  |  |
+| [`chain.copy`](#chaincopy) | Copy Chain | `read` | `Cmd+C` | `Ctrl+C` |
+| [`chain.create`](#chaincreate) | Create Chain | `edit` |  |  |
+| [`chain.cut`](#chaincut) | Cut Chain | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`chain.delete`](#chaindelete) | Delete Chain | `destructive` | `Delete` | `Delete` |
+| [`chain.drop_on_track`](#chaindrop_on_track) | Drop Chain on Track | `edit` |  |  |
+| [`chain.duplicate`](#chainduplicate) | Duplicate Chain | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`chain.hot_swap`](#chainhot_swap) | Hot-Swap Chain | `read` |  |  |
 | [`chain.move`](#chainmove) | Move Chain | `edit` |  |  |
-| [`chain.paste`](#chainpaste) | Paste Chain | `edit` |  |  |
+| [`chain.paste`](#chainpaste) | Paste Chain | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`chain.remove`](#chainremove) | Delete Chain | `destructive` |  |  |
-| [`chain.rename`](#chainrename) | Rename Chain | `edit` |  |  |
+| [`chain.rename`](#chainrename) | Rename Chain | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`chain.select`](#chainselect) | Select Chain | `read` |  |  |
 | [`chain.set_colour`](#chainset_colour) | Set Chain Colour | `edit` |  |  |
 | [`chain.set_enabled`](#chainset_enabled) | Chain Activator | `edit` |  |  |
 | [`chain.set_gain`](#chainset_gain) | Set Chain Gain | `edit` |  |  |
 | [`chain.set_info`](#chainset_info) | Edit Chain Info Text | `edit` |  |  |
 | [`chain.set_pan`](#chainset_pan) | Set Chain Pan | `edit` |  |  |
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
+| [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
+| [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` |  |  |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` |  |  |
+| [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` |  |  |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` |  |  |
+| [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
+| [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | Link Envelope | `edit` |  |  |
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
+| [`clip.set_follow_actions`](#clipset_follow_actions) | Set Clip Follow Actions | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
 | [`clip.set_high_quality`](#clipset_high_quality) | Set Clip High Quality | `edit` |  |  |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
@@ -168,6 +180,7 @@ Each command has:
 | [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -304,6 +317,7 @@ Each command has:
 | [`plugin.set_window`](#pluginset_window) | Set Plug-In Window Place | `read` |  |  |
 | [`plugin.settings`](#pluginsettings) | Plug-In Settings | `edit` |  |  |
 | [`plugin.show_window`](#pluginshow_window) | Show Plug-In Window | `read` |  |  |
+| [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`routing.set_cue_out`](#routingset_cue_out) | Set Cue Out | `edit` |  |  |
 | [`routing.set_input`](#routingset_input) | Set Input | `edit` |  |  |
 | [`routing.set_main_out`](#routingset_main_out) | Set Main Out | `edit` |  |  |
@@ -315,12 +329,14 @@ Each command has:
 | [`scene.duplicate`](#sceneduplicate) | Duplicate Scene | `edit` |  |  |
 | [`scene.move`](#scenemove) | Move Scene | `edit` |  |  |
 | [`scene.rename`](#scenerename) | Rename Scene | `edit` |  |  |
+| [`scene.set_follow_actions`](#sceneset_follow_actions) | Set Scene Follow Actions | `edit` |  |  |
 | [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
 | [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | Copy Clip to Slot | `edit` |  |  |
+| [`session.create_follow_action_chain`](#sessioncreate_follow_action_chain) | Create Follow Action Chain | `edit` | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` |
 | [`session.deactivate`](#sessiondeactivate) | Deactivate Clips | `edit` | `0` | `0` |
 | [`session.delete`](#sessiondelete) | Delete in the Session View | `destructive` |  |  |
 | [`session.drop_files`](#sessiondrop_files) | Drop Files into a Slot | `external` |  |  |
@@ -340,6 +356,7 @@ Each command has:
 | [`session.select`](#sessionselect) | Select in the Session View | `read` |  |  |
 | [`session.select_all`](#sessionselect_all) | Select All Slots | `read` | `Cmd+A` | `Ctrl+A` |
 | [`session.select_edge`](#sessionselect_edge) | Select the Scene's First or Last Track | `read` | `Home`, `Fn+Left`; `End`, `Fn+Right`; `End`, `Fn+Right` | `Home`; `End`; `End` |
+| [`session.set_follow_actions_enabled`](#sessionset_follow_actions_enabled) | Enable Follow Actions Globally | `read` |  |  |
 | [`session.set_quantization`](#sessionset_quantization) | Set Global Launch Quantization | `read` | `Cmd+6`; `Cmd+7`; `Cmd+8`; `Cmd+9`; `Cmd+0` | `Ctrl+6`; `Ctrl+7`; `Ctrl+8`; `Ctrl+9`; `Ctrl+0` |
 | [`session.set_quantization_enabled`](#sessionset_quantization_enabled) | Launch Quantization Enabled | `read` | `Cmd+4` | `Ctrl+4` |
 | [`session.smaller_quantization`](#sessionsmaller_quantization) | Smaller Launch Quantization | `read` | `Cmd+1` | `Ctrl+1` |
@@ -348,6 +365,7 @@ Each command has:
 | [`session.stop_recording`](#sessionstop_recording) | Stop Session Recording | `read` |  |  |
 | [`session.stop_selected`](#sessionstop_selected) | Stop the Selected Tracks' Clips | `read` | `Cmd+Enter` | `Ctrl+Enter` |
 | [`session.stop_track`](#sessionstop_track) | Stop Track | `read` |  |  |
+| [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | Toggle Follow Actions | `edit` | `Shift+Enter` | `Shift+Enter` |
 | [`session.triplet_quantization`](#sessiontriplet_quantization) | Triplet Launch Quantization | `read` | `Cmd+3` | `Ctrl+3` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
@@ -369,6 +387,7 @@ Each command has:
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
+| [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
@@ -1977,25 +1996,29 @@ Result: [`ChangeSet`](#changeset).
 
 #### `chain.copy`
 
-**Copy Chain**. Permission: `read`. Contexts: `device-view`.
+**Copy Chain**. Permission: `read`. Contexts: `rack-chains`.
 
-Copies a rack's chain, with its devices, name, colour, info text and mixer, to the chain clipboard for `chain.paste`. Changes nothing in the set.
+Copies a rack's chain, or the chains selected in the chain list if `chain` is left out, with their devices, names, colours, info texts and mixers, to the chain clipboard for `chain.paste`. Changes nothing in the set.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-002 | `Cmd+C` | `Ctrl+C` | `global` | Copy | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `chain` | [`ChainId`](#chainid) or null | no | The chain; the selected chains if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
-#### `chain.cut`
+#### `chain.create`
 
-**Cut Chain**. Permission: `destructive`. Contexts: `device-view`.
+**Create Chain**. Permission: `edit`. Contexts: `device-view`.
 
-Copies a rack's chain to the chain clipboard and deletes it: one undo step (Delete Chain). Because it removes the person's work an agent asks first.
+Makes a chain in a rack at `index` (the end if left out), as the chain list's drop area does, named after what it holds, and selects it: holding a new `device`, a device made from a `preset` file, or the existing device `move_device` moved out of where it is; with none of them it is empty. The chain must fit the rack's kind. One undo step (Insert Chain).
 
 Default keys: none.
 
@@ -2003,15 +2026,97 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `device` | [`NewDevice`](#newdevice) or null | no | A new device to put in it, as `device.add` describes one. |
+| `index` | integer or null | no | Where the chain goes in the rack's list; the end if left out. |
+| `move_device` | [`DeviceId`](#deviceid) or null | no | A device to move into it from where it is. |
+| `preset` | string or null | no | A preset file: the chain holds a new device with its values. |
+
+Result: [`ChainAdded`](#chainadded).
+
+#### `chain.cut`
+
+**Cut Chain**. Permission: `destructive`. Contexts: `rack-chains`.
+
+Copies a rack's chain, or the selected chains if `chain` is left out, to the chain clipboard and deletes them: one undo step (Delete Chain). Because it removes the person's work an agent asks first.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-001 | `Cmd+X` | `Ctrl+X` | `global` | Cut | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) or null | no | The chain; the selected chains if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.delete`
+
+**Delete Chain**. Permission: `destructive`. Contexts: `rack-chains`.
+
+Deletes the chains selected in the chain list, or `chains`, with their devices and automation: one undo step (Delete Chain). Undo restores them, but because it removes the person's work an agent asks first. `chain.remove` deletes one chain by its ID.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-005 | `Delete` | `Delete` | `global` | Delete | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chains` | array or null | no | The chains; the selected ones if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.drop_on_track`
+
+**Drop Chain on Track**. Permission: `edit`. Contexts: `device-view`.
+
+Moves a chain's devices, in order and keeping their settings and running state, into a track's own chain at `index`, and deletes the chain, as dropping a chain on a track's Device View outside any rack does: the chain's mixer and zones stay behind. The devices must fit the track and Live's order. One undo step (Move Chain).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain whose devices move. |
+| `track` | [`TrackId`](#trackid) | yes | The track whose own chain takes them. |
+| `index` | integer or null | no | Where the first goes in the track's chain; after the track's chain's devices of the same place in Live's order if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
 #### `chain.duplicate`
 
-**Duplicate Chain**. Permission: `edit`. Contexts: `device-view`.
+**Duplicate Chain**. Permission: `edit`. Contexts: `rack-chains`.
 
-Puts a copy of a rack's chain, with new IDs, straight after it: one undo step (Insert Chain).
+Puts a copy of a rack's chain, or of each selected chain if `chain` is left out, with new IDs, straight after it: one undo step (Insert Chain).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-004 | `Cmd+D` | `Ctrl+D` | `global` | Duplicate | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) or null | no | The chain; the selected chains if left out. |
+
+Result: [`ChainAdded`](#chainadded).
+
+#### `chain.hot_swap`
+
+**Hot-Swap Chain**. Permission: `read`. Contexts: `device-view`.
+
+Arms a chain for hot-swap, as its Hot-Swap button does, or disarms it; arming it ends the hot-swap of a device, and the other way round. Only the armed state is built so far: it shows on the chain's row in `device_view.state`. It changes only the view.
 
 Default keys: none.
 
@@ -2020,8 +2125,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `on` | boolean or null | no | Arm (true) or disarm (false); switches if left out. |
 
-Result: [`ChainAdded`](#chainadded).
+Result: [`DeviceViewState`](#deviceviewstate).
 
 #### `chain.move`
 
@@ -2043,18 +2149,22 @@ Result: [`ChangeSet`](#changeset).
 
 #### `chain.paste`
 
-**Paste Chain**. Permission: `edit`. Contexts: `device-view`.
+**Paste Chain**. Permission: `edit`. Contexts: `rack-chains`.
 
-Pastes the chain clipboard's chain into a rack at `index` (the end if left out), as a new chain with new IDs and everything else copied: one undo step (Insert Chain). The chain must fit the rack's kind.
+Pastes the chain clipboard's chains into a rack at `index` (the end if left out), as new chains with new IDs and everything else copied: one undo step (Insert Chain). A chain must fit the rack's kind.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-003 | `Cmd+V` | `Ctrl+V` | `global` | Paste | runs it |
 
 Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `rack` | [`DeviceId`](#deviceid) | yes | The rack to paste into. |
 | `index` | integer or null | no | Where it goes in the rack's list of chains; the end if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack to paste into; the rack in focus if left out. |
 
 Result: [`ChainAdded`](#chainadded).
 
@@ -2076,11 +2186,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `chain.rename`
 
-**Rename Chain**. Permission: `edit`. Contexts: `device-view`.
+**Rename Chain**. Permission: `edit`. Contexts: `rack-chains`.
 
 Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-EDIT-008 | `Cmd+R` | `Ctrl+R` | `global` | Rename the selection | runs it |
 
 Arguments:
 
@@ -2090,6 +2204,23 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `chain.select`
+
+**Select Chain**. Permission: `read`. Contexts: `device-view`.
+
+Selects chains in a rack's chain list, as clicking a row does, and gives the chain list the keyboard focus: `replace` selects only `chain`, `toggle` adds or removes it (Cmd-click, Ctrl-click), `range` selects every chain from the selected one to it (Shift-click), and `previous` and `next` step the selection up and down the list (Up and Down). The rack's devices view shows the selected chain's devices, or says how many chains are selected. It changes only the view: it isn't an undo step and isn't saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) or null | no | The chain to click; left out for `previous` and `next`, which step from the chains selected now. |
+| `mode` | [`ChainSelect`](#chainselect) | no | How the selection changes; a click if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
 
 #### `chain.set_colour`
 
@@ -2193,6 +2324,27 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `chain.solo`
+
+**Solo Chain**. Permission: `edit`. Contexts: `rack-chains`.
+
+Solos the selected chains, or `chain`, as a chain's Solo button does: it is the rack's only soloed chain, and soloing it again unsolos it; with `add` it adds or removes the chain and leaves the others as they are (Cmd-click, Ctrl-click). Other racks and the tracks are not touched. One undo step. `chain.set_solo` sets one chain's solo by its ID.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-023 | `S` | `S` | `rack-chains` | Solo the selected rack chain | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `add` | boolean | no | Add or remove the chain without touching the others' solo, as Cmd-click (Ctrl-click) does; otherwise it's the only one soloed. |
+| `chain` | [`ChainId`](#chainid) or null | no | The chain; the selected chains if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 ### Area `clip`
 
 #### `clip.create`
@@ -2260,6 +2412,7 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2278,6 +2431,24 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint is. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.delete_transients`
+
+**Delete Transients**. Permission: `edit`. Contexts: `clip-view`.
+
+Takes transients out of an audio clip: `times` are their times in the file, in seconds, as `clip.transients` lists them. A transient put in by hand is forgotten; a detected one is noted as taken away and stays away until `clip.reset_transients`. Refused for a time that is none of the clip's transients, once the file's analysis is ready. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `times` | array of number | yes | The transients to take out, by their times in the file as `clip.transients` lists them. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2298,11 +2469,28 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.insert_transient`
+
+**Insert Transient**. Permission: `edit`. Contexts: `clip-view`.
+
+Puts a transient into an audio clip at `time`, seconds in its file: Insert Transient, at the Sample Editor's insert marker when the app runs it. Putting one where a detected transient was taken away brings that one back. The edit belongs to the clip, is saved with the set, and shows in `clip.transients`. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `time` | number, at least 0 | yes | The time in the file, in seconds. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.insert_warp_marker`
 
 **Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
 
-Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one.
+Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one. With `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at the transients just before and just after the new one, read from the clip's transients (`clip.transients`) unless `transients` lists them; it works on one clip.
 
 Default keys: none.
 
@@ -2312,7 +2500,28 @@ Arguments:
 |---|---|---|---|
 | `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
 | `beat` | [`Ticks`](#ticks) or null | no | The beat, in ticks from the clip's 1.1.1, to put the marker on, at the time in the file the map already places there. Give this or `time`. |
+| `pin_neighbours` | boolean | no | Also put markers at the transients either side of the new one (WP-4.3): Cmd (Ctrl) held on a pseudo-warp marker. Needs one clip. |
 | `time` | number or null | no | The time in the file, in seconds, to put the marker at, on the beat the map already places it. Give this or `beat`. |
+| `transients` | array or null | no | The clip's transients, as times in the file, that `pin_neighbours` looks among. Left out, the app uses the clip's current ones. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.insert_warp_markers`
+
+**Insert Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Puts warp markers in a range of a warped audio clip's contents, `from` to `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, when it holds none, at its start and its end. The transients are the clip's own (`clip.transients`) unless `transients` lists times in the file. Each marker sits on the beat the map already places its time, so nothing moves; a marker already there is left. Refused for a clip that isn't warped, or while the file's analysis is not ready and `transients` is left out. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `from` | [`Ticks`](#ticks) | yes | The start of the range, in ticks from the clip's 1.1.1. |
+| `to` | [`Ticks`](#ticks) | yes | The end of the range, in ticks, after `from`. |
+| `transients` | array or null | no | The clip's transients, as times in the file, that the range is searched for. Left out, the app uses the clip's current ones. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2367,6 +2576,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint is now. |
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 or later, and not where another breakpoint of the same envelope already is. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
@@ -2386,6 +2596,24 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `track` | [`TrackId`](#trackid) | yes | The track whose slot it goes in. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it goes in. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.move_transient`
+
+**Move Transient**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the transient at `from` (seconds in the file, as `clip.transients` lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no audio and no warp marker. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `from` | number, at least 0 | yes | The transient's time in the file, in seconds, as `clip.transients` lists it. |
+| `to` | number, at least 0 | yes | Where it goes, in seconds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2428,6 +2656,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.reset_transients`
+
+**Reset Transients**. Permission: `edit`. Contexts: `clip-view`.
+
+Takes away all of an audio clip's transient edits: the transients put in by hand go, and the detected ones that were taken away come back. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.scale_tempo`
 
 **Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
@@ -2466,7 +2710,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Add Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
+Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
 
 Default keys: none.
 
@@ -2475,9 +2719,10 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
-| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates: a control of its mixer, one of its sends, or a parameter of a device in its chain. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates: a control of its mixer, one of its sends, or a parameter of a device in its chain; or, in a MIDI clip, a MIDI controller (`midi.cc`, `midi.pitch_bend` or `midi.channel_pressure`). |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint sits, in ticks from the beginning of the clip's contents, as a note's start is: 0 or later. |
-| `value` | number | yes | The value there, in the parameter's own units. |
+| `value` | number | yes | The value there, in the parameter's own units; a MIDI controller's own range (0 to 127, pitch bend -8192 to 8191). |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2497,6 +2742,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the segment starts: the breakpoint there. |
 | `bend` | number | yes | The bend, from −1 to 1: 0 is the straight line, and the sign chooses which side the segment bows to. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2515,6 +2761,7 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `linked` | boolean | yes | Whether the envelope follows the clip's timeline. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2533,6 +2780,31 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. |
 | `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_follow_actions`
+
+**Set Clip Follow Actions**. Permission: `edit`. Contexts: `clip-view`.
+
+Changes a Session clip's follow actions, as the Launch Properties panel does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, 0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from 1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is 2822400 ticks in 4/4). Fields left out stay as they are, and a number past its limit is held at the limit. One undo step. The defaults are off, A Next, B No Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the follow time has passed after the clip started, and the global switch (`session.set_follow_actions_enabled`) must be on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
+| `action_a` | [`FollowAction`](#followaction) or null | no | Action A. |
+| `action_b` | [`FollowAction`](#followaction) or null | no | Action B. |
+| `chance_a` | integer or null | no | The chance of action A in whole percent, 0 to 100; B has the rest. |
+| `enabled` | boolean or null | no | The Follow Action switch. |
+| `jump_a` | integer or null | no | The slot (scene) number action A's Jump goes to: 1 up to the number of scenes, and 0 for none. |
+| `jump_b` | integer or null | no | The slot (scene) number action B's Jump goes to. |
+| `linked` | boolean or null | no | Linked (on a scene, Longest) or Unlinked. |
+| `multiplier` | integer or null | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) or null | no | The Unlinked follow time in ticks, from a sixteenth. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2874,6 +3146,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.transients`
+
+**Clip Transients**. Permission: `read`. Contexts: `clip-view`.
+
+Lists an audio clip's transients: where its file starts notes and hits, found once in the background and kept by the file's content hash, with the clip's own edits applied (`clip.insert_transient`, `clip.delete_transients`, `clip.move_transient`, `clip.reset_transients`). Each has its `time` in the file in seconds, its `beat` in ticks from the clip's 1.1.1 when the clip is warped, and whether it was put in `by_hand`. `analysis_ready` says whether the file's analysis is done; until it is, only the transients put in by hand are listed, and asking starts the analysis. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`ClipTransients`](#cliptransients).
+
 #### `clip.trim_start`
 
 **Trim Clip Start**. Permission: `edit`. Contexts: `arrangement`.
@@ -3173,7 +3461,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 #### `device.group`
 
-**Group**. Permission: `edit`. Contexts: `device-view`.
+**Group**. Permission: `edit`. Contexts: `device-view`, `rack-chains`.
 
 Wraps the selected devices (or `devices`, all in one chain) in a new rack, as Group does: the rack takes the first device's place and holds one chain, named after the first device, that holds the devices in their order, each keeping its settings and running state; the rack is selected. The rack is the kind that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, and an instrument rack for any other mix. A selection that grouping would put out of the chain's order is refused. With `chains` (several chains of one rack) they become the chains of a new rack of the same kind, inside a new chain in the first one's place. One undo step (Group).
 
@@ -5310,6 +5598,31 @@ Arguments:
 
 Result: [`PluginInfo`](#plugininfo).
 
+### Area `rack`
+
+#### `rack.set_view`
+
+**Show or Hide a Rack's View**. Permission: `edit`. Contexts: `device-view`.
+
+Shows or hides one of the views of a rack, the selected device or `rack`: the Macro Controls, the chain list (View > Show Chains and Hide Chains) or the selected chain's devices. With every view hidden the rack folds into its view column. It changes only the view: it isn't an undo step, and the set keeps which views each rack shows.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-012 | `Plus` | `Plus` | `device-view` | Show the selected rack's chain list | fixes `shown` = `true`; fixes `view` = `"chain_list"` |
+| S-DEV-013 | `Minus` | `Minus` | `device-view` | Hide the selected rack's chain list | fixes `shown` = `false`; fixes `view` = `"chain_list"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `view` | [`RackView`](#rackview) | yes | The view. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+| `shown` | boolean or null | no | Show (true) or hide (false); switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 ### Area `routing`
 
 #### `routing.set_cue_out`
@@ -5500,6 +5813,31 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `scene.set_follow_actions`
+
+**Set Scene Follow Actions**. Permission: `edit`. Contexts: `session`.
+
+Changes a scene's follow actions, as the Scene View does: what the scene does after it was launched, over the scenes as a clip's do over its track's slots. `enabled` is the Follow Action switch; `action_a` and `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, 0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from 1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is 2822400 ticks in 4/4). Fields left out stay as they are, and a number past its limit is held at the limit. One undo step. The defaults are off, A Next, B No Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the follow time has passed after the scene started, and the global switch (`session.set_follow_actions_enabled`) must be on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `action_a` | [`FollowAction`](#followaction) or null | no | Action A. |
+| `action_b` | [`FollowAction`](#followaction) or null | no | Action B. |
+| `chance_a` | integer or null | no | The chance of action A in whole percent, 0 to 100; B has the rest. |
+| `enabled` | boolean or null | no | The Follow Action switch. |
+| `jump_a` | integer or null | no | The slot (scene) number action A's Jump goes to: 1 up to the number of scenes, and 0 for none. |
+| `jump_b` | integer or null | no | The slot (scene) number action B's Jump goes to. |
+| `linked` | boolean or null | no | Linked (on a scene, Longest) or Unlinked. |
+| `multiplier` | integer or null | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) or null | no | The Unlinked follow time in ticks, from a sixteenth. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `scene.set_tempo`
 
 **Set Scene Tempo**. Permission: `edit`. Contexts: `session`.
@@ -5599,6 +5937,22 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip to copy. |
 | `track` | [`TrackId`](#trackid) | yes | The track whose slot it goes in. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it goes in. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `session.create_follow_action_chain`
+
+**Create Follow Action Chain**. Permission: `edit`. Contexts: `session`.
+
+Chains the selected slots' clips, as the clip menu's Create Follow Action Chain (Cmd+Shift+Enter) does, a chain for each track in scene order: every clip gets Follow Action on, A Next at 100 %, B No Action and Linked 1x, so each launches the one after it when it ends. Where the next clip of the selection isn't the next slot, the clip gets A Jump to its slot instead, and the last clip jumps to the first, so the chain loops within the selection. Loop switches don't change. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-014 | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` | `session` | Create a follow action chain from the selected clips | runs it |
+
+Arguments: none (send `{}`).
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5927,6 +6281,22 @@ Arguments:
 
 Result: [`SessionViewState`](#sessionviewstate).
 
+#### `session.set_follow_actions_enabled`
+
+**Enable Follow Actions Globally**. Permission: `read`. Contexts: `session`.
+
+Turns every clip's and scene's follow actions on or off (`enabled`; left out, the switch goes to the other state), as the Enable Follow Actions Globally switch in Main's status row does. Off, no follow action runs, whatever a clip's or scene's own Follow Action switch says; a clip that started while it was off follows nothing until it starts again. On by default. Saved with the set beside the launch quantisation, and no undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether follow actions run; left out, the switch goes to the other state. |
+
+Result: [`LaunchSettings`](#launchsettings).
+
 #### `session.set_quantization`
 
 **Set Global Launch Quantization**. Permission: `read`. Contexts: `global`.
@@ -6054,6 +6424,22 @@ Arguments:
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 
 Result: nothing (`null`).
+
+#### `session.toggle_follow_actions`
+
+**Toggle Follow Actions**. Permission: `edit`. Contexts: `session`.
+
+Switches the Follow Action switch of the selected slots' clips on, or off when they are all on already, as Shift+Enter does: with some on and some off, they all go on. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-013 | `Shift+Enter` | `Shift+Enter` | `session` | Turn follow actions on or off for the selected clips | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`ChangeSet`](#changeset).
 
 #### `session.triplet_quantization`
 
@@ -6390,6 +6776,22 @@ Arguments:
 | `on` | boolean | yes | Whether the setting is on. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_record_session_automation_in`
+
+**Record Session Automation in**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Record Session automation in on the Settings window's Record, Warp & Launch page: `armed_tracks` (the default, Live's) records the control moves of a Session recording into the clips of the armed tracks, `all_tracks` into the playing clip of every track. Moves are recorded only while Automation Arm is on (`arrangement.automation_arm`). The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | `armed_tracks` or `all_tracks`. |
+
+Result: nothing (`null`).
 
 #### `settings.set_select_next_scene_on_launch`
 
@@ -7480,7 +7882,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
 | [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
+| [`chain.create`](#chaincreate) | the query tool's `device` | `chains` |
 | [`chain.cut`](#chaincut) | the query tool's `device` | `chains` |
+| [`chain.delete`](#chaindelete) | the query tool's `device` | `chains` |
+| [`chain.drop_on_track`](#chaindrop_on_track) | the query tool's `track` | `devices` |
 | [`chain.duplicate`](#chainduplicate) | the query tool's `device` | `chains` |
 | [`chain.move`](#chainmove) | the query tool's `device` | `chains` |
 | [`chain.paste`](#chainpaste) | the query tool's `device` | `chains` |
@@ -7492,25 +7897,32 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`chain.set_info`](#chainset_info) | the query tool's `device` | `chains` |
 | [`chain.set_pan`](#chainset_pan) | the query tool's `device` | `chains` |
 | [`chain.set_solo`](#chainset_solo) | the query tool's `device` | `chains` |
+| [`chain.solo`](#chainsolo) | the query tool's `device` | `chains` |
 | [`clip.create`](#clipcreate) | the query tool's `track` | `clips` |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | the query tool's `track` | `slots` |
 | [`clip.delete`](#clipdelete) | the query tool's `track` | `clips` |
 | [`clip.delete_envelope`](#clipdelete_envelope) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_warp_markers`](#clipinsert_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
+| [`clip.move_transient`](#clipmove_transient) | `clip.transients` | `transients` |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | the query tool's `clip` | `envelopes` |
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
+| [`clip.set_follow_actions`](#clipset_follow_actions) | the query tool's `clip` | `launch.follow` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
 | [`clip.set_high_quality`](#clipset_high_quality) | the query tool's `clip` | `data.audio.high_quality` |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
@@ -7612,6 +8024,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`plugin.scan`](#pluginscan) | `plugin.list` | `plugins` |
 | [`plugin.set_panel_param`](#pluginset_panel_param) | `device_view.state` | `devices` |
 | [`plugin.settings`](#pluginsettings) | `settings.state` | `plug_ins` |
+| [`rack.set_view`](#rackset_view) | `device_view.state` | `devices` |
 | [`routing.set_cue_out`](#routingset_cue_out) | the query tool's `track` | `routing.cue_out` |
 | [`routing.set_input`](#routingset_input) | the query tool's `track` | `routing.input` |
 | [`routing.set_main_out`](#routingset_main_out) | the query tool's `track` | `routing.main_out` |
@@ -7623,10 +8036,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`scene.duplicate`](#sceneduplicate) | the query tool's `song` | `scenes` |
 | [`scene.move`](#scenemove) | the query tool's `song` | `scenes` |
 | [`scene.rename`](#scenerename) | the query tool's `scene` | `name` |
+| [`scene.set_follow_actions`](#sceneset_follow_actions) | the query tool's `scene` | `follow` |
 | [`scene.set_tempo`](#sceneset_tempo) | the query tool's `scene` | `tempo` |
 | [`scene.set_time_signature`](#sceneset_time_signature) | the query tool's `scene` | `signature` |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | the query tool's `song` | `scenes` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | the query tool's `track` | `slots` |
+| [`session.create_follow_action_chain`](#sessioncreate_follow_action_chain) | the query tool's `clip` | `launch.follow` |
 | [`session.deactivate`](#sessiondeactivate) | the query tool's `clip` | `mute` |
 | [`session.delete`](#sessiondelete) | the query tool's `track` | `slots` |
 | [`session.drop_files`](#sessiondrop_files) | the query tool's `track` | `slots` |
@@ -7636,6 +8051,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.overdub`](#sessionoverdub) | `transport.state` | `recording.session_slots` |
 | [`session.record`](#sessionrecord) | `transport.state` | `recording.session_slots` |
 | [`session.record_slot`](#sessionrecord_slot) | `transport.state` | `recording.session_slots` |
+| [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
@@ -7648,6 +8064,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
+| [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
@@ -8418,6 +8835,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
 | `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
+| `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 | `warp_mode` | [`WarpMode`](#warpmode) | no | The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on. |
@@ -8511,6 +8929,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
         "number",
         "null"
       ]
+    },
+    "transient_edits": {
+      "$ref": "#/$defs/TransientEdits",
+      "description": "The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27)."
     },
     "warp": {
       "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
@@ -8972,7 +9394,7 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -8980,12 +9402,15 @@ One of:
 - an object with `type` = `"send"`, `to` ([`TrackId`](#trackid)): The level of the track's send to a return track.
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
+- an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
+- an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
+- an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -9066,6 +9491,53 @@ One of:
         "type",
         "chain",
         "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.",
+      "properties": {
+        "number": {
+          "description": "The controller number.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "midi.cc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "number"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.",
+      "properties": {
+        "type": {
+          "const": "midi.pitch_bend",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI clip's channel pressure envelope, from 0 to 127.",
+      "properties": {
+        "type": {
+          "const": "midi.channel_pressure",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
       ],
       "type": "object"
     }
@@ -9644,8 +10116,9 @@ What the chain commands that add a chain return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `chain` | [`ChainId`](#chainid) | yes | The new chain. |
+| `chain` | [`ChainId`](#chainid) | yes | The new chain, or the first of them. |
 | `rack` | [`DeviceId`](#deviceid) | yes | The rack it is in. |
+| `chains` | array of [`ChainId`](#chainid) | yes | Every new chain, in order. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9655,7 +10128,15 @@ What the chain commands that add a chain return.
   "properties": {
     "chain": {
       "$ref": "#/$defs/ChainId",
-      "description": "The new chain."
+      "description": "The new chain, or the first of them."
+    },
+    "chains": {
+      "default": [],
+      "description": "Every new chain, in order.",
+      "items": {
+        "$ref": "#/$defs/ChainId"
+      },
+      "type": "array"
     },
     "rack": {
       "$ref": "#/$defs/DeviceId",
@@ -9664,7 +10145,8 @@ What the chain commands that add a chain return.
   },
   "required": [
     "chain",
-    "rack"
+    "rack",
+    "chains"
   ],
   "type": "object"
 }
@@ -9728,6 +10210,145 @@ A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `ChainRow`
+
+One row of a rack's chain list (racks spec, R21).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `colour` | integer or null | yes | Its colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `enabled` | boolean | yes | Its Chain Activator. |
+| `solo` | boolean | yes | Whether it's soloed. |
+| `hot_swap` | boolean | yes | Whether it's armed for hot-swap by its Hot-Swap button. |
+| `volume` | number | yes | Its Volume as linear gain; 1 is 0 dB. |
+| `pan` | number | yes | Its Pan, from -1 to 1. |
+| `has_mixer` | boolean | yes | Whether it has Volume and Pan: all but a MIDI effect rack's chains do. |
+| `selected` | boolean | yes | Whether it's selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One row of a rack's chain list (racks spec, R21).",
+  "properties": {
+    "colour": {
+      "description": "Its colour, a swatch of the palette of 5 rows of 14, if it has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "enabled": {
+      "description": "Its Chain Activator.",
+      "type": "boolean"
+    },
+    "has_mixer": {
+      "description": "Whether it has Volume and Pan: all but a MIDI effect rack's chains do.",
+      "type": "boolean"
+    },
+    "hot_swap": {
+      "description": "Whether it's armed for hot-swap by its Hot-Swap button.",
+      "type": "boolean"
+    },
+    "id": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "pan": {
+      "description": "Its Pan, from -1 to 1.",
+      "format": "double",
+      "type": "number"
+    },
+    "selected": {
+      "description": "Whether it's selected.",
+      "type": "boolean"
+    },
+    "solo": {
+      "description": "Whether it's soloed.",
+      "type": "boolean"
+    },
+    "volume": {
+      "description": "Its Volume as linear gain; 1 is 0 dB.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "colour",
+    "enabled",
+    "solo",
+    "hot_swap",
+    "volume",
+    "pan",
+    "has_mixer",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChainSelect`
+
+How `chain.select` changes the selection.
+
+One of:
+
+- `"replace"`: Select only `chain`: a click.
+- `"toggle"`: Add `chain` to the selection, or remove it: Cmd-click (Ctrl-click).
+- `"range"`: Select every chain from the selected one to `chain`: Shift-click.
+- `"previous"`: Select only the chain above the first selected one: Up.
+- `"next"`: Select only the chain below the last selected one: Down.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How `chain.select` changes the selection.",
+  "oneOf": [
+    {
+      "const": "replace",
+      "description": "Select only `chain`: a click.",
+      "type": "string"
+    },
+    {
+      "const": "toggle",
+      "description": "Add `chain` to the selection, or remove it: Cmd-click (Ctrl-click).",
+      "type": "string"
+    },
+    {
+      "const": "range",
+      "description": "Select every chain from the selected one to `chain`: Shift-click.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "Select only the chain above the first selected one: Up.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "Select only the chain below the last selected one: Down.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -10086,6 +10707,8 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 |---|---|---|---|
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter it modulates: a control of the clip's track's mixer, a send, or a parameter of a device in its chain. |
 | `envelope` | [`Envelope`](#envelope) | yes | Its breakpoints, in position order: positions are ticks from the beginning of the clip's contents, like a note's start. |
+| `enabled` | boolean | no | Whether an automation envelope drives its parameter: a control moved by hand while the clip plays turns it off until the clip launches again or Re-Enable Automation. Always true for a modulation envelope. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Whether it modulates the parameter or sets it (WP-3.12). A clip can hold one of each kind for a parameter. |
 | `linked` | boolean | no | Whether it follows the clip's region and loop (`true`, the Linked switch's default) or plays once from the clip's start (`false`). |
 
 <details><summary>JSON Schema</summary>
@@ -10094,9 +10717,17 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 {
   "description": "An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).",
   "properties": {
+    "enabled": {
+      "description": "Whether an automation envelope drives its parameter: a control moved by hand while the clip plays turns it off until the clip launches again or Re-Enable Automation. Always true for a modulation envelope.",
+      "type": "boolean"
+    },
     "envelope": {
       "$ref": "#/$defs/Envelope",
       "description": "Its breakpoints, in position order: positions are ticks from the beginning of the clip's contents, like a note's start."
+    },
+    "kind": {
+      "$ref": "#/$defs/EnvelopeKind",
+      "description": "Whether it modulates the parameter or sets it (WP-3.12). A clip can hold one of each kind for a parameter."
     },
     "linked": {
       "description": "Whether it follows the clip's region and loop (`true`, the Linked switch's default) or plays once from the clip's start (`false`).",
@@ -10142,6 +10773,7 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `follow` | [`FollowActions`](#followactions) | no | What the clip does by itself after it has played for a while (WP-3.10). |
 | `legato` | boolean | no | Legato: the clip takes over the play position of the clip playing on its track when it launches. |
 | `mode` | [`LaunchMode`](#launchmode) | no | What a press and a release of the clip's launch button do (WP-3.3). |
 | `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The clip's own launch quantisation; `null` (left out) follows the global one, which Live's chooser calls "Global". |
@@ -10153,6 +10785,10 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 {
   "description": "A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). They are saved with the clip, so they're part of the set and each change is one undo step; a clip without them has the defaults.",
   "properties": {
+    "follow": {
+      "$ref": "#/$defs/FollowActions",
+      "description": "What the clip does by itself after it has played for a while (WP-3.10)."
+    },
     "legato": {
       "default": false,
       "description": "Legato: the clip takes over the play position of the clip playing on its track when it launches.",
@@ -10214,6 +10850,105 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ClipTransient`
+
+One transient of a clip.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number | yes | Where it is in the file, in seconds. |
+| `beat` | [`Ticks`](#ticks) or null | yes | The beat of the clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped, which has no beats. |
+| `by_hand` | boolean | yes | Whether it was put in by hand rather than detected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One transient of a clip.",
+  "properties": {
+    "beat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The beat of the clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped, which has no beats."
+    },
+    "by_hand": {
+      "description": "Whether it was put in by hand rather than detected.",
+      "type": "boolean"
+    },
+    "time": {
+      "description": "Where it is in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "beat",
+    "by_hand"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClipTransients`
+
+What `clip.transients` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `analysis_ready` | boolean | yes | Whether the file's analysis is ready. Until it is, only the transients put in by hand are listed. |
+| `transients` | array of [`ClipTransient`](#cliptransient) | yes | The clip's transients in order of their time in the file: those detected, less the ones taken away, with the ones put in by hand. |
+| `analysis_error` | string or null | no | Why the analysis failed, if it did: the file is missing, changed, or can't be decoded. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.transients` returns.",
+  "properties": {
+    "analysis_error": {
+      "description": "Why the analysis failed, if it did: the file is missing, changed, or can't be decoded.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "analysis_ready": {
+      "description": "Whether the file's analysis is ready. Until it is, only the transients put in by hand are listed.",
+      "type": "boolean"
+    },
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "transients": {
+      "description": "The clip's transients in order of their time in the file: those detected, less the ones taken away, with the ones put in by hand.",
+      "items": {
+        "$ref": "#/$defs/ClipTransient"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clip",
+    "analysis_ready",
+    "transients"
+  ],
+  "type": "object"
 }
 ```
 
@@ -11047,6 +11782,7 @@ One device as the Device View shows it.
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
+| `rack` | [`RackFrame`](#rackframe) or null | no | A rack's frame: its views, its chain list and the selected chain's devices (WP-5.2). None for a device that isn't a rack. |
 
 <details><summary>JSON Schema</summary>
 
@@ -11137,6 +11873,17 @@ One device as the Device View shows it.
         }
       ],
       "description": "Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them."
+    },
+    "rack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RackFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A rack's frame: its views, its chain list and the selected chain's devices (WP-5.2). None for a device that isn't a rack."
     },
     "role": {
       "$ref": "#/$defs/DeviceRole",
@@ -11346,6 +12093,68 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
   },
   "required": [
     "root"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceListEntry`
+
+One entry of the Device View selector's device list (racks spec, R25).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `depth` | integer, at least 0 | yes | How deep it sits: a track's devices are 0, a rack's chains 1 and those chains' devices 2. |
+| `label` | string | yes | What the list shows: a device's title, or a chain's name. |
+| `device` | [`DeviceId`](#deviceid) or null | yes | The device, for a device's entry. |
+| `chain` | [`ChainId`](#chainid) or null | yes | The chain, for a chain's entry. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One entry of the Device View selector's device list (racks spec, R25).",
+  "properties": {
+    "chain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChainId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain, for a chain's entry."
+    },
+    "depth": {
+      "description": "How deep it sits: a track's devices are 0, a rack's chains 1 and those chains' devices 2.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device, for a device's entry."
+    },
+    "label": {
+      "description": "What the list shows: a device's title, or a chain's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "depth",
+    "label",
+    "device",
+    "chain"
   ],
   "type": "object"
 }
@@ -11665,6 +12474,8 @@ What `device_view.state` returns.
 | `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
+| `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
+| `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 
 <details><summary>JSON Schema</summary>
@@ -11687,6 +12498,19 @@ What `device_view.state` returns.
     "can_paste": {
       "description": "Whether the clipboard holds a device to paste.",
       "type": "boolean"
+    },
+    "can_paste_chain": {
+      "default": false,
+      "description": "Whether the chain clipboard holds chains to paste.",
+      "type": "boolean"
+    },
+    "device_list": {
+      "default": [],
+      "description": "Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25).",
+      "items": {
+        "$ref": "#/$defs/DeviceListEntry"
+      },
+      "type": "array"
     },
     "devices": {
       "description": "Its devices, in signal order.",
@@ -11746,7 +12570,9 @@ What `device_view.state` returns.
     "devices",
     "selected",
     "hot_swap",
-    "can_paste"
+    "can_paste",
+    "can_paste_chain",
+    "device_list"
   ],
   "type": "object"
 }
@@ -12432,6 +13258,37 @@ A parameter's envelope: breakpoints joined by straight or curved segments, in po
 
 </details>
 
+### `EnvelopeKind`
+
+What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.
+
+One of:
+
+- `"modulation"`: Moves the parameter's own value, in modulation's units.
+- `"automation"`: Sets the parameter's value, in the parameter's own units.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.",
+  "oneOf": [
+    {
+      "const": "modulation",
+      "description": "Moves the parameter's own value, in modulation's units.",
+      "type": "string"
+    },
+    {
+      "const": "automation",
+      "description": "Sets the parameter's value, in the parameter's own units.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ExportResult`
 
 What `export.audio` returns.
@@ -12886,6 +13743,169 @@ What `device.windows` returns.
   "required": [
     "windows"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FollowAction`
+
+What a follow action does when its time comes (the Clip View's action list, in its order).
+
+One of:
+
+- `"no_action"`: Nothing: the clip plays on as it was.
+- `"stop"`: Stops the clip.
+- `"play_again"`: Launches the clip again from its start.
+- `"previous"`: Launches the clip before this one in its group.
+- `"next"`: Launches the clip after this one in its group.
+- `"first"`: Launches the first clip of the group.
+- `"last"`: Launches the last clip of the group.
+- `"any"`: Launches any clip of the group, this one included.
+- `"other"`: Launches any clip of the group but this one.
+- `"jump"`: Launches the clip at a slot number the action names.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a follow action does when its time comes (the Clip View's action list, in its order).",
+  "oneOf": [
+    {
+      "const": "no_action",
+      "description": "Nothing: the clip plays on as it was.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Stops the clip.",
+      "type": "string"
+    },
+    {
+      "const": "play_again",
+      "description": "Launches the clip again from its start.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "Launches the clip before this one in its group.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "Launches the clip after this one in its group.",
+      "type": "string"
+    },
+    {
+      "const": "first",
+      "description": "Launches the first clip of the group.",
+      "type": "string"
+    },
+    {
+      "const": "last",
+      "description": "Launches the last clip of the group.",
+      "type": "string"
+    },
+    {
+      "const": "any",
+      "description": "Launches any clip of the group, this one included.",
+      "type": "string"
+    },
+    {
+      "const": "other",
+      "description": "Launches any clip of the group but this one.",
+      "type": "string"
+    },
+    {
+      "const": "jump",
+      "description": "Launches the clip at a slot number the action names.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `FollowActions`
+
+A clip's or a scene's follow actions: the Follow Action switch, actions A and B with the chance that splits them, and the follow time.
+
+On a scene, `linked` is the Longest button: the time is the multiplier times the longest clip of the scene.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action_a` | [`FollowAction`](#followaction) | no | Action A, which runs with the chance `chance_a`. Next by default. |
+| `action_b` | [`FollowAction`](#followaction) | no | Action B, which runs the rest of the time. No Action by default. |
+| `chance_a` | integer from 0 to 255 | no | The chance of action A in whole percent, 0 to 100. Action B has the rest, so the two always add up to 100. |
+| `enabled` | boolean | no | The Follow Action switch. Off, nothing runs; off is the default. |
+| `jump_a` | integer, at least 0 | no | The slot (scene) number action A's Jump goes to, counted from 1; 0 leaves it empty, and a jump to an empty target stops the clip. |
+| `jump_b` | integer, at least 0 | no | The slot (scene) number action B's Jump goes to, as `jump_a`. |
+| `linked` | boolean | no | Linked: the follow time is a multiple of the clip's length (the multiplier counts loops, and a clip whose Loop switch is off follows at its end). Unlinked: `time`. On by default. |
+| `multiplier` | integer, at least 0 | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) | no | The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A clip's or a scene's follow actions: the Follow Action switch, actions A and B with the chance that splits them, and the follow time.\n\nOn a scene, `linked` is the Longest button: the time is the multiplier times the longest clip of the scene.",
+  "properties": {
+    "action_a": {
+      "$ref": "#/$defs/FollowAction",
+      "default": "next",
+      "description": "Action A, which runs with the chance `chance_a`. Next by default."
+    },
+    "action_b": {
+      "$ref": "#/$defs/FollowAction",
+      "default": "next",
+      "description": "Action B, which runs the rest of the time. No Action by default."
+    },
+    "chance_a": {
+      "default": 100,
+      "description": "The chance of action A in whole percent, 0 to 100. Action B has the rest, so the two always add up to 100.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "enabled": {
+      "default": false,
+      "description": "The Follow Action switch. Off, nothing runs; off is the default.",
+      "type": "boolean"
+    },
+    "jump_a": {
+      "default": 1,
+      "description": "The slot (scene) number action A's Jump goes to, counted from 1; 0 leaves it empty, and a jump to an empty target stops the clip.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "jump_b": {
+      "default": 1,
+      "description": "The slot (scene) number action B's Jump goes to, as `jump_a`.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "linked": {
+      "description": "Linked: the follow time is a multiple of the clip's length (the multiplier counts loops, and a clip whose Loop switch is off follows at its end). Unlinked: `time`. On by default.",
+      "type": "boolean"
+    },
+    "multiplier": {
+      "default": 1,
+      "description": "The Linked multiplier, a whole number from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "time": {
+      "$ref": "#/$defs/Ticks",
+      "default": 2822400,
+      "description": "The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default."
+    }
+  },
   "type": "object"
 }
 ```
@@ -13940,6 +14960,7 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
 |---|---|---|---|
 | `quantization` | [`LaunchQuantization`](#launchquantization) | yes | The step launches and stops wait for. |
 | `enabled` | boolean | yes | Whether launches and stops are quantised at all. Off, they happen at once, whatever the step says. |
+| `follow_actions` | boolean | no | Enable Follow Actions Globally (WP-3.10): off, no clip's or scene's follow action runs. On by default. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13949,6 +14970,10 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
   "properties": {
     "enabled": {
       "description": "Whether launches and stops are quantised at all. Off, they happen at once, whatever the step says.",
+      "type": "boolean"
+    },
+    "follow_actions": {
+      "description": "Enable Follow Actions Globally (WP-3.10): off, no clip's or scene's follow action runs. On by default.",
       "type": "boolean"
     },
     "quantization": {
@@ -16119,6 +17144,7 @@ A note in a MIDI clip.
 | `start` | [`Ticks`](#ticks) | yes | Where the note starts, counted from the beginning of the clip's contents: the clip's start less its offset. Never negative. |
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
+| `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
 | `release_velocity` | integer from 1 to 127 | no | The release velocity, from 1 to 127; 64 unless given. |
 | `velocity_deviation` | integer from -127 to 127 | no | How far velocity may deviate randomly, from -127 to +127: 0 unless given. |
@@ -16143,6 +17169,13 @@ A note in a MIDI clip.
     "mute": {
       "description": "Whether the note is switched off, so it stays in place but doesn't play.",
       "type": "boolean"
+    },
+    "pressure": {
+      "description": "The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure.",
+      "items": {
+        "$ref": "#/$defs/PressurePoint"
+      },
+      "type": "array"
     },
     "probability": {
       "description": "The chance the note will play, from 0 to 1: 1 (100 %) unless given.",
@@ -17494,6 +18527,43 @@ What the preset commands return.
 
 </details>
 
+### `PressurePoint`
+
+One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) | yes | Where it takes effect, counted from the note's start: 0 or more and before the note's length. |
+| `value` | integer from 0 to 127 | yes | The pressure, from 0 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it takes effect, counted from the note's start: 0 or more and before the note's length."
+    },
+    "value": {
+      "description": "The pressure, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 127,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "at",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PreviewResult`
 
 What `perception.preview` returns.
@@ -17722,6 +18792,81 @@ One of:
 
 </details>
 
+### `RackFrame`
+
+A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view column of selectors, then each view that's shown, left to right.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | [`RackKind`](#rackkind) | yes | Its kind. |
+| `views` | [`RackViews`](#rackviews) | yes | Which views it shows: kept with the set, so reopening it shows them. |
+| `chains` | array of [`ChainRow`](#chainrow) | yes | Its chains, in order. |
+| `selected_chains` | array of [`ChainId`](#chainid) | yes | The selected chains: those clicked, or the first chain while none is. |
+| `devices` | array of [`DeviceFrame`](#deviceframe) | yes | The devices of the selected chain, left to right: empty while no chain or several are selected. |
+| `chain_list_focused` | boolean | yes | Whether the chain list has the focus, so S solos the selected chain. |
+| `note` | string or null | no | What the devices view says instead of devices while several chains are selected, such as `3 chains selected`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view column of selectors, then each view that's shown, left to right.",
+  "properties": {
+    "chain_list_focused": {
+      "description": "Whether the chain list has the focus, so S solos the selected chain.",
+      "type": "boolean"
+    },
+    "chains": {
+      "description": "Its chains, in order.",
+      "items": {
+        "$ref": "#/$defs/ChainRow"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices of the selected chain, left to right: empty while no chain or several are selected.",
+      "items": {
+        "$ref": "#/$defs/DeviceFrame"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "$ref": "#/$defs/RackKind",
+      "description": "Its kind."
+    },
+    "note": {
+      "description": "What the devices view says instead of devices while several chains are selected, such as `3 chains selected`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selected_chains": {
+      "description": "The selected chains: those clicked, or the first chain while none is.",
+      "items": {
+        "$ref": "#/$defs/ChainId"
+      },
+      "type": "array"
+    },
+    "views": {
+      "$ref": "#/$defs/RackViews",
+      "description": "Which views it shows: kept with the set, so reopening it shows them."
+    }
+  },
+  "required": [
+    "kind",
+    "views",
+    "chains",
+    "selected_chains",
+    "devices",
+    "chain_list_focused"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RackKind`
 
 The four kinds of rack. A rack has the role of what it holds ([`RackKind::role`]).
@@ -17760,6 +18905,86 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RackView`
+
+One of the views a rack's frame can show (racks spec, R18).
+
+One of:
+
+- `"macros"`: The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).
+- `"chain_list"`: The chain list.
+- `"devices"`: The selected chain's devices.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the views a rack's frame can show (racks spec, R18).",
+  "oneOf": [
+    {
+      "const": "macros",
+      "description": "The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).",
+      "type": "string"
+    },
+    {
+      "const": "chain_list",
+      "description": "The chain list.",
+      "type": "string"
+    },
+    {
+      "const": "devices",
+      "description": "The selected chain's devices.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RackViews`
+
+Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `macros` | boolean | yes | The Macro Controls. |
+| `chain_list` | boolean | yes | The chain list. |
+| `devices` | boolean | yes | The selected chain's devices. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.",
+  "properties": {
+    "chain_list": {
+      "default": true,
+      "description": "The chain list.",
+      "type": "boolean"
+    },
+    "devices": {
+      "default": true,
+      "description": "The selected chain's devices.",
+      "type": "boolean"
+    },
+    "macros": {
+      "default": true,
+      "description": "The Macro Controls.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "macros",
+    "chain_list",
+    "devices"
+  ],
+  "type": "object"
 }
 ```
 
@@ -18699,6 +19924,37 @@ One of:
 
 </details>
 
+### `SessionAutomationTracks`
+
+Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12): which tracks a Session recording writes control moves into the clips of.
+
+One of:
+
+- `"armed_tracks"`: The armed tracks only: Live's default, as observed.
+- `"all_tracks"`: Every track with a Session clip playing.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12): which tracks a Session recording writes control moves into the clips of.",
+  "oneOf": [
+    {
+      "const": "armed_tracks",
+      "description": "The armed tracks only: Live's default, as observed.",
+      "type": "string"
+    },
+    {
+      "const": "all_tracks",
+      "description": "Every track with a Session clip playing.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `SessionSelectMode`
 
 How a click changes the selection (the Session View's own modifier click rules).
@@ -19061,6 +20317,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
+| `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
@@ -19113,6 +20370,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/PluginSettings",
       "description": "Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it."
     },
+    "record_session_automation_in": {
+      "$ref": "#/$defs/SessionAutomationTracks",
+      "description": "Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it."
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -19135,6 +20396,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
     "launch",
+    "record_session_automation_in",
     "file_folder",
     "auto_hide_plug_in_windows",
     "plug_ins",
@@ -20428,6 +21690,44 @@ What `track.ungroup` returns.
   "required": [
     "tracks"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TransientEdits`
+
+A clip's edits to its file's detected transients, as times in the file in seconds: `added` are transients put in by hand, `removed` are detected transients taken away.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `added` | array of number | no | Transients put in by hand. |
+| `removed` | array of number | no | Detected transients taken away, at the times they were detected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A clip's edits to its file's detected transients, as times in the file in seconds: `added` are transients put in by hand, `removed` are detected transients taken away.",
+  "properties": {
+    "added": {
+      "description": "Transients put in by hand.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "removed": {
+      "description": "Detected transients taken away, at the times they were detected.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
   "type": "object"
 }
 ```

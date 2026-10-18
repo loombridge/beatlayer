@@ -31,6 +31,74 @@ pub struct WarpMarker {
     pub beat: Ticks,
 }
 
+/// How far apart two times in the file may be and still name the same
+/// transient: half a millisecond. Detected transients are at least 20 ms
+/// apart, and another machine may place one a hair differently.
+pub const TRANSIENT_MATCH: f64 = 0.0005;
+
+fn same_transient(a: f64, b: f64) -> bool {
+    (a - b).abs() <= TRANSIENT_MATCH
+}
+
+/// A clip's edits to the transients detected in its file (the warping spec,
+/// R23): the ones made by hand, and the detected ones taken away. Times are
+/// seconds in the file, in increasing order, so the set shows the same
+/// transients on another machine once the file is analysed there.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A clip's edits to its file's detected transients, as times in the file in \
+                   seconds: `added` are transients put in by hand, `removed` are detected \
+                   transients taken away."
+)]
+pub struct TransientEdits {
+    /// Transients put in by hand.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<f64>,
+    /// Detected transients taken away, at the times they were detected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<f64>,
+}
+
+impl TransientEdits {
+    /// Whether there are no edits.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty()
+    }
+
+    /// The transients a clip shows: those `detected` in its file, less the
+    /// removed ones, with the added ones, in order.
+    #[must_use]
+    pub fn apply(&self, detected: &[f64]) -> Vec<f64> {
+        let mut shown: Vec<f64> = detected
+            .iter()
+            .copied()
+            .filter(|&t| !self.removed.iter().any(|&r| same_transient(r, t)))
+            .chain(self.added.iter().copied())
+            .collect();
+        shown.sort_by(f64::total_cmp);
+        shown.dedup_by(|later, earlier| same_transient(*later, *earlier));
+        shown
+    }
+}
+
+/// Puts `time` into a sorted list of times.
+fn insert_sorted(times: &mut Vec<f64>, time: f64) {
+    let at = times.partition_point(|&t| t < time);
+    times.insert(at, time);
+}
+
+fn check_transient_time(time: f64) -> Result<(), ModelError> {
+    if time.is_finite() && time >= 0.0 {
+        Ok(())
+    } else {
+        Err(ModelError::InvalidValue {
+            what: "transient time",
+            value: time,
+        })
+    }
+}
+
 /// Where a new warp marker goes (the warping spec, R6).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkerAt {
@@ -340,6 +408,121 @@ impl AudioData {
         })
     }
 
+    /// The clip with markers at every transient of `transients` (times in
+    /// the file) that plays within `from` to `to`, ticks of its contents, or,
+    /// when none does, at `from` and at `to` (R25).
+    pub(crate) fn with_markers_in_range(
+        &self,
+        from: Ticks,
+        to: Ticks,
+        transients: &[f64],
+    ) -> Result<Self, ModelError> {
+        self.require_warp()?;
+        if from >= to {
+            return Err(ModelError::InvalidInput(
+                "the range must end after it starts",
+            ));
+        }
+        let map = self.warp_map()?;
+        let within = (from.get() as f64)..=(to.get() as f64);
+        let inside: Vec<MarkerAt> = transients
+            .iter()
+            .filter(|&&t| within.contains(&map.time_to_beat(t)))
+            .map(|&t| MarkerAt::Time(t))
+            .collect();
+        let places = if inside.is_empty() {
+            vec![MarkerAt::Beat(from), MarkerAt::Beat(to)]
+        } else {
+            inside
+        };
+        places
+            .into_iter()
+            .try_fold(self.clone(), |next, at| next.with_marker_inserted(at))
+    }
+
+    /// The clip with a marker added as [`AudioData::with_marker_inserted`]
+    /// does, and markers too at the transients of `transients` either side
+    /// of it (R26): the nearest before and the nearest after.
+    pub(crate) fn with_marker_inserted_pinned(
+        &self,
+        at: MarkerAt,
+        transients: &[f64],
+    ) -> Result<Self, ModelError> {
+        self.require_warp()?;
+        let map = self.warp_map()?;
+        let time = match at {
+            MarkerAt::Beat(beat) => map.beat_to_time(beat.get() as f64),
+            MarkerAt::Time(time) => time,
+        };
+        let before = transients
+            .iter()
+            .copied()
+            .filter(|&t| t < time - TRANSIENT_MATCH)
+            .max_by(f64::total_cmp);
+        let after = transients
+            .iter()
+            .copied()
+            .filter(|&t| t > time + TRANSIENT_MATCH)
+            .min_by(f64::total_cmp);
+        [before, after]
+            .into_iter()
+            .flatten()
+            .try_fold(self.clone(), |next, t| {
+                next.with_marker_inserted(MarkerAt::Time(t))
+            })?
+            .with_marker_inserted(at)
+    }
+
+    /// The clip with a transient put in at `time` in the file (R23). Putting
+    /// one where a detected one was taken away brings that one back.
+    pub(crate) fn with_transient_inserted(&self, time: f64) -> Result<Self, ModelError> {
+        check_transient_time(time)?;
+        let mut next = self.clone();
+        let edits = &mut next.transient_edits;
+        if let Some(at) = edits.removed.iter().position(|&r| same_transient(r, time)) {
+            edits.removed.remove(at);
+        } else if !edits.added.iter().any(|&a| same_transient(a, time)) {
+            insert_sorted(&mut edits.added, time);
+        }
+        Ok(next)
+    }
+
+    /// The clip without the transients at `times` in the file (R23): one put
+    /// in by hand is forgotten, a detected one is noted as taken away.
+    pub(crate) fn with_transients_deleted(&self, times: &[f64]) -> Result<Self, ModelError> {
+        if times.is_empty() {
+            return Err(ModelError::InvalidInput("name at least one transient"));
+        }
+        let mut next = self.clone();
+        let edits = &mut next.transient_edits;
+        for &time in times {
+            check_transient_time(time)?;
+            if let Some(at) = edits.added.iter().position(|&a| same_transient(a, time)) {
+                edits.added.remove(at);
+            } else if !edits.removed.iter().any(|&r| same_transient(r, time)) {
+                insert_sorted(&mut edits.removed, time);
+            }
+        }
+        Ok(next)
+    }
+
+    /// The clip without any transient edits: the ones made by hand go, and
+    /// the detected ones taken away come back (R23).
+    pub(crate) fn with_transients_reset(&self) -> Self {
+        Self {
+            transient_edits: TransientEdits::default(),
+            ..self.clone()
+        }
+    }
+
+    /// The clip with the transient at `from` moved to `to`, both times in
+    /// the file (R26): the audio doesn't change.
+    pub(crate) fn with_transient_moved(&self, from: f64, to: f64) -> Result<Self, ModelError> {
+        check_transient_time(to)?;
+        self.with_transients_deleted(&[from])?
+            .with_transient_inserted(to)
+    }
+
     /// Checks that `indices` name markers of the clip.
     fn check_indices(&self, indices: &[usize]) -> Result<(), ModelError> {
         if indices.is_empty() || indices.iter().any(|&i| i >= self.warp_markers.len()) {
@@ -474,6 +657,8 @@ mod tests {
                 clips: vec![clip],
                 beat: Some(Ticks::WHOLE),
                 time: None,
+                pin_neighbours: false,
+                transients: None,
             })
             .unwrap();
         let before = editor.document().clip(clip).unwrap().clone();
@@ -885,5 +1070,112 @@ mod tests {
         let seconds = on.in_seconds();
         assert!(near(seconds.start, 1.0) && near(seconds.end.unwrap(), 1.5));
         assert_eq!(on.in_seconds().warp_markers, on.warp_markers);
+    }
+
+    // Spec: warping R25
+    #[test]
+    fn insert_warp_markers_marks_each_transient_or_the_selections_ends() {
+        // At 120 BPM a second is two quarters, so 0.25 s is half a quarter.
+        let clip = warped(&[(0.0, 0)], 120.0);
+        let transients = [0.25, 0.5, 1.0, 2.5];
+        let marked = clip
+            .with_markers_in_range(Ticks(0), Ticks(2 * Q), &transients)
+            .unwrap();
+        assert_eq!(times(&marked), [0.0, 0.25, 0.5, 1.0]);
+        assert_eq!(beats(&marked), [0, Q / 2, Q, 2 * Q]);
+        // The range's ends count, and a transient outside it doesn't.
+        let edges = clip
+            .with_markers_in_range(Ticks(Q), Ticks(2 * Q), &transients)
+            .unwrap();
+        assert_eq!(times(&edges), [0.0, 0.5, 1.0]);
+        // With no transient inside, the range's own ends get markers.
+        let ends = clip
+            .with_markers_in_range(Ticks(3 * Q), Ticks(4 * Q), &transients)
+            .unwrap();
+        assert_eq!(beats(&ends), [0, 3 * Q, 4 * Q]);
+        assert!(near(ends.warp_markers[2].time, 2.0));
+        let none = clip
+            .with_markers_in_range(Ticks(3 * Q), Ticks(4 * Q), &[])
+            .unwrap();
+        assert_eq!(none, ends);
+        // The audio doesn't move, the range must run forward, and the clip
+        // must be warped.
+        let (map, after) = (clip.warp_map().unwrap(), marked.warp_map().unwrap());
+        for beat in [-Q, 0, Q / 3, Q, 3 * Q] {
+            assert!(near(
+                map.beat_to_time(beat as f64),
+                after.beat_to_time(beat as f64)
+            ));
+        }
+        assert!(clip.with_markers_in_range(Ticks(Q), Ticks(Q), &[]).is_err());
+        let off = AudioData {
+            warp: false,
+            ..clip
+        };
+        assert!(off.with_markers_in_range(Ticks(0), Ticks(Q), &[]).is_err());
+    }
+
+    // Spec: warping R26
+    #[test]
+    fn a_pseudo_warp_marker_pins_its_neighbours_with_cmd() {
+        let clip = warped(&[(0.0, 0)], 120.0);
+        let transients = [0.25, 0.5, 1.0, 1.5];
+        let plain = clip.with_marker_inserted(MarkerAt::Time(1.0)).unwrap();
+        assert_eq!(times(&plain), [0.0, 1.0]);
+        let pinned = clip
+            .with_marker_inserted_pinned(MarkerAt::Time(1.0), &transients)
+            .unwrap();
+        assert_eq!(times(&pinned), [0.0, 0.5, 1.0, 1.5]);
+        // Named by a beat, it pins the same; at the last transient, only the
+        // one before it.
+        let by_beat = clip
+            .with_marker_inserted_pinned(MarkerAt::Beat(Ticks(2 * Q)), &transients)
+            .unwrap();
+        assert_eq!(times(&by_beat), times(&pinned));
+        let last = clip
+            .with_marker_inserted_pinned(MarkerAt::Time(1.5), &transients)
+            .unwrap();
+        assert_eq!(times(&last), [0.0, 1.0, 1.5]);
+        // No transients, no neighbours.
+        let alone = clip
+            .with_marker_inserted_pinned(MarkerAt::Time(1.0), &[])
+            .unwrap();
+        assert_eq!(alone, plain);
+    }
+
+    // Spec: warping R23
+    #[test]
+    fn transient_edits_add_remove_and_reset() {
+        let clip = AudioData::new(ContentHash([1; 32]));
+        let detected = [0.1, 0.5, 0.9];
+        let edited = clip
+            .with_transient_inserted(0.3)
+            .unwrap()
+            .with_transients_deleted(&[0.5])
+            .unwrap();
+        assert_eq!(edited.transient_edits.apply(&detected), [0.1, 0.3, 0.9]);
+        // A transient made by hand, deleted, is forgotten; a deleted
+        // detected one comes back when one is put where it was.
+        let forgotten = edited.with_transients_deleted(&[0.3]).unwrap();
+        assert!(forgotten.transient_edits.added.is_empty());
+        assert_eq!(forgotten.transient_edits.apply(&detected), [0.1, 0.9]);
+        let back = forgotten.with_transient_inserted(0.5).unwrap();
+        assert!(back.transient_edits.is_empty());
+        // Reset brings back every detected one and takes the added ones.
+        assert!(edited.with_transients_reset().transient_edits.is_empty());
+        // Moving one changes where it is.
+        let moved = clip.with_transient_moved(0.5, 0.6).unwrap();
+        assert_eq!(moved.transient_edits.apply(&detected), [0.1, 0.6, 0.9]);
+        // Times must be in the file, and a deletion names something.
+        assert!(clip.with_transient_inserted(-1.0).is_err());
+        assert!(clip.with_transient_inserted(f64::NAN).is_err());
+        assert!(clip.with_transients_deleted(&[]).is_err());
+        // The edits are saved only when there are some.
+        let saved = |audio: &AudioData| serde_json::to_value(audio).unwrap();
+        assert!(saved(&clip).get("transient_edits").is_none());
+        assert_eq!(
+            saved(&edited)["transient_edits"],
+            json!({ "added": [0.3], "removed": [0.5] })
+        );
     }
 }

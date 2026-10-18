@@ -181,6 +181,21 @@ fn a_warped_clip_keeps_its_warp_map_through_a_save_and_load() {
             clips: vec![warped],
             beat: Some(Ticks::WHOLE),
             time: None,
+            pin_neighbours: false,
+            transients: None,
+        })
+        .unwrap();
+    // Transient edits (WP-4.3) are saved with the clip too.
+    editor
+        .apply(Edit::InsertTransient {
+            clip: warped,
+            time: 0.3,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::DeleteTransients {
+            clip: warped,
+            times: vec![0.7],
         })
         .unwrap();
     // A signature has no command yet; the data carries it.
@@ -248,12 +263,15 @@ fn a_warped_clip_keeps_its_warp_map_through_a_save_and_load() {
         );
     }
     assert_eq!(text.matches("\"warp_markers\"").count(), 1);
+    assert_eq!(text.matches("\"transient_edits\"").count(), 1);
     let (loaded, _) = decode_json(&json, &LoadOptions::default()).unwrap();
     assert_eq!(loaded, project);
     let ClipData::Audio(back) = &loaded.document.clip(warped).unwrap().data else {
         unreachable!("an audio clip");
     };
     assert_eq!(*back, audio);
+    assert_eq!(back.transient_edits.added, [0.3]);
+    assert_eq!(back.transient_edits.removed, [0.7]);
     assert_eq!(
         back.warp_markers[1],
         WarpMarker {

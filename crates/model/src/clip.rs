@@ -32,7 +32,7 @@ use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
-use crate::warp::WarpMarker;
+use crate::warp::{TransientEdits, WarpMarker};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
@@ -97,12 +97,22 @@ impl Clip {
         self.envelopes.iter()
     }
 
-    /// The envelope the clip carries for `target`, if it has one.
+    /// The modulation envelope the clip carries for `target`, if it has one.
     #[must_use]
     pub fn envelope(&self, target: &AutomationTarget) -> Option<&ClipEnvelope> {
+        self.envelope_of(target, EnvelopeKind::Modulation)
+    }
+
+    /// The envelope of `kind` the clip carries for `target`, if it has one.
+    #[must_use]
+    pub fn envelope_of(
+        &self,
+        target: &AutomationTarget,
+        kind: EnvelopeKind,
+    ) -> Option<&ClipEnvelope> {
         self.envelopes
             .iter()
-            .find(|envelope| envelope.target == *target)
+            .find(|envelope| envelope.target == *target && envelope.kind == kind)
     }
 
     /// Where the clip ends: its start plus its length.
@@ -233,6 +243,35 @@ impl Clip {
     }
 }
 
+/// What a clip's envelope does to its parameter (WP-3.12, WP-3.15).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "What a clip envelope does: `modulation` (the default) moves the value the \
+                   control or the track's automation gives by a share of the parameter's travel; \
+                   `automation` (a Session clip's) sets the value outright while the clip plays."
+)]
+pub enum EnvelopeKind {
+    /// Moves the parameter's own value, in modulation's units.
+    #[default]
+    Modulation,
+    /// Sets the parameter's value, in the parameter's own units.
+    Automation,
+}
+
 /// A clip's envelope for one of its track's parameters (WP-3.15): the
 /// breakpoints it holds and whether it follows the clip's timeline.
 ///
@@ -258,6 +297,15 @@ pub struct ClipEnvelope {
     /// switch's default) or plays once from the clip's start (`false`).
     #[serde(default = "linked_default", skip_serializing_if = "is_linked")]
     pub linked: bool,
+    /// Whether it modulates the parameter or sets it (WP-3.12). A clip can
+    /// hold one of each kind for a parameter.
+    #[serde(default, skip_serializing_if = "is_modulation")]
+    pub kind: EnvelopeKind,
+    /// Whether an automation envelope drives its parameter: a control moved
+    /// by hand while the clip plays turns it off until the clip launches
+    /// again or Re-Enable Automation. Always true for a modulation envelope.
+    #[serde(default = "linked_default", skip_serializing_if = "is_linked")]
+    pub enabled: bool,
 }
 
 impl ClipEnvelope {
@@ -268,6 +316,8 @@ impl ClipEnvelope {
             target,
             envelope,
             linked: true,
+            kind: EnvelopeKind::Modulation,
+            enabled: true,
         }
     }
 }
@@ -282,15 +332,27 @@ fn linked_default() -> bool {
 pub(crate) fn clip_entry(
     envelopes: &mut Vec<ClipEnvelope>,
     target: AutomationTarget,
+    kind: EnvelopeKind,
 ) -> &mut ClipEnvelope {
     let index = envelopes
         .iter()
-        .position(|envelope| envelope.target == target)
+        .position(|envelope| envelope.target == target && envelope.kind == kind)
         .unwrap_or_else(|| {
-            envelopes.push(ClipEnvelope::new(target, Envelope::default()));
+            let mut entry = ClipEnvelope::new(target, Envelope::default());
+            entry.kind = kind;
+            envelopes.push(entry);
             envelopes.len() - 1
         });
     &mut envelopes[index]
+}
+
+/// Whether an envelope is a modulation one, so serde leaves the default out.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_modulation(kind: &EnvelopeKind) -> bool {
+    *kind == EnvelopeKind::Modulation
 }
 
 /// Whether a clip envelope is linked, so serde leaves the default out.
@@ -438,6 +500,11 @@ pub struct AudioData {
     /// band-limited interpolator wherever it is read at another rate than 1.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub high_quality: bool,
+    /// The clip's edits to its file's detected transients (the warping spec,
+    /// R23): none unless given. They belong to the file, so replacing the
+    /// file drops them (R27).
+    #[serde(default, skip_serializing_if = "TransientEdits::is_empty")]
+    pub transient_edits: TransientEdits,
 }
 
 impl AudioData {
@@ -464,6 +531,7 @@ impl AudioData {
             warp_settings: WarpSettings::default(),
             ram: false,
             high_quality: true,
+            transient_edits: TransientEdits::default(),
         }
     }
 
@@ -685,8 +753,20 @@ impl MidiData {
     }
 }
 
+/// One point of a note's pressure (WP-2.29): from `at` after the note's
+/// start the note's key is pressed to `value`, until the next point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PressurePoint {
+    /// Where it takes effect, counted from the note's start: 0 or more and
+    /// before the note's length.
+    pub at: Ticks,
+    /// The pressure, from 0 to 127.
+    #[schemars(range(max = 127))]
+    pub value: u8,
+}
+
 /// A note in a MIDI clip.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     /// The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.
     #[schemars(range(max = 127))]
@@ -720,6 +800,11 @@ pub struct Note {
     /// Whether the note is switched off, so it stays in place but doesn't play.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mute: bool,
+    /// The note's own pressure, played as polyphonic pressure over its
+    /// length: points in order of `at`, none at the same place. A note with
+    /// none plays no pressure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pressure: Vec<PressurePoint>,
 }
 
 impl Note {
@@ -735,6 +820,7 @@ impl Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }
@@ -750,6 +836,7 @@ impl Default for Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }

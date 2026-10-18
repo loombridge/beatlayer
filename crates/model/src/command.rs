@@ -11,12 +11,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device, override_target,
+    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device,
 };
-use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
+use crate::clip::{
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
+};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
+use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
@@ -29,7 +32,7 @@ use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
-use crate::warp::MarkerAt;
+use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
 
 /// What left a track: devices and rack chains.
@@ -293,6 +296,15 @@ pub enum Command {
         scene: SceneId,
         /// The tempo, or `None` for none of its own.
         tempo: Option<Bpm>,
+    },
+    /// Changes a scene's follow actions: the fields given change and the
+    /// others stay (WP-3.10).
+    SetSceneFollowActions {
+        /// The scene.
+        scene: SceneId,
+        /// The fields to change.
+        #[serde(flatten)]
+        patch: FollowPatch,
     },
     /// Gives a scene a time signature to set when it is launched, or
     /// switches it off with `None` (WP-3.5).
@@ -714,6 +726,63 @@ pub enum Command {
         /// beat the map already places it. Give this or `beat`.
         #[serde(default)]
         time: Option<f64>,
+        /// Also put markers at the transients either side of the new one
+        /// (WP-4.3): Cmd (Ctrl) held on a pseudo-warp marker. Needs one clip.
+        #[serde(default)]
+        pin_neighbours: bool,
+        /// The clip's transients, as times in the file, that `pin_neighbours`
+        /// looks among. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts warp markers in a range of a warped clip's contents (WP-4.3): at
+    /// every transient in it, or at its start and its end when it holds none.
+    InsertWarpMarkers {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The start of the range, in ticks from the clip's 1.1.1.
+        from: Ticks,
+        /// The end of the range, in ticks, after `from`.
+        to: Ticks,
+        /// The clip's transients, as times in the file, that the range is
+        /// searched for. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts a transient into an audio clip's file at a time (WP-4.3).
+    InsertTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The time in the file, in seconds.
+        #[schemars(range(min = 0.0))]
+        time: f64,
+    },
+    /// Takes transients out of an audio clip (WP-4.3).
+    DeleteTransients {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transients to take out, by their times in the file as
+        /// `clip.transients` lists them.
+        times: Vec<f64>,
+    },
+    /// Takes away an audio clip's transient edits (WP-4.3): the ones made by
+    /// hand go, and the detected ones taken away come back.
+    ResetTransients {
+        /// The audio clip.
+        clip: ClipId,
+    },
+    /// Moves a transient to another time in the file (WP-4.3); no audio
+    /// changes.
+    MoveTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transient's time in the file, in seconds, as `clip.transients`
+        /// lists it.
+        #[schemars(range(min = 0.0))]
+        from: f64,
+        /// Where it goes, in seconds.
+        #[schemars(range(min = 0.0))]
+        to: f64,
     },
     /// Moves warp markers by the same ticks, each keeping its time in the
     /// file (WP-4.1).
@@ -821,6 +890,15 @@ pub enum Command {
         #[serde(default)]
         quantization: Option<LaunchQuantization>,
     },
+    /// Changes a Session clip's follow actions: the fields given change and
+    /// the others stay (WP-3.10).
+    SetClipFollowActions {
+        /// The clip, which sits in a Session slot.
+        clip: ClipId,
+        /// The fields to change.
+        #[serde(flatten)]
+        patch: FollowPatch,
+    },
     /// Sets how much the velocity of the note that launches a Session clip
     /// changes its volume.
     SetClipVelocityAmount {
@@ -840,12 +918,18 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track the envelope modulates: a
         /// control of its mixer, one of its sends, or a parameter of a
-        /// device in its chain.
+        /// device in its chain; or, in a MIDI clip, a MIDI controller
+        /// (`midi.cc`, `midi.pitch_bend` or `midi.channel_pressure`).
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
         /// Where the breakpoint sits, in ticks from the beginning of the
         /// clip's contents, as a note's start is: 0 or later.
         at: Ticks,
-        /// The value there, in the parameter's own units.
+        /// The value there, in the parameter's own units; a MIDI
+        /// controller's own range (0 to 127, pitch bend -8192 to 8191).
         value: f64,
     },
     /// Curves the segment starting at one of a clip envelope's breakpoints,
@@ -857,6 +941,10 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track.
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
         /// Where the segment starts: the breakpoint there.
         at: Ticks,
         /// The bend, from −1 to 1: 0 is the straight line, and the sign
@@ -870,6 +958,10 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track.
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
         /// Where the breakpoint is now.
         at: Ticks,
         /// Where it goes: 0 or later, and not where another breakpoint of
@@ -888,6 +980,10 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track.
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
         /// Where the breakpoint is.
         at: Ticks,
     },
@@ -900,6 +996,10 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track.
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
     },
     /// Switches a clip envelope's Linked switch: linked, it follows the
     /// clip's region and loop; unlinked, it plays once from the clip's
@@ -909,6 +1009,10 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track.
         target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
         /// Whether the envelope follows the clip's timeline.
         linked: bool,
     },
@@ -1512,6 +1616,11 @@ impl Command {
             // Beatlayer's name the edit.
             Self::SetClipWarp { .. } => "Switch Warp",
             Self::InsertWarpMarker { .. } => "Insert Warp Marker",
+            Self::InsertWarpMarkers { .. } => "Insert Warp Markers",
+            Self::InsertTransient { .. } => "Insert Transient",
+            Self::DeleteTransients { .. } => "Delete Transient",
+            Self::ResetTransients { .. } => "Reset Transients",
+            Self::MoveTransient { .. } => "Move Transient",
             Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
             Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
             Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
@@ -1525,6 +1634,8 @@ impl Command {
             Self::SetClipLegato { .. } => "Switch Legato",
             Self::SetClipLaunchQuantization { .. } => "Change clip quantization",
             Self::SetClipVelocityAmount { .. } => "Change velocity amount",
+            // WP-3.10. Live's undo names are to observe.
+            Self::SetClipFollowActions { .. } => "Change follow actions",
             // WP-3.15. Live's undo names for clip envelope edits are to
             // observe; Beatlayer's name the edit.
             Self::SetClipEnvelopeBreakpoint { .. } => "Add Envelope Breakpoint",
@@ -1541,6 +1652,7 @@ impl Command {
             Self::DuplicateScene { .. } => "Duplicate scene",
             Self::RenameScene { .. } => "Rename scene",
             Self::SetSceneTempo { .. } => "Change scene tempo",
+            Self::SetSceneFollowActions { .. } => "Change follow actions",
             Self::SetSceneTimeSignature { .. } => "Change scene time signature",
             Self::CreateSlotClip { .. } => "Create clip",
             Self::MoveSlotClip { .. } => "Move clip",
@@ -1781,12 +1893,9 @@ impl Document {
                 if self.track_ref(*track)?.mixer.volume != *volume {
                     let track_ref = self.track_mut(*track)?;
                     track_ref.mixer.volume = *volume;
-                    override_target(
-                        &mut track_ref.automation,
-                        &AutomationTarget::Mixer {
-                            param: MixerParam::Volume,
-                        },
-                    );
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::Volume,
+                    });
                 }
                 Ok(())
             }
@@ -1799,12 +1908,9 @@ impl Document {
                 if self.track_ref(*track)?.mixer.pan != *pan {
                     let track_ref = self.track_mut(*track)?;
                     track_ref.mixer.pan = *pan;
-                    override_target(
-                        &mut track_ref.automation,
-                        &AutomationTarget::Mixer {
-                            param: MixerParam::Pan,
-                        },
-                    );
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::Pan,
+                    });
                 }
                 Ok(())
             }
@@ -1818,12 +1924,9 @@ impl Document {
                 if current.mixer.mute != *mute {
                     let track_ref = self.track_mut(*track)?;
                     track_ref.mixer.mute = *mute;
-                    override_target(
-                        &mut track_ref.automation,
-                        &AutomationTarget::Mixer {
-                            param: MixerParam::Mute,
-                        },
-                    );
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::Mute,
+                    });
                 }
                 Ok(())
             }
@@ -1877,10 +1980,8 @@ impl Document {
                     } else {
                         sends.insert(*to, *level);
                     }
-                    override_target(
-                        &mut self.track_mut(*track)?.automation,
-                        &AutomationTarget::Send { to: *to },
-                    );
+                    self.track_mut(*track)?
+                        .override_target(&AutomationTarget::Send { to: *to });
                 }
                 Ok(())
             }
@@ -1925,14 +2026,17 @@ impl Document {
                             automation.enabled = true;
                         }
                     }
+                    track.set_clip_envelopes_enabled(|_| true, true);
                 }
                 Ok(())
             }
             Command::ReEnableAutomationFor { track, target } => {
                 self.check_automation_target(*track, *target)?;
-                if let Some(automation) = self.track_mut(*track)?.automation.get_mut(target) {
+                let track = self.track_mut(*track)?;
+                if let Some(automation) = track.automation.get_mut(target) {
                     automation.enabled = true;
                 }
+                track.set_clip_envelopes_enabled(|t| t == target, true);
                 Ok(())
             }
             Command::SetSendTap { track, tap } => {
@@ -2026,8 +2130,17 @@ impl Document {
                 let owner = self.clip_owner(*clip)?;
                 check_clip_fits(self.track_ref(owner)?, data)?;
                 check_clip_data(data)?;
-                if self.clip_ref(*clip)?.data != *data {
-                    self.clip_mut(*clip)?.data = data.clone();
+                let mut data = data.clone();
+                // Transient edits belong to the file they were made on
+                // (the warping spec, R27).
+                if let (ClipData::Audio(next), ClipData::Audio(now)) =
+                    (&mut data, &self.clip_ref(*clip)?.data)
+                    && next.media != now.media
+                {
+                    next.transient_edits = TransientEdits::default();
+                }
+                if self.clip_ref(*clip)?.data != data {
+                    self.clip_mut(*clip)?.data = data;
                 }
                 Ok(())
             }
@@ -2094,7 +2207,13 @@ impl Document {
                 let set_tempo = self.settings.tempo.bpm_at(at);
                 self.edit_markers_with(*clip, |audio| audio.with_warp(*warp, set_tempo))
             }
-            Command::InsertWarpMarker { clips, beat, time } => {
+            Command::InsertWarpMarker {
+                clips,
+                beat,
+                time,
+                pin_neighbours,
+                transients,
+            } => {
                 let at = match (beat, time) {
                     (Some(beat), None) => MarkerAt::Beat(*beat),
                     (None, Some(time)) => MarkerAt::Time(*time),
@@ -2104,7 +2223,41 @@ impl Document {
                         ));
                     }
                 };
-                self.edit_each(clips, |audio| audio.with_marker_inserted(at))
+                if !*pin_neighbours {
+                    return self.edit_each(clips, |audio| audio.with_marker_inserted(at));
+                }
+                if clips.len() != 1 {
+                    return Err(ModelError::InvalidInput(
+                        "pin_neighbours works on one clip, whose transients it reads",
+                    ));
+                }
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_each(clips, |audio| {
+                    audio.with_marker_inserted_pinned(at, transients)
+                })
+            }
+            Command::InsertWarpMarkers {
+                clip,
+                from,
+                to,
+                transients,
+            } => {
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_markers_with(*clip, |audio| {
+                    audio.with_markers_in_range(*from, *to, transients)
+                })
+            }
+            Command::InsertTransient { clip, time } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_inserted(*time))
+            }
+            Command::DeleteTransients { clip, times } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transients_deleted(times))
+            }
+            Command::ResetTransients { clip } => {
+                self.edit_markers_with(*clip, |audio| Ok(audio.with_transients_reset()))
+            }
+            Command::MoveTransient { clip, from, to } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_moved(*from, *to))
             }
             Command::MoveWarpMarkers { clips, markers, by } => {
                 self.edit_each(clips, |audio| audio.with_markers_moved(markers, *by))
@@ -2152,6 +2305,12 @@ impl Document {
             Command::SetClipLaunchQuantization { clip, quantization } => {
                 self.edit_launch(*clip, |launch| launch.quantization = *quantization)
             }
+            Command::SetClipFollowActions { clip, patch } => {
+                let targets = self.scenes.len();
+                let mut result = Ok(());
+                self.edit_launch(*clip, |launch| result = launch.follow.apply(patch, targets))?;
+                result
+            }
             Command::SetClipVelocityAmount { clip, amount } => {
                 if !(0.0..=1.0).contains(amount) {
                     return Err(ModelError::InvalidInput(
@@ -2163,33 +2322,40 @@ impl Document {
             Command::SetClipEnvelopeBreakpoint {
                 clip,
                 target,
+                kind,
                 at,
                 value,
-            } => self.set_clip_envelope_breakpoint(*clip, *target, *at, *value),
+            } => self.set_clip_envelope_breakpoint(*clip, *target, *kind, *at, *value),
             Command::SetClipEnvelopeCurve {
                 clip,
                 target,
+                kind,
                 at,
                 bend,
-            } => self.set_clip_envelope_curve(*clip, *target, *at, *bend),
+            } => self.set_clip_envelope_curve(*clip, *target, *kind, *at, *bend),
             Command::MoveClipEnvelopeBreakpoint {
                 clip,
                 target,
+                kind,
                 at,
                 to,
                 value,
-            } => self.move_clip_envelope_breakpoint(*clip, *target, *at, *to, *value),
-            Command::DeleteClipEnvelopeBreakpoint { clip, target, at } => {
-                self.delete_clip_envelope_breakpoint(*clip, *target, *at)
-            }
-            Command::DeleteClipEnvelope { clip, target } => {
-                self.delete_clip_envelope(*clip, *target)
+            } => self.move_clip_envelope_breakpoint(*clip, *target, *kind, *at, *to, *value),
+            Command::DeleteClipEnvelopeBreakpoint {
+                clip,
+                target,
+                kind,
+                at,
+            } => self.delete_clip_envelope_breakpoint(*clip, *target, *kind, *at),
+            Command::DeleteClipEnvelope { clip, target, kind } => {
+                self.delete_clip_envelope(*clip, *target, *kind)
             }
             Command::SetClipEnvelopeLinked {
                 clip,
                 target,
+                kind,
                 linked,
-            } => self.set_clip_envelope_linked(*clip, *target, *linked),
+            } => self.set_clip_envelope_linked(*clip, *target, *kind, *linked),
             Command::CreateScene { id, index } => self.create_scene(*id, *index),
             Command::DeleteScene { scene } => self.delete_scene(*scene),
             Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
@@ -2198,6 +2364,20 @@ impl Document {
             }
             Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
             Command::SetSceneTempo { scene, tempo } => self.set_scene_tempo(*scene, *tempo),
+            Command::SetSceneFollowActions { scene, patch } => {
+                let targets = self.scenes.len();
+                let position = self
+                    .scene_position(*scene)
+                    .ok_or(ModelError::NoSuchScene(*scene))?;
+                let mut next = self.scenes[position].follow;
+                next.apply(patch, targets)?;
+                if let Some(scene) = self.scenes.get_mut(position)
+                    && scene.follow != next
+                {
+                    scene.follow = next;
+                }
+                Ok(())
+            }
             Command::SetSceneTimeSignature { scene, signature } => {
                 self.set_scene_signature(*scene, *signature)
             }
@@ -2304,13 +2484,11 @@ impl Document {
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     let owner = self.device_owner(*device)?;
                     self.device_mut(*device)?.set_param(*param, *value);
-                    override_target(
-                        &mut self.track_mut(owner)?.automation,
-                        &AutomationTarget::Device {
+                    self.track_mut(owner)?
+                        .override_target(&AutomationTarget::Device {
                             device: *device,
                             param: *param,
-                        },
-                    );
+                        });
                 }
                 Ok(())
             }
@@ -2788,8 +2966,11 @@ impl Document {
     /// names a parameter of the track it's on (WP-3.15, as automation R11
     /// drops a device's envelopes when it leaves a track).
     fn keep_fitting_envelopes(&self, track: TrackId, clip: &mut Clip) {
-        clip.envelopes
-            .retain(|envelope| self.check_automation_target(track, envelope.target).is_ok());
+        let envelopes = std::mem::take(&mut clip.envelopes);
+        clip.envelopes = envelopes
+            .into_iter()
+            .filter(|envelope| self.check_clip_target(track, clip, envelope.target).is_ok())
+            .collect();
     }
 
     /// Removes a clip from the Arrangement lane or the Session slot it sits
@@ -3241,14 +3422,55 @@ impl Document {
 
     /// Checks that `target` names a parameter of the clip's track: a control
     /// of its mixer, one of its sends, or a parameter of a device in its
-    /// chain (WP-3.15).
+    /// chain (WP-3.15), or a MIDI controller of a MIDI clip (WP-2.29, R1 and
+    /// R6).
     fn check_clip_envelope_target(
         &self,
         clip: ClipId,
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
         let track = self.clip_owner(clip)?;
-        self.check_automation_target(track, target)
+        self.check_clip_target(track, self.clip_ref(clip)?, target)
+    }
+
+    /// Checks `target` for an envelope of `clip`, which is on `track`: a
+    /// parameter of the track, or a MIDI controller (a number a clip holds,
+    /// on a MIDI clip).
+    pub fn check_clip_target(
+        &self,
+        track: TrackId,
+        clip: &Clip,
+        target: AutomationTarget,
+    ) -> Result<(), ModelError> {
+        if !target.is_midi() {
+            return self.check_automation_target(track, target);
+        }
+        if clip.data.is_audio() {
+            return Err(ModelError::NotMidiClip(clip.id));
+        }
+        if let AutomationTarget::MidiCc { number } = target {
+            check_value(
+                "MIDI controller number",
+                f64::from(number),
+                AutomationTarget::is_clip_controller(number),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Refuses an automation envelope on a clip that sits in no Session
+    /// slot: an Arrangement clip's envelopes only modulate, the automation
+    /// being the track's (WP-3.12).
+    fn check_envelope_kind(&self, clip: ClipId, kind: EnvelopeKind) -> Result<(), ModelError> {
+        if kind == EnvelopeKind::Automation
+            && !self
+                .track_ref(self.clip_owner(clip)?)?
+                .slots()
+                .any(|(_, slotted)| slotted.id == clip)
+        {
+            return Err(ModelError::NotSlotClip(clip));
+        }
+        Ok(())
     }
 
     /// Sets the value of `target` at `at` on the clip's envelope for it,
@@ -3258,15 +3480,22 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
         at: Ticks,
         value: f64,
     ) -> Result<(), ModelError> {
         if at < Ticks::ZERO {
             return Err(ModelError::NegativePosition(at));
         }
-        check_value("clip envelope value", value, value.is_finite())?;
         self.check_clip_envelope_target(clip, target)?;
-        clip_entry(&mut self.clip_mut(clip)?.envelopes, target)
+        check_clip_envelope_value(target, value)?;
+        // A MIDI controller's envelope only sends messages; it doesn't set a
+        // parameter as a Session clip's automation does (WP-2.29).
+        if kind == EnvelopeKind::Automation && target.is_midi() {
+            return Err(ModelError::MidiControllerNotAParameter);
+        }
+        self.check_envelope_kind(clip, kind)?;
+        clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind)
             .envelope
             .set(at, value);
         Ok(())
@@ -3278,23 +3507,24 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
         at: Ticks,
         bend: f64,
     ) -> Result<(), ModelError> {
         check_bend(bend)?;
         self.check_clip_envelope_target(clip, target)?;
-        let envelope = self
-            .clip_ref(clip)?
-            .envelope(&target)
-            .ok_or(ModelError::NoChange {
-                what: "clip envelope",
-                at,
-            })?;
+        let envelope =
+            self.clip_ref(clip)?
+                .envelope_of(&target, kind)
+                .ok_or(ModelError::NoChange {
+                    what: "clip envelope",
+                    at,
+                })?;
         let mut envelope = envelope.envelope.clone();
         envelope
             .set_bend(at, bend)
             .map_err(automation_point_error)?;
-        self.clip_envelope_mut(clip, target)?.envelope = envelope;
+        self.clip_envelope_mut(clip, target, kind)?.envelope = envelope;
         Ok(())
     }
 
@@ -3304,6 +3534,7 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
         at: Ticks,
         to: Ticks,
         value: Option<f64>,
@@ -3311,17 +3542,17 @@ impl Document {
         if to < Ticks::ZERO {
             return Err(ModelError::NegativePosition(to));
         }
-        if let Some(value) = value {
-            check_value("clip envelope value", value, value.is_finite())?;
-        }
         self.check_clip_envelope_target(clip, target)?;
-        let envelope = self
-            .clip_ref(clip)?
-            .envelope(&target)
-            .ok_or(ModelError::NoChange {
-                what: "clip envelope",
-                at,
-            })?;
+        if let Some(value) = value {
+            check_clip_envelope_value(target, value)?;
+        }
+        let envelope =
+            self.clip_ref(clip)?
+                .envelope_of(&target, kind)
+                .ok_or(ModelError::NoChange {
+                    what: "clip envelope",
+                    at,
+                })?;
         let mut envelope = envelope.envelope.clone();
         envelope
             .move_point(at, to)
@@ -3329,7 +3560,7 @@ impl Document {
         if let Some(value) = value {
             envelope.set(to, value);
         }
-        self.clip_envelope_mut(clip, target)?.envelope = envelope;
+        self.clip_envelope_mut(clip, target, kind)?.envelope = envelope;
         Ok(())
     }
 
@@ -3339,22 +3570,23 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
         at: Ticks,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
-        let envelope = self
-            .clip_ref(clip)?
-            .envelope(&target)
-            .ok_or(ModelError::NoChange {
-                what: "clip envelope",
-                at,
-            })?;
+        let envelope =
+            self.clip_ref(clip)?
+                .envelope_of(&target, kind)
+                .ok_or(ModelError::NoChange {
+                    what: "clip envelope",
+                    at,
+                })?;
         let mut envelope = envelope.envelope.clone();
         envelope.delete(at).map_err(automation_point_error)?;
         if envelope.is_empty() {
-            self.delete_clip_envelope(clip, target)
+            self.delete_clip_envelope(clip, target, kind)
         } else {
-            self.clip_envelope_mut(clip, target)?.envelope = envelope;
+            self.clip_envelope_mut(clip, target, kind)?.envelope = envelope;
             Ok(())
         }
     }
@@ -3365,11 +3597,12 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
         self.clip_mut(clip)?
             .envelopes
-            .retain(|envelope| envelope.target != target);
+            .retain(|envelope| envelope.target != target || envelope.kind != kind);
         Ok(())
     }
 
@@ -3379,10 +3612,12 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
         linked: bool,
     ) -> Result<(), ModelError> {
         self.check_clip_envelope_target(clip, target)?;
-        clip_entry(&mut self.clip_mut(clip)?.envelopes, target).linked = linked;
+        self.check_envelope_kind(clip, kind)?;
+        clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
         Ok(())
     }
 
@@ -3392,11 +3627,12 @@ impl Document {
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
+        kind: EnvelopeKind,
     ) -> Result<&mut ClipEnvelope, ModelError> {
         self.clip_mut(clip)?
             .envelopes
             .iter_mut()
-            .find(|envelope| envelope.target == target)
+            .find(|envelope| envelope.target == target && envelope.kind == kind)
             .ok_or(ModelError::NoChange {
                 what: "clip envelope",
                 at: Ticks::ZERO,
@@ -3684,10 +3920,8 @@ impl Document {
         let mut mixer = self.chain_ref(chain)?.mixer;
         if edit(&mut mixer) {
             self.chain_mut(chain)?.mixer = mixer;
-            override_target(
-                &mut self.track_mut(owner)?.automation,
-                &AutomationTarget::Chain { chain, param },
-            );
+            self.track_mut(owner)?
+                .override_target(&AutomationTarget::Chain { chain, param });
         }
         Ok(())
     }
@@ -3803,6 +4037,11 @@ impl Document {
                 if no_mixer && param != MixerParam::Mute {
                     return Err(ModelError::ChainHasNoMixer(chain));
                 }
+            }
+            AutomationTarget::MidiCc { .. }
+            | AutomationTarget::MidiPitchBend
+            | AutomationTarget::MidiChannelPressure => {
+                return Err(ModelError::MidiControllerNotAParameter);
             }
         }
         Ok(())
@@ -4223,6 +4462,19 @@ pub(crate) fn check_value(what: &'static str, value: f64, ok: bool) -> Result<()
     }
 }
 
+/// Checks the value of a clip envelope's breakpoint: a number, and for a MIDI
+/// controller inside the controller's range (the MIDI controller data spec,
+/// R1 and R6).
+pub(crate) fn check_clip_envelope_value(
+    target: AutomationTarget,
+    value: f64,
+) -> Result<(), ModelError> {
+    let in_range = target
+        .midi_range()
+        .map_or(value.is_finite(), |(min, max)| (min..=max).contains(&value));
+    check_value("clip envelope value", value, in_range)
+}
+
 /// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`
 /// from: each segment's starting tempo, and, where a segment arrives at a
 /// tempo the next one doesn't start at (a jump), a second breakpoint at the
@@ -4269,6 +4521,16 @@ pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), Mode
     }
 }
 
+/// Whether a note's pressure points obey the MIDI controller data spec's R2:
+/// each from the note's start to before its end, 0 to 127, in order with none
+/// at the same place.
+fn pressure_fits(note: &Note) -> bool {
+    note.pressure
+        .iter()
+        .all(|point| point.value <= 127 && point.at >= Ticks::ZERO && point.at < note.length)
+        && note.pressure.windows(2).all(|pair| pair[0].at < pair[1].at)
+}
+
 /// Checks a clip or note's start and length.
 pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError> {
     if start.is_negative() {
@@ -4303,6 +4565,7 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
                     || !(1..=127).contains(&note.release_velocity)
                     || !note.probability.is_finite()
                     || !(0.0..=1.0).contains(&note.probability)
+                    || !pressure_fits(note)
                 {
                     return Err(ModelError::InvalidNote { index });
                 }
@@ -4570,6 +4833,7 @@ mod tests {
     use crate::changes::ChangeSet;
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
+    use crate::follow::FollowAction;
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
     use crate::track::Routing;
@@ -6604,6 +6868,7 @@ mod tests {
             param: MixerParam::Volume,
         };
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::ZERO,
@@ -6611,6 +6876,7 @@ mod tests {
         })
         .unwrap();
         song.apply(Command::MoveClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::ZERO,
@@ -6622,12 +6888,144 @@ mod tests {
         assert!(envelope.envelope.point(Ticks::ZERO).is_none());
         assert_eq!(envelope.envelope.point(Ticks::WHOLE).unwrap().value, 0.25);
         song.reject(Command::MoveClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
             to: Ticks::WHOLE * 2,
             value: Some(f64::NAN),
         });
+    }
+
+    // Spec: session-automation R10
+    #[test]
+    fn a_session_clip_holds_an_automation_envelope_beside_its_modulation_one() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let slot: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(slot, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        let arrangement = song.clip(track, 0);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let set = |clip, kind, value| Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: volume,
+            kind,
+            at: Ticks::ZERO,
+            value,
+        };
+        song.apply(set(slot, EnvelopeKind::Modulation, 0.5))
+            .unwrap();
+        song.apply(set(slot, EnvelopeKind::Automation, 0.25))
+            .unwrap();
+        let clip = song.doc.clip(slot).unwrap();
+        assert_eq!(clip.envelopes().count(), 2, "one of each kind");
+        let value = |kind| {
+            clip.envelope_of(&volume, kind)
+                .unwrap()
+                .envelope
+                .value_at(Ticks::ZERO)
+        };
+        assert_eq!(value(EnvelopeKind::Modulation), Some(0.5));
+        assert_eq!(value(EnvelopeKind::Automation), Some(0.25));
+        assert_eq!(
+            clip.envelope(&volume).unwrap().kind,
+            EnvelopeKind::Modulation,
+            "the plain lookup is the modulation envelope"
+        );
+
+        // An Arrangement clip's envelopes only modulate: the automation is
+        // the track's.
+        song.reject(set(arrangement, EnvelopeKind::Automation, 0.5));
+        song.apply(set(arrangement, EnvelopeKind::Modulation, 0.5))
+            .unwrap();
+
+        // Deleting one kind leaves the other.
+        song.apply(Command::DeleteClipEnvelope {
+            clip: slot,
+            target: volume,
+            kind: EnvelopeKind::Automation,
+        })
+        .unwrap();
+        let clip = song.doc.clip(slot).unwrap();
+        assert!(
+            clip.envelope_of(&volume, EnvelopeKind::Automation)
+                .is_none()
+        );
+        assert!(
+            clip.envelope_of(&volume, EnvelopeKind::Modulation)
+                .is_some()
+        );
+    }
+
+    // Spec: session-automation R9
+    #[test]
+    fn a_hand_move_turns_a_session_clips_automation_off_until_it_is_re_enabled() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let slot: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(slot, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let pan = AutomationTarget::Mixer {
+            param: MixerParam::Pan,
+        };
+        for target in [volume, pan] {
+            song.apply(Command::SetClipEnvelopeBreakpoint {
+                clip: slot,
+                target,
+                kind: EnvelopeKind::Automation,
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+        }
+        let enabled = |song: &Song, target| {
+            song.doc
+                .clip(slot)
+                .unwrap()
+                .envelope_of(&target, EnvelopeKind::Automation)
+                .unwrap()
+                .enabled
+        };
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+
+        // The control moved by hand takes its parameter from the clip's
+        // envelope, and only that one.
+        song.apply(Command::SetVolume { track, volume: 0.3 })
+            .unwrap();
+        assert!(!enabled(&song, volume));
+        assert!(enabled(&song, pan));
+        assert!(song.doc.track(track).unwrap().automation_overridden());
+
+        // Re-enabling the one parameter, or all of them, gives it back.
+        song.apply(Command::ReEnableAutomationFor {
+            track,
+            target: volume,
+        })
+        .unwrap();
+        assert!(enabled(&song, volume));
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+        song.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        song.apply(Command::SetVolume { track, volume: 0.4 })
+            .unwrap();
+        assert!(!enabled(&song, pan) && !enabled(&song, volume));
+        song.apply(Command::ReEnableAutomation {}).unwrap();
+        assert!(enabled(&song, pan) && enabled(&song, volume));
     }
 
     // Spec: clip-envelopes R1, R5
@@ -6649,6 +7047,7 @@ mod tests {
 
         // A first breakpoint makes the envelope, linked to its clip.
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::ZERO,
@@ -6656,6 +7055,7 @@ mod tests {
         })
         .unwrap();
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
@@ -6683,6 +7083,7 @@ mod tests {
 
         // A send and a device parameter hold envelopes of their own.
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: send,
             at: Ticks::ZERO,
@@ -6690,6 +7091,7 @@ mod tests {
         })
         .unwrap();
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: param,
             at: Ticks::ZERO,
@@ -6702,6 +7104,7 @@ mod tests {
         // segment stores its bend on the breakpoint at its start; moving a
         // breakpoint keeps its value; deleting one joins its neighbours.
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
@@ -6720,6 +7123,7 @@ mod tests {
             2
         );
         song.apply(Command::SetClipEnvelopeCurve {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::ZERO,
@@ -6733,6 +7137,7 @@ mod tests {
         let want = 1.0 - 0.5 * 0.5f64.powf(2f64.powf(-0.5));
         assert!((half - want).abs() < 1e-12, "{half}");
         song.apply(Command::MoveClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
@@ -6748,6 +7153,7 @@ mod tests {
         );
         assert_eq!(envelope.envelope.point(Ticks::ZERO).unwrap().bend, -0.5);
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
@@ -6755,6 +7161,7 @@ mod tests {
         })
         .unwrap();
         song.apply(Command::DeleteClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::WHOLE,
@@ -6776,6 +7183,7 @@ mod tests {
         // move onto a breakpoint, a bend outside −1 to 1, a segment at no
         // breakpoint, and targets the clip's track doesn't have.
         song.apply(Command::SetClipEnvelopeLinked {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: volume,
             linked: false,
@@ -6793,6 +7201,7 @@ mod tests {
         assert!(
             song.doc
                 .apply(&Command::SetClipEnvelopeBreakpoint {
+                    kind: EnvelopeKind::Modulation,
                     clip,
                     target: volume,
                     at: -Ticks(1),
@@ -6803,6 +7212,7 @@ mod tests {
         assert!(
             song.doc
                 .apply(&Command::SetClipEnvelopeBreakpoint {
+                    kind: EnvelopeKind::Modulation,
                     clip,
                     target: volume,
                     at: Ticks::ZERO,
@@ -6812,6 +7222,7 @@ mod tests {
         );
         assert_eq!(
             song.reject(Command::MoveClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
                 clip,
                 target: volume,
                 at: Ticks::ZERO,
@@ -6825,6 +7236,7 @@ mod tests {
         );
         assert_eq!(
             song.reject(Command::MoveClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
                 clip,
                 target: volume,
                 at: Ticks::WHOLE,
@@ -6839,6 +7251,7 @@ mod tests {
         assert!(
             song.doc
                 .apply(&Command::SetClipEnvelopeCurve {
+                    kind: EnvelopeKind::Modulation,
                     clip,
                     target: volume,
                     at: Ticks::ZERO,
@@ -6849,6 +7262,7 @@ mod tests {
         assert!(
             song.doc
                 .apply(&Command::SetClipEnvelopeCurve {
+                    kind: EnvelopeKind::Modulation,
                     clip,
                     target: volume,
                     at: Ticks::WHOLE,
@@ -6860,6 +7274,7 @@ mod tests {
         assert!(
             song.doc
                 .apply(&Command::SetClipEnvelopeBreakpoint {
+                    kind: EnvelopeKind::Modulation,
                     clip,
                     target: AutomationTarget::Send { to: track },
                     at: Ticks::ZERO,
@@ -6872,6 +7287,7 @@ mod tests {
         let other_device = song.device(other);
         assert_eq!(
             song.reject(Command::SetClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Device {
                     device: other_device,
@@ -6890,17 +7306,26 @@ mod tests {
         // Envelope takes the whole envelope, and deleting it again changes
         // nothing.
         song.apply(Command::DeleteClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
             clip,
             target: param,
             at: Ticks::ZERO,
         })
         .unwrap();
         assert!(song.doc.clip(clip).unwrap().envelope(&param).is_none());
-        song.apply(Command::DeleteClipEnvelope { clip, target: send })
-            .unwrap();
+        song.apply(Command::DeleteClipEnvelope {
+            clip,
+            target: send,
+            kind: EnvelopeKind::Modulation,
+        })
+        .unwrap();
         assert!(song.doc.clip(clip).unwrap().envelope(&send).is_none());
-        song.apply(Command::DeleteClipEnvelope { clip, target: send })
-            .unwrap();
+        song.apply(Command::DeleteClipEnvelope {
+            clip,
+            target: send,
+            kind: EnvelopeKind::Modulation,
+        })
+        .unwrap();
         assert_eq!(song.doc.clip(clip).unwrap().envelopes().count(), 1);
         song.doc.check_invariants().unwrap();
     }
@@ -6922,6 +7347,7 @@ mod tests {
         };
         for target in [volume, param] {
             song.apply(Command::SetClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
                 clip,
                 target,
                 at: Ticks::ZERO,
@@ -6955,6 +7381,7 @@ mod tests {
         };
         for target in [volume, param] {
             song.apply(Command::SetClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
                 clip,
                 target,
                 at: Ticks::ZERO,
@@ -7897,6 +8324,70 @@ mod tests {
             }),
             ModelError::NotSlotClip(placed)
         );
+    }
+
+    // Spec: follow-actions R1, R3, R4, R7, R17
+    #[test]
+    fn follow_actions_are_set_per_clip_and_scene_and_only_on_a_slot_clip() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        let patch = FollowPatch {
+            enabled: Some(true),
+            action_a: Some(FollowAction::Jump),
+            jump_a: Some(99),
+            linked: Some(false),
+            time: Some(Ticks::ZERO),
+            ..FollowPatch::default()
+        };
+        song.apply(Command::SetClipFollowActions { clip, patch })
+            .unwrap();
+        let follow = song.doc.clip(clip).unwrap().launch.follow;
+        assert_eq!(
+            (
+                follow.enabled,
+                follow.action_a,
+                follow.jump_a,
+                follow.linked
+            ),
+            (true, FollowAction::Jump, DEFAULT_SCENE_COUNT as u32, false),
+            "a jump target is held at the number of scenes"
+        );
+        assert_eq!(follow.time, crate::FOLLOW_TIME_MIN);
+        song.apply(Command::SetSceneFollowActions { scene, patch })
+            .unwrap();
+        assert_eq!(song.doc.scene(scene).unwrap().follow, follow);
+
+        let placed: ClipId = song.fresh();
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(placed, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::SetClipFollowActions {
+                clip: placed,
+                patch
+            }),
+            ModelError::NotSlotClip(placed)
+        );
+        assert!(matches!(
+            song.reject(Command::SetClipFollowActions {
+                clip,
+                patch: FollowPatch {
+                    chance_a: Some(101),
+                    ..FollowPatch::default()
+                }
+            }),
+            ModelError::InvalidValue { .. }
+        ));
     }
 
     // Spec: session-view R10, R11

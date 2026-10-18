@@ -281,6 +281,87 @@ fn deactivating_the_selected_clips_switches_them_off() {
     assert!(!shell.editor().document().slot(track, scene).unwrap().mute);
 }
 
+/// Puts a clip in each of the track's slots at the given scene numbers
+/// (from 1) and selects them all.
+fn select_clips(shell: &mut Shell, track: TrackId, numbers: &[usize]) {
+    let scenes = scenes(shell);
+    for (n, &number) in numbers.iter().enumerate() {
+        let scene = scenes[number - 1];
+        shell
+            .run(
+                ids::INSERT_EMPTY_MIDI_CLIP,
+                json!({ "track": track, "scene": scene }),
+            )
+            .unwrap();
+        let mode = if n == 0 { "replace" } else { "add" };
+        shell
+            .run(
+                ids::SELECT,
+                json!({ "track": track, "scene": scene, "mode": mode }),
+            )
+            .unwrap();
+    }
+}
+
+fn follow(shell: &Shell, track: TrackId, number: usize) -> bl_model::FollowActions {
+    let scene = scenes(shell)[number - 1];
+    shell
+        .editor()
+        .document()
+        .slot(track, scene)
+        .unwrap()
+        .launch
+        .follow
+}
+
+// Spec: follow-actions R15 (S-SES-013). Shift+Enter switches mixed or off
+// clips all on, and all on all off.
+#[test]
+fn shift_enter_switches_the_selected_clips_follow_actions_on_then_off() {
+    let mut shell = shell();
+    let (track, _) = a_midi_slot(&shell);
+    select_clips(&mut shell, track, &[1, 2]);
+    // One of the two is on already: mixed goes all on.
+    let first = shell
+        .editor()
+        .document()
+        .slot(track, scenes(&shell)[0])
+        .unwrap()
+        .id;
+    shell
+        .run(
+            "clip.set_follow_actions",
+            json!({ "clip": first, "enabled": true }),
+        )
+        .unwrap();
+    one_step(&mut shell, ids::TOGGLE_FOLLOW_ACTIONS, json!({}));
+    assert!(follow(&shell, track, 1).enabled && follow(&shell, track, 2).enabled);
+    one_step(&mut shell, ids::TOGGLE_FOLLOW_ACTIONS, json!({}));
+    assert!(!follow(&shell, track, 1).enabled && !follow(&shell, track, 2).enabled);
+}
+
+// Spec: follow-actions R16 (S-SES-014). A chain runs Next through the
+// selection, jumps over an empty slot, and loops back to the first clip.
+#[test]
+fn create_follow_action_chain_wires_the_selection_into_a_loop() {
+    use bl_model::FollowAction::{Jump, Next, NoAction};
+    let mut shell = shell();
+    let (track, _) = a_midi_slot(&shell);
+    // Slots 1 to 3, an empty slot 4, then slot 5.
+    select_clips(&mut shell, track, &[1, 2, 3, 5]);
+    one_step(&mut shell, ids::CREATE_FOLLOW_ACTION_CHAIN, json!({}));
+    let chain: Vec<_> = (1..=5)
+        .filter(|&n| n != 4)
+        .map(|n| follow(&shell, track, n))
+        .collect();
+    let actions: Vec<_> = chain.iter().map(|f| (f.action_a, f.jump_a)).collect();
+    assert_eq!(actions, [(Next, 1), (Next, 1), (Jump, 5), (Jump, 1)]);
+    for f in &chain {
+        assert!(f.enabled && f.linked && f.multiplier == 1 && f.chance_a == 100);
+        assert_eq!(f.action_b, NoAction);
+    }
+}
+
 // Spec: session-view R4 (S-SES-020 to S-SES-022). Home and End select the
 // first and last track of the current scene; a second End selects the
 // scene.

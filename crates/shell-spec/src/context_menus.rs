@@ -12,11 +12,14 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING};
+use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
+
+/// The model's command that colours a chain.
+const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 
 /// The rows that hold the zoom-adaptive grid's settings.
 pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
@@ -156,6 +159,49 @@ pub fn device() -> Vec<MenuItem> {
     items(DEVICE)
 }
 
+/// The row of Beatlayer's own Ungroup in a rack's menu (racks spec, R26),
+/// straight after Group: not a row of menus.md.
+pub const R26_UNGROUP: &str = "R26-ungroup";
+
+/// The rows of a rack's menu that A/B compare doesn't apply to (racks spec,
+/// R26): the device menu's Compare items, disabled for a rack.
+pub const RACK_COMPARE_ROWS: [&str; 2] = ["C-DEVICE-010", "C-DEVICE-011"];
+
+/// The menu a rack's title bar opens: a device's (C-DEVICE) with Group
+/// working on the selection, Ungroup straight after it (Beatlayer's own
+/// place), and the two Compare items disabled, because A/B compare doesn't
+/// apply to racks (racks spec, R26).
+#[must_use]
+pub fn rack() -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(DEVICE.len() + 1);
+    for &row in DEVICE {
+        rows.push(row);
+        if row.0 == "C-DEVICE-007" {
+            rows.push((R26_UNGROUP, "Ungroup", Cmd(UNGROUP)));
+        }
+    }
+    items(&rows)
+}
+
+/// The row of a chain's menu that holds the colour palette, 5 rows of 14
+/// swatches (racks spec, R26; C-TRACK-015's palette, drawn by the UI).
+pub const CHAIN_COLOUR_ROW: &str = "R26-colour";
+
+const CHAIN: &[Row] = &[
+    ("R26-rename", "Rename", Key(&["S-EDIT-008"])),
+    ("R26-info", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    (CHAIN_COLOUR_ROW, "Colour", Cmd(SET_CHAIN_COLOUR)),
+];
+
+/// The menu a chain's row in a rack's chain list opens: Rename, Edit Info
+/// Text and the colour palette (racks spec, R26; Beatlayer's own rows, as
+/// menus.md records none for chains).
+#[must_use]
+pub fn chain() -> Vec<MenuItem> {
+    items(CHAIN)
+}
+
 const TRACK: &[Row] = &[
     ("C-TRACK-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-TRACK-002", "Copy", Key(&["S-EDIT-002"])),
@@ -262,7 +308,9 @@ pub fn track(state: TrackMenu) -> Vec<MenuItem> {
 #[must_use]
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
-        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" => Some("WP-2.24 (the Info View)"),
+        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
+            Some("WP-2.24 (the Info View)")
+        }
         "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
         "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-020" => Some("WP-4.13 (Crop Clip)"),
@@ -342,6 +390,49 @@ mod tests {
     #[test]
     fn the_device_and_track_menus_pending_items_name_their_package() {
         for item in device().into_iter().chain(track(EVERY_STATE)) {
+            if matches!(item.action, Pending(_)) {
+                assert!(pending_package(item.row).is_some(), "{}", item.row);
+            }
+        }
+    }
+
+    // Spec: racks R26
+    #[test]
+    fn a_racks_menu_adds_ungroup_and_disables_compare() {
+        let rack = rack();
+        let rows: Vec<&str> = rack.iter().map(|i| i.row).collect();
+        let group = rows.iter().position(|r| *r == "C-DEVICE-007").unwrap();
+        assert_eq!(rows[group + 1], R26_UNGROUP, "straight after Group");
+        let device = device();
+        assert_eq!(
+            rack.iter().filter(|i| i.row != R26_UNGROUP).count(),
+            device.len(),
+            "the rest is the device menu"
+        );
+        // The Compare commands refuse a rack, so the shell shows them
+        // disabled (device compare R6).
+        for (row, command) in RACK_COMPARE_ROWS
+            .into_iter()
+            .zip([COMPARE_SWITCH, COMPARE_COPY])
+        {
+            let item = rack.iter().find(|i| i.row == row).unwrap();
+            assert_eq!(item.command(), Some(command), "{row}");
+        }
+        let ungroup = rack.iter().find(|i| i.row == R26_UNGROUP).unwrap();
+        assert_eq!(ungroup.command(), Some(UNGROUP));
+    }
+
+    // Spec: racks R26
+    #[test]
+    fn a_chains_menu_holds_rename_info_text_and_the_colours() {
+        let labels: Vec<&str> = chain()
+            .iter()
+            .filter(|i| !i.is_separator())
+            .map(|i| i.label)
+            .collect();
+        assert_eq!(labels, ["Rename", "Edit Info Text", "Colour"]);
+        assert!(chain().iter().all(|i| is_lives(i.row) == i.row.is_empty()));
+        for item in chain() {
             if matches!(item.action, Pending(_)) {
                 assert!(pending_package(item.row).is_some(), "{}", item.row);
             }

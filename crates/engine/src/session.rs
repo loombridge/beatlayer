@@ -20,6 +20,8 @@
 //! track's Arrangement clips silent, and only Back to Arrangement gives the
 //! track back; a clip that stops doesn't.
 
+mod follow;
+
 use core::fmt;
 
 use bl_commands::Context::{self, Global, Session};
@@ -29,6 +31,9 @@ use bl_model::{LaunchMode, LaunchQuantization, LaunchSettings, SceneId, TrackId}
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
+
+use follow::FollowState;
+pub(crate) use follow::FollowTable;
 
 /// How many launched scenes can wait for their frame at once (WP-3.5).
 const SCENE_APPLIES: usize = 8;
@@ -73,6 +78,21 @@ pub struct SessionPlayback {
     pub scene: Option<SceneId>,
     /// The song frame the clip launched on (zero when `scene` is `None`).
     pub frame: Frames,
+    /// For a taken-over track with nothing playing, the clip that stopped on
+    /// it last: its Automation envelopes hold the value they had there
+    /// until Back to Arrangement (WP-3.12).
+    pub last: Option<StoppedClip>,
+}
+
+/// A Session clip that stopped on a track that stays taken over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoppedClip {
+    /// The scene whose slot it was.
+    pub scene: SceneId,
+    /// The song frame it launched on.
+    pub launched: Frames,
+    /// The song frame it stopped on.
+    pub stopped: Frames,
 }
 
 /// A Session clip starting or ending, as an Arrangement recording sees it
@@ -220,6 +240,17 @@ struct Slot {
     /// Whether the queued restart is one Repeat queued itself, which a
     /// release turns into the stop (R21).
     auto: bool,
+    /// Where the clip's follow action is (WP-3.10).
+    follow: FollowState,
+}
+
+/// The follow action of the scene launched last, which runs from the line it
+/// launched on (WP-3.10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SceneRun {
+    scene: SceneId,
+    line: Ticks,
+    follow: FollowState,
 }
 
 impl Slot {
@@ -258,6 +289,9 @@ pub(crate) struct SessionLauncher {
     /// The tracks a Session clip has taken over from the Arrangement, until
     /// a return (WP-3.6). Capacity as `slots`: a track is listed once.
     overridden: Vec<TrackId>,
+    /// The clip that stopped last on each taken-over track (WP-3.12). Capacity
+    /// as `overridden`.
+    stopped: Vec<(TrackId, StoppedClip)>,
     /// Stops that take a track over on a grid line without a Session clip
     /// playing on it: a stop button pressed on an idle track silences its
     /// Arrangement there.
@@ -268,6 +302,8 @@ pub(crate) struct SessionLauncher {
     pub(crate) log: Vec<SessionEvent>,
     /// Launches dropped because every slot was taken.
     pub(crate) overflowed: u64,
+    /// The follow action of the scene launched last (WP-3.10).
+    scene_run: Option<SceneRun>,
 }
 
 impl SessionLauncher {
@@ -279,9 +315,11 @@ impl SessionLauncher {
             slots: Vec::with_capacity(capacity),
             scenes: Vec::with_capacity(SCENE_APPLIES),
             overridden: Vec::with_capacity(capacity),
+            stopped: Vec::with_capacity(capacity),
             marks: Vec::with_capacity(capacity),
             log: Vec::with_capacity(capacity * 4),
             overflowed: 0,
+            scene_run: None,
         }
     }
 
@@ -303,7 +341,9 @@ impl SessionLauncher {
         self.slots.clear();
         self.scenes.clear();
         self.overridden.clear();
+        self.stopped.clear();
         self.marks.clear();
+        self.scene_run = None;
     }
 
     /// The tick of the grid line a launch or a stop asked for now waits for:
@@ -391,6 +431,7 @@ impl SessionLauncher {
         for &(_, track, _) in slots {
             self.press_at(track, scene, LaunchMode::Trigger, line, at);
         }
+        self.start_scene_run(scene, line);
         at
     }
 
@@ -443,12 +484,26 @@ impl SessionLauncher {
             slot.started = slot.started.map(&convert);
             slot.due = slot.due.map(&convert);
             slot.then_stop = slot.then_stop.map(&convert);
+            if let FollowState::Armed { due, .. } = &mut slot.follow {
+                *due = convert(*due);
+            }
+        }
+        if let Some(SceneRun {
+            follow: FollowState::Armed { due, .. },
+            ..
+        }) = &mut self.scene_run
+        {
+            *due = convert(*due);
         }
         for (_, due) in &mut self.scenes {
             *due = convert(*due);
         }
         for (_, due) in &mut self.marks {
             *due = convert(*due);
+        }
+        for (_, clip) in &mut self.stopped {
+            clip.launched = convert(clip.launched);
+            clip.stopped = convert(clip.stopped);
         }
     }
 
@@ -459,6 +514,10 @@ impl SessionLauncher {
     pub(crate) fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
         if self.find_mut(track, scene).is_none() {
             self.press_at(track, scene, LaunchMode::Trigger, Ticks::ZERO, at);
+            // The launch tick is unknown, so a recorded clip follows nothing.
+            if let Some(slot) = self.find_mut(track, scene) {
+                slot.follow = FollowState::Spent;
+            }
         }
     }
 
@@ -489,6 +548,7 @@ impl SessionLauncher {
                 line,
                 repeating,
                 auto: false,
+                follow: FollowState::Unarmed,
             });
             return;
         };
@@ -545,7 +605,10 @@ impl SessionLauncher {
         let at = self.frame_for(playhead);
         match track {
             Some(track) => self.mark(track, at),
-            None => tracks.iter().for_each(|&track| self.mark(track, at)),
+            None => {
+                tracks.iter().for_each(|&track| self.mark(track, at));
+                self.scene_run = None;
+            }
         }
         for slot in &mut self.slots {
             if track.is_some_and(|only| slot.track != only) {
@@ -598,6 +661,15 @@ impl SessionLauncher {
             .filter_map(|slot| Some((slot.track, slot.scene, slot.started?)))
     }
 
+    /// Notes the clip that stopped on `track`, replacing the one before.
+    fn remember_stop(&mut self, clip: StoppedClip, track: TrackId) {
+        if let Some((_, last)) = self.stopped.iter_mut().find(|(t, _)| *t == track) {
+            *last = clip;
+        } else if self.stopped.len() < self.stopped.capacity() {
+            self.stopped.push((track, clip));
+        }
+    }
+
     /// Lists `track` as taken over from the Arrangement.
     fn take_over(&mut self, track: TrackId) {
         if self.overridden.contains(&track) {
@@ -623,14 +695,19 @@ impl SessionLauncher {
             }
         }
         self.slots.retain(|slot| !returned(slot.track));
+        if track.is_none() {
+            self.scene_run = None;
+        }
         self.marks.retain(|&(t, _)| !returned(t));
         self.overridden.retain(|&t| !returned(t));
+        self.stopped.retain(|&(t, _)| !returned(t));
     }
 
     /// Forgets the takeovers of tracks the running program no longer has,
     /// so a deleted track doesn't keep Back to Arrangement lit.
     pub(crate) fn retain_tracks(&mut self, tracks: &[TrackId]) {
         self.overridden.retain(|t| tracks.contains(t));
+        self.stopped.retain(|(t, _)| tracks.contains(t));
         self.marks.retain(|(t, _)| tracks.contains(t));
     }
 
@@ -671,6 +748,7 @@ impl SessionLauncher {
                 slot.started = Some(due);
                 slot.restart = false;
                 slot.auto = false;
+                slot.follow = FollowState::Unarmed;
                 let then_stop = slot.then_stop.take();
                 if let Some(stop) = then_stop {
                     slot.due = Some(stop);
@@ -680,7 +758,17 @@ impl SessionLauncher {
                 self.take_over(track);
             } else {
                 // A queued stop: the clip is done.
-                self.slots.swap_remove(i);
+                let slot = self.slots.swap_remove(i);
+                if let Some(launched) = slot.started {
+                    self.remember_stop(
+                        StoppedClip {
+                            scene: slot.scene,
+                            launched,
+                            stopped: due,
+                        },
+                        slot.track,
+                    );
+                }
             }
         }
         let mut i = 0;
@@ -720,6 +808,8 @@ impl SessionLauncher {
             .filter_map(|slot| slot.due)
             .chain(self.scenes.iter().map(|&(_, due)| due))
             .chain(self.marks.iter().map(|&(_, due)| due))
+            .chain(self.slots.iter().filter_map(|slot| slot.follow.due()))
+            .chain(self.scene_run.and_then(|run| run.follow.due()))
             .filter(|&due| due > at)
             .min()
     }
@@ -751,6 +841,7 @@ impl SessionLauncher {
                     track: slot.track,
                     scene: Some(slot.scene),
                     frame,
+                    last: None,
                 });
             }
         }
@@ -760,6 +851,11 @@ impl SessionLauncher {
                     track,
                     scene: None,
                     frame: Frames::ZERO,
+                    last: self
+                        .stopped
+                        .iter()
+                        .find(|(t, _)| *t == track)
+                        .map(|&(_, clip)| clip),
                 });
             }
         }
@@ -1128,7 +1224,8 @@ mod tests {
             vec![SessionPlayback {
                 track,
                 scene: Some(scene),
-                frame: due
+                frame: due,
+                last: None,
             }]
         );
         // While stopped it plays at once.
@@ -1348,6 +1445,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.press(
             track,
@@ -1375,6 +1473,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::Sixteenth,
             enabled: true,
+            ..LaunchSettings::default()
         });
         assert_eq!(
             launcher.next_due(Frames::ZERO),
@@ -1484,6 +1583,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.release(
             track,
@@ -1594,6 +1694,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::Quarter,
             enabled: true,
+            ..LaunchSettings::default()
         });
         let on = |at| playhead(&tempo, &sigs, true, at);
         launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::ZERO));
@@ -1627,6 +1728,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::QUARTER * 5));
         launcher.apply_due(frame(Ticks::QUARTER * 5));
@@ -1689,9 +1791,19 @@ mod tests {
             vec![SessionPlayback {
                 track,
                 scene: None,
-                frame: Frames::ZERO
+                frame: Frames::ZERO,
+                // Spec: session-automation R7. The clip that stopped is
+                // kept, with the frames it played between.
+                last: Some(StoppedClip {
+                    scene,
+                    launched: bar,
+                    stopped: tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000),
+                }),
             }]
         );
+        launcher.back_to_arrangement(None, Frames::ZERO);
+        launcher.playback(&mut playing);
+        assert!(playing.is_empty(), "Back to Arrangement forgets it");
     }
 
     #[test]

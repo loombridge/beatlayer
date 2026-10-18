@@ -69,6 +69,7 @@ mod document;
 mod editor;
 mod error;
 pub mod fader;
+mod follow;
 mod ids;
 mod launch;
 mod layers;
@@ -92,8 +93,8 @@ pub use automation::{
 };
 pub use changes::{Change, ChangeSet};
 pub use clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note,
-    TakeClip, TakeLane,
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
+    Note, PressurePoint, TakeClip, TakeLane,
 };
 pub use command::Command;
 pub use device::{
@@ -105,6 +106,10 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub use follow::{
+    FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
+    FollowPatch,
+};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };
@@ -118,14 +123,16 @@ pub use layers::{
 };
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
-pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
+pub use rack::{
+    CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
+};
 pub use repr::{SavedSong, saved_schema};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
-pub use warp::WarpMarker;
+pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{
     BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
     TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,

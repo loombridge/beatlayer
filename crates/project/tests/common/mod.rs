@@ -350,6 +350,10 @@ fn audio_data(byte: u8) -> AudioData {
             },
             ram: byte.is_multiple_of(5),
             high_quality: !byte.is_multiple_of(7),
+            transient_edits: bl_model::TransientEdits {
+                added: vec![0.5, 1.0],
+                removed: vec![f64::from(byte) / 128.0],
+            },
             ..audio
         };
     }
@@ -426,6 +430,7 @@ impl Recipe {
             ids,
             media,
             windows: bl_model::DeviceWindows::new(),
+            rack_views: bl_model::RackViewMap::new(),
             folds: bl_model::ClipFolds::new(),
             // WP-5.13: what each multisampler's views show saves beside the
             // song.
@@ -439,6 +444,7 @@ impl Recipe {
                     bl_model::LaunchQuantization::Bars2
                 },
                 enabled: !self.id_skip.is_multiple_of(3),
+                follow_actions: !self.id_skip.is_multiple_of(5),
             },
         }
     }

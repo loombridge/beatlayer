@@ -151,9 +151,51 @@ fn the_quantisation_saves_with_the_set_and_opens_with_it() {
     let wanted = LaunchSettings {
         quantization: LaunchQuantization::HalfTriplet,
         enabled: false,
+        ..LaunchSettings::default()
     };
     assert_eq!(shell.launch_settings(), wanted);
     assert_eq!(shell.audio().launch_settings(), wanted);
+}
+
+// Spec: follow-actions R8. The global switch is on in a new set, toggles
+// when no value is given, reaches the engine, saves with the set and is no
+// undo step.
+#[test]
+fn the_global_follow_action_switch_saves_with_the_set_and_the_engine_hears_it() {
+    let scratch = Scratch::new("follow-switch");
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    assert!(shell.launch_settings().follow_actions);
+    shell
+        .run(ids::SET_FOLLOW_ACTIONS_ENABLED, json!({}))
+        .unwrap();
+    assert!(!shell.launch_settings().follow_actions);
+    assert_eq!(shell.audio().launch_settings(), shell.launch_settings());
+    let saved = PathBuf::from(
+        shell
+            .run(
+                "set.save_as",
+                json!({ "path": text(&scratch.path("Switch.blset")) }),
+            )
+            .unwrap()["path"]
+            .as_str()
+            .unwrap(),
+    );
+    shell.run("set.new", json!({})).unwrap();
+    assert!(shell.launch_settings().follow_actions);
+    shell
+        .run("set.open", json!({ "path": text(&saved) }))
+        .unwrap();
+    assert!(!shell.launch_settings().follow_actions);
+    shell
+        .run(ids::SET_FOLLOW_ACTIONS_ENABLED, json!({ "enabled": true }))
+        .unwrap();
+    assert!(shell.launch_settings().follow_actions);
+    assert_eq!(shell.editor().undo_history().count(), 0);
 }
 
 // Spec: launch-quantisation R6.

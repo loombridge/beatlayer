@@ -414,6 +414,8 @@ fn warp_edits_locates_and_tempo_swaps_play_on_under_the_allocation_trap() {
                 clips: vec![clip],
                 beat: Some(Ticks(100_000 + (round as i64 % 7) * 90_000)),
                 time: None,
+                pin_neighbours: false,
+                transients: None,
             }),
             15 => Some(Command::SetClipWarpSettings {
                 clip,

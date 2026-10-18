@@ -604,7 +604,7 @@ impl Op {
                 // isn't warped, or with these numbers, and must then change
                 // nothing; the ones that land are one undo step.
                 let ticks = Ticks((*a * 100_000.0) as i64);
-                match which % 16 {
+                match which % 21 {
                     5 => {
                         return Command::SetClipWarp {
                             clip,
@@ -616,6 +616,8 @@ impl Op {
                             clips: vec![clip],
                             beat: Some(ticks),
                             time: None,
+                            pin_neighbours: false,
+                            transients: None,
                         };
                     }
                     7 => {
@@ -646,9 +648,38 @@ impl Op {
                         };
                     }
                     11 => return Command::ScaleTempo { clip, factor: *a },
+                    // Transient edits and ranged markers (WP-4.3).
+                    12 => {
+                        return Command::InsertTransient {
+                            clip,
+                            time: *a - 1.0,
+                        };
+                    }
+                    13 => {
+                        return Command::DeleteTransients {
+                            clip,
+                            times: vec![*a - 1.0, *b],
+                        };
+                    }
+                    14 => {
+                        return Command::MoveTransient {
+                            clip,
+                            from: *a - 1.0,
+                            to: *b,
+                        };
+                    }
+                    15 => return Command::ResetTransients { clip },
+                    16 => {
+                        return Command::InsertWarpMarkers {
+                            clip,
+                            from: ticks - Ticks(150_000),
+                            to: ticks + Ticks(150_000),
+                            transients: Some(vec![*a, *b]),
+                        };
+                    }
                     // Warp modes (WP-4.2): a value out of range is refused
                     // and changes nothing.
-                    12 => {
+                    17 => {
                         return Command::SetClipWarpMode {
                             clip,
                             mode: match (*a * 3.0) as u8 % 6 {
@@ -661,7 +692,7 @@ impl Op {
                             },
                         };
                     }
-                    13 => {
+                    18 => {
                         return Command::SetClipWarpSettings {
                             clip,
                             beats: Some(BeatsUpdate {
@@ -675,13 +706,13 @@ impl Op {
                             complex_pro: None,
                         };
                     }
-                    14 => {
+                    19 => {
                         return Command::SetClipRamMode {
                             clip,
                             ram: *a > 1.0,
                         };
                     }
-                    15 => {
+                    20 => {
                         return Command::SetClipHighQuality {
                             clip,
                             high_quality: *a > 1.0,

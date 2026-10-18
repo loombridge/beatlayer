@@ -40,7 +40,7 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1171,7 +1171,72 @@ const ENTRIES: &[Entry] = &[
             Give one of the two. Nothing moves; the audio either side stays where it is. \
             Inserting where a marker is already changes nothing. Markers are named by their \
             place in the map (`data.audio.warp_markers`), the first being 0. The edit is made \
-            to every clip in one undo step, or to none if it's refused for one.",
+            to every clip in one undo step, or to none if it's refused for one. With \
+            `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at \
+            the transients just before and just after the new one, read from the clip's \
+            transients (`clip.transients`) unless `transients` lists them; it works on one \
+            clip.",
+    },
+    Entry {
+        id: "clip.insert_warp_markers",
+        action: Action::Apply("insert_warp_markers"),
+        label: "Insert Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts warp markers in a range of a warped audio clip's contents, `from` to \
+            `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, \
+            when it holds none, at its start and its end. The transients are the clip's own \
+            (`clip.transients`) unless `transients` lists times in the file. Each marker sits \
+            on the beat the map already places its time, so nothing moves; a marker already \
+            there is left. Refused for a clip that isn't warped, or while the file's analysis \
+            is not ready and `transients` is left out. One undo step.",
+    },
+    Entry {
+        id: "clip.insert_transient",
+        action: Action::Apply("insert_transient"),
+        label: "Insert Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts a transient into an audio clip at `time`, seconds in its file: Insert \
+            Transient, at the Sample Editor's insert marker when the app runs it. Putting one \
+            where a detected transient was taken away brings that one back. The edit belongs to \
+            the clip, is saved with the set, and shows in `clip.transients`. One undo step.",
+    },
+    Entry {
+        id: "clip.delete_transients",
+        action: Action::Apply("delete_transients"),
+        label: "Delete Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes transients out of an audio clip: `times` are their times in the \
+            file, in seconds, as `clip.transients` lists them. A transient put in by hand is \
+            forgotten; a detected one is noted as taken away and stays away until \
+            `clip.reset_transients`. Refused for a time that is none of the clip's transients, \
+            once the file's analysis is ready. One undo step.",
+    },
+    Entry {
+        id: "clip.reset_transients",
+        action: Action::Apply("reset_transients"),
+        label: "Reset Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes away all of an audio clip's transient edits: the transients put in \
+            by hand go, and the detected ones that were taken away come back. One undo step.",
+    },
+    Entry {
+        id: "clip.move_transient",
+        action: Action::Apply("move_transient"),
+        label: "Move Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the transient at `from` (seconds in the file, as `clip.transients` \
+            lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no \
+            audio and no warp marker. One undo step.",
     },
     Entry {
         id: "clip.move_warp_markers",
@@ -1342,6 +1407,27 @@ const ENTRIES: &[Entry] = &[
             step; launching doesn't read it yet.",
     },
     Entry {
+        id: "clip.set_follow_actions",
+        action: Action::Apply("set_clip_follow_actions"),
+        label: "Set Clip Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Changes a Session clip's follow actions, as the Launch Properties panel \
+            does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the clip started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
+    },
+    Entry {
         id: "clip.set_envelope_breakpoint",
         action: Action::Apply("set_clip_envelope_breakpoint"),
         label: "Add Envelope Breakpoint",
@@ -1354,8 +1440,13 @@ const ENTRIES: &[Entry] = &[
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
             or a parameter of a device in its chain), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
-            own units. A parameter with no clip envelope gets one, linked to the clip, with \
-            this breakpoint as its first.",
+            own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
+            the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
+            31 or 33 to 119, value 0 to 127), `{\"type\": \"midi.pitch_bend\"}` (-8192 to 8191, \
+            0 at rest) or `{\"type\": \"midi.channel_pressure\"}` (0 to 127); the value is \
+            the message the clip sends to its track's devices while it plays, on any channel. \
+            A parameter with no clip envelope gets one, linked to the clip, with this \
+            breakpoint as its first.",
     },
     Entry {
         id: "clip.set_envelope_curve",
@@ -1550,6 +1641,28 @@ const ENTRIES: &[Entry] = &[
             left out or null switches the scene's tempo off, as double-clicking the field or \
             Return to Default does, so launching it leaves the set's tempo as it is. One undo \
             step.",
+    },
+    Entry {
+        id: "scene.set_follow_actions",
+        action: Action::Apply("set_scene_follow_actions"),
+        label: "Set Scene Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Changes a scene's follow actions, as the Scene View does: what the scene \
+            does after it was launched, over the scenes as a clip's do over its track's slots. \
+            `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the scene started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
     },
     Entry {
         id: "scene.set_time_signature",
@@ -1995,8 +2108,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("rename_chain"),
         label: "Rename Chain",
         permission: Permission::Edit,
-        contexts: &[DeviceView],
-        keys: &[],
+        contexts: &[RackChains],
+        keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
     },
     Entry {

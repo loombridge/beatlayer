@@ -103,6 +103,7 @@ fn modulated_blocks_run_clean_under_the_sanitizer() {
         for (at, value) in [(Ticks::ZERO, 0.25), (Ticks::WHOLE * 2, 1.0)] {
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
                     clip,
                     target,
                     at,

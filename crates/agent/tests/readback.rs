@@ -10,8 +10,8 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackId, TrackKind,
-    WarpMarker, WarpMode, WarpSettings,
+    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackId,
+    TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -29,6 +29,10 @@ fn note(key: u8, start: i64) -> Note {
         probability: 0.5,
         velocity_deviation: 7,
         mute: false,
+        pressure: vec![PressurePoint {
+            at: Ticks(88_200),
+            value: 64,
+        }],
     }
 }
 
@@ -429,6 +433,10 @@ fn fixture() -> Project {
             },
             ram: true,
             high_quality: false,
+            transient_edits: TransientEdits {
+                added: vec![0.5],
+                removed: vec![1.25],
+            },
         }),
     );
     audio.name = "Verse vox".to_owned();
@@ -443,6 +451,7 @@ fn fixture() -> Project {
     apply(
         &mut editor,
         Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip: audio.id,
             target: volume,
             at: Ticks(0),
@@ -465,11 +474,38 @@ fn fixture() -> Project {
     );
     midi.name = "Chords".to_owned();
     midi.offset = Ticks(88_200);
+    let midi_id = midi.id;
     apply(
         &mut editor,
         Command::CreateClip {
             track: keys,
             clip: midi,
+        },
+    );
+    // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
+    // unlinked pitch bend one.
+    for (target, value) in [
+        (AutomationTarget::MidiCc { number: 1 }, 100.0),
+        (AutomationTarget::MidiPitchBend, -4096.0),
+    ] {
+        apply(
+            &mut editor,
+            Command::SetClipEnvelopeBreakpoint {
+                clip: midi_id,
+                kind: bl_model::EnvelopeKind::Modulation,
+                target,
+                at: Ticks(88_200),
+                value,
+            },
+        );
+    }
+    apply(
+        &mut editor,
+        Command::SetClipEnvelopeLinked {
+            clip: midi_id,
+            kind: bl_model::EnvelopeKind::Modulation,
+            target: AutomationTarget::MidiPitchBend,
+            linked: false,
         },
     );
     let scenes: Vec<_> = editor.document().scenes().map(|scene| scene.id).collect();
@@ -511,6 +547,24 @@ fn fixture() -> Project {
             amount: 0.5,
         },
     );
+    let follow = bl_model::FollowPatch {
+        enabled: Some(true),
+        ..bl_model::FollowPatch::default()
+    };
+    apply(
+        &mut editor,
+        Command::SetClipFollowActions {
+            clip: slot_clip_id,
+            patch: follow,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetSceneFollowActions {
+            scene: scenes[0],
+            patch: follow,
+        },
+    );
     apply(
         &mut editor,
         Command::SetSlotStopButton {
@@ -544,6 +598,7 @@ fn fixture() -> Project {
     Project::from_editor(&editor, Media::new()).with_launch(LaunchSettings {
         quantization: LaunchQuantization::Bars2,
         enabled: false,
+        ..LaunchSettings::default()
     })
 }
 
@@ -804,6 +859,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.warp_settings.tones.grain_size",
                 "data.audio.ram",
                 "data.audio.high_quality",
+                "data.audio.transient_edits.added.0",
+                "data.audio.transient_edits.removed.0",
             ][..],
         ),
         (
@@ -833,6 +890,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
     }
 }
 
+// Spec: midi-controller-data R9. The fixture's MIDI clip holds controller
+// envelopes and a note with pressure points.
 #[test]
 fn full_query_results_hold_everything_the_set_format_encodes() {
     let project = fixture();

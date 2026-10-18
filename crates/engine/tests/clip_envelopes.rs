@@ -87,12 +87,14 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
     let (mut rig, a) = rig_at(64, 0.5);
     let clip = looping_clip(&mut rig, a, Ticks::ZERO, 2);
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     let synced = rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -131,12 +133,14 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
     let (mut fine, b) = rig_at(1, 0.5);
     let clip = looping_clip(&mut fine, b, Ticks::ZERO, 2);
     fine.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     fine.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -162,17 +166,20 @@ fn an_unlinked_clip_envelope_runs_once_from_the_clip_start() {
     // it doesn't repeat, so the fader climbs from silence to its own level
     // across both bars.
     rig.apply(Command::SetClipEnvelopeLinked {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         linked: false,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE * 2,
@@ -214,12 +221,14 @@ fn an_envelope_plays_only_where_its_clip_does() {
         clip: Clip::new(clip, Ticks::WHOLE, Ticks::WHOLE, ClipData::Midi(data)),
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -251,6 +260,7 @@ fn clearing_an_envelope_hands_the_parameter_back() {
     let (mut rig, a) = rig_at(64, 0.5);
     let clip = looping_clip(&mut rig, a, Ticks::ZERO, 1);
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
@@ -263,6 +273,7 @@ fn clearing_an_envelope_hands_the_parameter_back() {
         "the envelope drives it"
     );
     let synced = rig.apply(Command::DeleteClipEnvelope {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
     });
@@ -302,6 +313,7 @@ fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
         (Ticks::WHOLE, 1.0),
     ] {
         rig.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target: volume(),
             at,
@@ -384,6 +396,7 @@ fn a_warped_audio_clips_linked_envelope_follows_its_beats() {
         for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)] {
             let synced = rig.apply(Command::SetClipEnvelopeBreakpoint {
                 clip,
+                kind: bl_model::EnvelopeKind::Modulation,
                 target: volume(),
                 at,
                 value,

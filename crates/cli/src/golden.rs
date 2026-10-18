@@ -169,6 +169,13 @@ impl Fixture {
     /// Renders the song in blocks of `block` frames.
     #[must_use]
     pub fn render_in_blocks(&self, block: usize) -> Render {
+        self.render_with_workers(block, 0)
+    }
+
+    /// Renders the song in blocks of `block` frames, its tasks run by
+    /// `workers` workers beside the rendering thread (WP-5.37).
+    #[must_use]
+    pub fn render_with_workers(&self, block: usize, workers: usize) -> Render {
         let scene = self.scene();
         let settings = Settings {
             sample_rate: SAMPLE_RATE,
@@ -176,13 +183,17 @@ impl Fixture {
             frames: scene.frames,
         };
         let mut samples = Vec::with_capacity(scene.frames as usize * 2);
-        let summary = render::render_launching(
+        let script = render::Script {
+            schedule: &scene.schedule,
+            cues: &scene.cues,
+            launches: &scene.launches,
+        };
+        let summary = render::render_launching_with_workers(
             scene.document(),
             Arc::new(scene.media.clone()),
-            &scene.schedule,
-            &scene.cues,
-            &scene.launches,
+            &script,
             &settings,
+            workers,
             |output| render::interleave(output, &mut samples),
         );
         Render {

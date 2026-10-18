@@ -11,6 +11,7 @@
 //! (grains, segments, a stretcher) makes it with the player's clip list, off
 //! the audio thread, and `render` allocates and locks nothing (R5).
 
+use crate::beats::Plan;
 use crate::interp::Interpolation;
 
 /// A planar block of frames: channel `c` is `data[c * stride..]`.
@@ -44,6 +45,8 @@ pub struct Request<'a> {
     /// The file position, in frames and perhaps fractional, each output
     /// frame plays. Never NaN; in increasing order.
     pub positions: &'a [f64],
+    /// The song frame the run's first output frame plays on.
+    pub first: i64,
     /// File frames per song frame over the run.
     pub speed: f64,
     /// Whether the run reads the file frame for frame: the speed is exactly 1
@@ -52,6 +55,9 @@ pub struct Request<'a> {
     pub neutral: bool,
     /// The HiQ switch (R12).
     pub high_quality: bool,
+    /// A Beats clip's segments and envelope (R14 to R17); empty in every
+    /// other mode.
+    pub beats: &'a Plan,
 }
 
 /// A warp mode.
@@ -97,23 +103,72 @@ impl WarpMode for RePitch {
         out: &mut [f32],
         stride: usize,
     ) {
-        let interpolation = Interpolation::of(request.high_quality);
+        read(request, window, out, stride);
+    }
+}
+
+/// Beats (R14 to R17): the clip played as segments. The positions come from
+/// the player's table, which [`Plan::stretches`](crate::beats::Plan::stretches)
+/// gives, and the mode shapes each segment's level by the transient envelope
+/// (R16). It keeps no state: a frame's output depends only on the song.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Beats;
+
+impl WarpMode for Beats {
+    fn reach(&self, request: &Request<'_>) -> (usize, usize) {
+        if request.neutral {
+            (0, 0)
+        } else {
+            Interpolation::of(request.high_quality).reach(request.speed)
+        }
+    }
+
+    // Spec: warp-modes R14 to R17
+    fn render(
+        &mut self,
+        request: &Request<'_>,
+        window: &Window<'_>,
+        out: &mut [f32],
+        stride: usize,
+    ) {
+        read(request, window, out, stride);
+        if request.beats.is_empty() {
+            return;
+        }
+        // The envelope (R16). At 100 every level is 1, so the run is left
+        // untouched, to the bit.
         for c in 0..window.channels {
-            let source = window.channel(c);
-            let out = &mut out[c * stride..c * stride + request.positions.len()];
-            for (frame, &position) in out.iter_mut().zip(request.positions) {
-                *frame = if request.neutral {
-                    // Spec: warp-modes R4. The nearest frame, untouched.
-                    source[(position.round() as i64 - window.first) as usize]
-                } else {
-                    let floor = position.floor();
-                    let at = (floor as i64 - window.first) as usize;
-                    interpolation.sample(source, at, position - floor, request.speed)
-                };
+            let channel = &mut out[c * stride..c * stride + request.positions.len()];
+            for (i, frame) in channel.iter_mut().enumerate() {
+                let level = request.beats.level(request.first + i as i64);
+                if level != 1.0 {
+                    *frame = (*frame as f64 * level) as f32;
+                }
             }
         }
     }
 }
+
+/// Reads the run's positions from the window, into `out`: the nearest file
+/// frame where the run is neutral, the interpolator's value otherwise.
+fn read(request: &Request<'_>, window: &Window<'_>, out: &mut [f32], stride: usize) {
+    let interpolation = Interpolation::of(request.high_quality);
+    for c in 0..window.channels {
+        let source = window.channel(c);
+        let out = &mut out[c * stride..c * stride + request.positions.len()];
+        for (frame, &position) in out.iter_mut().zip(request.positions) {
+            *frame = if request.neutral {
+                // Spec: warp-modes R4. The nearest frame, untouched.
+                source[(position.round() as i64 - window.first) as usize]
+            } else {
+                let floor = position.floor();
+                let at = (floor as i64 - window.first) as usize;
+                interpolation.sample(source, at, position - floor, request.speed)
+            };
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -138,9 +193,11 @@ mod tests {
         let positions: Vec<f64> = (0..20).map(|i| 50.0 + 2.0 * f64::from(i)).collect();
         let request = Request {
             positions: &positions,
+            first: 0,
             speed: 2.0,
             neutral: false,
             high_quality: false,
+            beats: &Plan::default(),
         };
         let mut out = vec![0.0; 20];
         RePitch.render(&request, &window, &mut out, 20);
@@ -151,9 +208,11 @@ mod tests {
         for high_quality in [false, true] {
             let request = Request {
                 positions: &positions,
+                first: 0,
                 speed: 0.5,
                 neutral: false,
                 high_quality,
+                beats: &Plan::default(),
             };
             RePitch.render(&request, &window, &mut out, 20);
             for (got, p) in out.iter().zip(&positions) {
@@ -176,9 +235,11 @@ mod tests {
         let positions: Vec<f64> = (0..10).map(|i| 20.4 + f64::from(i)).collect();
         let request = Request {
             positions: &positions,
+            first: 0,
             speed: 1.0,
             neutral: true,
             high_quality: true,
+            beats: &Plan::default(),
         };
         assert_eq!(RePitch.reach(&request), (0, 0));
         let mut out = vec![0.0; 10];

@@ -44,7 +44,9 @@ use crate::clip_source::ClipSource;
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
-use crate::warped::{CUE_BACK, Positions, WarpScratch, Warped};
+use crate::warped::{
+    BeatsMedia, CUE_BACK, Histories, History, Past, Playing, Positions, WarpScratch, Warped,
+};
 
 /// A clip's source, as a [`MediaLibrary`] opens it.
 pub struct OpenedSource {
@@ -98,6 +100,17 @@ pub trait MediaLibrary: Send + Sync {
     /// file in memory already.
     fn open_in_memory(&self, media: ContentHash, rate: SampleRate) -> Option<OpenedSource> {
         self.open(media, rate, 0)
+    }
+
+    /// The file's transients in seconds from its start, in order, as the
+    /// analysis found them (the warping spec, R20 to R23): what a Beats clip
+    /// cuts its segments at (the warp modes spec, R14). `None` where the
+    /// library doesn't analyse, or its analysis isn't ready, so a clip whose
+    /// transients aren't known segments on its warp markers alone. It reads
+    /// nothing, so the compiler calls it on its own thread.
+    fn transients(&self, media: ContentHash) -> Option<Arc<Vec<f64>>> {
+        let _ = media;
+        None
     }
 
     /// The media decoded into memory at `rate`, whole, for a device that
@@ -415,6 +428,9 @@ impl SourceCues for StreamCues {
 #[derive(Clone, Debug, Default)]
 pub struct MediaMap {
     files: BTreeMap<ContentHash, Arc<SampleData>>,
+    /// The files' transients, for the tests and golden renders that generate
+    /// their media (the warp modes spec, R14).
+    transients: BTreeMap<ContentHash, Arc<Vec<f64>>>,
 }
 
 impl MediaMap {
@@ -427,6 +443,12 @@ impl MediaMap {
     /// Adds `audio` under `media`, replacing whatever was there.
     pub fn insert(&mut self, media: ContentHash, audio: Arc<SampleData>) {
         self.files.insert(media, audio);
+    }
+
+    /// Adds `media`'s transients, in seconds from its start: what a Beats
+    /// clip cuts its segments at.
+    pub fn set_transients(&mut self, media: ContentHash, transients: Vec<f64>) {
+        self.transients.insert(media, Arc::new(transients));
     }
 
     /// The audio under `media`, at its own rate.
@@ -449,6 +471,10 @@ impl MediaMap {
 }
 
 impl MediaLibrary for MediaMap {
+    fn transients(&self, media: ContentHash) -> Option<Arc<Vec<f64>>> {
+        self.transients.get(&media).cloned()
+    }
+
     fn open(&self, media: ContentHash, rate: SampleRate, _start: u64) -> Option<OpenedSource> {
         let audio = self.files.get(&media)?;
         if audio.sample_rate() == rate.hz() {
@@ -510,6 +536,7 @@ impl Geometry {
     /// file `length` frames long (at `rate`) if that's known. A warped
     /// Arrangement clip gets its table once the length is known; a Session
     /// slot clip follows the tempo from its launch instead.
+    #[allow(clippy::too_many_arguments)]
     fn of(
         clip: &Clip,
         audio: &AudioData,
@@ -517,6 +544,7 @@ impl Geometry {
         rate: SampleRate,
         length: Option<u64>,
         arrangement: bool,
+        media: &BeatsMedia<'_>,
     ) -> Self {
         let start = tempo.ticks_to_frames(clip.start, rate).get();
         let end = tempo.ticks_to_frames(clip.end(), rate).get();
@@ -530,6 +558,7 @@ impl Geometry {
                 rate,
                 length,
                 arrangement && length.is_some(),
+                media,
             )
         {
             return Self {
@@ -629,8 +658,11 @@ pub(crate) struct PlacedClip {
     gain: f64,
     fade_in: u64,
     fade_out: u64,
-    /// The HiQ switch (the warp modes spec, R12).
-    high_quality: bool,
+    /// The clip's warp mode and HiQ switch (the warp modes spec, R8 and R12).
+    playing: Playing,
+    /// What the clip was playing before a mode change, where the new list
+    /// says it changed: the crossfade starts from it (R8).
+    past: Option<Past>,
 }
 
 impl PlacedClip {
@@ -684,6 +716,51 @@ pub(crate) struct ClipList {
     /// list arrives, and puts it back when the list leaves, so it's freed
     /// with the list, off the audio thread.
     bank: Handoff<Bank>,
+    /// Each clip's loop read-back room, one slot per clip as `bank` has
+    /// (WP-4.4, R15): made here, off the audio thread, and moved between
+    /// lists the same way.
+    histories: Handoff<Histories>,
+}
+
+/// What `clip` was playing in the set's last document, where its warp mode or
+/// HiQ switch changed: the mode it played, and its playback under the song's
+/// current tempo (R8). Made here, off the audio thread, so the player
+/// crossfades from it without owning anything.
+#[allow(clippy::too_many_arguments)]
+fn past_of(
+    previous: Option<&Track>,
+    clip: &Clip,
+    audio: &AudioData,
+    tempo: &TempoMap,
+    rate: SampleRate,
+    length: Option<u64>,
+    arrangement: bool,
+    media: &BeatsMedia<'_>,
+) -> Option<Past> {
+    let old = previous?.clip(clip.id)?;
+    let ClipData::Audio(before) = &old.data else {
+        return None;
+    };
+    let playing = Playing {
+        mode: before.warp_mode,
+        high_quality: before.high_quality,
+    };
+    let now = Playing {
+        mode: audio.warp_mode,
+        high_quality: audio.high_quality,
+    };
+    if playing == now || !before.warp {
+        return None;
+    }
+    let warped = Geometry::of(old, before, tempo, rate, length, arrangement, media).warped?;
+    Some(Past { playing, warped })
+}
+
+/// A clip's loop read-back room, where its mode keeps one (R15): nothing for
+/// a clip whose mode holds no history.
+fn history_of(geometry: &Geometry, channels: usize) -> Option<Box<History>> {
+    let frames = geometry.warped.as_ref()?.history_frames();
+    (frames > 0).then(|| Box::new(History::new(channels, frames)))
 }
 
 /// What [`ClipList::build`] made: the list, and the media it couldn't find.
@@ -699,10 +776,13 @@ impl ClipList {
     /// deactivated clip, a clip shorter than a frame, a clip whose source
     /// isn't open yet, and a clip whose audio `media` can't supply (reported
     /// as missing) aren't in it.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build(
         track: &Track,
+        previous: Option<&Track>,
         tempo: &TempoMap,
         rate: SampleRate,
+        channels: usize,
         loop_start: Option<i64>,
         sources: &mut ClipSources,
         media: Option<&dyn MediaLibrary>,
@@ -717,8 +797,18 @@ impl ClipList {
             if clip.mute {
                 continue;
             }
+            // A Beats clip's plan asks for the file's transients, and for
+            // its audio where a loop turn must be found (R14, R15).
+            let transients = media
+                .and_then(|library| library.transients(audio.media))
+                .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
+            let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            let beats = BeatsMedia {
+                transients: &transients,
+                samples: &samples,
+            };
             // Where the clip starts reading, before its length is known.
-            let at = Geometry::of(clip, audio, tempo, rate, None, true);
+            let at = Geometry::of(clip, audio, tempo, rate, None, true, &beats);
             if at.end <= at.start {
                 continue;
             }
@@ -734,8 +824,19 @@ impl ClipList {
             ) else {
                 continue;
             };
-            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, true);
+            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, true, &beats);
             sources.cue(clip.id, &geometry, loop_start);
+            let history = history_of(&geometry, channels);
+            let past = past_of(
+                previous,
+                clip,
+                audio,
+                tempo,
+                rate,
+                sourced.frames,
+                true,
+                &beats,
+            );
             let frames =
                 |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
             let (carry, source) = match sourced.supply {
@@ -752,9 +853,14 @@ impl ClipList {
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
-                    high_quality: audio.high_quality,
+                    playing: Playing {
+                        mode: audio.warp_mode,
+                        high_quality: audio.high_quality,
+                    },
+                    past,
                 },
                 source,
+                history,
             ));
         }
         // The track's Session slot clips (WP-3.2): they play only when the
@@ -766,7 +872,17 @@ impl ClipList {
             if clip.mute {
                 continue;
             }
-            let at = Geometry::of(clip, audio, tempo, rate, None, false);
+            // A Beats clip's plan asks for the file's transients, and for
+            // its audio where a loop turn must be found (R14, R15).
+            let transients = media
+                .and_then(|library| library.transients(audio.media))
+                .map_or_else(Vec::new, |detected| audio.transient_edits.apply(&detected));
+            let samples = || media.and_then(|library| library.sample(audio.media, rate));
+            let beats = BeatsMedia {
+                transients: &transients,
+                samples: &samples,
+            };
+            let at = Geometry::of(clip, audio, tempo, rate, None, false, &beats);
             if at.end <= at.start {
                 continue;
             }
@@ -782,8 +898,19 @@ impl ClipList {
             ) else {
                 continue;
             };
-            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, false);
+            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, false, &beats);
             sources.cue(clip.id, &geometry, loop_start);
+            let history = history_of(&geometry, channels);
+            let past = past_of(
+                previous,
+                clip,
+                audio,
+                tempo,
+                rate,
+                sourced.frames,
+                false,
+                &beats,
+            );
             let frames =
                 |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
             let (carry, source) = match sourced.supply {
@@ -800,16 +927,26 @@ impl ClipList {
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
-                    high_quality: audio.high_quality,
+                    playing: Playing {
+                        mode: audio.warp_mode,
+                        high_quality: audio.high_quality,
+                    },
+                    past,
                 },
                 source,
+                history,
             ));
         }
         sources.finish(track.id());
         // Only the Arrangement's clips are ordered: the session path finds
         // a slot by its scene.
-        placed.sort_by_key(|(clip, _)| (clip.geometry.start, clip.geometry.end, clip.id));
-        let (clips, bank): (Vec<PlacedClip>, Vec<_>) = placed.into_iter().unzip();
+        placed.sort_by_key(|(clip, _, _)| (clip.geometry.start, clip.geometry.end, clip.id));
+        let (mut clips, mut bank, mut histories) = (Vec::new(), Vec::new(), Vec::new());
+        for (clip, source, history) in placed {
+            clips.push(clip);
+            bank.push(source);
+            histories.push(history);
+        }
         let mut reach = Vec::with_capacity(clips.len());
         let mut furthest = i64::MIN;
         for clip in &clips {
@@ -831,6 +968,7 @@ impl ClipList {
                 reach,
                 ids,
                 bank: Handoff::new(Box::new(bank.into_boxed_slice())),
+                histories: Handoff::new(Box::new(histories.into_boxed_slice())),
             },
             missing,
         }
@@ -861,6 +999,8 @@ pub struct ClipPlayer {
     clips: Option<NodeData>,
     /// The sources of `clips`, one slot per clip.
     bank: Option<Box<Bank>>,
+    /// Each clip's loop read-back room, one slot per clip (WP-4.4, R15).
+    histories: Option<Box<Histories>>,
     /// Planar scratch for one source read: `channels` channels of
     /// `max_frames` frames.
     scratch: Vec<f32>,
@@ -900,6 +1040,7 @@ impl ClipPlayer {
         Self {
             clips: None,
             bank: None,
+            histories: None,
             scratch: vec![0.0; config.channels * config.max_frames],
             max_frames: config.max_frames,
             warp: WarpScratch::new(config.channels, config.max_frames),
@@ -1062,18 +1203,32 @@ fn render(
 fn render_warped(
     clip: &PlacedClip,
     positions: &Positions<'_>,
+    launched: Option<i64>,
     source: &mut dyn AudioSource,
     block: &mut Block<'_>,
     range: core::ops::Range<usize>,
     (elapsed, frame): (u64, i64),
     warp: &mut WarpScratch,
+    mut history: Option<&mut History>,
     level: impl Fn(&PlacedClip, u64) -> f64,
 ) {
     let channels = block.channels();
+    let plan = clip.geometry.warped.as_ref().map(|warped| warped.plan());
     let (mut at, mut elapsed, mut frame) = (range.start, elapsed, frame);
     while at < range.end {
-        // Spec: warping R12, warp-modes R9
-        let (n, sound) = warp.render(source, positions, frame, range.end - at, clip.high_quality);
+        // Spec: warping R12, warp-modes R9, R14
+        let (n, sound) = warp.render(
+            clip.id,
+            source,
+            positions,
+            launched,
+            frame,
+            range.end - at,
+            clip.playing,
+            plan,
+            clip.past.as_ref(),
+            history.as_deref_mut(),
+        );
         if sound {
             for c in 0..channels {
                 let out = &mut block.channel_mut(c)[at..at + n];
@@ -1109,40 +1264,44 @@ impl Node for ClipPlayer {
         // Spec: launch-quantisation R9. The launched slot clip plays from
         // its launch frame. Spec: session-view R20. While
         // the track is taken over, the Arrangement's clips below stay silent.
-        if let (Some(list), Some(bank)) = (
+        if let (Some(list), Some(bank), Some(histories)) = (
             self.clips
                 .as_ref()
                 .and_then(|d| d.downcast_ref::<ClipList>()),
             self.bank.as_mut(),
+            self.histories.as_mut(),
         ) && let Some(entry) = block
             .session()
             .iter()
             .find(|entry| entry.track == list.track)
             && let Some(scene) = entry.scene
             && let Some(at) = list.clips.iter().position(|clip| clip.scene == Some(scene))
-            && let Some(source) = bank[at].as_mut()
         {
+            let launch = entry.frame.get();
             let from = transport.position.get();
-            let elapsed = u64::try_from(from - entry.frame.get()).unwrap_or(0);
+            let elapsed = u64::try_from(from - launch).unwrap_or(0);
             let clip = &list.clips[at];
-            if let Some(warped) = &clip.geometry.warped {
+            if let (Some(source), Some(warped)) = (bank[at].as_mut(), clip.geometry.warped.as_ref())
+            {
                 // Spec: warping R15. A launched warped clip follows the
                 // tempo from its launch frame.
                 let tempo = block.tempo();
                 let rate = block.sample_rate().as_f64();
-                let positions = warped.launched(tempo, entry.frame.get(), rate);
+                let positions = warped.launched(tempo, launch, rate);
                 let frames = block.frames();
                 render_warped(
                     clip,
                     &positions,
+                    Some(launch),
                     source.as_mut(),
                     block,
                     0..frames,
                     (elapsed, from),
                     &mut self.warp,
+                    histories[at].as_deref_mut(),
                     PlacedClip::launch_level,
                 );
-            } else {
+            } else if let Some(source) = bank[at].as_mut() {
                 render(
                     clip,
                     source.as_mut(),
@@ -1158,14 +1317,16 @@ impl Node for ClipPlayer {
         let Self {
             clips,
             bank,
+            histories,
             scratch,
             max_frames,
             warp,
             ..
         } = self;
-        let (Some(list), Some(bank)) = (
+        let (Some(list), Some(bank), Some(histories)) = (
             clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()),
             bank.as_mut(),
+            histories.as_mut(),
         ) else {
             self.playing_clip = false;
             self.apply_gate(block);
@@ -1189,7 +1350,11 @@ impl Node for ClipPlayer {
             .iter()
             .take_while(|clip| clip.geometry.start < to)
             .any(|clip| clip.geometry.end > from);
-        for (clip, slot) in list.clips[first..].iter().zip(&mut bank[first..]) {
+        let played = list.clips[first..]
+            .iter()
+            .zip(&mut bank[first..])
+            .zip(histories[first..].iter_mut());
+        for ((clip, slot), history) in played {
             if clip.scene.is_some() {
                 continue;
             }
@@ -1210,11 +1375,13 @@ impl Node for ClipPlayer {
                 render_warped(
                     clip,
                     &warped.positions(),
+                    None,
                     source.as_mut(),
                     block,
                     range,
                     (elapsed, start),
                     warp,
+                    history.as_deref_mut(),
                     PlacedClip::level,
                 );
                 continue;
@@ -1243,39 +1410,78 @@ impl Node for ClipPlayer {
             return;
         };
         let mut bank = list.bank.take();
-        // Spec: audio-clips R18. The sources of the clips the new list keeps
-        // move across from the old one.
-        if let (Some(old), Some(old_bank), Some(new_bank)) = (
-            self.clips
-                .as_ref()
-                .and_then(|d| d.downcast_ref::<ClipList>()),
-            self.bank.as_mut(),
-            bank.as_mut(),
-        ) {
-            for (clip, slot) in list.clips.iter().zip(new_bank.iter_mut()) {
-                if !clip.carry {
-                    continue;
-                }
-                let Ok(i) = old.ids.binary_search_by_key(&clip.id, |&(id, _)| id) else {
-                    continue;
-                };
-                let playing = old_bank[old.ids[i].1 as usize].take();
-                match (slot.take(), playing) {
-                    // Spec: warp-modes R11. The RAM switch changed: the
-                    // clip goes on playing its source until the new one
-                    // is ready. What the source had retired goes back to
-                    // the old list's bank, to be freed with it.
-                    (Some(new), Some(mut playing)) => {
-                        old_bank[old.ids[i].1 as usize] = ClipSource::hand_over(&mut playing, new);
-                        *slot = Some(playing);
+        let mut histories = list.histories.take();
+        // Spec: warp-modes R8. The list says which clips changed their mode:
+        // each crossfades from what it was playing, from this list's first
+        // frame.
+        if list.clips.iter().any(|clip| clip.past.is_some()) {
+            self.warp.forget_change();
+        }
+        // Spec: audio-clips R18, warp-modes R8 and R15. The sources and the
+        // loop read-back rooms of the clips the new list keeps move across
+        // from the old one.
+        {
+            let Self {
+                clips,
+                bank: old_bank,
+                histories: old_histories,
+                ..
+            } = self;
+            if let (Some(old), Some(old_bank), Some(new_bank), Some(old_histories), Some(new)) = (
+                clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()),
+                old_bank.as_mut(),
+                bank.as_mut(),
+                old_histories.as_mut(),
+                histories.as_mut(),
+            ) {
+                let kept = list
+                    .clips
+                    .iter()
+                    .zip(new_bank.iter_mut())
+                    .zip(new.iter_mut());
+                for ((clip, slot), room) in kept {
+                    if !clip.carry {
+                        continue;
                     }
-                    (Some(new), None) => *slot = Some(new),
-                    (None, playing) => *slot = playing,
+                    let Ok(i) = old.ids.binary_search_by_key(&clip.id, |&(id, _)| id) else {
+                        continue;
+                    };
+                    let was = old.ids[i].1 as usize;
+                    let playing = old_bank[was].take();
+                    match (slot.take(), playing) {
+                        // Spec: warp-modes R11. The RAM switch changed: the
+                        // clip goes on playing its source until the new one
+                        // is ready. What the source had retired goes back to
+                        // the old list's bank, to be freed with it.
+                        (Some(new), Some(mut playing)) => {
+                            old_bank[was] = ClipSource::hand_over(&mut playing, new);
+                            *slot = Some(playing);
+                        }
+                        (Some(new), None) => *slot = Some(new),
+                        (None, playing) => *slot = playing,
+                    }
+                    // The read-back room carries over where it still fits
+                    // the new plan; the room the new list brought goes back
+                    // to the old list, whose drop thread frees it (R13).
+                    if let (Some(held), Some(fresh)) = (old_histories[was].as_mut(), room.as_mut())
+                        && held.capacity() == fresh.capacity()
+                    {
+                        std::mem::swap(held, fresh);
+                    }
                 }
             }
         }
         // The old list takes its bank back, with the sources the new one
         // didn't keep, and the drop thread frees them with it (R13).
+        if let Some(old_histories) = self.histories.take()
+            && let Some(old) = self
+                .clips
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<ClipList>())
+            && let Err(old_histories) = old.histories.put(old_histories)
+        {
+            std::mem::forget(old_histories);
+        }
         if let Some(old_bank) = self.bank.take() {
             match self
                 .clips
@@ -1298,6 +1504,11 @@ impl Node for ClipPlayer {
             {
                 std::mem::forget(bank);
             }
+            if let Some(histories) = histories
+                && let Err(histories) = list.histories.put(histories)
+            {
+                std::mem::forget(histories);
+            }
             // Dropping the data, the old list's or the empty new one, only
             // lets go of it: the drop thread frees it, with its sources.
             drop(self.clips.take());
@@ -1305,6 +1516,7 @@ impl Node for ClipPlayer {
             return;
         }
         self.bank = bank;
+        self.histories = histories;
         drop(self.clips.replace(data));
     }
 
@@ -1316,6 +1528,14 @@ impl Node for ClipPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a Beats clip's plan asks of the media: nothing in these tests.
+    fn no_media() -> BeatsMedia<'static> {
+        BeatsMedia {
+            transients: &[],
+            samples: &|| None,
+        }
+    }
 
     fn clip(looping: bool) -> PlacedClip {
         PlacedClip {
@@ -1335,7 +1555,11 @@ mod tests {
             gain: 0.5,
             fade_in: 10,
             fade_out: 20,
-            high_quality: true,
+            playing: Playing {
+                mode: bl_model::WarpMode::RePitch,
+                high_quality: true,
+            },
+            past: None,
         }
     }
 
@@ -1426,7 +1650,15 @@ mod tests {
             let ClipData::Audio(audio) = &clip.data else {
                 unreachable!("an audio clip")
             };
-            Geometry::of(clip, audio, &tempo, rate, Some(1_000_000), true)
+            Geometry::of(
+                clip,
+                audio,
+                &tempo,
+                rate,
+                Some(1_000_000),
+                true,
+                &no_media(),
+            )
         };
         let g = geometry(&whole);
         let r = rate.as_f64();
@@ -1474,7 +1706,15 @@ mod tests {
                 let ClipData::Audio(audio) = &clip.data else {
                     unreachable!("an audio clip")
                 };
-                Geometry::of(clip, audio, &tempo, rate, Some(1_000_000), true)
+                Geometry::of(
+                    clip,
+                    audio,
+                    &tempo,
+                    rate,
+                    Some(1_000_000),
+                    true,
+                    &no_media(),
+                )
             };
             let g = geometry(&whole);
             let len = (g.loop_end - g.loop_start) as i64;

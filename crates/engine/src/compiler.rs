@@ -264,7 +264,7 @@ impl Compiler {
                 match document.as_ref().and_then(|d| d.clip_track(clip)) {
                     Some(track) => {
                         if let Some(document) = &document {
-                            self.send_clips(document, track, &mut update);
+                            self.send_clips(document, Some(document), track, &mut update);
                         }
                     }
                     // The clip went while its source opened.
@@ -372,7 +372,7 @@ impl Compiler {
                 ));
             }
             for &track in &tracks {
-                self.send_clips(document, track, &mut update);
+                self.send_clips(document, Some(&old), track, &mut update);
             }
             update
         };
@@ -601,17 +601,26 @@ impl Compiler {
 
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
-    fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {
+    fn send_clips(
+        &mut self,
+        document: &Document,
+        previous: Option<&Document>,
+        track: TrackId,
+        update: &mut Update,
+    ) {
         let Some(track) = document.track(track) else {
             return;
         };
         match track.kind() {
             TrackKind::Audio => {
                 let loop_start = self.loop_start_frame(document);
+                let previous = previous.and_then(|last| last.track(track.id()));
                 let built = ClipList::build(
                     track,
+                    previous,
                     &document.settings().tempo,
                     self.config.sample_rate,
+                    self.config.channels,
                     loop_start,
                     &mut self.sources,
                     self.registry.media(),
@@ -647,6 +656,10 @@ impl Compiler {
     }
 
     fn compile_with(&mut self, document: &Document, resend: &Resend) -> Update {
+        // The document the program was playing before this one: a clip whose
+        // warp mode changed crossfades from what it was playing (the warp
+        // modes spec, R8).
+        let previous = self.synced.clone();
         let graph = Graph::of(document);
         let solo = Solo::with(document, &graph);
         let order = document.track_order();
@@ -1009,7 +1022,7 @@ impl Compiler {
                 resend.all || resend.tracks.contains(&id)
             };
             if send {
-                self.send_clips(document, id, &mut update);
+                self.send_clips(document, previous.as_ref(), id, &mut update);
             }
             // Every node is new in a new program, so each is sent the
             // automation that drives its parameters: a node with none is

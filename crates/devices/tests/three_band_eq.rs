@@ -1,4 +1,4 @@
-//! Triad, the native three-band EQ (WP-5.21; the three-band-eq spec): the
+//! EQ Three, the native three-band EQ (WP-5.21; the three-band-eq spec): the
 //! bands summing flat at 24 dB and colouring at 48 dB, the crossovers'
 //! slopes, a band at -inf or off leaving the others' response, the signal
 //! lights, and the display.
@@ -258,7 +258,7 @@ fn the_display_reads_the_lights() {
         &values.params,
         Some(&[0.0, 1.0, 0.0]),
     )
-    .expect("Triad has a display");
+    .expect("EQ Three has a display");
     let texts: Vec<_> = shown.readings.iter().map(|r| r.text.as_str()).collect();
     assert_eq!(texts, ["off", "lit", "off"]);
     assert_eq!(shown.readings[1].name, "Mid Signal");

@@ -1,7 +1,7 @@
-//! Strike in the shell (WP-5.18; the one-shot drum sampler spec, R22 and
+//! Drum Sampler in the shell (WP-5.18; the one-shot drum sampler spec, R22 and
 //! R23): `device.load_sample` gives it a sample by content hash, a saved
 //! set reopens with it, and `device.swap_to_snapshot` replaces it with
-//! Snapshot, keeping Start and Length, in one undo step. Driven through
+//! Simpler, keeping Start and Length, in one undo step. Driven through
 //! `Shell::run`, as an agent drives it (D17).
 
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ fn headless_with_config(config: &Path) -> Shell {
     )
 }
 
-/// Adds Strike to the default set's MIDI track, as `device.add` adds one
+/// Adds Drum Sampler to the default set's MIDI track, as `device.add` adds one
 /// from the browser.
 fn add_strike(shell: &mut Shell) -> DeviceId {
     let midi = shell
@@ -121,7 +121,11 @@ fn loading_a_sample_keeps_it_by_hash_through_a_save_and_undoes_as_one_step() {
     wav(&file, 4800);
     let mut shell = headless_with_config(&scratch.path("config"));
     let device = add_strike(&mut shell);
-    assert_eq!(sample_of(&shell, device), None, "a new Strike has none");
+    assert_eq!(
+        sample_of(&shell, device),
+        None,
+        "a new Drum Sampler has none"
+    );
 
     let loaded = load(&mut shell, device, &file);
     assert_eq!(sample_of(&shell, device), Some(loaded.media));
@@ -190,7 +194,10 @@ fn swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step() {
     .unwrap();
     let after = chain(&shell);
     assert_eq!(after.len(), before.len(), "a replacement, not an addition");
-    assert!(after.iter().all(|(id, _)| *id != strike), "Strike went");
+    assert!(
+        after.iter().all(|(id, _)| *id != strike),
+        "Drum Sampler went"
+    );
     let device = shell.editor().document().device(swapped.device).unwrap();
     assert_eq!(
         device.kind,
@@ -207,19 +214,19 @@ fn swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step() {
     assert_eq!(device.params.get(&sampler::START), Some(&20.0));
     assert_eq!(device.params.get(&sampler::LENGTH), Some(&50.0));
 
-    // One undo step brings Strike back as it was.
+    // One undo step brings Drum Sampler back as it was.
     shell.run("edit.undo", json!({})).unwrap();
     assert_eq!(chain(&shell), before);
     let back = shell.editor().document().device(strike).unwrap();
     assert_eq!(back.params.get(&START), Some(&20.0));
     assert_eq!(sample_of(&shell, strike), Some(loaded.media));
 
-    // Only Strike swaps.
+    // Only Drum Sampler swaps.
     let refused = shell.run(
         "device.swap_to_snapshot",
         json!({ "device": swapped.device }),
     );
-    assert!(refused.is_err(), "a device that isn't Strike");
+    assert!(refused.is_err(), "a device that isn't Drum Sampler");
 }
 
 // Spec: one-shot-drum-sampler R23
@@ -233,7 +240,7 @@ fn a_strike_inside_a_rack_chain_swaps_in_place() {
         .run("device.group", json!({ "devices": [strike] }))
         .unwrap();
     let before = shell.editor().document().device_place(strike).unwrap();
-    assert!(before.chain.is_some(), "Strike is in a rack's chain");
+    assert!(before.chain.is_some(), "Drum Sampler is in a rack's chain");
 
     let swapped: DeviceAdded = serde_json::from_value(
         shell
@@ -246,7 +253,7 @@ fn a_strike_inside_a_rack_chain_swaps_in_place() {
         .document()
         .device_place(swapped.device)
         .unwrap();
-    assert_eq!(after, before, "Snapshot took its place in the chain");
+    assert_eq!(after, before, "Simpler took its place in the chain");
     assert!(shell.editor().document().device(strike).is_none());
     shell.run("edit.undo", json!({})).unwrap();
     assert_eq!(

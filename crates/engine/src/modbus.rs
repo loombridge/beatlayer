@@ -119,7 +119,7 @@ impl Control<'_> {
     }
 }
 
-/// A Curve Mod's shape as node data (R23): sent to the device when it
+/// A Shaper's shape as node data (R23): sent to the device when it
 /// changes, as its breakpoints aren't parameters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shape(pub Vec<bl_model::modulator::ShapePoint>);

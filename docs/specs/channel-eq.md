@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Strip is Beatlayer's channel EQ, a three-band EQ in the style of a mixing desk: a switch for a high-pass filter at 80 Hz, a low shelf at 100 Hz, a sweepable mid peak, and a high band that is a shelf when it boosts and a shelf with a low-pass filter when it cuts, followed by Output. Its display shows the bands' combined response and the spectrum of what comes out.
+Channel EQ is Beatlayer's channel EQ, a three-band EQ in the style of a mixing desk: a switch for a high-pass filter at 80 Hz, a low shelf at 100 Hz, a sweepable mid peak, and a high band that is a shelf when it boosts and a shelf with a low-pass filter when it cuts, followed by Output. Its display shows the bands' combined response and the spectrum of what comes out.
 
-The filters are Contour's: second-order sections from the standard audio-EQ cookbook, so each band's magnitude response is its analytic curve, and the spectrum is Contour's analyser (the [EQ spec](eq.md)). Strip adds no latency. The framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md).
+The filters are EQ Eight's: second-order sections from the standard audio-EQ cookbook, so each band's magnitude response is its analytic curve, and the spectrum is EQ Eight's analyser (the [EQ spec](eq.md)). Channel EQ adds no latency. The framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md).
 
 ## Sources
 
@@ -20,15 +20,15 @@ The filters are Contour's: second-order sections from the standard audio-EQ cook
 
 ## Rules
 
-- **R1.** Beatlayer ships Strip, an audio-effect device type of its own name and layout: every parameter has a descriptor and a place in the layout, and the parameters keep their values through a saved set and through the agent API. HP 80 is a switch, off at first; Low is ±15 dB, Mid ±12 dB, High ±15 dB, all at 0 dB at first; Mid Freq runs from 120 Hz to 7.5 kHz, at 1 kHz at first (Beatlayer's own default); Output is a gain from −∞ to +12 dB (Beatlayer's own top), at 0 dB at first. (S1, S2)
-- **R2.** With every band at 0 dB, the high-pass off and Output at 0 dB, Strip's output equals its input, below −120 dB of difference, from the first frame after the high-pass is switched off. (S1)
+- **R1.** Beatlayer ships Channel EQ, an audio-effect device type of its own layout: every parameter has a descriptor and a place in the layout, and the parameters keep their values through a saved set and through the agent API. HP 80 is a switch, off at first; Low is ±15 dB, Mid ±12 dB, High ±15 dB, all at 0 dB at first; Mid Freq runs from 120 Hz to 7.5 kHz, at 1 kHz at first (Beatlayer's own default); Output is a gain from −∞ to +12 dB (Beatlayer's own top), at 0 dB at first. (S1, S2)
+- **R2.** With every band at 0 dB, the high-pass off and Output at 0 dB, Channel EQ's output equals its input, below −120 dB of difference, from the first frame after the high-pass is switched off. (S1)
 - **R3.** With HP 80 on, the signal passes a second-order Butterworth high-pass (12 dB per octave, Beatlayer's own order) whose −3 dB point is 80 Hz, within 2 %. (S1)
 - **R4.** The low band is a low shelf at 100 Hz, its midpoint, with a gain of ±15 dB: the response reaches the full gain (within 0.1 dB at 10 Hz) and returns to 0 dB above a few hundred Hz. Its shape follows its gain, as the manual says, by Beatlayer's rule: the shelf's Q is 0.5 at 0 dB and rises evenly to 0.71 at ±15 dB, so a larger gain makes a steeper shelf. Its curve is the cookbook's low shelf at that Q, within 0.1 dB. (S1)
 - **R5.** The mid band is a peak at Mid Freq with a gain of ±12 dB: at its centre the response is the gain, within 0.1 dB, anywhere from 120 Hz to 7.5 kHz, and the curve is the cookbook's peak at a Q of 0.8 (Beatlayer's own), within 0.1 dB. (S1)
 - **R6.** With High above 0 dB the high band is a high shelf, its midpoint at 6 kHz (Beatlayer's own) and its Q 1/√2, up to +15 dB. With High below 0 dB it is that shelf and a second-order Butterworth low-pass in series, the low-pass's −3 dB corner at 20 kHz × (8 kHz / 20 kHz)^(cut / 15 dB): 20 kHz as the cut begins, about 12.6 kHz at −7.5 dB, 8 kHz at −15 dB, within 2 %. At exactly 0 dB the band does nothing. (S1)
-- **R7.** Output multiplies the signal after the bands and reaches −∞ dB, where Strip is silent. (S1, S2)
-- **R8.** Strip adds no latency, and its output is the same, bit for bit, at any block size: the sections are redesigned from the parameters' values every 16 frames counted from the device's start, not from each block's. (S1)
-- **R9.** Strip's display (device framework R36) holds the series Response, the sum of the sections' responses in dB at 96 places from 20 Hz to 20 kHz, worked out from the parameters; the marker Mid, at the mid peak's centre and gain; and, with an engine publishing, the series Spectrum, the output's 64 bands in dB. (S1)
+- **R7.** Output multiplies the signal after the bands and reaches −∞ dB, where Channel EQ is silent. (S1, S2)
+- **R8.** Channel EQ adds no latency, and its output is the same, bit for bit, at any block size: the sections are redesigned from the parameters' values every 16 frames counted from the device's start, not from each block's. (S1)
+- **R9.** Channel EQ's display (device framework R36) holds the series Response, the sum of the sections' responses in dB at 96 places from 20 Hz to 20 kHz, worked out from the parameters; the marker Mid, at the mid peak's centre and gain; and, with an engine publishing, the series Spectrum, the output's 64 bands in dB. (S1)
 
 ## Tests
 

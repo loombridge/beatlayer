@@ -27,7 +27,7 @@ const PLAYING: TransportInfo = TransportInfo {
     position: Frames(0),
 };
 
-/// A Wave Mod's node on the rising ramp at 10 Hz (a 4,800-frame cycle) with
+/// A LFO's node on the rising ramp at 10 Hz (a 4,800-frame cycle) with
 /// `params` over those.
 fn ramp(params: &[(ParamId, f64)]) -> Box<dyn bl_engine::Node> {
     let mut all = vec![(WAVE, 1.0), (RATE_HZ, 10.0)];

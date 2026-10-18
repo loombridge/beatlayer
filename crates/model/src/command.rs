@@ -1116,7 +1116,7 @@ pub enum Command {
         /// The name the title bar shows while Show Preset Name is on, such
         /// as the preset's; empty for the device's own name.
         name: String,
-        /// A Curve Mod's breakpoint shape (the modulation spec, R23), which
+        /// A Shaper's breakpoint shape (the modulation spec, R23), which
         /// a preset of one holds; `null` for the default shape.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shape: Option<Vec<crate::modulator::ShapePoint>>,
@@ -1175,10 +1175,10 @@ pub enum Command {
         /// The slot, from 0 to 7.
         slot: u8,
     },
-    /// Replaces the breakpoint shape of a Curve Mod (R23): every edit of
+    /// Replaces the breakpoint shape of a Shaper (R23): every edit of
     /// its display, Clear and the presets make a new list.
     SetShape {
-        /// The Curve Mod device.
+        /// The Shaper device.
         device: DeviceId,
         /// The breakpoints, in order along the cycle (at most 64), each with
         /// its place and output from 0 to 1 and the bend of the segment
@@ -1297,7 +1297,7 @@ pub enum Command {
     },
     /// Adds an edit to the end of a sample's edit list (WP-5.15, R55): a
     /// layer's, or with no `layer` the sample in slot 0 of a device such as
-    /// Snapshot. A layer's length and markers follow the audio (R56). The
+    /// Simpler. A layer's length and markers follow the audio (R56). The
     /// selection must be a span of the sample as the earlier edits left it;
     /// a layer's is checked here, a device's by `device.edit_sample`, which
     /// knows the sample.

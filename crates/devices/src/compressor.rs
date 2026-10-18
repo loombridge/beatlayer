@@ -1,4 +1,4 @@
-//! Squeeze, the native compressor (WP-2.18a, part 2; the compressor spec):
+//! Compressor, the native compressor (WP-2.18a, part 2; the compressor spec):
 //! threshold, ratio to infinity, attack, release with Auto Release, knee,
 //! the Peak, RMS and Expand modes, the Lin and Log envelope shapes, look
 //! ahead, Makeup, Out, Dry/Wet, and the sidechain section: the framework's
@@ -34,7 +34,7 @@ use crate::dynamics::{
 };
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
-/// Squeeze's device type.
+/// Compressor's device type.
 pub const COMPRESSOR: &str = "beatlayer.squeeze";
 
 /// Threshold: the level above which the gain turns down, in dB.
@@ -101,7 +101,7 @@ const AUTO_SUSTAIN_SECONDS: f64 = 0.3;
 /// Beatlayer's own; Live's shape is to observe.
 const LOG_DEPTH_DB: f32 = 6.0;
 
-/// The Squeeze device type.
+/// The Compressor device type.
 #[must_use]
 pub fn compressor_type() -> DeviceType {
     let params = vec![
@@ -173,7 +173,7 @@ pub fn compressor_type() -> DeviceType {
             .logarithmic()
             .describe("The sidechain filter's resonance."),
     ];
-    DeviceType::native(COMPRESSOR, "Squeeze", DeviceRole::AudioEffect)
+    DeviceType::native(COMPRESSOR, "Compressor", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(
             DeviceDescription::new(params)
@@ -227,7 +227,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds the Squeeze compressor to `registry`.
+/// Adds the Compressor compressor to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, compressor_type(), |device, config| {
         Squeeze::new(device, config)
@@ -247,7 +247,7 @@ fn curve_slope(ratio: f64, expand: bool) -> f64 {
     }
 }
 
-/// Squeeze's audio-thread half.
+/// Compressor's audio-thread half.
 pub struct Squeeze {
     rate: f64,
     /// The most samples of look-ahead any choice asks for.

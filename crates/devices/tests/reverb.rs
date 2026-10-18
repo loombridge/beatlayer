@@ -1,4 +1,4 @@
-//! Rotunda, the algorithmic reverb (WP-2.18b, part 1; the reverb spec):
+//! Reverb, the algorithmic reverb (WP-2.18b, part 1; the reverb spec):
 //! the input filter, the early reflections with Spin and Shape, the
 //! diffusion network with its damping, Chorus, Predelay, Size, Decay
 //! (RT60), Freeze with Flat and Cut, the Stereo width, and the Reflect,
@@ -25,7 +25,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Rotunda of `params`, up to `max_frames` at a time.
+/// A Reverb of `params`, up to `max_frames` at a time.
 fn reverb(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = reverb_type();
     node(&registry(), &device(&device_type, params), max_frames)

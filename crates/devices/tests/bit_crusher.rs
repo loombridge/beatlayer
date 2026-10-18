@@ -1,4 +1,4 @@
-//! Crush, the native bit-crusher (WP-5.24; the bit-crusher spec): the
+//! Redux, the native bit-crusher (WP-5.24; the bit-crusher spec): the
 //! sample-rate reduction with its jitter and filters, and the bit reduction
 //! with its shape and DC shift.
 
@@ -15,12 +15,12 @@ use bl_engine::Node;
 use bl_model::ParamId;
 use common::{db, device, node, noise, sine, spectrum, stream};
 
-/// A Crush of `params`, for blocks of up to 4,096 frames.
+/// A Redux of `params`, for blocks of up to 4,096 frames.
 fn crush(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     node(&common::registry(), &device(&crusher_type(), params), 4_096)
 }
 
-/// `input` on both channels through a Crush, in `block`-sized blocks.
+/// `input` on both channels through a Redux, in `block`-sized blocks.
 fn render(params: &[(ParamId, f64)], input: &[f32], block: usize) -> Vec<Vec<f32>> {
     stream(
         crush(params).as_mut(),

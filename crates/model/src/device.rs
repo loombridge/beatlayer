@@ -114,7 +114,7 @@ pub struct Device {
     /// R19). Left out of the saved set for a device that maps none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mappings: Vec<Mapping>,
-    /// The breakpoints of a Curve Mod's shape (R23); `None` plays the
+    /// The breakpoints of a Shaper's shape (R23); `None` plays the
     /// default shape. Left out of the saved set while it is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<Vec<ShapePoint>>,

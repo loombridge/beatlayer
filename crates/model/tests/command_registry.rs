@@ -977,7 +977,7 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.insert",
         json!({ "track": drums, "index": 0, "device": {
-            "id": wave, "name": "Curve Mod", "enabled": true, "params": [],
+            "id": wave, "name": "Shaper", "enabled": true, "params": [],
             "kind": { "native": { "device_type": "beatlayer.curve_mod" } },
         } }),
     );

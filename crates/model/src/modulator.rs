@@ -1,6 +1,6 @@
-//! Modulators' mappings and the Curve Mod's shape (WP-5.10; the modulation
+//! Modulators' mappings and the Shaper's shape (WP-5.10; the modulation
 //! spec, R12 to R19, R23): what a modulator device maps, how a mapping is
-//! kept and removed, and the breakpoint shape a Curve Mod plays.
+//! kept and removed, and the breakpoint shape a Shaper plays.
 //!
 //! A mapping is kept on the modulator, in the document. The modulator's
 //! output, its mode, polarity and each slot's amount and range are
@@ -16,15 +16,15 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{DeviceId, ParamId, TrackId};
 
-/// The Wave Mod's device type: Beatlayer's equivalent of an LFO device.
+/// The LFO's device type.
 pub const WAVE_MOD: &str = "beatlayer.wave_mod";
-/// The Curve Mod's device type: Beatlayer's equivalent of a Shaper device.
+/// The Shaper's device type.
 pub const CURVE_MOD: &str = "beatlayer.curve_mod";
 
 /// How many targets a modulator maps: the first slot is always shown, and
 /// Show Multimap shows the other seven (R17).
 pub const SLOTS: u8 = 8;
-/// The most breakpoints a Curve Mod's shape holds.
+/// The most breakpoints a Shaper's shape holds.
 pub const MAX_POINTS: usize = 64;
 
 /// The Mod switch: Modulation (0, the default) or Remote Control (1) for
@@ -35,10 +35,10 @@ pub const POLARITY: ParamId = ParamId(65);
 /// The Depth, from 0 % (no effect) to 100 % (full), which scales every
 /// mapping's effect (R13). A parameter of every modulator.
 pub const DEPTH: ParamId = ParamId(66);
-/// The Curve Mod's Grid: the display's divisions of the cycle, a choice among
+/// The Shaper's Grid: the display's divisions of the cycle, a choice among
 /// [`GRIDS`] (R23).
 pub const GRID_DIVISIONS: ParamId = ParamId(13);
-/// The Curve Mod's Snap: breakpoints snap to the grid (R23).
+/// The Shaper's Snap: breakpoints snap to the grid (R23).
 pub const SNAP: ParamId = ParamId(14);
 /// The Grid's choices: each one's name and its divisions of the cycle.
 pub const GRIDS: [(&str, u32); 5] = [
@@ -120,7 +120,7 @@ pub struct Mapping {
     pub target: ModTarget,
 }
 
-/// One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the
+/// One breakpoint of a Shaper's shape (R23): a place in the cycle, the
 /// output there, and the bend of the segment starting at it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShapePoint {
@@ -250,7 +250,7 @@ pub fn without_point(points: &[ShapePoint], index: usize) -> Vec<ShapePoint> {
     out
 }
 
-/// The shape a new Curve Mod plays: the triangle.
+/// The shape a new Shaper plays: the triangle.
 #[must_use]
 pub fn default_shape() -> Vec<ShapePoint> {
     shape_preset(3).unwrap_or_default()
@@ -423,7 +423,7 @@ impl Document {
         Ok(())
     }
 
-    /// Replaces the shape of the Curve Mod `device` (R23).
+    /// Replaces the shape of the Shaper `device` (R23).
     pub(crate) fn set_shape(
         &mut self,
         device: DeviceId,
@@ -433,7 +433,7 @@ impl Document {
         let is_curve =
             matches!(&current.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
         if !is_curve {
-            return Err(ModelError::InvalidInput("only a Curve Mod has a shape"));
+            return Err(ModelError::InvalidInput("only a Shaper has a shape"));
         }
         check_shape(points)?;
         if current.shape.as_deref() != Some(points) {

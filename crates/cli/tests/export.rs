@@ -1280,7 +1280,7 @@ fn bl_cli_export_writes_what_the_command_does() {
     assert!(!temp.names().iter().any(|name| name.starts_with('.')));
 }
 
-/// Spec: modulation R21, R29. A random Wave Mod modulating a reverb's decay
+/// Spec: modulation R21, R29. A random LFO modulating a reverb's decay
 /// plays the same values in every export, at any block size, and the export
 /// differs from one without the modulator.
 #[test]

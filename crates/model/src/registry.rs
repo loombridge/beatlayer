@@ -1773,7 +1773,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
+        description: "Replaces the breakpoint shape of a Shaper, as every edit of its display \
             does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
             `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
             place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \

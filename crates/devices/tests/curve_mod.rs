@@ -1,4 +1,4 @@
-//! The Curve Mod (WP-5.10; the modulation spec, R23): it plays its
+//! The Shaper (WP-5.10; the modulation spec, R23): it plays its
 //! breakpoints and their curves, 1-Shot plays once per trigger, Manual
 //! outputs the point of the shape it is given, and a new shape reaches it as
 //! node data. Every block runs as a real-time section under the allocation
@@ -29,7 +29,7 @@ fn playing() -> TransportInfo {
     }
 }
 
-/// A Curve Mod playing `shape`, slot 1 giving its output itself, with
+/// A Shaper playing `shape`, slot 1 giving its output itself, with
 /// `params` over that.
 fn curve(shape: &[ShapePoint], params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let mut all = vec![(modulator::amount(0), 100.0), (POLARITY, 1.0)];

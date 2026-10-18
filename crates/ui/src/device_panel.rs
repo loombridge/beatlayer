@@ -175,7 +175,7 @@ pub fn show(
         }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
-        // mappings and, for the Curve Mod, its shape.
+        // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {
             let slot = name
                 .strip_prefix("Mapping ")

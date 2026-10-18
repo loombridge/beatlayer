@@ -107,7 +107,7 @@ impl Shell {
             | ids::AUDITION_SAMPLE => self.run_sample_edits(id, args),
             ids::NORMALIZE_LAYERS => {
                 let args: NormalizeArgs = Self::args(id, args)?;
-                // Snapshot's Normalize Volumes sets its Gain (R60).
+                // Simpler's Normalize Volumes sets its Gain (R60).
                 let snapshot = args.device.or_else(|| self.devices.selected()).filter(|d| {
                     self.editor
                         .document()

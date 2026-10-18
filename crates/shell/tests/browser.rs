@@ -212,7 +212,7 @@ fn the_modulators_label_lists_the_two_modulators() {
         json!({ "label": "modulators" }),
     );
     let names: Vec<&str> = state.rows.iter().map(|row| row.name.as_str()).collect();
-    assert_eq!(names, ["Wave Mod", "Curve Mod"]);
+    assert_eq!(names, ["LFO", "Shaper"]);
     assert!(
         state
             .rows
@@ -221,7 +221,7 @@ fn the_modulators_label_lists_the_two_modulators() {
     );
     assert!(state.note.is_none());
     // The search narrows the list by name.
-    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "curve" }));
+    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "shaper" }));
     assert_eq!(found.rows.len(), 1);
     // Loading the selected device adds it to the selected track's chain.
     let path = found.rows[0].path.clone();

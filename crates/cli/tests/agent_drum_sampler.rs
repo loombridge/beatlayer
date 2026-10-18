@@ -119,7 +119,7 @@ fn an_agent_loads_selects_and_clears_slots_by_command_id_and_reads_them_back() {
         "device.add",
         json!({ "device": {
             "kind": { "native": { "device_type": "beatlayer.kitbag" } },
-            "name": "Kitbag",
+            "name": "Impulse",
             "role": "instrument",
         } }),
     );

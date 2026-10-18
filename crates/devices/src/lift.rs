@@ -1,4 +1,4 @@
-//! Lift, the transposing MIDI effect (WP-5.30; the MIDI transpose spec): moves
+//! Pitch, the transposing MIDI effect (WP-5.30; the MIDI transpose spec): moves
 //! every note by a number of semitones, and keeps the result inside a window
 //! of keys by blocking, folding or limiting what falls outside it.
 //!
@@ -10,7 +10,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, value};
 
-/// The Lift device type's id.
+/// The Pitch device type's id.
 pub const LIFT: &str = "beatlayer.lift";
 
 /// The transposition, in semitones.
@@ -29,10 +29,10 @@ pub const USE_SCALE: ParamId = ParamId(5);
 /// The Mode choices.
 pub const MODES: [&str; 3] = ["Block", "Fold", "Limit"];
 
-/// Lift's device type.
+/// Pitch's device type.
 #[must_use]
 pub fn lift_type() -> DeviceType {
-    DeviceType::native(LIFT, "Lift", DeviceRole::MidiEffect).with_description(
+    DeviceType::native(LIFT, "Pitch", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
             ParamDescriptor::integer(PITCH, "Pitch", (-128, 128), 0, ParamUnit::Semitones)
                 .describe("Moves every note by this many semitones."),
@@ -53,14 +53,14 @@ pub fn lift_type() -> DeviceType {
     )
 }
 
-/// Adds Lift to `registry`.
+/// Adds Pitch to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, lift_type(), |_, _| Lift {
         router: Router::new(),
     });
 }
 
-/// Where Lift sends `key`: moved by `pitch` into the window from `lowest`
+/// Where Pitch sends `key`: moved by `pitch` into the window from `lowest`
 /// up to `highest`, or `None` if the note is blocked.
 fn lifted(key: u8, pitch: i32, lowest: i32, highest: i32, mode: usize) -> Option<u8> {
     let moved = i32::from(key) + pitch;

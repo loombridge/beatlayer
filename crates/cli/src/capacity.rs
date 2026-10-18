@@ -11,7 +11,7 @@ use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackId, TrackKind};
 
 /// A song of `tracks` audio tracks, each a test tone at −24 dBFS through
-/// Contour (the EQ) and Squeeze (the compressor), all into Main. Returns the
+/// EQ Eight (the EQ) and Compressor (the compressor), all into Main. Returns the
 /// editor holding it and the tracks, in order.
 ///
 /// # Panics

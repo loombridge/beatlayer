@@ -1,4 +1,4 @@
-//! Crush, the native bit-crusher (WP-5.24; the bit-crusher spec): lowers the
+//! Redux, the native bit-crusher (WP-5.24; the bit-crusher spec): lowers the
 //! sample rate and the bit depth. The signal goes through an optional
 //! low-pass, is held at the lowered rate, goes through an optional low-pass
 //! again, and is then quantised.
@@ -18,7 +18,7 @@ use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sections::{Biquad, Coeffs};
 
-/// Crush's device type.
+/// Redux's device type.
 pub const CRUSHER: &str = "beatlayer.crush";
 
 /// Rate: the sample rate the signal is held at.
@@ -62,7 +62,7 @@ const SHAPE_RANGE: f64 = 3.0;
 /// How often the filters' coefficients are worked out, in frames.
 const REFRESH_FRAMES: u64 = 16;
 
-/// The Crush device type.
+/// The Redux device type.
 #[must_use]
 pub fn crusher_type() -> DeviceType {
     let params = vec![
@@ -113,11 +113,11 @@ pub fn crusher_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(CRUSHER, "Crush", DeviceRole::AudioEffect)
+    DeviceType::native(CRUSHER, "Redux", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds Crush to `registry`.
+/// Adds Redux to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, crusher_type(), Crusher::new);
 }
@@ -160,7 +160,7 @@ struct Channel {
     post: [Biquad; 2],
 }
 
-/// Crush's audio-thread half.
+/// Redux's audio-thread half.
 pub struct Crusher {
     rate: f64,
     channels: Vec<Channel>,

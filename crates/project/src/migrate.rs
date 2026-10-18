@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -69,6 +69,13 @@ pub const MIGRATIONS: &[Migration] = &[
                   JSON itself needs nothing",
         apply: Ok,
     },
+    Migration {
+        from: 6,
+        summary: "a native device saved under the name Beatlayer gave it before it took the name \
+                  of the Live device it matches opens under the new name; a device the user \
+                  renamed keeps its name",
+        apply: rename_devices,
+    },
 ];
 
 /// One step from a schema version to the next.
@@ -85,6 +92,89 @@ pub struct Migration {
     /// It must be a pure function of its input. It needn't touch the
     /// `schema` field, which the loader sets after each step.
     pub apply: fn(Value) -> Result<Value, String>,
+}
+
+/// The native devices that took Live's names (T197), as (device type, name
+/// before, name now). The device types are the stable IDs and did not change.
+const RENAMED_DEVICES: &[(&str, &str, &str)] = &[
+    ("beatlayer.contour", "Contour", "EQ Eight"),
+    ("beatlayer.squeeze", "Squeeze", "Compressor"),
+    ("bl.device.reprise", "Reprise", "Delay"),
+    ("beatlayer.cascade", "Cascade", "Drift"),
+    ("beatlayer.snapshot", "Snapshot", "Simpler"),
+    ("beatlayer.strike", "Strike", "Drum Sampler"),
+    ("beatlayer.mosaic", "Mosaic", "Sampler"),
+    ("beatlayer.sweep", "Sweep", "Auto Filter"),
+    ("beatlayer.triband", "Triband", "Multiband Dynamics"),
+    ("beatlayer.degrade", "Degrade", "Erosion"),
+    ("beatlayer.crush", "Crush", "Redux"),
+    ("beatlayer.wax", "Wax", "Vinyl Distortion"),
+    ("beatlayer.singe", "Singe", "Saturator"),
+    ("beatlayer.grit", "Grit", "Overdrive"),
+    ("beatlayer.valve", "Valve", "Dynamic Tube"),
+    ("bl.device.trident", "Trident", "Filter Delay"),
+    ("bl.device.scatter", "Scatter", "Grain Delay"),
+    ("bl.device.plumb", "Plumb", "Align Delay"),
+    ("bl.device.stutter", "Stutter", "Beat Repeat"),
+    ("beatlayer.strip", "Strip", "Channel EQ"),
+    ("beatlayer.triad", "Triad", "EQ Three"),
+    ("beatlayer.shutter", "Shutter", "Gate"),
+    ("beatlayer.bond", "Bond", "Glue Compressor"),
+    ("beatlayer.wave_mod", "Wave Mod", "LFO"),
+    ("beatlayer.curve_mod", "Curve Mod", "Shaper"),
+    ("beatlayer.brickwall", "Brickwall", "Limiter"),
+    ("beatlayer.rotunda", "Rotunda", "Reverb"),
+    ("beatlayer.kitbag", "Kitbag", "Impulse"),
+    ("beatlayer.dice", "Dice", "Random"),
+    ("beatlayer.hold", "Hold", "Note Length"),
+    ("beatlayer.lift", "Lift", "Pitch"),
+    ("beatlayer.remap", "Remap", "Scale"),
+    ("beatlayer.stack", "Stack", "Chord"),
+    ("beatlayer.touch", "Touch", "Velocity"),
+];
+
+/// The name now for a device of `device_type` called `name` before T197, or
+/// `None` if `name` isn't the old name of that type.
+pub(crate) fn renamed_device(device_type: &str, name: &str) -> Option<&'static str> {
+    RENAMED_DEVICES
+        .iter()
+        .find(|(ty, old, _)| *ty == device_type && *old == name)
+        .map(|(_, _, new)| *new)
+}
+
+/// Version 6 to 7 (T197): the devices took the names of the Live devices
+/// they match. A device saved with its type's old name, as its title or its
+/// own name, gets the new one wherever it sits in the set (a track's chain, a
+/// rack's chain); one the user renamed keeps its name. The IDs are unchanged.
+fn rename_devices(mut value: Value) -> Result<Value, String> {
+    fn walk(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                let device_type = map
+                    .get("kind")
+                    .and_then(|kind| kind.get("native"))
+                    .and_then(|native| native.get("device_type"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                if let Some(device_type) = device_type {
+                    for key in ["name", "own_name"] {
+                        let new = map
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .and_then(|name| renamed_device(&device_type, name));
+                        if let Some(new) = new {
+                            map.insert(key.to_owned(), Value::from(new));
+                        }
+                    }
+                }
+                map.values_mut().for_each(walk);
+            }
+            Value::Array(items) => items.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut value);
+    Ok(value)
 }
 
 /// Version 1 to 2 (WP-1.4b): an audio clip trimmed or split in version 1

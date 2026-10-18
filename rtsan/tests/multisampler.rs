@@ -72,7 +72,7 @@ fn a_multisampler_passes_under_rtsan() {
         .unwrap();
     let mut device = Device::new(
         editor.new_id(),
-        "Mosaic",
+        "Sampler",
         DeviceKind::Native {
             device_type: MULTISAMPLER.to_owned(),
         },

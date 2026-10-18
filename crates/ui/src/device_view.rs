@@ -51,7 +51,7 @@ pub(crate) struct DeviceDrag {
 /// scroll.
 pub struct DeviceViewUi {
     multisampler: crate::multisampler::MultisamplerUi,
-    /// Snapshot's sample displays (WP-5.15).
+    /// Simpler's sample displays (WP-5.15).
     sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
@@ -511,7 +511,7 @@ impl DeviceViewUi {
                                 &played,
                                 events,
                             );
-                            // Spec: multisampler R54. Snapshot's sample
+                            // Spec: multisampler R54. Simpler's sample
                             // display fills its first cell.
                             if matches!(
                                 &frame.kind,
@@ -907,7 +907,7 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
-            if ui.button("Convert to Snapshot").clicked() {
+            if ui.button("Convert to Simpler").clicked() {
                 invoke(
                     events,
                     bl_shell::multisampler_commands::CONVERT,
@@ -916,7 +916,7 @@ impl DeviceViewUi {
                 ui.close();
             }
         }
-        // Spec: multisampler R62. Snapshot's menu converts it the other way.
+        // Spec: multisampler R62. Simpler's menu converts it the other way.
         if matches!(
             &frame.kind,
             bl_model::DeviceKind::Native { device_type }
@@ -958,11 +958,11 @@ impl DeviceViewUi {
             }
             crate::menus::take_focus_first(ui, &response);
         }
-        // Strike's own items after its switches (31.4.5): the swap to
-        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // Drum Sampler's own items after its switches (31.4.5): the swap to
+        // Simpler, and Save as Default Pad, which the Drum Rack's pads
         // (T145) bring.
         if frame.swaps_to_snapshot {
-            let response = ui.button("Swap to Snapshot");
+            let response = ui.button("Swap to Simpler");
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
                 invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));

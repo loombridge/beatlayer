@@ -1,4 +1,4 @@
-//! Contour, the native eight-band parametric EQ (WP-2.18a, part 1; the eq
+//! EQ Eight, the native eight-band parametric EQ (WP-2.18a, part 1; the eq
 //! spec): eight filters per curve, two curves for the L/R and M/S modes, an
 //! optional oversampled path, adaptive Q, and the output spectrum the
 //! display draws.
@@ -33,7 +33,7 @@ use crate::sections::{
     spectrum_series,
 };
 
-/// Contour's device type.
+/// EQ Eight's device type.
 pub const EQ: &str = "beatlayer.contour";
 
 /// Bands, on each of the two curves.
@@ -248,7 +248,7 @@ fn band_descriptors(curve: usize, band: usize) -> [ParamDescriptor; SLOTS] {
     ]
 }
 
-/// Contour's type: Beatlayer's own name and look, EQ Eight's behaviour.
+/// EQ Eight's type: Beatlayer's own look, EQ Eight's behaviour.
 #[must_use]
 pub fn eq_type() -> DeviceType {
     let mut params = vec![
@@ -269,7 +269,7 @@ pub fn eq_type() -> DeviceType {
             params.extend(band_descriptors(curve, band));
         }
     }
-    DeviceType::native(EQ, "Contour", DeviceRole::AudioEffect)
+    DeviceType::native(EQ, "EQ Eight", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -312,12 +312,12 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Contour to `registry`.
+/// Adds EQ Eight to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, eq_type(), |_, config| make(config));
 }
 
-/// Makes a Contour for `config`'s rate, channels, and block size. Every
+/// Makes an EQ Eight for `config`'s rate, channels, and block size. Every
 /// buffer it needs is made here, off the audio thread.
 #[must_use]
 pub fn make(config: &NodeConfig) -> Contour {
@@ -537,7 +537,7 @@ impl Plan {
     }
 }
 
-/// Contour's audio-thread half.
+/// EQ Eight's audio-thread half.
 pub struct Contour {
     rate: f64,
     /// Each channel's eight bands.
@@ -563,7 +563,7 @@ impl BandChain {
 }
 
 impl Contour {
-    /// A Contour for `config`, every buffer made here.
+    /// An EQ Eight for `config`, every buffer made here.
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
         let frames = config.max_frames.max(1);

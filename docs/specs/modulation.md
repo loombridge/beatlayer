@@ -1,7 +1,7 @@
 # Modulation: relative modulation on top of automation, and the modulator devices
 
 - **Status:** partial (R1 to R23 each have a passing test, bar the gaps in "Not built yet"; R24 to R29 are WP-5.11's)
-- **Work packages:** WP-5.9 (modulation on a parameter: R1 to R11), WP-5.10 (modulators, part 1: how a modulator maps to its targets, its timing, and the equivalents of LFO and Shaper: R12 to R23), WP-5.11 (modulators, part 2: the equivalents of Envelope Follower, Envelope MIDI, Shaper MIDI and Expression Control: R24 to R29). Automation is [automation.md](automation.md)'s; clip envelopes' document and playback are [clip-envelopes.md](clip-envelopes.md)'s, and their Clip View editor is WP-3.16's; macros are [macros.md](macros.md)'s; MIDI and key mapping is milestone M7's; the warp settings as modulation targets are WP-4.8's
+- **Work packages:** WP-5.9 (modulation on a parameter: R1 to R11), WP-5.10 (modulators, part 1: how a modulator maps to its targets, its timing, and the LFO and Shaper: R12 to R23), WP-5.11 (modulators, part 2: the equivalents of Envelope Follower, Envelope MIDI, Shaper MIDI and Expression Control: R24 to R29). Automation is [automation.md](automation.md)'s; clip envelopes' document and playback are [clip-envelopes.md](clip-envelopes.md)'s, and their Clip View editor is WP-3.16's; macros are [macros.md](macros.md)'s; MIDI and key mapping is milestone M7's; the warp settings as modulation targets are WP-4.8's
 - **Parity-matrix row:** Automation and modulation: Relative modulation on top of automation; Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.3 and 12.4
 
@@ -66,7 +66,7 @@ This spec covers how modulation and automation combine on a parameter, in the en
 
 **The first two modulators (WP-5.10, Beatlayer's own)**
 
-The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's the **Curve Mod** (`beatlayer.curve_mod`). Both are audio effects listed under the Modulators label (R12). Their parameters, with the units the device panel and an agent see:
+The LFO (`beatlayer.wave_mod`) and the Shaper (`beatlayer.curve_mod`) take Live's names. Both are audio effects listed under the Modulators label (R12). Their parameters, with the units the device panel and an agent see:
 
 | Parameter | Both or one | Range and default |
 |---|---|---|
@@ -81,18 +81,18 @@ The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's
 | Offset | both | −100 % to 100 %, 0 % |
 | Phase | both | 0 % to 100 %, 0 % |
 | R | both | a switch; turning it on restarts the cycle from its Phase |
-| Wave | Wave Mod | the nine waveforms, Sine by default |
-| Shape | Wave Mod | −100 % to 100 %, 0 % |
-| Steps | Wave Mod | 0 (smooth) to 24 |
-| Hold | Wave Mod | a switch |
-| Trigger Mode | Curve Mod | Loop (default), 1-Shot or Manual |
-| T | Curve Mod | a switch; turning it on plays the shape once in 1-Shot mode |
-| Manual | Curve Mod | 0 % to 100 %, 0 % |
-| Grid, Snap | Curve Mod | the display's divisions of the cycle (1/2, 1/4 (default), 1/8, 1/16, 1/32) and whether breakpoints snap to them |
+| Wave | LFO | the nine waveforms, Sine by default |
+| Shape | LFO | −100 % to 100 %, 0 % |
+| Steps | LFO | 0 (smooth) to 24 |
+| Hold | LFO | a switch |
+| Trigger Mode | Shaper | Loop (default), 1-Shot or Manual |
+| T | Shaper | a switch; turning it on plays the shape once in 1-Shot mode |
+| Manual | Shaper | 0 % to 100 %, 0 % |
+| Grid, Snap | Shaper | the display's divisions of the cycle (1/2, 1/4 (default), 1/8, 1/16, 1/32) and whether breakpoints snap to them |
 
-*The Wave Mod's waveforms.* With `p` the position in the cycle, from 0 to 1, bent by Shape (`p` raised to the power `4^(−s)`, `s` being Shape as a share from −1 to 1, so a positive Shape brings the change forward and a negative one holds it back; the random waves aren't bent): Sine is `0.5 − 0.5·cos(2πp)`, Up is `p`, Down is `1 − p`, Triangle is `1 − |2p − 1|`, and Square is 1 for the first half of the bent cycle and 0 for the rest. The four random waves draw from the generator R21 describes, once per cycle: Random holds a new value in 0 to 1 for the cycle, Bin holds 0 or 1, Stray holds a value that wanders from the last by up to a quarter either way, reflected at 0 and 1, and Glider runs in a straight line from the last cycle's value to this one's. Steps cuts a wave into that many evenly spaced levels (inactive for Random, Bin and Square). Jitter adds up to half its share of a draw either way, Smooth moves the output towards each new value by a share that falls from all of it at 0 % to 2 % at 100 %, and Offset then adds its share and clamps the output to 0 to 1. Hold keeps the output where it is and stops the cycle; released, a free cycle carries on from there and a synced one is shifted so the output carries on, then follows the song again.
+*The LFO's waveforms.* With `p` the position in the cycle, from 0 to 1, bent by Shape (`p` raised to the power `4^(−s)`, `s` being Shape as a share from −1 to 1, so a positive Shape brings the change forward and a negative one holds it back; the random waves aren't bent): Sine is `0.5 − 0.5·cos(2πp)`, Up is `p`, Down is `1 − p`, Triangle is `1 − |2p − 1|`, and Square is 1 for the first half of the bent cycle and 0 for the rest. The four random waves draw from the generator R21 describes, once per cycle: Random holds a new value in 0 to 1 for the cycle, Bin holds 0 or 1, Stray holds a value that wanders from the last by up to a quarter either way, reflected at 0 and 1, and Glider runs in a straight line from the last cycle's value to this one's. Steps cuts a wave into that many evenly spaced levels (inactive for Random, Bin and Square). Jitter adds up to half its share of a draw either way, Smooth moves the output towards each new value by a share that falls from all of it at 0 % to 2 % at 100 %, and Offset then adds its share and clamps the output to 0 to 1. Hold keeps the output where it is and stops the cycle; released, a free cycle carries on from there and a synced one is shifted so the output carries on, then follows the song again.
 
-*The Curve Mod's shape.* A list of up to 64 breakpoints, each a place `x` in the cycle (0 to 1), an output `y` (0 to 1) and the bend of the segment that starts there, by [automation.md](automation.md) R12's law; the output holds the first breakpoint's value before it and the last one's after it, and an empty shape outputs 0. A new Curve Mod plays the triangle (0, 0; ½, 1; 1, 0). The six preset buttons draw: 1 a rise, 2 a fall, 3 the triangle, 4 a pulse (high for the first half), 5 a staircase of four steps and 6 a curved decay. The shape belongs to the device: it is saved with the set and in its presets, copies with the device, and is edited by `modulator.set_shape` and the gestures R23 lists. Loop plays the shape once each cycle at the rate; 1-Shot rests at the shape's start before its first trigger, plays through in one cycle of the rate each time T turns on, and rests at the shape's end; Manual outputs the shape at the Manual control's share of the cycle.
+*The Shaper's shape.* A list of up to 64 breakpoints, each a place `x` in the cycle (0 to 1), an output `y` (0 to 1) and the bend of the segment that starts there, by [automation.md](automation.md) R12's law; the output holds the first breakpoint's value before it and the last one's after it, and an empty shape outputs 0. A new Shaper plays the triangle (0, 0; ½, 1; 1, 0). The six preset buttons draw: 1 a rise, 2 a fall, 3 the triangle, 4 a pulse (high for the first half), 5 a staircase of four steps and 6 a curved decay. The shape belongs to the device: it is saved with the set and in its presets, copies with the device, and is edited by `modulator.set_shape` and the gestures R23 lists. Loop plays the shape once each cycle at the rate; 1-Shot rests at the shape's start before its first trigger, plays through in one cycle of the rate each time T turns on, and rests at the shape's end; Manual outputs the shape at the Manual control's share of the cycle.
 
 *Mapping in the panel.* Slot 1's mapping cell is in the body, with the slot's Amount, Min and Max under it; Show Multimap is the device's expand toggle (L-DEV-004), which adds the other seven cells. Each cell shows the target by its device or track and its parameter, a Map button that lights while its slot is armed (`modulator.arm_map`), and Unmap. While one is lit, every control that can be a target is tinted with the theme's mapping colour (its own parameters aren't), and a click, or Enter on the control with the keyboard focus, maps it and puts the button out.
 
@@ -113,7 +113,7 @@ The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's
 - A held control isn't drawn disabled (R16): it refuses hand moves and the commands that make them, and shows its played value, but its look doesn't change.
 - A slot's Min and Max are positions on the target's travel, shown as percentages; the target's own units (R16) wait for a control that reads its target's scale.
 - A modulator isn't held back by its target's node delay (R20); audio-driven modulators bring the ordering that makes this matter (WP-5.11).
-- The Wave Mod's display shows the waveform as the controls set it, and the Curve Mod's the shape, not the output now.
+- The LFO's display shows the waveform as the controls set it, and the Shaper's the shape, not the output now.
 
 ## Tests
 

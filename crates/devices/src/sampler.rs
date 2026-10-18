@@ -1,4 +1,4 @@
-//! Snapshot, the native sampler (WP-2.16; the sampler spec): Classic,
+//! Simpler, the native sampler (WP-2.16; the sampler spec): Classic,
 //! One-Shot and Slicing playback of one sample — the region, the loop and
 //! its constant-power crossfade, Transpose, Detune, Glide and Portamento,
 //! the amplitude envelope, velocity and pan — with Slicing's slices, a
@@ -223,7 +223,7 @@ const LFO_MAX_HZ: f64 = 30.0;
 /// The kit's filters measure pitch with A4 at this frequency.
 const REFERENCE_HZ: f32 = 440.0;
 
-/// The Snapshot device type.
+/// The Simpler device type.
 #[must_use]
 pub fn sampler_type() -> DeviceType {
     let time = |id, name: &str, default: f64| {
@@ -485,7 +485,7 @@ pub fn sampler_type() -> DeviceType {
         )
         .describe("How far the LFO moves the filter's cutoff, up to four octaves each way."),
     ];
-    DeviceType::native(SAMPLER, "Snapshot", DeviceRole::Instrument)
+    DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -815,7 +815,7 @@ impl Sampler {
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
             // The sampler plays no per-note expression (MPE): today only
-            // Cascade does. Nor does it answer a channel message yet.
+            // Drift does. Nor does it answer a channel message yet.
             NoteKind::Expression { .. }
             | NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }

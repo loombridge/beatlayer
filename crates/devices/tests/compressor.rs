@@ -1,4 +1,4 @@
-//! Squeeze, the native compressor (WP-2.18a, part 2; the compressor spec):
+//! Compressor, the native compressor (WP-2.18a, part 2; the compressor spec):
 //! the static curve at several ratios and knees, the ratio's infinite top,
 //! expansion, the attack and release time constants, Auto Release, the Log
 //! envelope, the Peak and RMS modes, the look-ahead and its latency,
@@ -25,7 +25,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Squeeze of `params`, up to `max_frames` at a time.
+/// A Compressor of `params`, up to `max_frames` at a time.
 fn squeeze(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = compressor_type();
     node(&registry(), &device(&device_type, params), max_frames)
@@ -143,7 +143,7 @@ fn fit_tau(gaps: &[f64], low: f64, high: f64) -> f64 {
 fn the_compressor_is_described_and_declares_a_sidechain() {
     let device_type: DeviceType = compressor_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Squeeze");
+    assert_eq!(device_type.name, "Compressor");
     assert!(device_type.sidechain, "it has a sidechain section");
     assert_eq!(device_type.description.params.len(), 16);
     assert!(matches!(

@@ -1,4 +1,4 @@
-//! Degrade, the native digital-degradation effect (WP-5.24; the digital
+//! Erosion, the native digital-degradation effect (WP-5.24; the digital
 //! degradation spec): a short delay moved by a sine and by band-filtered
 //! noise, which smears a signal from a soft warble to grit.
 //!
@@ -22,7 +22,7 @@ use crate::delay::BandPass;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sections::{ANALYSER_BANDS, Analyser, spectrum_series};
 
-/// Degrade's device type.
+/// Erosion's device type.
 pub const DEGRADE: &str = "beatlayer.degrade";
 
 /// Freq: the sine's frequency and the noise band's centre.
@@ -55,7 +55,7 @@ const NOISE_LEVEL: f64 = 0.5;
 /// How often the noise band's coefficients are worked out, in frames.
 const REFRESH_FRAMES: u64 = 16;
 
-/// The Degrade device type.
+/// The Erosion device type.
 #[must_use]
 pub fn degrade_type() -> DeviceType {
     let params = vec![
@@ -102,11 +102,11 @@ pub fn degrade_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(DEGRADE, "Degrade", DeviceRole::AudioEffect)
+    DeviceType::native(DEGRADE, "Erosion", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds Degrade to `registry`.
+/// Adds Erosion to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, degrade_type(), Degrade::new);
 }
@@ -142,7 +142,7 @@ impl Line {
     }
 }
 
-/// Degrade's audio-thread half.
+/// Erosion's audio-thread half.
 pub struct Degrade {
     rate: f64,
     /// The delay's centre, in frames.

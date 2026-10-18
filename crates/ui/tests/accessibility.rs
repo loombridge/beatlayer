@@ -1191,8 +1191,8 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
-/// A Wave Mod and a test utility on the selected audio track (WP-5.10),
-/// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
+/// A LFO and a test utility on the selected audio track (WP-5.10),
+/// with the LFO's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
 fn modulators_on_track(h: &mut Harness, mapped: bool, lit: bool) {
     let mut types = bl_devices::testing::device_types();
@@ -1244,7 +1244,7 @@ fn a_lit_map_button(h: &mut Harness) {
     modulators_on_track(h, false, true);
 }
 
-/// A Curve Mod on the selected audio track.
+/// A Shaper on the selected audio track.
 fn a_curve_mod(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1263,7 +1263,7 @@ fn a_curve_mod(h: &mut Harness) {
         .unwrap();
 }
 
-/// A Squeeze, whose display has views, on the selected audio track.
+/// A Compressor, whose display has views, on the selected audio track.
 fn a_squeeze(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1273,7 +1273,7 @@ fn a_squeeze(h: &mut Harness) {
     let types = bl_devices::device_types();
     let t = types
         .iter()
-        .find(|t| t.name == "Squeeze")
+        .find(|t| t.name == "Compressor")
         .expect("the compressor is offered");
     h.shell
         .run(
@@ -2237,7 +2237,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
         ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
-        // maps while Map is lit (Enter on one), and the Curve Mod's preset
+        // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.
         (
             "modulator.arm_map",

@@ -541,7 +541,7 @@ impl Song {
     /// Automation Arm moving the synth's filter, and returns what came out.
     fn record_keys(&mut self) -> KeysTake {
         let (keys, group) = self.create_grouped("Keys", "midi");
-        let synth = self.add_device(keys, POLYSYNTH, "Cascade", "instrument", false);
+        let synth = self.add_device(keys, POLYSYNTH, "Drift", "instrument", false);
         self.run(
             "midi.set_port",
             json!({ "direction": "input", "name": "Test Keys", "track": true }),
@@ -741,13 +741,13 @@ impl Song {
         // The drums are the sampler: the kick on its own track as a
         // one-shot, and the kit's snare, hats and clap as four slices of
         // one file.
-        let snapshot = self.add_device(kick, SAMPLER, "Snapshot", "instrument", false);
+        let snapshot = self.add_device(kick, SAMPLER, "Simpler", "instrument", false);
         self.run(
             "device.load_sample",
             json!({ "device": snapshot, "path": song_audio("kick.wav") }),
         );
         self.set_param(snapshot, MODE, 1.0);
-        let kit = self.add_device(perc, SAMPLER, "Snapshot", "instrument", false);
+        let kit = self.add_device(perc, SAMPLER, "Simpler", "instrument", false);
         self.run(
             "device.load_sample",
             json!({ "device": kit, "path": song_audio("kit.wav") }),
@@ -755,16 +755,16 @@ impl Song {
         self.set_param(kit, MODE, 2.0);
         self.set_param(kit, SLICE_BY, 2.0);
         self.set_param(kit, SLICE_REGIONS, 4.0);
-        let bass_synth = self.add_device(bass, POLYSYNTH, "Cascade", "instrument", false);
-        self.add_device(pad, POLYSYNTH, "Cascade", "instrument", false);
+        let bass_synth = self.add_device(bass, POLYSYNTH, "Drift", "instrument", false);
+        self.add_device(pad, POLYSYNTH, "Drift", "instrument", false);
 
         // Two compressors duck under the kick, each listening to the kick's
         // group. The bass's sits on the bass track, as the manual's dance
         // music example has it (29.9.2.2); the pad's sits on a return the pad
         // sends to.
-        let squeeze_bass = self.add_device(bass, COMPRESSOR, "Squeeze", "audio_effect", true);
+        let squeeze_bass = self.add_device(bass, COMPRESSOR, "Compressor", "audio_effect", true);
         self.duck_under(squeeze_bass, kick_group);
-        let squeeze = self.add_device(duck, COMPRESSOR, "Squeeze", "audio_effect", true);
+        let squeeze = self.add_device(duck, COMPRESSOR, "Compressor", "audio_effect", true);
         self.duck_under(squeeze, kick_group);
         let mut mix = Vec::new();
         for (track, volume) in [

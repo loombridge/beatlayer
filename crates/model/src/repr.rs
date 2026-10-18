@@ -518,7 +518,7 @@ mod tests {
         let target = doc.device_ids().next().unwrap();
         let mut wave = Device::new(
             crate::DeviceId(bl_core::id::Id::new(doc.max_id().get() + 1).unwrap()),
-            "Wave Mod",
+            "LFO",
             DeviceKind::Native {
                 device_type: WAVE_MOD.to_owned(),
             },

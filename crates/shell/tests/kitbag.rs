@@ -86,7 +86,7 @@ fn add_kitbag(shell: &mut Shell) -> DeviceId {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: KITBAG.to_owned() },
-                        "name": "Kitbag",
+                        "name": "Impulse",
                         "role": DeviceRole::Instrument,
                     }
                 }),

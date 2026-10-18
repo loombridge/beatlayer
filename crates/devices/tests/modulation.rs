@@ -1,5 +1,5 @@
 //! A modulator in an engine (WP-5.10; the modulation spec, R14, R16, R19 and
-//! R20): a Wave Mod on one track modulates or holds a device on another, on
+//! R20): a LFO on one track modulates or holds a device on another, on
 //! the same frames at any block size, whether the song plays or not; a
 //! mapping edited in the document reaches the target without a new program.
 //! Every block runs as a real-time section under the allocation trap.
@@ -113,7 +113,7 @@ impl Rig {
     }
 }
 
-/// A Wave Mod on an audio track, rising at 10 Hz (a cycle of 4,800 frames, a
+/// A LFO on an audio track, rising at 10 Hz (a cycle of 4,800 frames, a
 /// whole number of 32-frame grid steps) and mapped to the gain of a test
 /// utility on a track carrying a signal of 1.
 fn rig(block: usize, modulator_params: &[(bl_model::ParamId, f64)]) -> (Rig, DeviceId, DeviceId) {
@@ -313,7 +313,7 @@ fn a_modulator_inside_a_rack_chain_modulates_a_device_on_another_track() {
     let utility = rig.insert(target, UTILITY, &[]);
     let mut wave = Device::new(
         rig.editor.new_id(),
-        "Wave Mod",
+        "LFO",
         DeviceKind::Native {
             device_type: modulator::WAVE_MOD.to_owned(),
         },

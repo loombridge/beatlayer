@@ -40,7 +40,8 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, SampleEditor, Session,
+    TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1076,7 +1077,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_clip_region"),
         label: "Set Clip Start and End",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Moves an audio clip's Start and End markers: the clip starts playing at \
             `start` when the song reaches the clip, and, while its loop is off, plays until \
@@ -1093,7 +1094,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_clip_loop"),
         label: "Set Clip Loop",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Moves an audio clip's loop brace, in seconds into its audio file for an \
             unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a \
@@ -1138,7 +1139,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_clip_loop_enabled"),
         label: "Clip Loop On/Off",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
             where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
@@ -1179,7 +1180,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_clip_warp"),
         label: "Clip Warp On/Off",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Switches an audio clip's Warp on or off. Off, the clip plays at its \
             file's own speed whatever the set's tempo, and its Start and End markers and loop \
@@ -1200,8 +1201,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("insert_warp_marker"),
         label: "Insert Warp Marker",
         permission: Permission::Edit,
-        contexts: &[ClipView],
-        keys: &[],
+        contexts: &[ClipView, SampleEditor],
+        keys: &[Key::Runs("S-SAMPLE-009")],
         description: "Adds a warp marker to each of the warped audio clips `clips`, which must \
             hold files of the same length: at a `beat` of the clip's contents (ticks from its \
             1.1.1, negative before it), at the time in the file the map already places there, \
@@ -1220,7 +1221,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("insert_warp_markers"),
         label: "Insert Warp Markers",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Puts warp markers in a range of a warped audio clip's contents, `from` to \
             `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, \
@@ -1235,8 +1236,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("insert_transient"),
         label: "Insert Transient",
         permission: Permission::Edit,
-        contexts: &[ClipView],
-        keys: &[],
+        contexts: &[ClipView, SampleEditor],
+        keys: &[Key::Runs("S-SAMPLE-011")],
         description: "Puts a transient into an audio clip at `time`, seconds in its file: Insert \
             Transient, at the Sample Editor's insert marker when the app runs it. Putting one \
             where a detected transient was taken away brings that one back. The edit belongs to \
@@ -1247,8 +1248,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("delete_transients"),
         label: "Delete Transients",
         permission: Permission::Edit,
-        contexts: &[ClipView],
-        keys: &[],
+        contexts: &[ClipView, SampleEditor],
+        keys: &[Key::Runs("S-SAMPLE-012")],
         description: "Takes transients out of an audio clip: `times` are their times in the \
             file, in seconds, as `clip.transients` lists them. A transient put in by hand is \
             forgotten; a detected one is noted as taken away and stays away until \
@@ -1260,7 +1261,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("reset_transients"),
         label: "Reset Transients",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Takes away all of an audio clip's transient edits: the transients put in \
             by hand go, and the detected ones that were taken away come back. One undo step.",
@@ -1270,7 +1271,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("move_transient"),
         label: "Move Transient",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Moves the transient at `from` (seconds in the file, as `clip.transients` \
             lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no \
@@ -1281,7 +1282,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("move_warp_markers"),
         label: "Move Warp Markers",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Moves the warp markers named in `markers` (their place in the map, the \
             first being 0) of each of the warped audio clips `clips`, which must hold files of \
@@ -1296,7 +1297,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("shift_warp_marker"),
         label: "Shift Warp Marker",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Moves the time in the file of warp marker `marker` (its place in the \
             map, the first being 0) of each of the warped audio clips `clips`, which must hold \
@@ -1309,8 +1310,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("delete_warp_markers"),
         label: "Delete Warp Markers",
         permission: Permission::Edit,
-        contexts: &[ClipView],
-        keys: &[],
+        contexts: &[ClipView, SampleEditor],
+        keys: &[Key::Runs("S-SAMPLE-010")],
         description: "Deletes the warp markers named in `markers` (their place in the map, the \
             first being 0) of each of the warped audio clips `clips`, which must hold files of \
             the same length: the segments either side of each join into one straight segment. \
@@ -1322,7 +1323,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("set_segment_bpm"),
         label: "Set Warp Segment BPM",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Sets a warped audio clip's BPM field. With `marker` (its place in the \
             map, the first being 0), `bpm` is the tempo of the segment that starts at that \
@@ -1337,7 +1338,7 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("scale_tempo"),
         label: "Scale Clip Tempo",
         permission: Permission::Edit,
-        contexts: &[ClipView],
+        contexts: &[ClipView, SampleEditor],
         keys: &[],
         description: "Multiplies every segment's tempo and the clip's own tempo of a warped \
             audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found \

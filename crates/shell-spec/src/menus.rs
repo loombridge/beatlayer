@@ -107,6 +107,14 @@ pub const D24: &str = "D24";
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
 
+/// The rows of the Create menu's Sample Editor items, which menus.md's note
+/// under the Create menu names but gives no rows (WP-4.10).
+pub const SAMPLE_WARP: &str = "WP-4.10-warp";
+/// See [`SAMPLE_WARP`].
+pub const SAMPLE_INSERT: &str = "WP-4.10-insert";
+/// See [`SAMPLE_WARP`].
+pub const SAMPLE_DELETE: &str = "WP-4.10-delete";
+
 /// Whether a row is one of Live's, in menus.md, rather than one of
 /// Beatlayer's improvements.
 #[must_use]
@@ -411,6 +419,12 @@ const CREATE: &[Row] = &[
     ("M-CREATE-009", "Capture MIDI", Cmd(CAPTURE_MIDI)),
     SEPARATOR,
     ("M-CREATE-010", "Create Fade", Key(&["S-ARR-008"])),
+    // The manual places these in the Create menu while the Sample Editor has
+    // focus (the note under menus.md's Create menu); they are disabled
+    // elsewhere.
+    (SAMPLE_WARP, "Insert Warp Marker", Key(&["S-SAMPLE-009"])),
+    (SAMPLE_INSERT, "Insert Transient", Key(&["S-SAMPLE-011"])),
+    (SAMPLE_DELETE, "Delete Transient", Key(&["S-SAMPLE-012"])),
     SEPARATOR,
     ("M-CREATE-011", "Slice to New MIDI Track", Pending(None)),
     (

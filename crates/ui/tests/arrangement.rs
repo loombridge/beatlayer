@@ -659,3 +659,103 @@ fn every_part_reaches_assistive_technology() {
         assert!(!node.disabled, "{name}");
     }
 }
+
+#[test]
+fn a_warped_clip_is_drawn_through_its_warp_map() {
+    // Spec: sample-editor R4. A warped clip's waveform is drawn through the
+    // same mapping as the Sample Editor's: each segment of the file runs at
+    // the speed that segment plays, so both sides of a warp marker agree on
+    // the frame under it.
+    use bl_model::{AudioData, Clip, ClipData, Command};
+    use bl_ui::arrangement::gpu::{Slot, WaveInst, lock};
+    use bl_ui::arrangement::peaks::MemoryPeaks;
+
+    let hash = benchmark::media_hash(0);
+    let peaks = Arc::new(
+        Peaks::from_samples(&benchmark::media_samples(
+            &mut benchmark::Random::new(1),
+            16.0,
+        ))
+        .unwrap(),
+    );
+    let mut source = MemoryPeaks::new();
+    source.insert(hash, Arc::clone(&peaks));
+    let mut editor = bl_shell::files::factory_default_set();
+    let track = editor.document().top_level().nth(2).unwrap();
+    let id: bl_model::ClipId = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                id,
+                Ticks(2 * BAR),
+                Ticks(8 * BAR),
+                ClipData::Audio(AudioData::new(hash)),
+            ),
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell = benchmark::shell_with(editor);
+    h.main
+        .arrangement_mut()
+        .set_peak_source(Box::new(source), None);
+    h.settle();
+    // Sixteen seconds at 120 BPM is eight bars. A marker at the eighth
+    // second, four bars in, moved four beats later, stretches the first half.
+    let quarter = Ticks::QUARTER.get();
+    h.shell
+        .run("clip.set_warp", json!({ "clip": id, "warp": true }))
+        .unwrap();
+    h.shell
+        .run(
+            "clip.insert_warp_marker",
+            json!({ "clips": [id], "time": 8.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "clip.move_warp_markers",
+            json!({ "clips": [id], "markers": [1], "by": 4 * quarter }),
+        )
+        .unwrap();
+    h.settle();
+    let lanes = layout(&h).lanes;
+    let shared = h.main.arrangement().shared();
+    let mut waves: Vec<WaveInst> = lock(&shared).slots[Slot::Lanes as usize].waves.clone();
+    waves.sort_by(|p, q| p.draw[0].total_cmp(&q.draw[0]));
+    // The first channel's band of each stretch.
+    waves.dedup_by(|p, q| (p.draw[0] - q.draw[0]).abs() < 0.5);
+    assert_eq!(waves.len(), 2, "one stretch each side of the marker");
+    // 30 points to a bar: the marker is at 20 beats, five bars in, from the
+    // clip's start at bar 2.
+    let marker = lanes.left() + (2.0 + 5.0) * 30.0;
+    assert!(
+        (waves[1].draw[0] - marker).abs() < 1.0,
+        "{:?}",
+        waves[1].draw
+    );
+    assert!(
+        (waves[0].draw[2] - marker).abs() < 1.0,
+        "{:?}",
+        waves[0].draw
+    );
+    // Both stretches reach the same frame, the eighth second, at the marker.
+    let frame_at = |wave: &WaveInst, x: f32| {
+        let level = (0..peaks.level_count())
+            .find(|level| peaks.run(*level, 0).map(|run| run.len) == Some(wave.run[1]))
+            .expect("the stretch's level");
+        (f64::from(wave.run[2])
+            + f64::from(wave.band[3])
+            + f64::from(x - wave.draw[0]) * f64::from(wave.band[2]))
+            * Peaks::frames_per_peak(level) as f64
+    };
+    let expected = 8.0 * f64::from(peaks.sample_rate());
+    let left = frame_at(&waves[0], marker);
+    let right = frame_at(&waves[1], marker);
+    assert!((left - expected).abs() < 400.0, "{left} against {expected}");
+    assert!(
+        (right - expected).abs() < 400.0,
+        "{right} against {expected}"
+    );
+}

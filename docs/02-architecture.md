@@ -458,7 +458,7 @@ Beatlayer has its own extension layer, in two parts (Phase 9):
 
 `cargo-packager` builds every package below, and CI runs on GitHub's hosted runners (`macos-15` on arm64, `windows-2025`, `ubuntu-24.04`). Arm runners for Windows and Linux exist, so the Arm builds in Phase 10 need no new infrastructure.
 
-`cargo xtask package` builds the current platform's packages and starts each packaged binary to check it, and the nightly workflow runs it on all three platforms (WP-0.11). The configuration is `[package.metadata.packager]` in `crates/app/Cargo.toml`, with the macOS `Info.plist` additions and entitlements in `crates/app/packaging/macos/`. Signing and notarisation run only when their secrets exist; until a signing certificate and a code-signing route exist, the packages are unsigned.
+`cargo xtask package` builds the current platform's packages and starts each packaged binary to check it, and the nightly workflow runs it on all three platforms (WP-0.11). The configuration is `[package.metadata.packager]` in `crates/app/Cargo.toml`, with the macOS `Info.plist` additions and entitlements in `crates/app/packaging/macos/`. Signing and notarisation run only when their secrets exist; until a signing certificate and a code-signing route exist, the packages are unsigned. Unsigned or not, every release attaches `SHA256SUMS.txt` and a build provenance attestation for each package (`release.yml`), so a download can be checked against the workflow and commit that built it; [the security page](security.md) has the threat model.
 
 | Platform | Package | Notes |
 |---|---|---|

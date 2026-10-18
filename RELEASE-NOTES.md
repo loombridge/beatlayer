@@ -97,6 +97,27 @@ xattr -dr com.apple.quarantine /Applications/Beatlayer.app
 
    Alternatively, unpack the `.tar.gz` and run the `beatlayer` binary inside it.
 
+## Checking a download
+
+Each release lists the SHA-256 of every file in `SHA256SUMS.txt`. In the
+folder you downloaded to, this checks the files you have against it:
+
+```sh
+shasum -a 256 --ignore-missing -c SHA256SUMS.txt
+```
+
+On Linux, `sha256sum --ignore-missing -c SHA256SUMS.txt` does the same. On
+Windows, `Get-FileHash beatlayer-windows-x64.msi` in PowerShell prints the hash
+to compare with the file's line.
+
+Each file also has a build provenance attestation, which shows it was built by
+this repository's release workflow from the tagged commit. With the GitHub
+CLI:
+
+```sh
+gh attestation verify beatlayer-macos-arm64.dmg --repo loombridge/beatlayer
+```
+
 ## Reporting problems
 
 Beatlayer is developed in the open. If something does not work, or you want to

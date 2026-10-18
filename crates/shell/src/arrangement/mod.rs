@@ -18,19 +18,20 @@ pub mod rows;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{ClipId, Document, TrackId, TrackKind};
+use bl_model::{AutomationTarget, ClipId, Document, MixerParam, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
-    self as ids, ArrangementState, FoldArgs, FoldGroupsArgs, FollowArgs, InsertMarkerArgs,
-    ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs, ShowRangeArgs, ShowTrackArgs,
-    SwitchArgs, TimeRange, TrackHeightArgs, ZoomArgs,
+    self as ids, ArrangementState, AutomationLane, FoldArgs, FoldGroupsArgs, FollowArgs,
+    InsertMarkerArgs, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
+    ShowAutomationArgs, ShowRangeArgs, ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs,
+    ZoomArgs,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use self::grid::{Grid, Step};
 use self::rows::{
-    DEFAULT_TRACK_HEIGHT, DROP_AREA, FOLDED_HEIGHT, MAX_TRACK_HEIGHT, MIN_OPTIMIZED_HEIGHT,
-    MIN_TRACK_HEIGHT, Row,
+    AUTOMATION_LANE_HEIGHT, DEFAULT_TRACK_HEIGHT, DROP_AREA, FOLDED_HEIGHT, MAX_TRACK_HEIGHT,
+    MIN_OPTIMIZED_HEIGHT, MIN_TRACK_HEIGHT, Row,
 };
 
 /// A new set's zoom: 30 points to a 4/4 bar, about 32 bars across the lanes
@@ -177,6 +178,16 @@ pub struct ArrangementView {
     /// again straight away goes back.
     zoomed_to_selection: Option<Saved>,
     transport: TransportView,
+    /// Whether Automation Mode is on (WP-2.12): every track shows its
+    /// automation lane under its lane.
+    automation_mode: bool,
+    /// Whether Automation Arm is on (WP-2.12): moving a control while the
+    /// transport records writes it into the parameter's envelope.
+    automation_arm: bool,
+    /// The parameter each track's automation lane shows, where the choosers
+    /// have picked one; `None` hides that track's lane. A track with no
+    /// entry shows its volume.
+    automation_lanes: BTreeMap<TrackId, Option<AutomationTarget>>,
 }
 
 impl Default for ArrangementView {
@@ -214,6 +225,9 @@ impl ArrangementView {
             history: Vec::new(),
             zoomed_to_selection: None,
             transport: TransportView::default(),
+            automation_mode: false,
+            automation_arm: false,
+            automation_lanes: BTreeMap::new(),
         }
     }
 
@@ -340,6 +354,44 @@ impl ArrangementView {
         self.optimize_width.is_some()
     }
 
+    /// Whether Automation Mode is on: the tracks show their automation lanes.
+    #[must_use]
+    pub fn automation_mode(&self) -> bool {
+        self.automation_mode
+    }
+
+    /// Whether Automation Arm is on.
+    #[must_use]
+    pub fn automation_arm(&self) -> bool {
+        self.automation_arm
+    }
+
+    /// The parameter a track's automation lane shows: the choosers' last
+    /// choice, or its volume by default. `None` draws no envelope, while
+    /// the lane and its choosers stay.
+    #[must_use]
+    pub fn automation_lane(&self, track: TrackId) -> Option<AutomationTarget> {
+        self.automation_lanes
+            .get(&track)
+            .copied()
+            .unwrap_or(Some(AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            }))
+    }
+
+    /// How tall `track`'s automation lane is, in points: [`AUTOMATION_LANE_HEIGHT`]
+    /// while Automation Mode is on and the track is unfolded, and 0 otherwise.
+    /// The lane shows even with nothing chosen (None), so its choosers can
+    /// pick a parameter again.
+    #[must_use]
+    pub fn automation_lane_height(&self, track: TrackId) -> f32 {
+        if self.automation_mode && !self.is_folded(track) {
+            AUTOMATION_LANE_HEIGHT
+        } else {
+            0.0
+        }
+    }
+
     /// The editing grid's settings.
     #[must_use]
     pub fn grid(&self) -> Grid {
@@ -431,21 +483,29 @@ impl ArrangementView {
             } else {
                 self.track_height(track)
             };
+            // WP-2.12: an automation lane under an unfolded track while
+            // Automation Mode is on.
+            let automation = if folded {
+                0.0
+            } else {
+                self.automation_lane_height(track)
+            };
             out.push(Row {
                 track,
                 kind,
                 depth,
                 top,
                 height,
+                automation,
                 folded,
             });
-            top += height;
+            top += height + automation;
         }
         if self.optimize_height && !out.is_empty() {
             let each = (self.viewport.height / out.len() as f32).max(MIN_OPTIMIZED_HEIGHT);
             for (index, row) in out.iter_mut().enumerate() {
                 row.top = each * index as f32;
-                row.height = each;
+                row.height = (each - row.automation).max(MIN_OPTIMIZED_HEIGHT);
             }
         }
     }
@@ -619,6 +679,8 @@ impl ArrangementView {
         self.forget_missing_clips(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
+        self.automation_lanes
+            .retain(|id, _| doc.track(*id).is_some());
         self.clamp_scroll(doc);
     }
 
@@ -980,6 +1042,21 @@ impl ArrangementView {
                 self.title_bars = true;
                 self.show_track(doc, first);
             }
+            ids::AUTOMATION_MODE => {
+                let SwitchArgs { on } = parse(args)?;
+                self.automation_mode = on.unwrap_or(!self.automation_mode);
+                self.clamp_scroll(doc);
+            }
+            ids::AUTOMATION_ARM => {
+                let SwitchArgs { on } = parse(args)?;
+                self.automation_arm = on.unwrap_or(!self.automation_arm);
+            }
+            ids::SHOW_AUTOMATION => {
+                let ShowAutomationArgs { track, target } = parse(args)?;
+                self.targets(doc, Some(vec![track]))?;
+                self.automation_lanes.insert(track, target);
+                self.clamp_scroll(doc);
+            }
             other => {
                 return Err(ViewError::InvalidArgs(format!(
                     "`{other}` isn't a view command"
@@ -1025,6 +1102,16 @@ impl ArrangementView {
                 .map(|(start, end)| TimeRange { start, end }),
             folded_tracks: self.folded.iter().copied().collect(),
             zoom_back_steps: self.history.len(),
+            automation_mode: self.automation_mode,
+            automation_arm: self.automation_arm,
+            automation_lanes: self
+                .automation_lanes
+                .iter()
+                .map(|(track, target)| AutomationLane {
+                    track: *track,
+                    target: *target,
+                })
+                .collect(),
         }
     }
 
@@ -1040,6 +1127,8 @@ impl ArrangementView {
             ids::TRIPLET_GRID => Some(self.grid.triplet),
             ids::SNAP_TO_GRID => Some(self.grid.snap),
             ids::FIXED_GRID => Some(self.grid.fixed_on),
+            ids::AUTOMATION_MODE => Some(self.automation_mode),
+            ids::AUTOMATION_ARM => Some(self.automation_arm),
             _ => None,
         }
     }

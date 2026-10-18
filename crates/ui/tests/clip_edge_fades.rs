@@ -29,15 +29,25 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     let switch = Harness::node(&nodes, "Create Fades on Clip Edges");
     assert_eq!(switch.role, Role::Button);
     assert!(!switch.disabled);
-    // Live's rows in Live's order, every other one pending: Record's seven,
-    // then Warp/Fades' three before the switch, then Launch and Tap Tempo.
+    // Live's rows in Live's order, every other one pending but the Launch
+    // section's (WP-3.4), Record Session automation in (WP-3.12) and the
+    // Warp/Fades rows before the switch (WP-4.9): Record's seven, then
+    // Warp/Fades' three before the switch, then Launch and Tap Tempo.
+    let live = |label: &str| {
+        label == "Create Fades on Clip Edges"
+            || label == "Record Session automation in"
+            || label.contains("Launch")
+            || [
+                "Loop/Warp Short Samples",
+                "Auto-Warp Long Samples",
+                "Default Warp Mode",
+            ]
+            .contains(&label)
+    };
     let top = |label: &str| {
         let node = Harness::node(&nodes, label);
-        assert!(
-            node.disabled || label == "Create Fades on Clip Edges",
-            "{label} is pending"
-        );
-        if label != "Create Fades on Clip Edges" {
+        assert!(node.disabled || live(label), "{label} is pending");
+        if !live(label) {
             assert!(node.description.contains("Not built yet"), "{label}");
         }
         node.bounds.expect("drawn").y0
@@ -93,4 +103,96 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     );
     h.settle();
     assert!(h.shell.create_fades_on_clip_edges());
+}
+
+// Spec: recording R13. Warp recorded audio is a switch after Create Fades on
+// Clip Edges, on the Record, Warp & Launch page, and runs its command.
+#[test]
+fn the_record_warp_and_launch_page_switches_warp_recorded_audio() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let switch = Harness::node(&nodes, "Warp recorded audio");
+    assert_eq!(switch.role, Role::Button);
+    assert!(!switch.disabled);
+    let fades = Harness::node(&nodes, "Create Fades on Clip Edges");
+    let launch = Harness::node(&nodes, "Default Launch Mode");
+    assert!(
+        fades.bounds.unwrap().y0 < switch.bounds.unwrap().y0
+            && switch.bounds.unwrap().y0 < launch.bounds.unwrap().y0,
+        "after the Warp/Fades rows, before Launch"
+    );
+    // On, as Live warps its recordings.
+    assert!(h.shell.warp_recorded_audio());
+
+    h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
+    h.settle();
+    assert!(!h.shell.warp_recorded_audio());
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "settings.set_warp_recorded_audio" && i.args == json!({ "on": false })
+    )));
+
+    h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
+    h.settle();
+    assert!(h.shell.warp_recorded_audio());
+}
+
+// Spec: launch-quantisation R15. The Launch section's rows are live on the
+// Record, Warp & Launch page: the switches run their commands and the
+// choosers are enabled.
+#[test]
+fn the_launch_rows_of_record_warp_and_launch_are_live() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for chooser in ["Default Launch Mode", "Default Launch Quantization"] {
+        assert!(!Harness::node(&nodes, chooser).disabled, "{chooser}");
+    }
+    assert!(h.shell.launch_prefs().select_on_launch, "on, as Live's is");
+
+    h.accesskit(Id::new(("switch", "select-on-launch")), Action::Click);
+    h.settle();
+    assert!(!h.shell.launch_prefs().select_on_launch);
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "settings.set_select_on_launch" && i.args == json!({ "on": false })
+    )));
+}
+
+// Spec: session-recording R12. The Record section's rows show the values
+// Live 12 shows in a new install, though the settings behind them come with
+// later packages.
+#[test]
+fn the_record_rows_show_the_values_live_shows_in_a_new_install() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for (label, value) in [
+        ("File Type", "WAV"),
+        ("Bit Depth", "24"),
+        ("Count-In", "None"),
+        ("Clip Update Rate", "1/16"),
+        ("Record Session automation in", "Armed Tracks"),
+        ("Start Transport With Record", "On"),
+    ] {
+        assert_eq!(Harness::node(&nodes, label).value, value, "{label}");
+    }
 }

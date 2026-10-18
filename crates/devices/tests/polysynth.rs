@@ -1,4 +1,4 @@
-//! Cascade, the native polysynth (WP-2.17, part 1; the polysynth spec): the
+//! Drift, the native polysynth (WP-2.17, part 1; the polysynth spec): the
 //! oscillators' aliasing, the low-pass filters against their prototypes,
 //! the envelopes' timing, polyphony and stealing, and the voice budget.
 //!
@@ -11,7 +11,8 @@ mod common;
 use std::time::Instant;
 
 use bl_engine::{
-    Block, DeviceType, Node, NoteBuffer, NoteEvent, NoteKind, Registry, TransportInfo,
+    Block, DeviceType, Node, NoteBuffer, NoteEvent, NoteExpression, NoteKind, Registry,
+    TransportInfo,
 };
 use bl_model::DeviceKind;
 use bl_model::ParamId;
@@ -20,8 +21,11 @@ use common::{CHANNELS, RATE, device, node};
 use realfft::RealFftPlanner;
 
 use bl_devices::polysynth::{
-    FILTER, FILTER_TYPE, FREQ, HP, KEY, NOISE, OSC1_GAIN, OSC1_SHAPE, OSC1_WAVE, OSC2, POLYSYNTH,
-    RES, RETRIGGER, VOLUME,
+    FILTER, FILTER_TYPE, FREQ, HP, KEY, LFO_AMOUNT, LFO_DIVISIONS, LFO_MODE, LFO_MODES, LFO_RATIO,
+    LFO_RETRIGGER, LFO_SHAPE, LFO_SHAPES, LFO_SYNC, MOD_DESTINATIONS, MOD_SOURCES, MOD1_AMOUNT,
+    MOD1_DEST, MOD1_SOURCE, MOD2_AMOUNT, MOD2_DEST, MOD2_SOURCE, NOISE, NOISE_GAIN, NOTE_PB,
+    OSC1_GAIN, OSC1_SHAPE, OSC1_WAVE, OSC2, OSC2_DETUNE, PB_RANGE, PITCH_MOD1_AMOUNT,
+    PITCH_MOD1_SOURCE, POLYSYNTH, RES, RETRIGGER, VOLUME,
 };
 
 /// The sample rate the tests run at, in hertz.
@@ -39,7 +43,7 @@ fn cascade() -> DeviceType {
         .find(|device_type| {
             matches!(&device_type.kind, DeviceKind::Native { device_type } if device_type == POLYSYNTH)
         })
-        .expect("Cascade is registered")
+        .expect("Drift is registered")
 }
 
 fn on(offset: u32, key: u8, velocity: f32) -> NoteEvent {
@@ -583,4 +587,448 @@ fn sixteen_voices_render_faster_than_the_device_budget() {
             "16 voices ran at {realtime:.1}x real time in a debug build"
         );
     }
+}
+
+// ---- WP-2.17, part 2: the LFO, the modulation routes and MPE ----
+
+/// The index of `name` in a chooser's list, as a parameter value.
+fn choice(list: &[&str], name: &str) -> f64 {
+    list.iter()
+        .position(|entry| *entry == name)
+        .unwrap_or_else(|| panic!("{name} is one of {list:?}")) as f64
+}
+
+/// A note-on with its own note ID, so per-note expressions can name it.
+fn on_id(offset: u32, key: u8, velocity: f32, id: u32) -> NoteEvent {
+    NoteEvent {
+        offset,
+        kind: NoteKind::On,
+        channel: 0,
+        key,
+        velocity,
+        note_id: Some(id),
+    }
+}
+
+/// A per-note expression for the note `id` (MPE).
+fn expression(offset: u32, key: u8, id: u32, expression: NoteExpression, value: f32) -> NoteEvent {
+    NoteEvent {
+        offset,
+        kind: NoteKind::Expression { expression, value },
+        channel: 0,
+        key,
+        velocity: 0.0,
+        note_id: Some(id),
+    }
+}
+
+/// A channel message on channel 0 (WP-5.44).
+fn message(offset: u32, kind: NoteKind) -> NoteEvent {
+    NoteEvent {
+        offset,
+        kind,
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    }
+}
+
+/// The RMS of `signal`'s first difference: a crude high-frequency energy.
+fn difference_rms(signal: &[f32]) -> f64 {
+    let energy: f64 = signal
+        .windows(2)
+        .map(|pair| {
+            let difference = f64::from(pair[1] - pair[0]);
+            difference * difference
+        })
+        .sum();
+    (energy / (signal.len().saturating_sub(1).max(1)) as f64).sqrt()
+}
+
+/// `signal`'s brightness one value every 10 ms, from its first difference.
+fn brightness(signal: &[f32]) -> Vec<f64> {
+    signal
+        .chunks(480)
+        .filter(|window| window.len() == 480)
+        .map(difference_rms)
+        .collect()
+}
+
+/// The strongest frequency in `series`, sampled at `rate` hertz, between
+/// `low` and `high`: a slow DFT in 0.05 Hz steps.
+fn series_peak(series: &[f64], rate: f64, low: f64, high: f64) -> f64 {
+    let mean = series.iter().sum::<f64>() / series.len() as f64;
+    let mut best = (0.0f64, 0.0f64);
+    let mut hz = low;
+    while hz <= high {
+        let (mut re, mut im) = (0.0, 0.0);
+        for (i, value) in series.iter().enumerate() {
+            let phase = core::f64::consts::TAU * hz * i as f64 / rate;
+            re += (value - mean) * phase.cos();
+            im -= (value - mean) * phase.sin();
+        }
+        let power = re * re + im * im;
+        if power > best.1 {
+            best = (hz, power);
+        }
+        hz += 0.05;
+    }
+    best.0
+}
+
+// Spec: polysynth R19, R20 (an LFO-to-cutoff route at the synced rate)
+#[test]
+fn an_lfo_to_cutoff_route_moves_the_cutoff_at_the_synced_rate() {
+    let registry = registry();
+    let node_for = |division: &str| -> Box<dyn Node> {
+        let params = [
+            (OSC1_WAVE, 4.0),
+            (OSC1_GAIN, db_to_gain(-6.0)),
+            (FILTER, 1.0),
+            (FREQ, 400.0),
+            (HP, 20.0),
+            (RES, 0.0),
+            (KEY, 0.0),
+            (LFO_MODE, choice(&LFO_MODES, "Sync")),
+            (LFO_SYNC, choice(&LFO_DIVISIONS, division)),
+            (LFO_SHAPE, choice(&LFO_SHAPES, "Sine")),
+            (LFO_RETRIGGER, 1.0),
+            (LFO_AMOUNT, 100.0),
+            (MOD1_SOURCE, choice(&MOD_SOURCES, "LFO")),
+            (MOD1_DEST, choice(&MOD_DESTINATIONS, "LP Frequency")),
+            (MOD1_AMOUNT, 30.0),
+        ];
+        node(&registry, &device_with(&params), 480)
+    };
+    // 120 BPM throughout: a quarter note is 0.5 seconds, a half note one
+    // second, so the LFO runs at 2 and 1 hertz.
+    let mut measured = Vec::new();
+    for (division, expected) in [("1/4", 2.0), ("1/2", 1.0)] {
+        let mut node = node_for(division);
+        let signal = play_blocks(node.as_mut(), 96_000, 480, &[on(0, 40, 1.0)]);
+        // Skip the attack's first 0.1 s.
+        let series = brightness(&signal[4_800..]);
+        let peak = series_peak(&series, HZ / 480.0, 0.5, 5.0);
+        println!("the {division} LFO moved the cutoff at {peak:.2} Hz");
+        assert!(
+            (peak - expected).abs() < 0.15,
+            "the {division} LFO ran at {peak:.2} Hz, wanted {expected}"
+        );
+        measured.push(peak);
+    }
+    let ratio = measured[0] / measured[1];
+    assert!(
+        (ratio - 2.0).abs() < 0.2,
+        "the quarter note ran {ratio:.2} times the half note"
+    );
+}
+
+// Spec: polysynth R21 (MPE's per-note pitch bend)
+#[test]
+fn mpe_pitch_bend_bends_one_note_only() {
+    let registry = registry();
+    let params = [
+        (OSC1_WAVE, 0.0),
+        (OSC1_GAIN, db_to_gain(-6.0)),
+        (PB_RANGE, 12.0),
+        (NOTE_PB, 1.0),
+    ];
+    let mut node = node(&registry, &device_with(&params), 8_192);
+    // Two notes, C4 and C5, and a half-way bend for the first one's ID.
+    let notes = [
+        on_id(0, 60, 1.0, 1),
+        on_id(0, 72, 1.0, 2),
+        expression(48_000, 60, 1, NoteExpression::Bend, 0.5),
+    ];
+    let signal = play_blocks(node.as_mut(), 96_000, 8_192, &notes);
+    let before = &signal[9_600..38_400];
+    let after = &signal[57_600..86_400];
+    let (c4, c4_bent, c5, c5_bent) = (261.63, 369.99, 523.25, 739.99);
+    println!(
+        "before: C4 {:.4}, bent C4 {:.4}, C5 {:.4}; after: C4 {:.4}, bent C4 {:.4}, C5 {:.4}, bent C5 {:.4}",
+        amplitude_at(before, c4),
+        amplitude_at(before, c4_bent),
+        amplitude_at(before, c5),
+        amplitude_at(after, c4),
+        amplitude_at(after, c4_bent),
+        amplitude_at(after, c5),
+        amplitude_at(after, c5_bent)
+    );
+    assert!(amplitude_at(before, c4) > 0.05, "C4 sounds");
+    assert!(amplitude_at(before, c5) > 0.05, "C5 sounds");
+    assert!(
+        amplitude_at(before, c4_bent) < 0.1 * amplitude_at(before, c4),
+        "C4 hasn't bent yet"
+    );
+    // The bend moved the first note up six semitones, 12 × 0.5.
+    assert!(
+        amplitude_at(after, c4_bent) > 10.0 * amplitude_at(after, c4),
+        "C4 bent to {c4_bent:.2} Hz"
+    );
+    // The second note didn't move.
+    assert!(
+        amplitude_at(after, c5) > 0.05,
+        "C5 still sounds at its own pitch"
+    );
+    assert!(
+        amplitude_at(after, c5_bent) < 0.1 * amplitude_at(after, c5),
+        "C5 didn't bend"
+    );
+}
+
+// Spec: polysynth R22, device-framework R39. The pitch wheel moves every
+// note on its frame, by the PB Range.
+#[test]
+fn the_pitch_wheel_bends_every_note_by_the_pb_range() {
+    let registry = registry();
+    let params = [
+        (OSC1_WAVE, 0.0),
+        (OSC1_GAIN, db_to_gain(-6.0)),
+        (PB_RANGE, 12.0),
+    ];
+    let mut node = node(&registry, &device_with(&params), 8_192);
+    // Two notes, C4 and C5, a half-way bend up at 1 s and a full bend down
+    // at 2 s.
+    let notes = [
+        on(0, 60, 1.0),
+        on(0, 72, 1.0),
+        message(48_000, NoteKind::PitchBend { value: 0.5 }),
+        message(96_000, NoteKind::PitchBend { value: -1.0 }),
+    ];
+    let signal = play_blocks(node.as_mut(), 144_000, 8_192, &notes);
+    let (before, up, down) = (
+        &signal[9_600..38_400],
+        &signal[57_600..86_400],
+        &signal[105_600..134_400],
+    );
+    let strongest = |part: &[f32], hz: f64| amplitude_at(part, hz);
+    let (c4, c5) = (261.63, 523.25);
+    // Six semitones up from each, then an octave down from each.
+    let (c4_up, c5_up) = (369.99, 739.99);
+    let (c4_down, c5_down) = (130.81, 261.63);
+    assert!(strongest(before, c4) > 0.05 && strongest(before, c5) > 0.05);
+    assert!(strongest(before, c4_up) < 0.1 * strongest(before, c4));
+    assert!(strongest(up, c4_up) > 10.0 * strongest(up, c4), "C4 up");
+    assert!(strongest(up, c5_up) > 10.0 * strongest(up, c5), "C5 up");
+    assert!(
+        strongest(down, c4_down) > 10.0 * strongest(down, c4_up),
+        "C4 down"
+    );
+    assert!(
+        strongest(down, c5_down) > 10.0 * strongest(down, c5_up),
+        "C5 down"
+    );
+}
+
+// Spec: polysynth R21, device-framework R39. A change of the mod wheel
+// (controller 1) moves the Modwheel source, from the frame it lands on.
+#[test]
+fn the_mod_wheel_moves_the_modwheel_source() {
+    let registry = registry();
+    let params = [
+        (OSC1_WAVE, 0.0),
+        (OSC1_GAIN, db_to_gain(-6.0)),
+        (MOD1_SOURCE, choice(&MOD_SOURCES, "Modwheel")),
+        (MOD1_DEST, choice(&MOD_DESTINATIONS, "Main Volume")),
+        (MOD1_AMOUNT, 100.0),
+    ];
+    let mut node = node(&registry, &device_with(&params), 24_000);
+    let wheel = NoteKind::Control {
+        controller: 1,
+        value: 1.0,
+    };
+    let notes = [on(0, 60, 1.0), message(12_000, wheel)];
+    let signal = play_blocks(node.as_mut(), 24_000, 24_000, &notes);
+    let before = rms(&signal[4_800..11_000]);
+    let after = rms(&signal[14_000..23_000]);
+    println!("mod wheel: {before:.5} then {after:.5}");
+    assert!(after > 4.0 * before, "the mod wheel raised the level");
+}
+
+// Spec: polysynth R21 (MPE's pressure and slide as sources)
+#[test]
+fn mpe_pressure_and_slide_are_modulation_sources() {
+    let registry = registry();
+    let node_for = |source: &str, dest: &str, amount: f64, extra: &[(ParamId, f64)]| {
+        let mut params = vec![
+            (OSC1_WAVE, 0.0),
+            (OSC1_GAIN, db_to_gain(-6.0)),
+            (MOD1_SOURCE, choice(&MOD_SOURCES, source)),
+            (MOD1_DEST, choice(&MOD_DESTINATIONS, dest)),
+            (MOD1_AMOUNT, amount),
+        ];
+        params.extend_from_slice(extra);
+        node(&registry, &device_with(&params), 24_000)
+    };
+    // Pressure moves the Main Volume: the note rises when it arrives.
+    let mut node = node_for("Pressure", "Main Volume", 100.0, &[]);
+    let notes = [
+        on_id(0, 60, 1.0, 1),
+        expression(12_000, 60, 1, NoteExpression::Pressure, 1.0),
+    ];
+    let signal = play_blocks(node.as_mut(), 24_000, 24_000, &notes);
+    let before = rms(&signal[4_800..11_000]);
+    let after = rms(&signal[14_000..23_000]);
+    println!("pressure: {before:.5} then {after:.5}");
+    assert!(after > 4.0 * before, "pressure raised the level");
+    // Slide moves the low-pass cutoff: the note brightens.
+    let mut node = node_for(
+        "Slide",
+        "LP Frequency",
+        50.0,
+        &[(FILTER, 1.0), (FREQ, 300.0), (OSC1_WAVE, 4.0)],
+    );
+    let notes = [
+        on_id(0, 40, 1.0, 1),
+        expression(12_000, 40, 1, NoteExpression::Slide, 1.0),
+    ];
+    let signal = play_blocks(node.as_mut(), 24_000, 24_000, &notes);
+    let before = difference_rms(&signal[4_800..11_000]);
+    let after = difference_rms(&signal[14_000..23_000]);
+    println!("slide: {before:.5} then {after:.5}");
+    assert!(after > 2.0 * before, "slide raised the cutoff");
+}
+
+// Spec: polysynth R20 (every Mod destination moves the sound)
+#[test]
+fn every_modulation_destination_moves_the_sound() {
+    let registry = registry();
+    let lfo = choice(&MOD_SOURCES, "LFO");
+    let lp_freq = choice(&MOD_DESTINATIONS, "LP Frequency");
+    let cases: Vec<(&str, Vec<(ParamId, f64)>)> = vec![
+        ("Osc 1 Gain", vec![]),
+        ("Osc 1 Shape", vec![(OSC1_WAVE, 4.0)]),
+        ("Osc 2 Gain", vec![(OSC2, 1.0)]),
+        ("Osc 2 Detune", vec![(OSC2, 1.0), (OSC2_DETUNE, 7.0)]),
+        (
+            "Noise Gain",
+            vec![(NOISE, 1.0), (NOISE_GAIN, db_to_gain(-12.0))],
+        ),
+        ("LP Frequency", vec![(FILTER, 1.0), (FREQ, 500.0)]),
+        (
+            "LP Resonance",
+            vec![(FILTER, 1.0), (FREQ, 500.0), (RES, 40.0)],
+        ),
+        ("HP Frequency", vec![(FILTER, 1.0), (HP, 400.0)]),
+        (
+            "LFO Rate",
+            vec![
+                (FILTER, 1.0),
+                (FREQ, 500.0),
+                (MOD2_SOURCE, lfo),
+                (MOD2_DEST, lp_freq),
+                (MOD2_AMOUNT, 50.0),
+            ],
+        ),
+        ("Main Volume", vec![(VOLUME, 0.5)]),
+    ];
+    for (name, extra) in cases {
+        let mut base = vec![(OSC1_WAVE, 0.0), (OSC1_GAIN, db_to_gain(-6.0))];
+        base.extend(extra.iter().copied());
+        let mut plain = node(&registry, &device_with(&base), 8_192);
+        let mut moved_params = base.clone();
+        moved_params.extend([
+            (MOD1_SOURCE, choice(&MOD_SOURCES, "Env 1")),
+            (MOD1_DEST, choice(&MOD_DESTINATIONS, name)),
+            (MOD1_AMOUNT, 50.0),
+        ]);
+        let mut moved = node(&registry, &device_with(&moved_params), 8_192);
+        let a = play(plain.as_mut(), 8_192, &[on(0, 60, 1.0)]);
+        let b = play(moved.as_mut(), 8_192, &[on(0, 60, 1.0)]);
+        let difference = a
+            .iter()
+            .zip(&b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            difference > 1e-4,
+            "the {name} route changed nothing ({difference})"
+        );
+    }
+}
+
+// Spec: polysynth R19 (the Ratio time mode follows the note)
+#[test]
+fn the_lfo_ratio_mode_modulates_the_note_at_its_own_rate() {
+    let registry = registry();
+    let node_for = |amount: f64| -> Box<dyn Node> {
+        let params = [
+            (OSC1_WAVE, 0.0),
+            (OSC1_GAIN, db_to_gain(-6.0)),
+            (LFO_MODE, choice(&LFO_MODES, "Ratio")),
+            (LFO_RATIO, 1.0),
+            (LFO_AMOUNT, 100.0),
+            (PITCH_MOD1_SOURCE, choice(&MOD_SOURCES, "LFO")),
+            (PITCH_MOD1_AMOUNT, amount),
+        ];
+        node(&registry, &device_with(&params), 24_000)
+    };
+    // Key 57 is A3, 220 Hz; an LFO at the note's own rate bends its pitch
+    // at audio rate, which adds sidebands at 440 Hz and up.
+    let mut plain = node_for(0.0);
+    let mut fm = node_for(50.0);
+    let a = play(plain.as_mut(), 24_000, &[on(0, 57, 1.0)]);
+    let b = play(fm.as_mut(), 24_000, &[on(0, 57, 1.0)]);
+    // The pitch bends by 2^(sin), whose average is the note times I₀(ln 2):
+    // its lines sit at 248 Hz and each 220 Hz above that, so they show the
+    // LFO running at the note's own rate.
+    let shifted = amplitude_at(&b[4_800..], 248.0);
+    let sideband = amplitude_at(&b[4_800..], 468.0);
+    let plain_shifted = amplitude_at(&a[4_800..], 248.0);
+    let plain_sideband = amplitude_at(&a[4_800..], 468.0);
+    println!(
+        "ratio mode: {shifted:.4} at 248 Hz, {sideband:.4} at 468 Hz; \
+         without the route {plain_shifted:.4} and {plain_sideband:.4}"
+    );
+    assert!(shifted > 0.1, "the FM tone's shifted carrier is there");
+    assert!(
+        sideband > 0.05,
+        "the ratio LFO adds FM sidebands ({sideband:.4})"
+    );
+    assert!(
+        plain_shifted < 0.1 * shifted && plain_sideband < 0.1 * sideband,
+        "without the route there are no sidebands"
+    );
+}
+
+// Spec: polysynth R19 (Retrigger and the free-running LFO)
+#[test]
+fn a_free_running_lfo_is_shared_and_retrigger_restarts_it() {
+    let registry = registry();
+    let node_for = |retrigger: f64| -> Box<dyn Node> {
+        let params = [
+            (OSC1_WAVE, 0.0),
+            (OSC1_GAIN, db_to_gain(-6.0)),
+            (LFO_MODE, choice(&LFO_MODES, "Sync")),
+            (LFO_SYNC, choice(&LFO_DIVISIONS, "1/4")),
+            (LFO_SHAPE, choice(&LFO_SHAPES, "Square")),
+            (LFO_RETRIGGER, retrigger),
+            (LFO_AMOUNT, 100.0),
+            (MOD1_SOURCE, choice(&MOD_SOURCES, "LFO")),
+            (MOD1_DEST, choice(&MOD_DESTINATIONS, "Main Volume")),
+            (MOD1_AMOUNT, 100.0),
+        ];
+        node(&registry, &device_with(&params), 24_000)
+    };
+    // A square LFO on the volume, 2 Hz at 120 BPM: silent from 0.25 to
+    // 0.5 s. A second note starts at 0.25 s, where a free-running LFO is
+    // low and a restarted one is high.
+    let notes = [on(0, 60, 1.0), on(12_000, 67, 1.0)];
+    let window = 12_480..23_040;
+    let mut free = node_for(0.0);
+    let free_signal = play_blocks(free.as_mut(), 24_000, 24_000, &notes);
+    let mut restarted = node_for(1.0);
+    let restarted_signal = play_blocks(restarted.as_mut(), 24_000, 24_000, &notes);
+    let free_level = rms(&free_signal[window.clone()]);
+    let restarted_level = rms(&restarted_signal[window]);
+    println!("free-running {free_level:.5}, restarted {restarted_level:.5}");
+    assert!(
+        free_level < 1e-5,
+        "a free-running LFO keeps both notes quiet there ({free_level:.5})"
+    );
+    assert!(
+        restarted_level > 1e-2,
+        "Retrigger starts the second note at the top ({restarted_level:.5})"
+    );
 }

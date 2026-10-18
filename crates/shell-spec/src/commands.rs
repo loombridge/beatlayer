@@ -5,12 +5,17 @@
 //! can check them and list them in the command reference without linking a UI
 //! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
-use bl_commands::Context::{Dialog, Global, Settings, TabFocus};
-use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_commands::Context::{
+    ClipView, Dialog, Envelope, Global, NoteEditor, SampleEditor, Settings, TabFocus,
+};
+use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use bl_model::{LaunchMode, LaunchQuantization};
+
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
+use crate::notes::{ClipTab, ClipViewState, NoteField};
 use crate::settings::{SettingsPage, ThemeChoice};
 
 /// `set.new`: replace the set with the factory default set.
@@ -43,10 +48,27 @@ pub const APP_ABOUT: &str = "app.about";
 pub const APP_SETTINGS: &str = "app.settings";
 /// `window.close`: close the frontmost secondary window.
 pub const WINDOW_CLOSE: &str = "window.close";
+/// `view.state`: what the window's view toggles show.
+pub const VIEW_STATE: &str = "view.state";
 /// `view.full_screen`: toggle full-screen mode.
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
+pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
+/// `view.draw_mode`: switch Draw Mode (B, WP-2.3).
+pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
+/// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
+/// WP-2.3).
+pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
+/// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
+pub const VIEW_LANE: &str = "view.lane";
+/// `view.clip_tab`: show a tab of the Clip View, or go on to the next
+/// (S-CLIPMODE-001 to 004, WP-3.16).
+pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
+/// `view.clip_envelope`: choose the parameter whose envelope the Clip View's
+/// Envelopes tab shows (WP-3.16).
+pub const VIEW_CLIP_ENVELOPE: &str = "view.clip_envelope";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
@@ -94,6 +116,39 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
+/// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
+/// Folder page (WP-4.20).
+pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
+/// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
+pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
+/// `settings.set_loop_warp_short_samples`: choose Loop/Warp Short Samples
+/// (WP-4.9).
+pub const SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES: &str = "settings.set_loop_warp_short_samples";
+/// `settings.set_auto_warp_long_samples`: switch Auto-Warp Long Samples
+/// (WP-4.9).
+pub const SETTINGS_SET_AUTO_WARP_LONG_SAMPLES: &str = "settings.set_auto_warp_long_samples";
+/// `settings.set_default_warp_mode`: choose Default Warp Mode (WP-4.9).
+pub const SETTINGS_SET_DEFAULT_WARP_MODE: &str = "settings.set_default_warp_mode";
+/// `settings.set_default_launch_mode`: choose Default Launch Mode (WP-3.4).
+pub const SETTINGS_SET_DEFAULT_LAUNCH_MODE: &str = "settings.set_default_launch_mode";
+/// `settings.set_default_launch_quantization`: choose Default Launch
+/// Quantization (WP-3.4).
+pub const SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION: &str =
+    "settings.set_default_launch_quantization";
+/// `settings.set_select_on_launch`: switch Select on Launch (WP-3.4).
+pub const SETTINGS_SET_SELECT_ON_LAUNCH: &str = "settings.set_select_on_launch";
+/// `settings.set_select_next_scene_on_launch`: switch Select Next Scene on
+/// Launch (WP-3.4).
+pub const SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH: &str =
+    "settings.set_select_next_scene_on_launch";
+/// `settings.set_start_recording_on_scene_launch`: switch Start Recording on
+/// Scene Launch (WP-3.4).
+pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
+    "settings.set_start_recording_on_scene_launch";
+/// `settings.set_record_session_automation_in`: choose which tracks Session
+/// recordings write automation for (WP-3.12).
+pub const SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN: &str =
+    "settings.set_record_session_automation_in";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -108,9 +163,9 @@ pub const AUDIO_TOGGLE_ENGINE: &str = "audio.toggle_engine";
 /// `audio.set_test_tone`: switch the Audio settings' test tone.
 pub const AUDIO_SET_TEST_TONE: &str = "audio.set_test_tone";
 
-/// Every command [`register`] adds apart from the agent server's
-/// ([`crate::agent::IDS`]), so a host knows which IDs to send to
-/// `bl-shell`'s `Shell::run`.
+/// Every command [`register`] adds apart from the agent server's and the
+/// built-in assistant's ([`crate::agent::IDS`], [`crate::assistant::IDS`]),
+/// so a host knows which IDs to send to `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SET_NEW,
     SET_OPEN,
@@ -126,8 +181,15 @@ pub const IDS: &[&str] = &[
     APP_ABOUT,
     APP_SETTINGS,
     WINDOW_CLOSE,
+    VIEW_STATE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_CLIP_VIEW,
+    VIEW_DRAW_MODE,
+    VIEW_FOLD_NOTES,
+    VIEW_LANE,
+    VIEW_CLIP_TAB,
+    VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -147,6 +209,17 @@ pub const IDS: &[&str] = &[
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_TEMPORARY_FOLDER,
+    SETTINGS_SET_WARP_RECORDED_AUDIO,
+    SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+    SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+    SETTINGS_SET_DEFAULT_WARP_MODE,
+    SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+    SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+    SETTINGS_SET_SELECT_ON_LAUNCH,
+    SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+    SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+    SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -156,11 +229,12 @@ pub const IDS: &[&str] = &[
     AUDIO_SET_TEST_TONE,
 ];
 
-/// Whether `id` is one of the shell's commands: those in [`IDS`] and the
-/// agent server's ([`crate::agent::IDS`]).
+/// Whether `id` is one of the shell's commands: those in [`IDS`], the agent
+/// server's ([`crate::agent::IDS`]), and the built-in assistant's
+/// ([`crate::assistant::IDS`]).
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id) || crate::agent::handles(id)
+    IDS.contains(&id) || crate::agent::handles(id) || crate::assistant::handles(id)
 }
 
 /// Arguments of `set.open`: a set file's path.
@@ -245,6 +319,64 @@ pub struct ThemeArgs {
     pub theme: ThemeChoice,
 }
 
+/// Arguments of `settings.set_loop_warp_short_samples`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoopWarpShortSamplesArgs {
+    /// What a new clip of a short sample gets.
+    pub mode: crate::settings::LoopWarpShortSamples,
+}
+
+/// Arguments of `settings.set_default_warp_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultWarpModeArgs {
+    /// The warp mode a new warped clip takes.
+    pub mode: crate::settings::DefaultWarpMode,
+}
+
+/// Arguments of `settings.set_default_launch_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultLaunchModeArgs {
+    /// The launch mode new clips start with.
+    pub mode: LaunchMode,
+}
+
+/// Arguments of `settings.set_record_session_automation_in`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSessionAutomationInArgs {
+    /// `armed_tracks` or `all_tracks`.
+    pub tracks: crate::settings::SessionAutomationTracks,
+}
+
+/// Arguments of `settings.set_default_launch_quantization`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultLaunchQuantizationArgs {
+    /// The quantisation new clips start with; `null` (or nothing) follows
+    /// the global one, Live's "Global".
+    #[serde(default)]
+    pub quantization: Option<LaunchQuantization>,
+}
+
+/// Arguments of `settings.set_temporary_folder`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TemporaryFolderArgs {
+    /// The folder's absolute path, or `null` for the default: a `Temporary`
+    /// folder in Beatlayer's application-data folder.
+    pub path: Option<String>,
+}
+
+/// What `settings.set_temporary_folder` returns: the folder in use afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TemporaryFolderResult {
+    /// The Temporary Folder's path.
+    pub path: String,
+}
+
 /// Arguments of a command that switches a setting on or off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -311,6 +443,45 @@ pub struct TogglePlugInWindowsArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of `view.fold_notes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<bl_model::ClipId>,
+    /// Fold (true) or unfold (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folded: Option<bool>,
+}
+
+/// Arguments of `view.lane`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LaneArgs {
+    /// Which value the lane shows.
+    pub lane: NoteField,
+}
+
+/// Arguments of `view.clip_tab`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipTabArgs {
+    /// The tab to show. Left out, the Clip View goes on to the next one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<ClipTab>,
+}
+
+/// Arguments of `view.clip_envelope`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipEnvelopeArgs {
+    /// The parameter of the shown clip's track whose envelope the Envelopes
+    /// tab shows, or `null` to show none.
+    pub target: Option<bl_model::AutomationTarget>,
+}
+
 /// What a command that switches something returns: its new state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchResult {
@@ -333,6 +504,23 @@ pub struct ViewResult {
     pub zoom: f32,
 }
 
+/// What `view.state` returns: what the view commands switch, without
+/// switching any of it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewState {
+    /// The main window: the main view, the browser, the Info View,
+    /// full-screen mode and the interface zoom.
+    pub window: ViewResult,
+    /// The Clip View and its note editor: whether it shows, Draw Mode, the
+    /// clip it holds, the selected notes, the lane and Fold.
+    pub clip_view: ClipViewState,
+    /// The assistant's panel.
+    pub assistant: crate::assistant::AssistantPanelState,
+    /// Whether floating devices' and plug-ins' windows are shown, as
+    /// `view.toggle_plug_in_windows` sets it.
+    pub plug_in_windows: bool,
+}
+
 /// Adds the shell's commands to a registry, the agent server's
 /// ([`crate::agent`]) among them.
 ///
@@ -343,7 +531,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     for spec in specs() {
         registry.register(spec)?;
     }
-    crate::agent::register(registry)
+    crate::agent::register(registry)?;
+    crate::assistant::register(registry)
 }
 
 #[expect(
@@ -562,6 +751,111 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-002")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_STATE, "View State")
+            .description(
+                "Reports what the view commands switch: the main view (Arrangement or \
+                 Session), whether the browser and the Info View show, full-screen mode and \
+                 the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, \
+                 `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View \
+                 with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, \
+                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and \
+                 whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes \
+                 nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
+                 `mixer_view.state`, the Session View's in `session.state` and the Device \
+                 View's in `device_view.state`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ViewState>(),
+        CommandSpec::new(VIEW_TOGGLE_CLIP_VIEW, "Clip View")
+            .description(
+                "Shows or hides the Clip View in the detail area, which holds the MIDI Note \
+                 Editor for the Arrangement's selected MIDI clip; while it shows, it takes \
+                 the detail area in place of the Device View. It shows the clip the \
+                 Arrangement has selected, with its notes, and selecting another MIDI clip \
+                 switches the editor to it, clearing the note selection. Changes nothing in \
+                 the set and isn't an undo step. The result says whether it shows, what clip \
+                 the editor holds, and which notes are selected.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-015")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_DRAW_MODE, "Draw Mode")
+            .description(
+                "Switches Draw Mode (B; Options ▸ Draw Mode), which changes what a click in \
+                 the MIDI Note Editor's note area does: with it on, clicking empty grid adds \
+                 a note one grid step long, and clicking a note removes it; with it off, \
+                 clicking selects. Changes nothing in the set and isn't an undo step. The \
+                 result says whether it's on.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-GRID-001")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_FOLD_NOTES, "Fold to Notes")
+            .description(
+                "Folds or unfolds the MIDI Note Editor (F, View ▸ Fold to Notes): while it's \
+                 folded, the editor shows only the key rows that hold notes, one under the \
+                 next, and not the empty rows between them. `clip` names the clip; left out, \
+                 the one the editor shows. `folded` says which way; left out, it switches. \
+                 Folding changes nothing in the set and isn't an undo step: it's saved with \
+                 the set beside the song, so it's there again when the set is reopened. The \
+                 result says whether the editor is folded now.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .binding("S-NOTE-038")
+            .args::<FoldNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_LANE, "Note Editor Lane")
+            .description(
+                "Chooses which of a note's values the lane under the MIDI Note Editor shows \
+                 and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or \
+                 `velocity_deviation`. Dragging a note's stem in the lane sets that value on \
+                 that note, and dragging across several notes ramps it; the same edits are \
+                 the `note.set_value` and `note.ramp_value` commands. Changes only the view, \
+                 so it's no undo step and isn't saved with the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .args::<LaneArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_CLIP_TAB, "Clip View Tab")
+            .description(
+                "Chooses the tab the Clip View shows for its clip: `notes` (the MIDI Note \
+                 Editor, Option+Shift+1) or `envelopes` (the clip's envelopes, \
+                 Option+Shift+2). Left out, `tab` goes on to the next tab and round to the \
+                 first after the last (Option+Tab). The Clip View shows the clip most \
+                 recently selected, in the Arrangement or in a Session slot. Changes only \
+                 the view, so it's no undo step and isn't saved with the set. The result \
+                 says which tab shows.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor, SampleEditor, Envelope])
+            .binding(Binding::new("S-CLIPMODE-001"))
+            .binding(Binding::new("S-CLIPMODE-002"))
+            .binding(Binding::new("S-CLIPMODE-003").arg("tab", "notes"))
+            .binding(Binding::new("S-CLIPMODE-004").arg("tab", "envelopes"))
+            .args::<ClipTabArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_CLIP_ENVELOPE, "Clip View Envelope")
+            .description(
+                "Chooses the parameter whose envelope the Clip View's Envelopes tab shows \
+                 and edits, as its device and control choosers do: `target` is a control of \
+                 the shown clip's track's mixer, one of its sends, or a parameter of a \
+                 device in its chain, named as `clip.set_envelope_breakpoint` names it; \
+                 `null` shows none. Changes only the view, so it's no undo step. Editing \
+                 the envelope is done by the `clip.*envelope*` commands. The result says \
+                 which parameter shows.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, Envelope])
+            .args::<ClipEnvelopeArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
             .description(
                 "Shows or hides the Info View at the bottom left of the main window, which \
@@ -778,6 +1072,177 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // File & Folder (L-SET-015; WP-4.20): an edit-class preference.
+        CommandSpec::new(SETTINGS_SET_TEMPORARY_FOLDER, "Temporary Folder")
+            .description(
+                "Chooses the Temporary Folder on the Settings window's File & Folder page: where \
+                 the files Reverse, Crop, Consolidate, Freeze and Bounce write go while the set \
+                 has never been saved (the first save moves them into the project's \
+                 `Samples/Processed` folders). `path` is an absolute path, made when it is first \
+                 needed, or `null` for the default, a `Temporary` folder in Beatlayer's \
+                 application-data folder. Files already written stay where they are. Run by a \
+                 person from the Browse button without a `path`, it asks for a folder. The \
+                 setting is kept for the next start, and isn't part of the set or an undo step. \
+                 The result's `path` is the folder in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<TemporaryFolderArgs>()
+            .result::<TemporaryFolderResult>(),
+        // Record, Warp & Launch, Warp/Fades (IMP-02; WP-2.13).
+        CommandSpec::new(SETTINGS_SET_WARP_RECORDED_AUDIO, "Warp Recorded Audio")
+            .description(
+                "Switches Warp recorded audio, on the Settings window's Record, Warp & Launch \
+                 page, a Beatlayer addition (IMP-02); it's on in a new install, as Live warps \
+                 its recordings. Clips have no warp settings yet, so for now recorded clips play \
+                 at their file's own speed whether it's on or off; warping will read the setting \
+                 for the clips a recording makes. The setting is kept for the next start, and \
+                 isn't part of the set or an undo step. The result's `on` is the setting \
+                 afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<SwitchResult>(),
+        // Record, Warp & Launch, Launch (L-SET-018; WP-3.4): edit-class
+        // preferences, kept between starts and not saved with a set.
+        // Record, Warp & Launch, Warp/Fades (L-SET-018; WP-4.9): edit-class
+        // preferences, like the theme.
+        CommandSpec::new(
+            SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+            "Loop/Warp Short Samples",
+        )
+        .description(
+            "Chooses Loop/Warp Short Samples on the Settings window's Record, Warp & Launch \
+             page: what a new audio clip of a short sample, one under 60 seconds, gets when it \
+             is dropped from the browser, loaded with Enter or imported. `unwarped_one_shot` \
+             leaves Warp and the loop off; `warped_one_shot` warps it as a loop of whole bars, \
+             the loop off; `warped_loop` does the same with the loop on; `auto`, what a new \
+             install has, makes a warped loop when the file's analysis finds a steady beat \
+             that fits 1, 2, 4, 8 or 16 bars, and an unwarped one-shot otherwise. Clips \
+             already in the set keep their settings. The setting is kept for the next start, \
+             and isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<LoopWarpShortSamplesArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+            "Auto-Warp Long Samples",
+        )
+        .description(
+            "Switches Auto-Warp Long Samples on the Settings window's Record, Warp & Launch \
+             page; it's on in a new install, as Live's is. While it's on, a new audio clip of \
+             a long sample, one of 60 seconds or more, is warped with a warp marker on the \
+             first beat of every bar its analysis finds, and its 1.1.1 on the first beat; off, \
+             it is left unwarped. Clips already in the set keep their settings. The setting is \
+             kept for the next start, and isn't part of the set or an undo step. The result's \
+             `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(SETTINGS_SET_DEFAULT_WARP_MODE, "Default Warp Mode")
+            .description(
+                "Chooses Default Warp Mode on the Settings window's Record, Warp & Launch \
+                 page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or \
+                 `complex_pro`) a new warped clip takes. It's `beats` in a new install, as \
+                 Live's is. Clips already in the set keep their modes. The setting is \
+                 kept for the next start, and isn't part of the set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<DefaultWarpModeArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_DEFAULT_LAUNCH_MODE, "Default Launch Mode")
+            .description(
+                "Chooses Default Launch Mode on the Settings window's Record, Warp & Launch \
+                 page: the launch mode (`trigger`, `gate`, `toggle` or `repeat`) a new Session \
+                 clip starts with. It's `trigger` in a new install, as Live's is. Clips made \
+                 so far keep their modes, and launch modes aren't built into clips yet, so for \
+                 now it only keeps the choice. The setting is kept for the next start, and \
+                 isn't part of the set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<DefaultLaunchModeArgs>()
+            .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+            "Default Launch Quantization",
+        )
+        .description(
+            "Chooses Default Launch Quantization on the Settings window's Record, Warp & \
+             Launch page: the launch quantisation a new Session clip starts with, one of the \
+             global quantisation's steps (see `clip.set_launch_quantization`), or `null` to \
+             follow the global quantisation (the default, Live's \"Global\"). Clips already \
+             in the set keep theirs. The setting is kept for the next start, and isn't part \
+             of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<DefaultLaunchQuantizationArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+            "Record Session Automation in",
+        )
+        .description(
+            "Chooses Record Session automation in on the Settings window's Record, Warp & \
+             Launch page: `armed_tracks` (the default, Live's) records the control moves of \
+             a Session recording into the clips of the armed tracks, `all_tracks` into the \
+             playing clip of every track. Moves are recorded only while Automation Arm is \
+             on (`arrangement.automation_arm`). The setting is kept for the next start, and \
+             isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<RecordSessionAutomationInArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
+            .description(
+                "Switches Select on Launch on the Settings window's Record, Warp & Launch \
+                 page; it's on in a new install, as Live's is. While it's on, launching a clip \
+                 that sits in a slot (`session.launch`) selects that slot. The setting is kept \
+                 for the next start, and isn't part of the set or an undo step. The result's \
+                 `on` is the setting afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+            "Select Next Scene on Launch",
+        )
+        .description(
+            "Switches Select Next Scene on Launch on the Settings window's Record, Warp & \
+             Launch page; it's on in a new install, as Live's is. While it's on, launching a \
+             scene (`session.launch_scene`) selects the scene after it, when there is one. The \
+             setting is kept for the next start, and isn't part of the set or an undo step. \
+             The result's `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+            "Start Recording on Scene Launch",
+        )
+        .description(
+            "Switches Start Recording on Scene Launch on the Settings window's Record, Warp & \
+             Launch page; it's off in a new install, as Live's is. Session recording isn't \
+             built yet, so for now it only keeps the choice. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
@@ -881,7 +1346,10 @@ mod tests {
     fn every_listed_id_is_registered_and_complete() {
         let mut registry = Registry::new();
         register(&mut registry).unwrap();
-        assert_eq!(registry.len(), IDS.len() + crate::agent::IDS.len());
+        assert_eq!(
+            registry.len(),
+            IDS.len() + crate::agent::IDS.len() + crate::assistant::IDS.len()
+        );
         for id in IDS {
             assert!(registry.contains(id), "{id}");
         }

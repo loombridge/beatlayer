@@ -11,7 +11,8 @@
 //! Showing, hiding, scrolling, and focusing the mixer are the
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
-use bl_model::{Document, TrackId, TrackKind};
+use bl_model::modulator::ModTarget;
+use bl_model::{AutomationTarget, CrossfadeAssign, Document, MixerParam, TrackId, TrackKind};
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
@@ -30,10 +31,12 @@ use serde_json::json;
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     ARRANGEMENT_TITLE_ROW, Column, ColumnKind, MixerLayout, SCALE_LABELS, Sections, SessionLayout,
-    StripLayout, in_out_row, send_knob,
+    StripLayout, crossfade_buttons, crossfader_slider, in_out_row, send_knob,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::track_menu::{TrackMenus, rename_edit};
+use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
 /// The mixer's sections as the shell has them.
 #[must_use]
@@ -43,6 +46,7 @@ pub fn sections(shell: &Shell) -> Sections {
         in_out: view.in_out(),
         sends: view.sends(),
         volume: view.volume(),
+        crossfader: view.crossfader(),
         returns: view.return_tracks(),
     }
 }
@@ -147,6 +151,14 @@ struct ValueDrag {
     moved: f64,
 }
 
+/// A drag on the crossfader: where it started, and how far the pointer has
+/// moved since, in points.
+#[derive(Clone, Copy, Debug, Default)]
+struct CrossfadeDrag {
+    start: f64,
+    moved: f32,
+}
+
 /// The Mixer view's state between frames: the focus requests it has
 /// carried out, and a column the focus moves to. Drags keep their state in
 /// egui's memory, by control.
@@ -160,6 +172,10 @@ pub struct MixerUi {
     /// A track to scroll into view in a mixer, for a keyboard focus move to
     /// one of its controls (the accessibility spec, R4).
     reveal: Option<(MixerOf, TrackId)>,
+    /// The Session View grid's slots (WP-3.7).
+    grid: crate::session_view::GridUi,
+    /// The menu a title bar opens (WP-4.22).
+    track_menus: TrackMenus,
 }
 
 impl MixerUi {
@@ -197,15 +213,17 @@ impl MixerUi {
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
-        title_bars(ui, shell, theme, layout.title_bars, MixerOf::Session);
-        // The slots and the status row arrive with the Session View (M3).
-        painter.text(
-            layout.slots.center(),
-            Align2::CENTER_CENTER,
-            "The Session View's clip slots and scenes arrive in milestone M3.",
-            theme.small_font(),
-            theme.colors.pending.0,
+        title_bars(
+            ui,
+            &self.track_menus,
+            shell,
+            theme,
+            layout.title_bars,
+            MixerOf::Session,
+            events,
         );
+        // The clip slots and scenes (M3, WP-3.7).
+        self.grid.show(ui, shell, theme, &layout, events);
         painter.line_segment(
             [layout.status_row.left_top(), layout.status_row.right_top()],
             Stroke::new(1.0, theme.colors.separator.0),
@@ -249,7 +267,7 @@ impl MixerUi {
                 area.min,
                 pos2(area.right(), area.top() + ARRANGEMENT_TITLE_ROW),
             );
-            title_bars(ui, shell, theme, row, of);
+            title_bars(ui, &self.track_menus, shell, theme, row, of, events);
             area.with_min_y(row.bottom())
         } else {
             area
@@ -344,7 +362,7 @@ impl MixerUi {
             );
             let label = activator_label(column);
             if let Some(span) = layout.in_out
-                && let Some(section) = bl_shell::routing::in_out(doc, track)
+                && let Some(section) = bl_shell::routing::in_out(doc, track, &shell.interface())
             {
                 let parts = crate::in_out::InOutParts {
                     theme,
@@ -379,6 +397,16 @@ impl MixerUi {
                     activator: &label,
                 };
                 parts.strip(&mut column_ui, &strip, column.kind, events);
+            }
+            if let Some(span) = layout.crossfader {
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.crossfade_section(&mut column_ui, column, span, events);
             }
         }
         self.scroll(&ui, sections_area, of, events);
@@ -509,7 +537,18 @@ fn scroll_into_view(layout: &MixerLayout, index: usize, of: MixerOf, events: &mu
 /// A row of title bars over a mixer's columns: the Session View's top row
 /// (L-SES-002) and the Arrangement mixer's top row, each track's colour and
 /// name.
-fn title_bars(ui: &Ui, shell: &Shell, theme: &Theme, row: Rect, of: MixerOf) {
+///
+/// Right-clicking a title bar opens the track's menu (WP-4.22, C-TRACK); the
+/// keys do the same while the track's column has the keyboard.
+fn title_bars(
+    ui: &mut Ui,
+    menus: &TrackMenus,
+    shell: &Shell,
+    theme: &Theme,
+    row: Rect,
+    of: MixerOf,
+    events: &mut Vec<UiEvent>,
+) {
     let doc = shell.editor().document();
     let columns = shell.mixer_columns();
     let returns: Vec<TrackId> = doc.returns().collect();
@@ -532,12 +571,26 @@ fn title_bars(ui: &Ui, shell: &Shell, theme: &Theme, row: Rect, of: MixerOf) {
             0.0,
             title_colour(theme, track, t.kind()).gamma_multiply(0.82),
         );
-        painter.text(
-            pos2(bar.left() + 4.0, bar.center().y),
-            Align2::LEFT_CENTER,
-            t.name(),
-            theme.small_font(),
-            theme.colors.clip_text.0,
+        if !rename_edit(ui, theme, bar, track, t.name(), events) {
+            painter.text(
+                pos2(bar.left() + 4.0, bar.center().y),
+                Align2::LEFT_CENTER,
+                t.name(),
+                theme.small_font(),
+                theme.colors.clip_text.0,
+            );
+        }
+        let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        crate::rack_view::focus_track_under_drag(ui, shell, track, bar, events);
+        let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
+        menus.title(
+            ui,
+            theme,
+            &response,
+            track,
+            (bar.left_bottom(), focused, false),
+            shell,
+            events,
         );
     }
 }
@@ -581,6 +634,29 @@ fn bounds(rect: Rect) -> accesskit::Rect {
 fn midi_only(doc: &Document, track: TrackId) -> bool {
     doc.track(track)
         .is_some_and(|t| t.kind() == TrackKind::Midi && t.devices().len() == 0)
+}
+
+/// Headphones in `rect`: a band over two ear cups.
+fn headphones(painter: &egui::Painter, rect: Rect, ink: Color32) {
+    let (centre, size) = (rect.center(), rect.height().min(rect.width()) * 0.7);
+    let r = size * 0.4;
+    let band: Vec<egui::Pos2> = (0..=12)
+        .map(|i| {
+            let angle = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+            pos2(
+                centre.x + r * angle.cos(),
+                centre.y + size * 0.1 + r * angle.sin(),
+            )
+        })
+        .collect();
+    painter.add(Shape::line(band, Stroke::new(1.5, ink)));
+    for side in [-1.0, 1.0] {
+        let cup = Rect::from_center_size(
+            pos2(centre.x + side * r, centre.y + size * 0.15),
+            egui::vec2(size * 0.22, size * 0.36),
+        );
+        painter.rect_filled(cup, 1.0, ink);
+    }
 }
 
 /// A control another package brings: drawn and named where Live has it,
@@ -697,11 +773,36 @@ impl StripParts<'_> {
         index: usize,
         events: &mut Vec<UiEvent>,
     ) {
+        self.send_knob(ui, rect, to, index, events);
+        // Spec: modulation R15. A lit Map button maps the send's level.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            send_id(self.place, self.track, to),
+            ModTarget::Send {
+                track: self.track,
+                to,
+            },
+            events,
+        );
+    }
+
+    fn send_knob(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        to: TrackId,
+        index: usize,
+        events: &mut Vec<UiEvent>,
+    ) {
         let doc = self.doc();
         let control = Control::Send(to);
         let Some(level) = control.value(doc, self.track) else {
             return;
         };
+        let modulated = self.played(control);
+        let base = modulated.map_or(level, |(base, _)| base);
         let response = ui.interact(
             rect,
             send_id(self.place, self.track, to),
@@ -728,10 +829,16 @@ impl StripParts<'_> {
             let centre = rect.center();
             let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
             painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
-            let position = controls::send_position(level) as f32;
-            let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
-            let angle = -sweep + 2.0 * sweep * position;
-            let tip = centre + vec2(angle.sin(), -angle.cos()) * radius;
+            let position = controls::send_position(base) as f32;
+            // Spec: modulation R7: the pointer stays at the base.
+            if let Some(segment) = modulated.and_then(|(_, played)| {
+                ring_segment(position, controls::send_position(played) as f32)
+            }) {
+                paint_ring_segment(&painter, self.theme, segment, |at| {
+                    ring_point(centre, radius, at)
+                });
+            }
+            let tip = ring_point(centre, radius, position);
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
             painter.text(
                 pos2(centre.x, rect.bottom()),
@@ -749,8 +856,11 @@ impl StripParts<'_> {
             ui,
             &response,
             &name,
-            format!("{} dB", controls::send_text(level)),
-            level,
+            modulated_text(
+                format!("{} dB", controls::send_text(base)),
+                modulated.map(|(_, played)| format!("{} dB", controls::send_text(played))),
+            ),
+            base,
             (0.0, 1.0),
         );
     }
@@ -821,26 +931,10 @@ impl StripParts<'_> {
         }
         match kind {
             ColumnKind::Main => {
-                pending(
-                    ui,
-                    self.theme,
-                    strip.activator,
-                    Id::new(("mixer-cue-volume", self.place)),
-                    Role::Slider,
-                    "Cue Volume",
-                    "Cue",
-                    "Phase 3",
-                );
-                pending(
-                    ui,
-                    self.theme,
-                    strip.solo,
-                    Id::new(("mixer-solo-cue", self.place)),
-                    Role::Button,
-                    "Solo/Cue Mode",
-                    "Solo",
-                    "Phase 3",
-                );
+                // Main has no activator or Solo: its cue volume and Solo/Cue
+                // button take their places in the Tab order.
+                self.cue_volume(ui, strip.activator, events);
+                self.cue_mode_button(ui, strip.solo, events);
             }
             _ => {
                 for (switch, rect) in [
@@ -854,8 +948,177 @@ impl StripParts<'_> {
         }
     }
 
+    /// The Crossfader section (L-MIX-006; the mixer spec, R23): a track's
+    /// or a return's A and B assign buttons under its strip, and the
+    /// crossfader itself in Main's column. A track without the buttons (a
+    /// MIDI track with no instrument, as observed) shows neither.
+    fn crossfade_section(
+        &self,
+        ui: &mut Ui,
+        column: &Column,
+        span: (f32, f32),
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = self.doc();
+        if column.kind == ColumnKind::Main {
+            self.crossfader(ui, column.rect, span, events);
+            return;
+        }
+        if midi_only(doc, self.track) {
+            return;
+        }
+        let current = doc
+            .track(self.track)
+            .map_or(CrossfadeAssign::None, |t| t.mixer().crossfade);
+        let [a, b] = crossfade_buttons(column.rect, span);
+        for (side, rect) in [(CrossfadeAssign::A, a), (CrossfadeAssign::B, b)] {
+            self.assign_button(ui, rect, side, current, events);
+        }
+    }
+
+    /// One A or B assign button: lit while the track plays on that side. A
+    /// click assigns it, or releases the track when it's already lit; the
+    /// two sides are exclusive.
+    fn assign_button(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        side: CrossfadeAssign,
+        current: CrossfadeAssign,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let on = current == side;
+        let id = Id::new(("mixer-crossfade-assign", self.place, self.track, side));
+        let response = ui.interact(rect, id, Sense::click());
+        self.escape_to_title(ui, &response);
+        let pressed =
+            response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+        if pressed
+            && let Some(invocation) = controls::crossfade_clicked(self.doc(), self.track, side)
+        {
+            events.push(UiEvent::Invoke(invocation));
+        }
+        let c = &self.theme.colors;
+        let face = if on {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        let painter = ui.painter_at(rect.expand(2.0));
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            if side == CrossfadeAssign::A { "A" } else { "B" },
+            self.theme.small_font(),
+            if on { c.accent_text.0 } else { c.text.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        // Live's own name for the buttons isn't observed.
+        let name = format!(
+            "Crossfade {}",
+            if side == CrossfadeAssign::A { "A" } else { "B" }
+        );
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, &name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name);
+            node.set_value(if on { "on" } else { "off" }.to_owned());
+            node.set_description("Assigns the track to this side of the crossfader".to_owned());
+        });
+    }
+
+    /// Main's crossfader (R23): a horizontal slider, 0 (the A end) at its
+    /// left and 1 (the B end) at its right, dragging relative to the
+    /// pointer like the mixer's other faders.
+    fn crossfader(&self, ui: &mut Ui, column: Rect, span: (f32, f32), events: &mut Vec<UiEvent>) {
+        let position = self.doc().settings().crossfader;
+        let rect = crossfader_slider(column, span);
+        let id = Id::new(("mixer-crossfader", self.place));
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.escape_to_title(ui, &response);
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| {
+                d.insert_temp(
+                    drag_id,
+                    CrossfadeDrag {
+                        start: position,
+                        moved: 0.0,
+                    },
+                );
+            });
+            events.push(UiEvent::BeginGesture(controls::CROSSFADER_GESTURE));
+        }
+        if response.dragged() {
+            let dx = response.drag_delta().x;
+            let drag = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<CrossfadeDrag>(drag_id);
+                drag.moved += dx;
+                *drag
+            });
+            let at = controls::crossfader_moved(drag.start, drag.moved, rect.width());
+            ui.data_mut(|d| d.insert_temp(readout_id(), controls::crossfader_readout(at)));
+            if at != position {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_crossfader",
+                    json!({ "position": at }),
+                )));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<CrossfadeDrag>(drag_id));
+            events.push(UiEvent::EndGesture);
+        }
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(3.0));
+        let y = rect.top() + rect.height() * 0.5;
+        painter.line_segment(
+            [pos2(rect.left(), y), pos2(rect.right(), y)],
+            Stroke::new(2.0, c.separator.0),
+        );
+        let x = rect.left() + rect.width() * position as f32;
+        let handle = Rect::from_center_size(pos2(x, y), vec2(5.0, rect.height()));
+        let face = if response.dragged() {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.text_dim.0
+        };
+        painter.rect_filled(handle, 1.0, face);
+        focus_ring(&painter, self.theme, rect, &response);
+        // A slider a screen reader can read. Live's own keyboard steps for
+        // the crossfader aren't observed, so it offers none.
+        response.widget_info(|| WidgetInfo::slider(true, position, "Crossfader"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Slider);
+            node.set_label("Crossfader".to_owned());
+            node.set_value(controls::crossfader_text(position));
+            node.set_numeric_value(position);
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(1.0);
+        });
+    }
+
     fn doc(&self) -> &Document {
         self.shell.editor().document()
+    }
+
+    /// A control's base and the value it plays while a clip modulates it.
+    fn played(&self, control: Control) -> Option<(f64, f64)> {
+        let target = match control {
+            Control::Volume => AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+            Control::Pan => AutomationTarget::Mixer {
+                param: MixerParam::Pan,
+            },
+            Control::Send(to) => AutomationTarget::Send { to },
+        };
+        self.shell.played(self.track, &target)
     }
 
     /// Esc from a Session strip's control goes to the track's title bar,
@@ -1094,7 +1357,8 @@ impl StripParts<'_> {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let volume = track.mixer().volume;
+        let modulated = self.played(Control::Volume);
+        let volume = modulated.map_or(track.mixer().volume, |(base, _)| base);
         let id = volume_field_id(self.place, self.track);
         let response = ui.interact(rect, id, Sense::click_and_drag());
         self.register(ui, id, crate::focus::Slot::Volume);
@@ -1124,7 +1388,10 @@ impl StripParts<'_> {
             ui,
             &response,
             "Track Volume",
-            volume_spoken(volume),
+            modulated_text(
+                volume_spoken(volume),
+                modulated.map(|(_, played)| volume_spoken(played)),
+            ),
             controls::gain_db(volume).max(-1000.0),
             (-1000.0, controls::TOP_DB),
         );
@@ -1242,10 +1509,27 @@ impl StripParts<'_> {
     /// The fader (R6): a relative drag moves the handle a point per point
     /// of drag along the meter's scale, which the handle sits on.
     pub fn fader(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        self.fader_control(ui, rect, events);
+        // Spec: modulation R15. A lit Map button maps the track's volume.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            fader_id(self.place, self.track),
+            ModTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Volume,
+            },
+            events,
+        );
+    }
+
+    fn fader_control(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let volume = track.mixer().volume;
+        let modulated = self.played(Control::Volume);
+        let volume = modulated.map_or(track.mixer().volume, |(base, _)| base);
         let response = ui.interact(
             rect,
             fader_id(self.place, self.track),
@@ -1262,7 +1546,16 @@ impl StripParts<'_> {
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(2.0, c.separator.0),
         );
-        let y = rect.bottom() - rect.height() * controls::fader_position(volume) as f32;
+        let y_of = |gain| rect.bottom() - rect.height() * controls::fader_position(gain) as f32;
+        // Spec: modulation R7: a mark under the thumb at the level it plays.
+        if let Some((_, played)) = modulated {
+            painter.rect_filled(
+                Rect::from_center_size(pos2(x, y_of(played)), vec2(rect.width(), 3.0)),
+                1.0,
+                c.modulation.0,
+            );
+        }
+        let y = y_of(volume);
         let handle = Rect::from_center_size(pos2(x, y), vec2(rect.width(), 5.0));
         let face = if response.dragged() {
             c.accent.0
@@ -1277,7 +1570,10 @@ impl StripParts<'_> {
             ui,
             &response,
             "Track Volume",
-            volume_spoken(volume),
+            modulated_text(
+                volume_spoken(volume),
+                modulated.map(|(_, played)| volume_spoken(played)),
+            ),
             controls::gain_db(volume).max(-1000.0),
             (-1000.0, controls::TOP_DB),
         );
@@ -1285,10 +1581,33 @@ impl StripParts<'_> {
 
     /// The pan control (R6), with its reset triangle above it in a strip.
     pub fn pan(&self, ui: &mut Ui, rect: Rect, triangle: Option<Rect>, events: &mut Vec<UiEvent>) {
+        self.pan_control(ui, rect, triangle, events);
+        // Spec: modulation R15. A lit Map button maps the track's pan.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            pan_id(self.place, self.track),
+            ModTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Pan,
+            },
+            events,
+        );
+    }
+
+    fn pan_control(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        triangle: Option<Rect>,
+        events: &mut Vec<UiEvent>,
+    ) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let pan = track.mixer().pan;
+        let modulated = self.played(Control::Pan);
+        let pan = modulated.map_or(track.mixer().pan, |(base, _)| base);
         let response = ui.interact(
             rect,
             pan_id(self.place, self.track),
@@ -1315,8 +1634,16 @@ impl StripParts<'_> {
             let centre = rect.center();
             let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
             painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
-            let angle = (pan as f32) * std::f32::consts::FRAC_PI_4 * 3.0;
-            let tip = centre + vec2(angle.sin(), -angle.cos()) * radius;
+            let position = |pan: f64| (pan as f32 + 1.0) / 2.0;
+            // Spec: modulation R7: the pointer stays at the base.
+            if let Some(segment) =
+                modulated.and_then(|(_, played)| ring_segment(position(pan), position(played)))
+            {
+                paint_ring_segment(&painter, self.theme, segment, |at| {
+                    ring_point(centre, radius, at)
+                });
+            }
+            let tip = ring_point(centre, radius, position(pan));
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
         }
         focus_ring(&painter, self.theme, rect, &response);
@@ -1327,7 +1654,8 @@ impl StripParts<'_> {
         } else {
             "Track Pan"
         };
-        self.describe_value(ui, &response, name, pan_text(pan), pan, (-1.0, 1.0));
+        let spoken = modulated_text(pan_text(pan), modulated.map(|(_, played)| pan_text(played)));
+        self.describe_value(ui, &response, name, spoken, pan, (-1.0, 1.0));
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -1355,10 +1683,204 @@ impl StripParts<'_> {
         }
     }
 
+    /// The Preview/Cue Volume knob on Main's strip (L-MIX-004): a drag moves
+    /// it along the fader's scale, Up and Down step it, and a double-click or
+    /// Delete resets it to 0 dB (observed 18 October 2026).
+    fn cue_volume(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let volume = self.doc().settings().cue_volume;
+        let id = Id::new(("mixer-cue-volume", self.place));
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.register(ui, id, crate::focus::Slot::Activator);
+        self.escape_to_title(ui, &response);
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
+        let drag = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag, (volume, 0.0f64)));
+            events.push(UiEvent::BeginGesture(controls::CUE_VOLUME_GESTURE));
+        }
+        if response.dragged() {
+            let dy = response.drag_delta().y;
+            let fine = ui.input(|i| i.modifiers.shift);
+            let (start, moved) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(f64, f64)>(drag);
+                if dy != 0.0 {
+                    drag.1 += f64::from(-dy / if fine { FINE } else { 1.0 });
+                }
+                *drag
+            });
+            if dy != 0.0 {
+                let change = controls::cue_volume_moved(start, moved);
+                if let Some(gain) = change.args["volume"].as_f64() {
+                    ui.data_mut(|d| {
+                        d.insert_temp(readout_id(), controls::cue_volume_readout(gain))
+                    });
+                }
+                events.push(UiEvent::Invoke(change));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(f64, f64)>(drag));
+            events.push(UiEvent::EndGesture);
+        }
+        let mut steps = ui.input(|i| {
+            i.num_accesskit_action_requests(id, Action::Increment) as i32
+                - i.num_accesskit_action_requests(id, Action::Decrement) as i32
+        });
+        let mut fine = false;
+        let mut reset = response.double_clicked();
+        if response.has_focus() {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        escape: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            ui.input(|i| {
+                for event in &i.events {
+                    if let Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        match key {
+                            Key::ArrowUp => steps += 1,
+                            Key::ArrowDown => steps -= 1,
+                            Key::Delete => reset = true,
+                            _ => continue,
+                        }
+                        fine |= modifiers.shift;
+                    }
+                }
+            });
+        }
+        let change = if reset {
+            Some(controls::set_cue_volume(1.0))
+        } else if steps != 0 {
+            Some(controls::cue_volume_stepped(volume, steps, fine))
+        } else {
+            None
+        };
+        if let Some(change) = change {
+            events.push(UiEvent::BeginGesture(controls::CUE_VOLUME_GESTURE));
+            events.push(UiEvent::Invoke(change));
+            events.push(UiEvent::EndGesture);
+        }
+        // The knob: a ring, and a line from its centre to where the volume
+        // sits on the fader's scale, in the accent colour (Live's is blue).
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let centre = rect.center();
+        let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
+        painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
+        let tip = ring_point(centre, radius, controls::fader_position(volume) as f32);
+        painter.line_segment([centre, tip], Stroke::new(2.0, c.accent.0));
+        focus_ring(&painter, self.theme, rect, &response);
+        self.describe_value(
+            ui,
+            &response,
+            "Cue Volume",
+            controls::volume_spoken(volume),
+            volume,
+            (0.0, bl_model::MAX_CUE_VOLUME),
+        );
+    }
+
+    /// The global Solo/Cue button on Main's strip (L-MIX-004): it reads Solo
+    /// or Cue and toggles the mode. It does nothing, and is dimmed, while Cue
+    /// Out and Main Out share a channel (observed 18 October 2026).
+    fn cue_mode_button(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let doc = self.doc();
+        let (available, cue) = (doc.cue_available(), doc.cue_active());
+        let id = Id::new(("mixer-solo-cue", self.place));
+        let response = ui.interact(
+            rect,
+            id,
+            if available {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        self.register(ui, id, crate::focus::Slot::Solo);
+        self.escape_to_title(ui, &response);
+        let pressed = available
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+        if pressed {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "mixer.set_cue_mode",
+                json!({ "enabled": !cue }),
+            )));
+        }
+        let c = &self.theme.colors;
+        let text = if cue { "Cue" } else { "Solo" };
+        let painter = ui.painter_at(rect.expand(2.0));
+        let face = if !available {
+            c.control.0.gamma_multiply(0.6)
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            self.theme.small_font(),
+            if available { c.text.0 } else { c.pending.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Button, available, "Solo/Cue Mode"));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Solo/Cue Mode".to_owned());
+            node.set_value(text.to_owned());
+            node.set_description(
+                if available {
+                    "Switches the tracks' Solo switches to Cue switches, which feed the Cue Out"
+                } else {
+                    "Needs a Cue Out that shares no output channel with Main Out"
+                }
+                .to_owned(),
+            );
+            if !available {
+                node.set_disabled();
+            }
+        });
+    }
+
     /// A switch (R7, R8): the activator, Solo, or Arm. Tracks without it
     /// show nothing in its place; a deactivated activator shows its number
     /// on grey (observed).
     pub fn switch(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
+        self.switch_control(ui, switch, rect, events);
+        // Spec: modulation R15. A lit Map button maps the Track Activator.
+        if switch == Switch::Activator && switch.on_track(self.doc(), self.track) {
+            crate::mapping::overlay(
+                ui,
+                self.theme,
+                rect,
+                switch_id(self.place, switch, self.track),
+                ModTarget::Mixer {
+                    track: self.track,
+                    param: MixerParam::Mute,
+                },
+                events,
+            );
+        }
+    }
+
+    fn switch_control(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
         let doc = self.doc();
         if !switch.on_track(doc, self.track) {
             return;
@@ -1390,8 +1912,12 @@ impl StripParts<'_> {
             Self::run_all(events, switch.gesture(), invocations);
         }
         let c = &self.theme.colors;
+        // In Cue mode the Solo switch is a Cue switch and shows headphones
+        // (observed 18 October 2026).
+        let cue = switch == Switch::Solo && doc.cue_active();
         let (name, text, lit) = match switch {
             Switch::Activator => ("Track Activator", self.activator, c.accent.0),
+            Switch::Solo if cue => ("Cue", "", c.accent.0),
             Switch::Solo => ("Solo", "S", c.accent.0),
             Switch::Arm => ("Arm Recording", "●", c.record.0),
         };
@@ -1404,13 +1930,18 @@ impl StripParts<'_> {
             c.control.0
         };
         painter.rect_filled(rect, self.theme.sizes.corner, face);
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            self.theme.small_font(),
-            if on { c.accent_text.0 } else { c.text.0 },
-        );
+        let ink = if on { c.accent_text.0 } else { c.text.0 };
+        if cue {
+            headphones(&painter, rect, ink);
+        } else {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                self.theme.small_font(),
+                ink,
+            );
+        }
         focus_ring(&painter, self.theme, rect, &response);
         response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, name));
         ui.ctx().accesskit_node_builder(id, |node| {
@@ -1554,6 +2085,14 @@ impl StripParts<'_> {
 }
 
 /// The digit a key types, if it's a digit key.
+/// The point at `position` (0 to 1) on the ring of a send or pan knob, which
+/// turns 135 degrees either side of straight up.
+fn ring_point(centre: egui::Pos2, radius: f32, position: f32) -> egui::Pos2 {
+    let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
+    let angle = -sweep + 2.0 * sweep * position;
+    centre + vec2(angle.sin(), -angle.cos()) * radius
+}
+
 fn digit(key: Key) -> Option<char> {
     Some(match key {
         Key::Num0 => '0',

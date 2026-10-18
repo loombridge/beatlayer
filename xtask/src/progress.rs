@@ -849,10 +849,14 @@ mod tests {
             return None;
         }
         Some(
-            Docs::read(|path| {
-                std::fs::read_to_string(root.join(path))
-                    .map(Some)
-                    .map_err(|e| e.to_string())
+            Docs::read(|path| match std::fs::read_to_string(root.join(path)) {
+                Ok(text) => Ok(Some(text)),
+                // Reagent's plan stays with the maintainers, so a published
+                // checkout doesn't have it.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && path == reagent::PATH => {
+                    Ok(None)
+                }
+                Err(e) => Err(e.to_string()),
             })
             .expect("the planning documents are readable"),
         )
@@ -868,14 +872,14 @@ mod tests {
         assert_eq!(numbers, (0..=10).collect::<Vec<_>>());
         let milestones: Vec<u32> = progress.milestones.iter().map(|m| m.number).collect();
         assert_eq!(milestones, (0..=10).collect::<Vec<_>>());
-        for phase in &progress.phases[..3] {
+        for phase in &progress.phases[..6] {
             assert!(
                 !phase.packages.is_empty(),
                 "phase {} has packages",
                 phase.number
             );
         }
-        for phase in &progress.phases[3..] {
+        for phase in &progress.phases[6..] {
             assert!(
                 phase.estimate.is_some_and(|n| n > 0),
                 "phase {} has an estimate",

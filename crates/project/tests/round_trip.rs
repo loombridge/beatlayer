@@ -14,8 +14,10 @@ mod common;
 
 use std::process::Command;
 
+use bl_model::{Command as Edit, Editor, TrackKind};
 use bl_project::{
-    LoadOptions, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, encode, encode_json, load,
+    LoadOptions, Media, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, decode_json, encode,
+    encode_json, load,
 };
 use common::{TestDir, depth, recipe};
 use proptest::prelude::*;
@@ -90,6 +92,193 @@ proptest! {
             .map_or(0, Iterator::count);
         prop_assert_eq!(backups, recipes.len() - 1);
     }
+}
+
+/// A scene whose Clip Stop button was removed can be deleted, and the set
+/// still saves and loads (WP-3.2): the removal goes with its scene.
+#[test]
+fn a_deleted_scene_takes_its_removed_stop_button_with_it() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Slots".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let scene = editor
+        .document()
+        .scenes()
+        .next()
+        .expect("a new set opens with scenes")
+        .id;
+    editor
+        .apply(Edit::SetSlotStopButton {
+            track,
+            scene,
+            stop_button: false,
+        })
+        .unwrap();
+    editor.apply(Edit::DeleteScene { scene }).unwrap();
+    assert_eq!(
+        editor
+            .document()
+            .track(track)
+            .expect("the track stays")
+            .removed_stop_buttons()
+            .count(),
+        0,
+        "the removed button goes with the scene"
+    );
+    let project = Project::from_editor(&editor, Media::new());
+    let json = encode_json(&project, 1).unwrap();
+    decode_json(&json, &LoadOptions::default()).expect("the set opens again");
+}
+
+/// A warped clip saves and loads with every warp field (the warping spec,
+/// R11), and an unwarped clip's JSON holds none of them.
+#[test]
+fn a_warped_clip_keeps_its_warp_map_through_a_save_and_load() {
+    use bl_core::time::{Ticks, TimeSignature};
+    use bl_model::{AudioData, Clip, ClipData, ContentHash, WarpMarker};
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Loop".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let (plain, warped) = (editor.new_id(), editor.new_id());
+    for (id, start) in [(plain, Ticks::ZERO), (warped, Ticks::WHOLE * 2)] {
+        editor
+            .apply(Edit::CreateClip {
+                track,
+                clip: Clip::new(
+                    id,
+                    start,
+                    Ticks::WHOLE,
+                    ClipData::Audio(AudioData::new(ContentHash([5; 32]))),
+                ),
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Edit::SetClipWarp {
+            clip: warped,
+            warp: true,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::InsertWarpMarker {
+            clips: vec![warped],
+            beat: Some(Ticks::WHOLE),
+            time: None,
+            pin_neighbours: false,
+            transients: None,
+        })
+        .unwrap();
+    // Transient edits (WP-4.3) are saved with the clip too.
+    editor
+        .apply(Edit::InsertTransient {
+            clip: warped,
+            time: 0.3,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::DeleteTransients {
+            clip: warped,
+            times: vec![0.7],
+        })
+        .unwrap();
+    // A signature has no command yet; the data carries it.
+    let ClipData::Audio(mut audio) = editor.document().clip(warped).unwrap().data.clone() else {
+        unreachable!("an audio clip");
+    };
+    audio.signature = Some(TimeSignature::new(7, 8).unwrap());
+    editor
+        .apply(Edit::SetClipData {
+            clip: warped,
+            data: ClipData::Audio(audio.clone()),
+        })
+        .unwrap();
+    // The warp mode, its controls, and the RAM and HiQ switches (WP-4.2).
+    editor
+        .apply(Edit::SetClipWarpMode {
+            clip: warped,
+            mode: bl_model::WarpMode::Tones,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipWarpSettings {
+            clip: warped,
+            beats: None,
+            tones: Some(bl_model::TonesUpdate {
+                grain_size: Some(45.0),
+            }),
+            texture: None,
+            complex_pro: None,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipRamMode {
+            clip: warped,
+            ram: true,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipHighQuality {
+            clip: warped,
+            high_quality: false,
+        })
+        .unwrap();
+    let ClipData::Audio(audio) = editor.document().clip(warped).unwrap().data.clone() else {
+        unreachable!("an audio clip");
+    };
+    let project = Project::from_editor(&editor, Media::new());
+    let json = encode_json(&project, 1).unwrap();
+    let text = String::from_utf8(json.clone()).unwrap();
+    assert_eq!(
+        text.matches("\"warp\":true").count(),
+        1,
+        "only the warped clip"
+    );
+    for saved in [
+        "warp_mode",
+        "warp_settings",
+        "\"ram\":true",
+        "\"high_quality\":false",
+    ] {
+        assert_eq!(
+            text.matches(saved).count(),
+            1,
+            "{saved}: only the warped clip"
+        );
+    }
+    assert_eq!(text.matches("\"warp_markers\"").count(), 1);
+    assert_eq!(text.matches("\"transient_edits\"").count(), 1);
+    let (loaded, _) = decode_json(&json, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded, project);
+    let ClipData::Audio(back) = &loaded.document.clip(warped).unwrap().data else {
+        unreachable!("an audio clip");
+    };
+    assert_eq!(*back, audio);
+    assert_eq!(back.transient_edits.added, [0.3]);
+    assert_eq!(back.transient_edits.removed, [0.7]);
+    assert_eq!(
+        back.warp_markers[1],
+        WarpMarker {
+            time: audio.warp_markers[1].time,
+            beat: Ticks::WHOLE
+        }
+    );
 }
 
 /// A song the size of the UI benchmark (200 tracks, 5,000 clips) saves and

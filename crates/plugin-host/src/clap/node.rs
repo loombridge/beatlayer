@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::time::TICKS_PER_QUARTER;
-use bl_engine::{Block, Node, NodeConfig, NodeEvent, ParamValue};
+use bl_engine::{AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue};
+use bl_model::ParamId;
 use clack_host::events::EventFlags;
 use clack_host::events::event_types::{TransportEvent, TransportFlags};
 use clack_host::prelude::*;
@@ -81,6 +82,9 @@ pub struct ClapNode {
     status: Arc<Status>,
     failed: bool,
     pending: Vec<(u32, ParamValue)>,
+    /// The automation and clip modulation the compiler sent (the modulation
+    /// spec, R10).
+    automation: Option<NodeData>,
     input: InputList,
     output: OutputList,
     ins: Vec<f32>,
@@ -107,6 +111,7 @@ impl ClapNode {
             status: Arc::clone(&status),
             failed: false,
             pending: Vec::with_capacity(PENDING_CAPACITY),
+            automation: None,
             input: InputList::new(),
             output: OutputList::new(),
             ins: vec![0.0; MAX_CHANNELS * max_frames],
@@ -164,6 +169,7 @@ impl ClapNode {
     /// changes to the main thread.
     fn send_out(&mut self, block: Option<&mut Block<'_>>) {
         let mut block = block;
+        let drive = self.processor.as_ref();
         for event in &self.output.events {
             match *event {
                 Out::Note(note) => {
@@ -172,6 +178,12 @@ impl ClapNode {
                     }
                 }
                 Out::Param(id, value) => {
+                    // Spec: modulation R10. A value the plug-in reports back
+                    // because the engine just sent it, as automation or
+                    // modulation, is neither an undo step nor an edit.
+                    if drive.is_some_and(|p| p.access_handler(|d| d.drive.is_echo(id, value))) {
+                        continue;
+                    }
                     if self.params_out.push(ParamOut::Value(id, value)).is_err() {
                         self.status.dropped.fetch_add(1, Relaxed);
                     }
@@ -266,27 +278,38 @@ impl Node for ClapNode {
         };
         let (inputs, outputs) = started.access_handler(|d| (d.inputs, d.outputs));
         // The events: changes kept while it wasn't running, at the first
-        // frame, then the block's changes and notes on their frames.
+        // frame, then the block's changes and notes on their frames, and
+        // the values automation and modulation give the parameters they
+        // drive (the modulation spec, R10), which stand in for the changes
+        // of those parameters' controls.
         self.input.clear();
-        for &(id, value) in &self.pending {
-            let value = match value {
-                ParamValue::Set(value) => Some(value),
-                ParamValue::Default => started.access_handler(|d| d.default_of(id)),
-            };
-            if let Some(value) = value {
-                self.input.param(0, id, value);
+        let list = self
+            .automation
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<AutomationList>());
+        let (input, pending) = (&mut self.input, &self.pending);
+        started.access_handler_mut(|d| {
+            d.drive.prepare(list, block);
+            for &(id, value) in pending {
+                if let Some(value) = d.resolve_undriven(id, value) {
+                    input.param(0, id, value);
+                }
             }
-        }
+            for event in block.events() {
+                if let Some(value) = d.resolve_undriven(event.param.0, event.value) {
+                    input.param(event.offset, event.param.0, value);
+                }
+            }
+            d.drive.play(list, block, |play| {
+                if play.modulatable {
+                    input.param(play.offset, play.id, play.base);
+                    input.param_mod(play.offset, play.id, play.played - play.base);
+                } else {
+                    input.param(play.offset, play.id, play.played);
+                }
+            });
+        });
         self.pending.clear();
-        for event in block.events() {
-            let value = match event.value {
-                ParamValue::Set(value) => Some(value),
-                ParamValue::Default => started.access_handler(|d| d.default_of(event.param.0)),
-            };
-            if let Some(value) = value {
-                self.input.param(event.offset, event.param.0, value);
-            }
-        }
         for note in block.notes() {
             self.input.note(note);
         }
@@ -364,11 +387,9 @@ impl Node for ClapNode {
         let params = processor.access_handler(|d| d.params);
         self.input.clear();
         for event in events {
-            let value = match event.value {
-                ParamValue::Set(value) => Some(value),
-                ParamValue::Default => processor.access_handler(|d| d.default_of(event.param.0)),
-            };
-            if let Some(value) = value {
+            if let Some(value) =
+                processor.access_handler_mut(|d| d.resolve(event.param.0, event.value))
+            {
                 self.input.param(0, event.param.0, value);
             }
         }
@@ -380,6 +401,18 @@ impl Node for ClapNode {
             );
         }
         self.send_out(None);
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
+    }
+
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Some(processor) = &self.processor {
+            processor.access_handler(|d| d.drive.modulated(report));
+        }
     }
 
     fn latency(&self) -> u32 {

@@ -9,12 +9,15 @@ use serde::{Deserialize, Serialize};
 use bl_model::ParamId;
 use bl_model::PluginFormat;
 
+pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
+    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
+    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
     zoom_percent, zoom_step,
 };
 
 use crate::agent::AgentSettings;
+use crate::assistant::{AssistantPanelPrefs, AssistantSettings};
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -50,6 +53,16 @@ pub struct Preferences {
     /// The agent server: whether it runs, its port and token, and the
     /// agents allowed to connect (WP-1.15).
     pub agent: AgentSettings,
+    /// The built-in assistant's provider, base URL and model (WP-2.23,
+    /// part 4). Its API key is in the OS keychain, never here.
+    pub assistant: AssistantSettings,
+    /// Where the assistant's panel is: its docked width, and whether it
+    /// floats in a window of its own (WP-2.23, part 3; D24).
+    pub assistant_panel: AssistantPanelPrefs,
+    /// The assistant commands the person chose "always allow" for, so a
+    /// destructive or external command it calls doesn't ask again
+    /// (WP-2.23, part 4).
+    pub assistant_always: BTreeSet<String>,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
@@ -57,6 +70,22 @@ pub struct Preferences {
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
+    /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
+    /// recording spec, R13): whether a recorded clip will be warped, once
+    /// warping arrives; clips have no warp fields until then. On by default,
+    /// as Live warps its recordings, and on for preferences saved before the
+    /// setting existed.
+    pub warp_recorded_audio: OnByDefault,
+    /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode
+    /// (Record, Warp & Launch, L-SET-018; WP-4.9): what a new clip of a file
+    /// gets (the warping spec, R29 and R33).
+    pub warp: WarpPrefs,
+    /// The Launch section of Record, Warp & Launch (L-SET-018; WP-3.4),
+    /// with the defaults observed in Live 12.4.3.
+    pub launch: LaunchPrefs,
+    /// Record Session automation in (Record, Warp & Launch, L-SET-018;
+    /// WP-3.12): Armed Tracks, as observed in Live 12.4.3.
+    pub record_session_automation_in: SessionAutomationTracks,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -71,16 +100,61 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// Use Audio Units v2 (Plug-Ins, Plug-In Sources, L-SET-017): Audio
+    /// Units in `.component` bundles are scanned and listed (WP-2.9b). Off
+    /// by default, as L-SET-017 records Live's default.
+    pub use_audio_units_v2: bool,
+    /// Use Audio Units v3 (L-SET-017): kept and shown; Beatlayer doesn't
+    /// scan app-extension Audio Units yet (WP-2.9b). Off by default.
+    pub use_audio_units_v3: bool,
+    /// Use VST3 Plug-In System Folders (L-SET-017): VST3 plug-ins in the
+    /// format's system folders are scanned and listed (WP-2.9b). Off by
+    /// default, as L-SET-017 records Live's default.
+    pub vst3_system_folders: bool,
     /// Which parameter each knob of a plug-in device's panel shows
     /// (WP-2.10, D19), by `format/plugin_id` and then by knob: absent
     /// entries keep the plug-in's own parameter at that place. Remembered
     /// per plug-in, so a device of a known plug-in keeps its mapping.
     pub plugin_panels:
         std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    /// The Temporary Folder (File & Folder, L-SET-015): where the files an
+    /// edit writes go while the set has never been saved (WP-4.20, the audio
+    /// clip editing spec, R5). `None` is the default, a `Temporary` folder
+    /// in Beatlayer's application-data folder.
+    pub temporary_folder: Option<PathBuf>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.
     pub default_set: Option<PathBuf>,
+    /// The MIDI ports' switches and the computer MIDI keyboard (WP-2.2).
+    pub midi: MidiPrefs,
+}
+
+/// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3
+/// and R17).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MidiPrefs {
+    /// Each port's switches, by direction and name, so they apply again
+    /// whenever the port is seen.
+    pub ports: Vec<PortPrefs>,
+    /// Whether the computer MIDI keyboard is on.
+    pub keyboard_on: bool,
+}
+
+/// One MIDI port's switches in the preferences.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortPrefs {
+    /// Input or output.
+    pub direction: PortDirection,
+    /// The name the MIDI system gives the port.
+    pub name: String,
+    /// Track.
+    pub track: bool,
+    /// Sync.
+    pub sync: bool,
+    /// Remote.
+    pub remote: bool,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and
@@ -203,6 +277,42 @@ mod tests {
         let off: Preferences =
             serde_json::from_str(r#"{"auto_hide_plug_in_windows": false}"#).unwrap();
         assert!(!off.auto_hide_plug_in_windows.0);
+    }
+
+    // Spec: warping R29
+    #[test]
+    fn the_warp_settings_start_as_observed_and_are_kept() {
+        let defaults = Preferences::default().warp;
+        assert_eq!(defaults.loop_warp_short_samples, LoopWarpShortSamples::Auto);
+        assert!(defaults.auto_warp_long_samples);
+        assert_eq!(defaults.default_warp_mode, DefaultWarpMode::Beats);
+        // Preferences saved before the settings existed take the defaults.
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert_eq!(older.warp, defaults);
+        let dir = std::env::temp_dir().join(format!("bl-shell-warp-prefs-{}", std::process::id()));
+        let kept = Preferences {
+            warp: WarpPrefs {
+                loop_warp_short_samples: LoopWarpShortSamples::WarpedOneShot,
+                auto_warp_long_samples: false,
+                default_warp_mode: DefaultWarpMode::ComplexPro,
+            },
+            ..Preferences::default()
+        };
+        kept.save(&dir).unwrap();
+        assert_eq!(Preferences::load(&dir).unwrap(), kept);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn warp_recorded_audio_is_on_unless_saved_off() {
+        // Spec: recording R13.
+        assert!(Preferences::default().warp_recorded_audio.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.warp_recorded_audio.0);
+        let off: Preferences = serde_json::from_str(r#"{"warp_recorded_audio": false}"#).unwrap();
+        assert!(!off.warp_recorded_audio.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["warp_recorded_audio"], false);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -29,12 +29,54 @@ const _: () = assert!(OLDEST_SCHEMA_VERSION >= 1);
 
 /// Every migration, oldest first: the one at index `i` reads version
 /// [`OLDEST_SCHEMA_VERSION`]` + i`.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    from: 1,
-    summary: "an audio clip's offset into its file becomes part of its Start marker, as Live \
-              moves the marker when a clip is split or its left edge trimmed",
-    apply: audio_offsets_to_start_markers,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 1,
+        summary: "an audio clip's offset into its file becomes part of its Start marker, as Live \
+                  moves the marker when a clip is split or its left edge trimmed",
+        apply: audio_offsets_to_start_markers,
+    },
+    Migration {
+        from: 2,
+        summary: "the document gains the Session View's scenes and the clips in their slots; a \
+                  set saved without scenes opens with the default eight, whose IDs the \
+                  document's loader hands out after the set's largest (the session view spec, \
+                  R14), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 3,
+        summary: "the set gains the global launch quantisation and its enabled switch, and each \
+                  track's removed Clip Stop buttons; a set saved before them opens with a new \
+                  set's quantisation and with a stop button in every slot (the launch \
+                  quantisation spec, R1 and R8), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 4,
+        summary: "a clip envelope's values are modulation (a share of the parameter's travel, or \
+                  of a level's position) rather than parameter units added to the value; a set \
+                  saved before it keeps the old values in the JSON, and the loader's caller \
+                  turns them with the controls' values and the devices' descriptions \
+                  (`SetInfo::before_relative_modulation`; the modulation spec, R5)",
+        apply: Ok,
+    },
+    Migration {
+        from: 5,
+        summary: "a device may hold a multisampler's layers, and the set may save what each \
+                  multisampler's views show; a set saved before them opens with no layers and \
+                  the views a new device has (the multisampler spec, R1 and R2), so the saved \
+                  JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 6,
+        summary: "a native device saved under the name Beatlayer gave it before it took the name \
+                  of the Live device it matches opens under the new name; a device the user \
+                  renamed keeps its name",
+        apply: rename_devices,
+    },
+];
 
 /// One step from a schema version to the next.
 #[derive(Clone, Copy, Debug)]
@@ -50,6 +92,94 @@ pub struct Migration {
     /// It must be a pure function of its input. It needn't touch the
     /// `schema` field, which the loader sets after each step.
     pub apply: fn(Value) -> Result<Value, String>,
+}
+
+/// The native devices that took Live's names (T197), as (device type, name
+/// before, name now). The device types are the stable IDs and did not change.
+const RENAMED_DEVICES: &[(&str, &str, &str)] = &[
+    ("beatlayer.contour", "Contour", "EQ Eight"),
+    ("beatlayer.squeeze", "Squeeze", "Compressor"),
+    ("bl.device.reprise", "Reprise", "Delay"),
+    ("beatlayer.cascade", "Cascade", "Drift"),
+    ("beatlayer.snapshot", "Snapshot", "Simpler"),
+    ("beatlayer.strike", "Strike", "Drum Sampler"),
+    ("beatlayer.mosaic", "Mosaic", "Sampler"),
+    ("beatlayer.sweep", "Sweep", "Auto Filter"),
+    ("beatlayer.triband", "Triband", "Multiband Dynamics"),
+    ("beatlayer.degrade", "Degrade", "Erosion"),
+    ("beatlayer.crush", "Crush", "Redux"),
+    ("beatlayer.wax", "Wax", "Vinyl Distortion"),
+    ("beatlayer.singe", "Singe", "Saturator"),
+    ("beatlayer.grit", "Grit", "Overdrive"),
+    ("beatlayer.valve", "Valve", "Dynamic Tube"),
+    ("bl.device.trident", "Trident", "Filter Delay"),
+    ("bl.device.scatter", "Scatter", "Grain Delay"),
+    ("bl.device.plumb", "Plumb", "Align Delay"),
+    ("bl.device.stutter", "Stutter", "Beat Repeat"),
+    ("beatlayer.strip", "Strip", "Channel EQ"),
+    ("beatlayer.triad", "Triad", "EQ Three"),
+    ("beatlayer.shutter", "Shutter", "Gate"),
+    ("beatlayer.bond", "Bond", "Glue Compressor"),
+    ("beatlayer.wave_mod", "Wave Mod", "LFO"),
+    ("beatlayer.curve_mod", "Curve Mod", "Shaper"),
+    ("beatlayer.brickwall", "Brickwall", "Limiter"),
+    ("beatlayer.rotunda", "Rotunda", "Reverb"),
+    ("beatlayer.kitbag", "Kitbag", "Impulse"),
+    ("beatlayer.dice", "Dice", "Random"),
+    ("beatlayer.hold", "Hold", "Note Length"),
+    ("beatlayer.lift", "Lift", "Pitch"),
+    ("beatlayer.remap", "Remap", "Scale"),
+    ("beatlayer.stack", "Stack", "Chord"),
+    ("beatlayer.touch", "Touch", "Velocity"),
+    ("beatlayer.veer", "Veer", "Shifter"),
+    ("beatlayer.level_mod", "Level Mod", "Envelope Follower"),
+    ("beatlayer.gate_mod", "Gate Mod", "Envelope MIDI"),
+    ("beatlayer.strike_mod", "Strike Mod", "Shaper MIDI"),
+    ("beatlayer.play_mod", "Play Mod", "Expression Control"),
+];
+
+/// The name now for a device of `device_type` called `name` before T197, or
+/// `None` if `name` isn't the old name of that type.
+pub(crate) fn renamed_device(device_type: &str, name: &str) -> Option<&'static str> {
+    RENAMED_DEVICES
+        .iter()
+        .find(|(ty, old, _)| *ty == device_type && *old == name)
+        .map(|(_, _, new)| *new)
+}
+
+/// Version 6 to 7 (T197): the devices took the names of the Live devices
+/// they match. A device saved with its type's old name, as its title or its
+/// own name, gets the new one wherever it sits in the set (a track's chain, a
+/// rack's chain); one the user renamed keeps its name. The IDs are unchanged.
+fn rename_devices(mut value: Value) -> Result<Value, String> {
+    fn walk(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                let device_type = map
+                    .get("kind")
+                    .and_then(|kind| kind.get("native"))
+                    .and_then(|native| native.get("device_type"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                if let Some(device_type) = device_type {
+                    for key in ["name", "own_name"] {
+                        let new = map
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .and_then(|name| renamed_device(&device_type, name));
+                        if let Some(new) = new {
+                            map.insert(key.to_owned(), Value::from(new));
+                        }
+                    }
+                }
+                map.values_mut().for_each(walk);
+            }
+            Value::Array(items) => items.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut value);
+    Ok(value)
 }
 
 /// Version 1 to 2 (WP-1.4b): an audio clip trimmed or split in version 1

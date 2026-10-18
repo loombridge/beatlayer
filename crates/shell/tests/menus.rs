@@ -47,6 +47,10 @@ fn every_item_reaches_a_command_or_is_pending() {
             for item in menu.walk() {
                 match item.action {
                     Action::Command(id) => assert!(registry.contains(id), "{}: {id}", item.row),
+                    Action::Choice(id, args) => {
+                        assert!(registry.contains(id), "{}: {id}", item.row);
+                        serde_json::from_str::<serde_json::Value>(args).expect(item.row);
+                    }
                     Action::Shortcut(ids) => {
                         assert!(!ids.is_empty());
                         for id in ids {
@@ -86,6 +90,25 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+        // The File & Folder page's Temporary Folder (the audio clip editing
+        // spec, R5).
+        commands::SETTINGS_SET_TEMPORARY_FOLDER,
+        // The same page's Warp recorded audio switch (the recording spec,
+        // R13).
+        commands::SETTINGS_SET_WARP_RECORDED_AUDIO,
+        commands::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+        commands::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+        commands::SETTINGS_SET_DEFAULT_WARP_MODE,
+        // The same page's Launch section (the launch quantisation spec,
+        // R15).
+        commands::SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+        commands::SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+        commands::SETTINGS_SET_SELECT_ON_LAUNCH,
+        commands::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+        commands::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+        // The same page's Record Session automation in chooser (the Session
+        // automation spec, R5).
+        commands::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).
@@ -101,6 +124,20 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // (M-FILE-007); it also runs by itself when a set is opened
         // (WP-2.25).
         commands::SET_RELINK_MISSING,
+        // The MIDI Note Editor's lane and fold (WP-2.3): the View menu's
+        // Fold to Notes reaches view.fold_notes through its key (M-VIEW-039,
+        // S-NOTE-038), the lane header's own menu reaches view.lane
+        // (L-CLIP-014), and agents reach both.
+        commands::VIEW_FOLD_NOTES,
+        commands::VIEW_LANE,
+        // The Clip View's Envelopes tab (WP-3.16): the View menu's Content
+        // Editor and Envelope Editor reach view.clip_tab through their keys
+        // (M-VIEW-018, M-VIEW-019, S-CLIPMODE-003, S-CLIPMODE-004), and the
+        // control chooser reaches view.clip_envelope (L-CLIP-017).
+        commands::VIEW_CLIP_TAB,
+        commands::VIEW_CLIP_ENVELOPE,
+        // A query for agents, like `transport.state`.
+        commands::VIEW_STATE,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

@@ -110,6 +110,31 @@ const WIDGET: &[(&str, &str)] = &[
         "the browser: Right moves from the sidebar to the list, and Left at the list's top \
          level back (`focus.browser`)",
     ),
+    // WP-2.2: while the computer MIDI keyboard is on, its letters play notes
+    // and step its octave and velocity, with Shift (or Cmd, Ctrl, Option)
+    // leaving them their shortcuts. The key dispatcher reads them itself
+    // because a note goes down and up with its key; each runs a registered
+    // command.
+    (
+        "S-MAP-004",
+        "while the computer MIDI keyboard is on, Z and X move its octave \
+         (`midi.computer_keyboard_octave`)",
+    ),
+    (
+        "S-MAP-005",
+        "while the computer MIDI keyboard is on, C and V step its velocity \
+         (`midi.computer_keyboard_velocity`)",
+    ),
+    (
+        "S-MAP-006",
+        "while the computer MIDI keyboard is on, its note keys play and release notes \
+         (`midi.computer_keyboard_key`)",
+    ),
+    (
+        "S-MAP-007",
+        "while the computer MIDI keyboard is on, a letter with Shift runs its shortcut as it \
+         would with the keyboard off",
+    ),
     // WP-1.8b: keys with two directions, and modifiers a drag reads as it
     // goes, each running a registered command.
     (
@@ -184,6 +209,70 @@ const WIDGET: &[(&str, &str)] = &[
         "the focused view opens its selection's context menu: the Arrangement's clip or \
          time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen \
          place's in the browser's sidebar (`browser.remove_folder`)",
+    ),
+    // WP-2.3: the Clip View's note selection reads the transpose keys itself,
+    // each running `note.move` (part 3).
+    (
+        "S-A11Y-008",
+        "the Clip View's note editor: Up and Down transpose the selected notes by a semitone \
+         (`note.move`)",
+    ),
+    (
+        "S-A11Y-009",
+        "the Clip View's note editor: Shift-Up and Shift-Down transpose the selected notes by \
+         an octave (`note.move`)",
+    ),
+    // WP-4.10: the Sample Editor reads its arrow keys itself, because each
+    // shortcut has two keys that act differently and the keymap gives a
+    // shortcut one command with one set of arguments; each runs a
+    // registered command.
+    (
+        "S-SAMPLE-003",
+        "the Clip View's Sample Editor: Left and Right move the selected warp markers by one \
+         step of the editing grid (`clip.move_warp_markers`)",
+    ),
+    (
+        "S-SAMPLE-004",
+        "the Clip View's Sample Editor: Cmd-Left and Cmd-Right select the previous or next \
+         warp marker (`clip_view.select_warp_markers`)",
+    ),
+    (
+        "S-SAMPLE-006",
+        "the Clip View's Sample Editor: with the Start marker selected, Shift-Left and \
+         Shift-Right move the clip's region by one step of the editing grid \
+         (`clip.set_region`)",
+    ),
+    (
+        "S-A11Y-012",
+        "the Clip View's Sample Editor: Option-Left and Option-Right (Ctrl on Windows) move \
+         the insert marker by one step of the editing grid (`clip_view.set_insert_marker`)",
+    ),
+    (
+        "S-A11Y-013",
+        "the Clip View's Sample Editor: with nothing selected, Shift-Left and Shift-Right \
+         start or extend a time selection by one step of the editing grid \
+         (`clip_view.select_time`)",
+    ),
+    // WP-3.7: the Session View grid reads its arrows, Page keys, Home and
+    // End, and Esc itself, because each shortcut has keys that act
+    // differently and the keymap gives a shortcut one command with one set of
+    // arguments.
+    (
+        "S-SES-002",
+        "the Session View: the arrows select the neighbouring slot, across the tracks and \
+         down the scenes (`session.select`)",
+    ),
+    (
+        "S-SES-010",
+        "the Session View: Up and Down select the scene above or below (`session.select`)",
+    ),
+    (
+        "S-SES-011",
+        "the Session View: Page Up and Page Down move eight scenes (`session.select`)",
+    ),
+    (
+        "S-SES-019",
+        "the Session View: Esc goes to the highlighted track's title bar (`session.select`)",
     ),
 ];
 

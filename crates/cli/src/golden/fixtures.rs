@@ -25,14 +25,16 @@ use std::sync::Arc;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap};
 use bl_engine::mixer::{gain_from_db, track as mixer};
 use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, test_tone};
-use bl_engine::{Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
+use bl_engine::{
+    Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, SessionCommand, TransportCommand,
+};
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, DeviceKind, Editor,
-    ParamId, SendTap, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
+    DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
-use crate::render::Cue;
+use crate::render::{Cue, Launch};
 
 pub(super) const FIXTURES: &[Fixture] = &[
     Fixture {
@@ -84,6 +86,13 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: tempo_ramp_loop,
     },
     Fixture {
+        name: "scene-tempo",
+        about: "A scene with its own tempo launched while the song plays at 120 BPM: the launch \
+                lands on the next bar line, where the beat tone's beats lengthen to the \
+                scene's 60 BPM and the playhead keeps its beat.",
+        build: scene_tempo,
+    },
+    Fixture {
         name: "pan-and-sends",
         about: "The mixer: tones panned across the field by the constant-power law, a group \
                 with its own volume and pan, a post-fader return and a pre-fader one, a \
@@ -120,6 +129,28 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: fader_move,
     },
     Fixture {
+        name: "volume-modulation",
+        about: "A tone whose volume is automated down over two bars while its clip's volume \
+                modulation envelope rises: the modulation acts on the automation, so the \
+                result follows it down.",
+        build: volume_modulation,
+    },
+    Fixture {
+        name: "device-modulation",
+        about: "A tone through a Utility whose gain a clip's modulation envelope lowers and \
+                then hands back across two bars: the envelope moves the gain from where its \
+                control is.",
+        build: device_modulation,
+    },
+    Fixture {
+        name: "crossfade",
+        about: "Two tracks, one assigned to the crossfader's A side and one to B, swept from \
+                the A end to the B end in 1/16 steps every 1/32 beat, closer than the 20 ms a \
+                move takes so the glides run into each other, with a third track assigned to \
+                neither playing through.",
+        build: crossfade,
+    },
+    Fixture {
         name: "clip-mid-bar",
         about: "Audio clips starting mid-bar, on frames no block starts on: one plays a stretch \
                 from the middle of its file, between its Start and End markers, and one is cut \
@@ -145,11 +176,31 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: clip_fades,
     },
     Fixture {
+        name: "beat-repeat",
+        about: "A drum loop of two bars through Beat Repeat, in \
+                Insert mode: a capture of a sixteenth on beat three of each bar repeats for \
+                half a bar, each repeat quieter and lower than the last, the grid varied by \
+                the device's seeded source.",
+        build: beat_repeat,
+    },
+    Fixture {
         name: "clip-tempo-change",
         about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
                 unbroken while its end lands where the tempo map puts it, and a looped clip \
                 placed after the ramp.",
         build: clip_tempo_change,
+    },
+    Fixture {
+        name: "warped-loop-120",
+        about: "A one-bar loop warped at 90 BPM, looping over three 2/4 bars of a 120 BPM song \
+                in Re-Pitch through the HiQ interpolator: it plays at four thirds of its speed \
+                and wraps on every bar line.",
+        build: warped_loop_120,
+    },
+    Fixture {
+        name: "warped-loop-140",
+        about: "The same loop in a 140 BPM song, through the cheaper interpolator (HiQ off).",
+        build: warped_loop_140,
     },
 ];
 
@@ -160,6 +211,7 @@ struct Song {
     media: MediaMap,
     schedule: Vec<ScheduledCommand>,
     cues: Vec<Cue>,
+    launches: Vec<Launch>,
 }
 
 impl Song {
@@ -170,6 +222,7 @@ impl Song {
             media: MediaMap::new(),
             schedule: Vec::new(),
             cues: Vec::new(),
+            launches: Vec::new(),
         }
     }
 
@@ -270,6 +323,11 @@ impl Song {
     /// Moves the transport on frame `at` of the render.
     fn cue(&mut self, at: u64, command: TransportCommand) {
         self.cues.push(Cue { at, command });
+    }
+
+    /// Asks the Session View for `command` on frame `at` of the render.
+    fn launch(&mut self, at: u64, command: SessionCommand) {
+        self.launches.push(Launch { at, command });
     }
 
     /// Puts the loop brace at `start` for `length`, and switches the loop
@@ -396,6 +454,7 @@ impl Song {
             } else {
                 self.cues
             },
+            launches: self.launches,
             frames: SAMPLE_RATE.seconds_to_frames(seconds).get() as u64,
         }
     }
@@ -403,6 +462,21 @@ impl Song {
 
 fn bpm(bpm: f64) -> Bpm {
     Bpm::new(bpm).expect("a fixture's tempos are valid")
+}
+
+/// `frames` frames at `rate` of a sine at `level` for each of `hertz` in
+/// turn, each for an equal share of them and starting afresh (so each beat
+/// of a loop made of them is plain to hear, and the file takes little room as
+/// a FLAC reference). Its sine is `libm`'s.
+fn beat_tones(frames: usize, rate: u32, hertz: &[f64], level: f64) -> Vec<f32> {
+    let each = frames / hertz.len();
+    (0..frames)
+        .map(|i| {
+            let (beat, within) = ((i / each).min(hertz.len() - 1), i % each);
+            let phase = std::f64::consts::TAU * hertz[beat] * within as f64 / f64::from(rate);
+            (libm::sin(phase) * level) as f32
+        })
+        .collect()
 }
 
 /// A sine at `level` whose frequency moves in a straight line from `from` to
@@ -420,6 +494,83 @@ fn chirp(frames: usize, rate: u32, from: f64, to: f64, level: f64) -> Vec<f32> {
         }
     }
     samples
+}
+
+/// A bar of drums at 120 BPM, mono at 48 kHz, made from `libm`'s sine and
+/// exponential, so it is the same to the bit on every platform: a kick on
+/// beats one and three, a snare (three inharmonic tones) on two and four,
+/// and a hat (two high tones) on the eighth notes. There is no noise: the
+/// reference's FLAC encoder expands on it.
+fn drum_bar() -> Vec<f32> {
+    let rate = 48_000.0;
+    let tau = std::f64::consts::TAU;
+    let mut bar = vec![0.0f32; 96_000];
+    let mut add = |at: usize, length: usize, voice: &mut dyn FnMut(f64) -> f64| {
+        for n in 0..length {
+            bar[at + n] += voice(n as f64 / rate) as f32;
+        }
+    };
+    for beat in [0, 2] {
+        let mut phase = 0.0;
+        add(beat * 24_000, 12_000, &mut |t| {
+            phase += (45.0 + 75.0 * libm::exp(-t * 30.0)) / rate;
+            libm::sin(phase * tau) * libm::exp(-t * 12.0) * 0.5
+        });
+    }
+    for beat in [1, 3] {
+        add(beat * 24_000, 9_000, &mut |t| {
+            let tones = libm::sin(190.0 * t * tau)
+                + 0.7 * libm::sin(327.0 * t * tau)
+                + 0.5 * libm::sin(511.0 * t * tau);
+            tones * 0.15 * libm::exp(-t * 20.0)
+        });
+    }
+    for eighth in 0..8 {
+        add(eighth * 12_000, 1_800, &mut |t| {
+            let tones = libm::sin(5_200.0 * t * tau) + libm::sin(7_300.0 * t * tau);
+            tones * 0.06 * libm::exp(-t * 90.0)
+        });
+    }
+    bar
+}
+
+/// Spec: beat-repeat R1 to R10. A drum loop through Beat Repeat in Insert mode.
+fn beat_repeat() -> Scene {
+    use bl_devices::beat_repeat::{
+        BEAT_REPEAT, DECAY, GATE, GRID, INTERVAL, MODE, OFFSET, PITCH_DECAY, VARIATION,
+    };
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Beat Repeat",
+        DeviceKind::Native {
+            device_type: BEAT_REPEAT.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (INTERVAL, 5.0),
+        (OFFSET, 8.0),
+        (GRID, 4.0),
+        (GATE, 8.0),
+        (MODE, 1.0),
+        (VARIATION, 50.0),
+        (PITCH_DECAY, 30.0),
+        (DECAY, 25.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(4.25)
 }
 
 fn single_tone() -> Scene {
@@ -597,6 +748,25 @@ fn tempo_ramp_loop() -> Scene {
     song.finish(4.5)
 }
 
+/// Spec: session-view R22, R23.
+fn scene_tempo() -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(120.0)),
+    });
+    let track = song.track(TrackKind::Midi, "Beat", None);
+    song.beat_tone(track, 220.0, -24.0);
+    let scene = song.editor.document().scenes().next().unwrap().id;
+    song.apply(Command::SetSceneTempo {
+        scene,
+        tempo: Some(bpm(60.0)),
+    });
+    // Asked for a frame past 1.2.1: the 1 Bar grid puts the launch on
+    // 2.1.1, frame 96,000, and the scene has no clips to launch.
+    song.launch(24_001, SessionCommand::LaunchScene(scene));
+    song.finish(4.0)
+}
+
 /// Spec: mixer R1 to R9.
 fn pan_and_sends() -> Scene {
     let mut song = Song::new();
@@ -707,6 +877,130 @@ fn fader_move() -> Scene {
         song.schedule(at, key, mixer::PAN, pan);
     }
     song.finish(3.25)
+}
+
+/// A two-bar MIDI clip at the song's start on `track`, with `envelope`'s
+/// breakpoints (a position in ticks and a value) for `target`, modulating it
+/// while the clip plays.
+fn modulated_clip(
+    song: &mut Song,
+    track: TrackId,
+    target: bl_model::AutomationTarget,
+    envelope: &[(Ticks, f64)],
+) {
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::WHOLE * 2,
+            ClipData::Midi(bl_model::MidiData::default()),
+        ),
+    });
+    for &(at, value) in envelope {
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
+            clip,
+            target,
+            at,
+            value,
+        });
+    }
+}
+
+/// Spec: modulation R2, R4. The manual's example of modulation on top of
+/// automation: the volume automation fades from 0 dB to a quarter of the
+/// fader over two bars, and the clip's modulation envelope rises from 20 %
+/// to 100 % of it, so the sound follows the fade down.
+fn volume_modulation() -> Scene {
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let volume = bl_model::AutomationTarget::Mixer {
+        param: bl_model::MixerParam::Volume,
+    };
+    for (at, value) in [(Ticks::ZERO, 1.0), (Ticks::WHOLE * 2, 0.25)] {
+        song.apply(Command::SetAutomationBreakpoint {
+            track: lead,
+            target: volume,
+            at,
+            value,
+        });
+    }
+    modulated_clip(
+        &mut song,
+        lead,
+        volume,
+        &[(Ticks::ZERO, 0.2), (Ticks::WHOLE * 2, 1.0)],
+    );
+    song.finish(4.25)
+}
+
+/// Spec: modulation R3, R4. A clip's modulation envelope moves a device
+/// parameter relative to its control: the Utility's gain is at 0 dB, and the
+/// envelope takes it a third of its travel down at the start and back to
+/// where the control is at the end of the second bar.
+fn device_modulation() -> Scene {
+    use bl_devices::utility::{GAIN, UTILITY};
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let id = song.editor.new_id();
+    song.apply(Command::InsertDevice {
+        track: lead,
+        index: 1,
+        device: Device::new(
+            id,
+            "Utility",
+            DeviceKind::Native {
+                device_type: UTILITY.to_owned(),
+            },
+        ),
+    });
+    modulated_clip(
+        &mut song,
+        lead,
+        bl_model::AutomationTarget::Device {
+            device: id,
+            param: GAIN,
+        },
+        &[(Ticks::ZERO, -0.33), (Ticks::WHOLE * 2, 0.0)],
+    );
+    song.finish(4.25)
+}
+
+/// Spec: mixer R23. The crossfader swept from the A end to the B end with
+/// a track on each side and one on neither: every move is a parameter
+/// change on its exact frame, as a UI drag sends one, and the steps are
+/// 1/32 beat (15.625 ms at 120 BPM) apart, closer than the 20 ms a change
+/// takes, so the glides run into each other. The position reaches every
+/// track's mixer node, as the engine's does.
+fn crossfade() -> Scene {
+    let mut song = Song::new();
+    let left = song.track(TrackKind::Midi, "Left", None);
+    song.tone(left, 220.0, -24.0);
+    song.apply(Command::SetCrossfadeAssign {
+        track: left,
+        assign: CrossfadeAssign::A,
+    });
+    let right = song.track(TrackKind::Midi, "Right", None);
+    song.tone(right, 330.0, -24.0);
+    song.apply(Command::SetCrossfadeAssign {
+        track: right,
+        assign: CrossfadeAssign::B,
+    });
+    let through = song.track(TrackKind::Midi, "Through", None);
+    song.tone(through, 660.0, -30.0);
+    let step = Ticks::QUARTER / 32;
+    for n in 0..=32i32 {
+        let position = f64::from(n) / 32.0;
+        let at = Ticks::QUARTER + step * i64::from(n);
+        for track in [left, right, through] {
+            song.schedule(at, NodeKey::Mixer(track), mixer::CROSSFADER, position);
+        }
+    }
+    song.finish(2.0)
 }
 
 /// The fader drag bl-ui's mixer test makes through the window and the
@@ -881,4 +1175,65 @@ fn clip_tempo_change() -> Scene {
     song.audio_clip(after, at, Ticks::QUARTER * 2, looped);
     let seconds = song.to_last_clip();
     song.finish(seconds)
+}
+
+/// Spec: warping R13, warp-modes R9, R12. A loop of one 2/4 bar at 90 BPM
+/// (a tone for each of its two beats, a different one in each channel),
+/// warped with a marker at each end, looping its whole length over three
+/// bars of a song at `song_bpm`: Re-Pitch reads it `song_bpm / 90` times as
+/// fast, and every bar of the song starts it again.
+fn warped_loop(song_bpm: f64, high_quality: bool) -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(song_bpm)),
+    });
+    let time_signatures = TimeSignatureMap::new([TimeSignatureChange {
+        at: Ticks::ZERO,
+        signature: TimeSignature::new(2, 4).expect("the time signature is valid"),
+    }])
+    .expect("the time-signature map is valid");
+    song.apply(Command::SetTimeSignatures { time_signatures });
+    // Two beats at 90 BPM are 4/3 of a second.
+    let frames = 64_000;
+    let file = song.file(
+        "loop.wav",
+        48_000,
+        &[
+            beat_tones(frames, 48_000, &[330.0, 440.0], 0.0625),
+            beat_tones(frames, 48_000, &[660.0, 495.0], 0.046_875),
+        ],
+    );
+    let track = song.track(TrackKind::Audio, "Loop", None);
+    let bar = Ticks::QUARTER * 2;
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            bl_model::WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            bl_model::WarpMarker {
+                time: frames as f64 / 48_000.0,
+                beat: bar,
+            },
+        ],
+        tempo: Some(90.0),
+        warp_mode: bl_model::WarpMode::RePitch,
+        high_quality,
+        looping: true,
+        loop_start: 0.0,
+        loop_end: Some(bar.get() as f64),
+        ..AudioData::new(file)
+    };
+    song.audio_clip(track, Ticks::ZERO, bar * 3, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+fn warped_loop_120() -> Scene {
+    warped_loop(120.0, true)
+}
+
+fn warped_loop_140() -> Scene {
+    warped_loop(140.0, false)
 }

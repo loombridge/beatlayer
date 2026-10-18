@@ -10,42 +10,15 @@
 //! sources). Shift with a fader drag is assumed to match pan's until it's
 //! observed.
 
-use bl_model::{Document, TrackId};
+use bl_model::{CrossfadeAssign, Document, TrackId};
 use serde_json::json;
 
 use crate::Invocation;
 
-/// The fader's top, in dB (observed: +6.0 dB).
-pub const TOP_DB: f64 = 6.0;
-
-/// The lowest finite volume, in dB (observed: −69.6 dB stays; −69.7 or
-/// lower is −∞).
-pub const LOWEST_DB: f64 = -69.6;
-
-/// Below this a volume is −∞ dB: between the lowest finite step and the
-/// next tenth down.
-const SILENCE_BELOW_DB: f64 = -69.65;
-
-/// The fader's and the meter's shared scale, as dB and the height in a
-/// strip, in points from the strip section's top, where the handle sits
-/// (observed: the handle sits on the meter's 0, 12, 24, 36, 48, and 60
-/// labels at those values, +6 dB 10.5 points above 0, and −∞ about 7.5
-/// points below −60). From −60 dB the scale runs straight to the bottom,
-/// reached at −70 dB.
-pub const FADER_SCALE: [(f64, f32); 8] = [
-    (6.0, 13.0),
-    (0.0, 23.5),
-    (-12.0, 44.5),
-    (-24.0, 64.5),
-    (-36.0, 84.5),
-    (-48.0, 99.0),
-    (-60.0, 111.0),
-    (-70.0, 118.5),
-];
-
-/// The fader's travel in a strip, top and bottom, in points from the strip
-/// section's top: from +6 dB to −∞.
-pub const FADER_TRAVEL: (f32, f32) = (13.0, 118.5);
+pub use bl_model::fader::{
+    FADER_SCALE, FADER_TRAVEL, LOWEST_DB, SEND_LOWEST_DB, TOP_DB, db_gain, fader_gain,
+    fader_position, gain_db, send_level, send_position, volume_gain,
+};
 
 /// The fader's travel in points, from −∞ to +6 dB: a drag moves the
 /// handle one point per point of vertical drag along [`FADER_SCALE`]
@@ -77,107 +50,17 @@ pub const PAN_GESTURE: &str = "Change \"Track Panning\"";
 /// The undo step a send drag makes. (Live's name for it isn't observed.)
 pub const SEND_GESTURE: &str = "Change \"Send\"";
 
-/// The lowest finite send level, in dB: below it a send is at −∞. Live's
-/// send knob's range isn't observed; Beatlayer's runs from −∞ to 0 dB
-/// (the mixer spec, R7), its finite part down to the fader's lowest.
-pub const SEND_LOWEST_DB: f64 = LOWEST_DB;
+/// The undo step a crossfader drag makes. (Live's name for it isn't
+/// observed; it matches the command's own.)
+pub const CROSSFADER_GESTURE: &str = "Change crossfader";
+
+/// The undo step a Cue Volume drag makes, named as Live names it (observed,
+/// 18 October 2026).
+pub const CUE_VOLUME_GESTURE: &str = "Change \"Preview Volume\"";
 
 /// Points of vertical drag that turn a send from −∞ to 0 dB: the pan
 /// knob's travel, as Live's send knob's isn't observed.
 pub const SEND_DRAG_TRAVEL: f32 = PAN_DRAG_TRAVEL;
-
-/// A gain in dB, from a linear gain (−∞ for 0).
-#[must_use]
-pub fn gain_db(gain: f64) -> f64 {
-    if gain <= 0.0 {
-        f64::NEG_INFINITY
-    } else {
-        20.0 * gain.log10()
-    }
-}
-
-/// A linear gain from dB.
-#[must_use]
-pub fn db_gain(db: f64) -> f64 {
-    if db == f64::NEG_INFINITY {
-        0.0
-    } else {
-        10f64.powf(db / 20.0)
-    }
-}
-
-/// The gain of a volume of `db`, kept within the fader's range: no higher
-/// than its top, and −∞ below its lowest finite step.
-#[must_use]
-pub fn volume_gain(db: f64) -> f64 {
-    if db.is_nan() || db < SILENCE_BELOW_DB {
-        0.0
-    } else {
-        db_gain(db.min(TOP_DB))
-    }
-}
-
-/// Straight-line interpolation through `points`, sorted by their first
-/// value in either direction, clamped to the ends.
-fn through(points: &[(f64, f64)], x: f64) -> f64 {
-    let ascending = points[0].0 < points[points.len() - 1].0;
-    for pair in points.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        let inside = if ascending {
-            x >= a.0 && x <= b.0
-        } else {
-            x <= a.0 && x >= b.0
-        };
-        if inside {
-            let t = (x - a.0) / (b.0 - a.0);
-            return a.1 + (b.1 - a.1) * t;
-        }
-    }
-    let before_first = if ascending {
-        x < points[0].0
-    } else {
-        x > points[0].0
-    };
-    if before_first {
-        points[0].1
-    } else {
-        points[points.len() - 1].1
-    }
-}
-
-/// Where a gain sits on the fader's (and the meter's) scale, from 0 (−∞ dB,
-/// the bottom) to 1 (+6 dB, the top). Gains above the top sit at the top.
-#[must_use]
-pub fn fader_position(gain: f64) -> f64 {
-    let (top, bottom) = FADER_TRAVEL;
-    let y = if gain <= 0.0 || gain.is_nan() {
-        f64::from(bottom)
-    } else {
-        let scale: Vec<(f64, f64)> = FADER_SCALE
-            .iter()
-            .map(|(db, y)| (*db, f64::from(*y)))
-            .collect();
-        through(&scale, gain_db(gain))
-    };
-    ((f64::from(bottom) - y) / f64::from(bottom - top)).clamp(0.0, 1.0)
-}
-
-/// The gain at a place on the fader's scale, from 0 (−∞ dB, the bottom) to
-/// 1 (+6 dB, the top): the inverse of [`fader_position`].
-#[must_use]
-pub fn fader_gain(position: f64) -> f64 {
-    let (top, bottom) = FADER_TRAVEL;
-    let position = position.clamp(0.0, 1.0);
-    if position <= 0.0 {
-        return 0.0;
-    }
-    let y = f64::from(bottom) - position * f64::from(bottom - top);
-    let scale: Vec<(f64, f64)> = FADER_SCALE
-        .iter()
-        .map(|(db, y)| (f64::from(*y), *db))
-        .collect();
-    volume_gain(through(&scale, y))
-}
 
 /// Volume as the mixer shows it, in dB to one decimal: `0.0`, `-6.0`,
 /// `-inf`.
@@ -207,6 +90,39 @@ pub fn volume_spoken(gain: f64) -> String {
 #[must_use]
 pub fn volume_readout(gain: f64) -> String {
     format!("Track Volume: {} dB", volume_text(gain))
+}
+
+/// What the Status Bar shows while the Cue Volume knob is dragged (observed:
+/// the knob is named Preview Volume in both modes).
+#[must_use]
+pub fn cue_volume_readout(gain: f64) -> String {
+    format!("Preview Volume: {} dB", volume_text(gain))
+}
+
+/// The command that sets the Cue Volume to `gain`, kept within the knob's
+/// range, −∞ to +6 dB.
+#[must_use]
+pub fn set_cue_volume(gain: f64) -> Invocation {
+    Invocation::new(
+        "mixer.set_cue_volume",
+        json!({ "volume": gain.clamp(0.0, bl_model::MAX_CUE_VOLUME) }),
+    )
+}
+
+/// The Cue Volume after a drag of `delta` points up from `start`, along the
+/// fader's scale as the volume fader's drag moves it.
+#[must_use]
+pub fn cue_volume_moved(start: f64, delta: f64) -> Invocation {
+    set_cue_volume(fader_gain(
+        fader_position(start) + delta / FADER_TRAVEL_POINTS,
+    ))
+}
+
+/// The Cue Volume after Up or Down: `steps` dB, tenths with `fine`, as the
+/// volume fader's keys step.
+#[must_use]
+pub fn cue_volume_stepped(gain: f64, steps: i32, fine: bool) -> Invocation {
+    set_cue_volume(step_volume(gain, steps, fine))
 }
 
 /// Pan as the mixer shows it: `C`, or a number from 1 to 50 and `L` or `R`.
@@ -250,26 +166,6 @@ pub fn shift_volume(gain: f64, delta: f64) -> f64 {
         return 0.0;
     }
     volume_gain(gain_db(gain) + delta)
-}
-
-/// Where a send's knob points, from 0 (−∞) to 1 (0 dB): straight in dB
-/// from the lowest finite level.
-#[must_use]
-pub fn send_position(level: f64) -> f64 {
-    if level <= 0.0 {
-        return 0.0;
-    }
-    ((gain_db(level) - SEND_LOWEST_DB) / -SEND_LOWEST_DB).clamp(0.0, 1.0)
-}
-
-/// The send level a knob position gives, the inverse of
-/// [`send_position`]: 0 (−∞) at the bottom.
-#[must_use]
-pub fn send_level(position: f64) -> f64 {
-    if position <= 0.0 {
-        return 0.0;
-    }
-    db_gain((SEND_LOWEST_DB * (1.0 - position.min(1.0)) * 100.0).round() / 100.0)
 }
 
 /// A send level `steps` dB away (tenths with `fine`), within −∞ to 0 dB,
@@ -618,6 +514,62 @@ pub fn toggled(doc: &Document, switch: Switch, tracks: &[TrackId]) -> Vec<Invoca
     tracks.iter().map(|t| switch.set(*t, on)).collect()
 }
 
+/// The crossfader's position as the Status Bar reads it while it's dragged
+/// (observed: `Crossfade: 25A`), from 50A (0, the A end) through the centre
+/// to 50B (1, the B end), counting steps from the centre. Live's own text
+/// for the centre isn't observed; Beatlayer shows `C`, as pan's.
+#[must_use]
+pub fn crossfader_text(position: f64) -> String {
+    let steps = (position.clamp(0.0, 1.0) * 100.0).round() as i64;
+    match steps {
+        50 => "C".to_owned(),
+        n if n < 50 => format!("{}A", 50 - n),
+        n => format!("{}B", n - 50),
+    }
+}
+
+/// What the Status Bar shows while the crossfader is dragged (observed:
+/// `Crossfade: 25A`).
+#[must_use]
+pub fn crossfader_readout(position: f64) -> String {
+    format!("Crossfade: {}", crossfader_text(position))
+}
+
+/// The command a click on a track's crossfader A or B button runs (the
+/// mixer spec, R23): the clicked side, or neither when that side is already
+/// assigned, as the button toggles. The two sides are exclusive, so
+/// assigning one releases the other. Nothing for a track without the
+/// buttons, Main.
+#[must_use]
+pub fn crossfade_clicked(
+    doc: &Document,
+    track: TrackId,
+    side: CrossfadeAssign,
+) -> Option<Invocation> {
+    let t = doc.track(track)?;
+    if !t.kind().has_crossfade_assign() {
+        return None;
+    }
+    let assign = if t.mixer().crossfade == side {
+        CrossfadeAssign::None
+    } else {
+        side
+    };
+    Some(Invocation::new(
+        "mixer.set_crossfade_assign",
+        json!({ "track": track, "assign": assign }),
+    ))
+}
+
+/// The crossfader's position after a drag of `dx` points on a fader `width`
+/// points wide, from `start`: one point of drag per point of travel, within
+/// 0 to 1. (Live's own crossfader drag isn't observed; this follows the
+/// mixer's other faders, which drag relative to the pointer.)
+#[must_use]
+pub fn crossfader_moved(start: f64, dx: f32, width: f32) -> f64 {
+    (start + f64::from(dx) / f64::from(width.max(1.0))).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +702,54 @@ mod tests {
         assert_eq!(step_pan(0.0, 1), 0.02);
         assert_eq!(step_pan(0.99, 5), 1.0);
         assert_eq!(step_pan(-1.0, -1), -1.0);
+    }
+
+    // Spec: mixer-view R6, R23.
+    #[test]
+    fn the_crossfader_reads_as_live_writes_it_and_a_click_toggles_a_side() {
+        assert_eq!(crossfader_text(0.0), "50A");
+        assert_eq!(crossfader_text(1.0), "50B");
+        assert_eq!(crossfader_text(0.5), "C");
+        assert_eq!(crossfader_text(0.75), "25B");
+        assert_eq!(crossfader_text(0.22), "28A");
+        assert_eq!(crossfader_readout(0.25), "Crossfade: 25A");
+        // One point of drag is one step of 50, and the ends hold.
+        let moved = crossfader_moved(0.0, 20.0, 100.0);
+        assert!((moved - 0.2).abs() < 1e-9);
+        assert_eq!(crossfader_moved(0.5, 1e9, 100.0), 1.0);
+        assert_eq!(crossfader_moved(0.5, -1e9, 100.0), 0.0);
+
+        // A click on a side assigns it; on the lit side it releases the
+        // track; the sides are exclusive, so the assignment is one value.
+        let mut editor = bl_model::Editor::new();
+        let id: TrackId = editor.new_id();
+        editor
+            .apply(bl_model::Command::CreateTrack {
+                id,
+                kind: bl_model::TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let assign =
+            |doc: &Document, side| crossfade_clicked(doc, id, side).unwrap().args["assign"].clone();
+        assert_eq!(assign(editor.document(), CrossfadeAssign::A), json!("a"));
+        editor
+            .apply(bl_model::Command::SetCrossfadeAssign {
+                track: id,
+                assign: CrossfadeAssign::A,
+            })
+            .unwrap();
+        assert_eq!(
+            assign(editor.document(), CrossfadeAssign::A),
+            json!("none"),
+            "the lit side releases the track"
+        );
+        assert_eq!(assign(editor.document(), CrossfadeAssign::B), json!("b"));
+        // Main has no buttons.
+        let main = editor.document().main_id();
+        assert!(crossfade_clicked(editor.document(), main, CrossfadeAssign::A).is_none());
     }
 
     // Spec: mixer-view R8.

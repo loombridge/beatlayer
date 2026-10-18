@@ -1,0 +1,272 @@
+[
+  {
+    "answer": "11",
+    "fixture": "overview",
+    "id": "overview-tracks",
+    "question": "How many tracks does the set have?"
+  },
+  {
+    "answer": "96",
+    "fixture": "overview",
+    "id": "overview-tempo",
+    "question": "What is the tempo at the start of the set, in BPM?"
+  },
+  {
+    "answer": "4",
+    "fixture": "overview",
+    "id": "overview-clip-tracks",
+    "question": "How many tracks hold at least one clip?"
+  },
+  {
+    "answer": "Chords",
+    "fixture": "overview",
+    "id": "overview-id-18",
+    "question": "What is the name of the track whose id is 18?"
+  },
+  {
+    "answer": "2",
+    "fixture": "overview",
+    "id": "overview-undo",
+    "question": "How many undo steps does the set have?"
+  },
+  {
+    "answer": "Drums, Bass, Chords, Lead",
+    "fixture": "tracks",
+    "id": "tracks-with-devices",
+    "question": "List the names of the tracks that have a device, in the order they are listed."
+  },
+  {
+    "answer": "1",
+    "fixture": "tracks",
+    "id": "tracks-muted",
+    "question": "How many tracks are muted?"
+  },
+  {
+    "answer": "19",
+    "fixture": "tracks",
+    "id": "tracks-lead-id",
+    "question": "What is the id of the track named Lead?"
+  },
+  {
+    "answer": "Lead",
+    "fixture": "tracks",
+    "id": "tracks-quietest",
+    "question": "Which track has the lowest volume_db? Give its name."
+  },
+  {
+    "answer": "9.65",
+    "fixture": "tracks",
+    "id": "tracks-volume-sum",
+    "question": "What is the sum of the volume of all tracks, to two decimals?"
+  },
+  {
+    "answer": "1",
+    "fixture": "tracks",
+    "id": "tracks-left",
+    "question": "How many tracks are panned to the left (pan below 0)?"
+  },
+  {
+    "answer": "2",
+    "fixture": "tracks",
+    "id": "tracks-bare-midi",
+    "question": "How many MIDI tracks have no device?"
+  },
+  {
+    "answer": "128",
+    "fixture": "notes_drums",
+    "id": "drums-total",
+    "question": "How many notes does the clip hold?"
+  },
+  {
+    "answer": "64",
+    "fixture": "notes_drums",
+    "id": "drums-key-42",
+    "question": "How many notes have key 42?"
+  },
+  {
+    "answer": "32",
+    "fixture": "notes_drums",
+    "id": "drums-key-36",
+    "question": "How many notes have key 36?"
+  },
+  {
+    "answer": "110",
+    "fixture": "notes_drums",
+    "id": "drums-max-velocity",
+    "question": "What is the highest velocity of any note?"
+  },
+  {
+    "answer": "705600",
+    "fixture": "notes_drums",
+    "id": "drums-first-snare",
+    "question": "At which start, in ticks, is the first note with key 38?"
+  },
+  {
+    "answer": "48",
+    "fixture": "notes_drums",
+    "id": "drums-late-hats",
+    "question": "How many notes with key 42 start in bar 5 or later? A bar is 2822400 ticks, and bar 1 starts at tick 0."
+  },
+  {
+    "answer": "11289600",
+    "fixture": "notes_drums",
+    "id": "drums-kick-length",
+    "question": "What is the sum of the length, in ticks, of all notes with key 36?"
+  },
+  {
+    "answer": "0",
+    "fixture": "notes_drums",
+    "id": "drums-off-beat",
+    "question": "How many notes with key 42 start off the beat, that is at a tick that is not a multiple of 705600?"
+  },
+  {
+    "answer": "48",
+    "fixture": "notes_chords",
+    "id": "chords-total",
+    "question": "How many notes does the clip hold?"
+  },
+  {
+    "answer": "48, 52, 53, 55, 57, 59, 60, 62, 64",
+    "fixture": "notes_chords",
+    "id": "chords-keys",
+    "question": "List the distinct keys of the notes, lowest first."
+  },
+  {
+    "answer": "8",
+    "fixture": "notes_chords",
+    "id": "chords-key-60",
+    "question": "How many notes have key 60?"
+  },
+  {
+    "answer": "3",
+    "fixture": "notes_chords",
+    "id": "chords-at-zero",
+    "question": "How many notes start at tick 0?"
+  },
+  {
+    "answer": "8",
+    "fixture": "notes_chords",
+    "id": "chords-above-60",
+    "question": "How many notes have a key above 60?"
+  },
+  {
+    "answer": "48",
+    "fixture": "notes_chords",
+    "id": "chords-lowest",
+    "question": "What is the lowest key of any note?"
+  },
+  {
+    "answer": "64",
+    "fixture": "notes_lead",
+    "id": "lead-total",
+    "question": "How many notes does the clip hold?"
+  },
+  {
+    "answer": "76",
+    "fixture": "notes_lead",
+    "id": "lead-highest",
+    "question": "What is the highest key of any note?"
+  },
+  {
+    "answer": "8",
+    "fixture": "notes_lead",
+    "id": "lead-key-69",
+    "question": "How many notes have key 69?"
+  },
+  {
+    "answer": "71",
+    "fixture": "notes_lead",
+    "id": "lead-commonest",
+    "question": "Which key is played by the most notes? If several tie, give the lowest."
+  },
+  {
+    "answer": "16",
+    "fixture": "notes_lead",
+    "id": "lead-first-four-bars",
+    "question": "How many notes start in bars 1 to 4? A bar is 2822400 ticks, and bar 1 starts at tick 0."
+  },
+  {
+    "answer": "6080",
+    "fixture": "notes_lead",
+    "id": "lead-velocity-sum",
+    "question": "What is the sum of the velocity of all notes?"
+  },
+  {
+    "answer": "46",
+    "fixture": "commands_clip",
+    "id": "commands-total",
+    "question": "How many commands are listed?"
+  },
+  {
+    "answer": "1",
+    "fixture": "commands_clip",
+    "id": "commands-destructive",
+    "question": "How many commands have the permission destructive?"
+  },
+  {
+    "answer": "clip.delete",
+    "fixture": "commands_clip",
+    "id": "commands-refused",
+    "question": "Which commands are refused to agents? Give their ids, in the order they are listed."
+  },
+  {
+    "answer": "Set Clip Gain",
+    "fixture": "commands_clip",
+    "id": "commands-label",
+    "question": "What is the label of the command clip.set_gain?"
+  },
+  {
+    "answer": "24",
+    "fixture": "commands_clip",
+    "id": "commands-set-prefix",
+    "question": "How many command ids start with clip.set_?"
+  },
+  {
+    "answer": "edit",
+    "fixture": "describe_clip_create",
+    "id": "describe-permission",
+    "question": "What is the permission class of the command?"
+  },
+  {
+    "answer": "clip, track",
+    "fixture": "describe_clip_create",
+    "id": "describe-properties",
+    "question": "What are the names of the properties of the command's arguments, alphabetically?"
+  },
+  {
+    "answer": "35",
+    "fixture": "describe_clip_create",
+    "id": "describe-defs",
+    "question": "How many definitions does the argument schema hold under $defs?"
+  },
+  {
+    "answer": "clip, track",
+    "fixture": "describe_clip_create",
+    "id": "describe-required",
+    "question": "Which arguments are required? Give their names alphabetically."
+  },
+  {
+    "answer": "E minor",
+    "fixture": "analysis",
+    "id": "analysis-key",
+    "question": "Which key does the analysis find?"
+  },
+  {
+    "answer": "8",
+    "fixture": "analysis",
+    "id": "analysis-transients",
+    "question": "How many transients does the analysis count?"
+  },
+  {
+    "answer": "250",
+    "fixture": "analysis",
+    "id": "analysis-loudest-band",
+    "question": "What is the centre frequency, in Hz, of the spectrum band with the highest level_db?"
+  },
+  {
+    "answer": "60",
+    "fixture": "analysis",
+    "id": "analysis-short-term",
+    "question": "How many short-term loudness readings are listed?"
+  }
+]

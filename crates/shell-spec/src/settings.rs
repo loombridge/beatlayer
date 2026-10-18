@@ -1,8 +1,22 @@
 //! The Settings window's pages and the theme choice, as the shell's
 //! commands name them.
 
+use bl_commands::Context::Global;
+use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use bl_model::{LaunchMode, LaunchQuantization};
+
+use crate::agent::AllowedAgent;
+use crate::assistant::AssistantState;
+use crate::audio::{AudioSettings, ToneSettings};
+use crate::midi_io::MidiPortsResult;
+use crate::plugins::PluginSettings;
+
+/// `settings.state`: every preference the Settings window shows with a
+/// value.
+pub const STATE: &str = "settings.state";
 
 /// A page of the Settings window, in Live's order (L-SET-002).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -91,7 +105,9 @@ impl SettingsPage {
     /// in the chooser. The shell (WP-1.7) builds Audio and the theme choice,
     /// WP-1.17 Display & Input's Zoom, WP-1.4b Record, Warp & Launch's
     /// Create Fades on Clip Edges, WP-2.5b Plug-Ins' Auto-Hide Plug-In
-    /// Windows, and WP-1.15 the Agents page's agent server settings.
+    /// Windows, WP-1.15 the Agents page's agent server settings, WP-2.2 the
+    /// Tempo & MIDI page's MIDI ports table, and WP-4.20 File & Folder's
+    /// Temporary Folder.
     #[must_use]
     pub const fn is_built(self) -> bool {
         matches!(
@@ -102,6 +118,8 @@ impl SettingsPage {
                 | Self::RecordWarpLaunch
                 | Self::PlugIns
                 | Self::Agents
+                | Self::TempoMidi
+                | Self::FileFolder
         )
     }
 
@@ -191,9 +209,292 @@ impl ThemeChoice {
     }
 }
 
+/// The Display & Input page's settings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayInputSettings {
+    /// The interface zoom in percent, as `view.set_zoom` takes it.
+    pub zoom_percent: u16,
+    /// Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.
+    pub outline_view_in_focus: bool,
+    /// Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.
+    pub use_tab_key_to_move_focus: bool,
+    /// Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.
+    pub wrap_tab_navigation: bool,
+}
+
+/// The Audio page's settings: the device choices as `audio.configure` takes
+/// them, and the test tone's level and frequency.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AudioPageSettings {
+    /// Driver, devices, sample rate, buffer size, output channels and Driver
+    /// Error Compensation, as set (null is the platform's or the device's
+    /// own choice).
+    pub device: AudioSettings,
+    /// Tone Volume and Tone Frequency, as `audio.set_test_tone` takes them.
+    pub tone: ToneSettings,
+}
+
+/// The Launch section of Record, Warp & Launch (L-SET-018), as observed in
+/// Live 12.4.6: what a new clip starts with and what launching does. They
+/// are preferences, kept between starts and not saved with a set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct LaunchPrefs {
+    /// Default Launch Mode, as `settings.set_default_launch_mode` sets it.
+    pub default_mode: LaunchMode,
+    /// Default Launch Quantization, as
+    /// `settings.set_default_launch_quantization` sets it: `null` is
+    /// "Global".
+    pub default_quantization: Option<LaunchQuantization>,
+    /// Select on Launch: a launched clip selects itself.
+    pub select_on_launch: bool,
+    /// Select Next Scene on Launch: a launched scene selects the next one.
+    pub select_next_scene_on_launch: bool,
+    /// Start Recording on Scene Launch.
+    pub start_recording_on_scene_launch: bool,
+}
+
+impl Default for LaunchPrefs {
+    fn default() -> Self {
+        Self {
+            default_mode: LaunchMode::Trigger,
+            default_quantization: None,
+            select_on_launch: true,
+            select_next_scene_on_launch: true,
+            start_recording_on_scene_launch: false,
+        }
+    }
+}
+
+/// Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018):
+/// what a new clip of a short sample gets (the warping spec, R29 and R32).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopWarpShortSamples {
+    /// Warp and the loop off.
+    UnwarpedOneShot,
+    /// Warped, the loop off.
+    WarpedOneShot,
+    /// Warped, the loop on over the whole file.
+    WarpedLoop,
+    /// A loop when its analysis finds a steady beat that fits whole bars, a
+    /// one-shot otherwise. What a new install has.
+    #[default]
+    Auto,
+}
+
+impl LoopWarpShortSamples {
+    /// Every choice, in the order Live lists them.
+    pub const ALL: [Self; 4] = [
+        Self::UnwarpedOneShot,
+        Self::WarpedOneShot,
+        Self::WarpedLoop,
+        Self::Auto,
+    ];
+
+    /// The choice's name in the Settings window.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UnwarpedOneShot => "Unwarped One Shot",
+            Self::WarpedOneShot => "Warped One Shot",
+            Self::WarpedLoop => "Warped Loop",
+            Self::Auto => "Auto",
+        }
+    }
+}
+
+/// Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the
+/// warp mode a new warped clip takes (the warping spec, R29 and R33).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultWarpMode {
+    /// Beats. What a new install has.
+    #[default]
+    Beats,
+    /// Tones.
+    Tones,
+    /// Texture.
+    Texture,
+    /// Re-Pitch.
+    RePitch,
+    /// Complex.
+    Complex,
+    /// Complex Pro.
+    ComplexPro,
+}
+
+impl DefaultWarpMode {
+    /// Every choice, in the order Live lists them.
+    pub const ALL: [Self; 6] = [
+        Self::Beats,
+        Self::Tones,
+        Self::Texture,
+        Self::RePitch,
+        Self::Complex,
+        Self::ComplexPro,
+    ];
+
+    /// The choice's name in the Settings window.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Beats => "Beats",
+            Self::Tones => "Tones",
+            Self::Texture => "Texture",
+            Self::RePitch => "Re-Pitch",
+            Self::Complex => "Complex",
+            Self::ComplexPro => "Complex Pro",
+        }
+    }
+}
+
+/// The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with
+/// the defaults observed in Live 12.4.6. They are preferences, kept between
+/// starts and not saved with a set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct WarpPrefs {
+    /// Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples`
+    /// sets it.
+    pub loop_warp_short_samples: LoopWarpShortSamples,
+    /// Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets
+    /// it.
+    pub auto_warp_long_samples: bool,
+    /// Default Warp Mode, as `settings.set_default_warp_mode` sets it.
+    pub default_warp_mode: DefaultWarpMode,
+}
+
+impl Default for WarpPrefs {
+    fn default() -> Self {
+        Self {
+            loop_warp_short_samples: LoopWarpShortSamples::Auto,
+            auto_warp_long_samples: true,
+            default_warp_mode: DefaultWarpMode::Beats,
+        }
+    }
+}
+
+/// Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12):
+/// which tracks a Session recording writes control moves into the clips of.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAutomationTracks {
+    /// The armed tracks only: Live's default, as observed.
+    #[default]
+    ArmedTracks,
+    /// Every track with a Session clip playing.
+    AllTracks,
+}
+
+/// The Agents page's settings. The server's token and each allowed agent's
+/// are never reported, only whether the server has one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentsPageSettings {
+    /// Whether the agent server runs, as `agent.set_server` sets it.
+    pub server: bool,
+    /// The port it listens on.
+    pub port: u16,
+    /// The address agents connect to.
+    pub url: String,
+    /// Whether the server has a token stored.
+    pub token_stored: bool,
+    /// The agents allowed to connect, with their autonomous mode.
+    pub clients: Vec<AllowedAgent>,
+}
+
+/// File & Folder's settings in `settings.state`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileFolderSettings {
+    /// The Temporary Folder in use: the setting, or the default.
+    pub temporary_folder: String,
+}
+
+/// What `settings.state` returns: the Settings window's preferences by
+/// page. Pages whose settings no package has built yet are left out.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SettingsState {
+    /// The page the Settings window shows, or showed last.
+    pub page: SettingsPage,
+    /// Display & Input.
+    pub display_input: DisplayInputSettings,
+    /// Theme & Colors: the theme, as `settings.set_theme` takes it.
+    pub theme: ThemeChoice,
+    /// Audio.
+    pub audio: AudioPageSettings,
+    /// Tempo & MIDI: the MIDI ports' switches and the computer MIDI
+    /// keyboard, the same as `midi.ports` reports.
+    pub tempo_midi: MidiPortsResult,
+    /// Record, Warp & Launch: Create Fades on Clip Edges, as
+    /// `settings.set_create_fades_on_clip_edges` sets it.
+    pub create_fades_on_clip_edges: bool,
+    /// Record, Warp & Launch: Warp Recorded Audio, as
+    /// `settings.set_warp_recorded_audio` sets it.
+    pub warp_recorded_audio: bool,
+    /// Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long
+    /// Samples and Default Warp Mode.
+    pub warp: WarpPrefs,
+    /// Record, Warp & Launch: the Launch section, as the
+    /// `settings.set_default_launch_*`, `settings.set_select_on_launch`,
+    /// `settings.set_select_next_scene_on_launch` and
+    /// `settings.set_start_recording_on_scene_launch` commands set it.
+    pub launch: LaunchPrefs,
+    /// Record, Warp & Launch: Record Session automation in, as
+    /// `settings.set_record_session_automation_in` sets it.
+    pub record_session_automation_in: SessionAutomationTracks,
+    /// File & Folder: the Temporary Folder, as `settings.set_temporary_folder`
+    /// sets it.
+    pub file_folder: FileFolderSettings,
+    /// Plug-Ins: Auto-Hide Plug-In Windows, as
+    /// `settings.set_auto_hide_plug_in_windows` sets it.
+    pub auto_hide_plug_in_windows: bool,
+    /// Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets
+    /// it.
+    pub plug_ins: PluginSettings,
+    /// Agents.
+    pub agents: AgentsPageSettings,
+    /// Agents, the assistant: provider, base URL, model, and whether an API
+    /// key is stored for the provider (the key itself is never reported).
+    pub assistant: AssistantState,
+}
+
+/// Adds `settings.state` to a registry.
+///
+/// # Errors
+///
+/// [`RegisterError`] if its ID is already registered.
+pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
+    registry.register(
+        CommandSpec::new(STATE, "Settings State")
+            .description(
+                "Reports every preference the Settings window shows with a value, by page, in \
+                 the form its own command takes it: the theme (`settings.set_theme`), Display & \
+                 Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
+                 settings with Driver Error Compensation and the test tone (`audio.configure`, \
+                 `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
+                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
+                 (`plugin.settings`), the agent server and the \
+                 assistant. The server's and the agents' tokens and the assistant's API key are \
+                 never reported, only whether one is stored. Preferences aren't saved with the \
+                 set. Changes nothing. Use it to check a `settings.set_*` command took effect.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SettingsState>(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_query_registers_complete() {
+        let mut registry = Registry::new();
+        register(&mut registry).unwrap();
+        assert!(registry.problems().is_empty(), "{:?}", registry.problems());
+    }
 
     #[test]
     fn pages_step_round_in_order() {

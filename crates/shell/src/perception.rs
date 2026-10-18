@@ -10,10 +10,10 @@
 //!   `bl-analysis`: loudness and true peak, levels, the octave-band
 //!   spectrum, tempo, key, and transients.
 //!
-//! In the app, perception calls without CLAP plug-in devices defer
-//! rendering to a worker thread in the app host (WP-2.28), while this
+//! In the app, perception calls without CLAP, VST3 or Audio Unit devices
+//! defer rendering to a worker thread in the app host (WP-2.28), while this
 //! module provides the synchronous render primitives they execute.
-//! Sets with CLAP plug-in devices render synchronously on the calling thread
+//! Sets with such plug-in devices render synchronously on the calling thread
 //! while the transport is stopped (the offline plug-in renders spec, R8),
 //! because plug-in instances are main-thread objects borrowed from the engine.
 
@@ -27,7 +27,6 @@ use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_engine::MediaLibrary;
 use bl_media::{BitDepth, Dither};
 use bl_model::{Command, Document};
-use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::perception::{
     ANALYZE, ANALYZE_SECONDS, AnalyzeArgs, AnalyzeResult, BandResult, ChannelLevels, KeyResult,
     LevelsResult, LoudnessResult, Measure, PREVIEW, PREVIEW_SECONDS, PREVIEWS_KEPT, PreviewArgs,
@@ -36,7 +35,7 @@ use bl_shell_spec::perception::{
 };
 
 use crate::ShellError;
-use crate::export::{self, ExportError, Length, Render};
+use crate::export::{self, ExportError, Hosts, Length, Render};
 
 /// A preview kept for the agent API: the rendered samples and what they
 /// are.
@@ -189,7 +188,7 @@ pub struct Source<'a> {
     /// The engine's rate.
     pub engine_rate: u32,
     /// The plug-ins the engine plays, which the render borrows.
-    pub plugins: Option<&'a ClapHost>,
+    pub plugins: Hosts<'a>,
     /// Whether the transport plays.
     pub playing: bool,
     /// A cancellation flag observed during offline rendering (WP-2.28).
@@ -281,8 +280,10 @@ fn render_range(
     let (document, track, mut notes) = document_for(command, source.document, range.track)?;
     // Spec: offline-plugin-renders R8. Borrowing the plug-ins would take
     // them from the song playing.
-    let has_clap = crate::plugins::has_clap(&document);
-    if source.playing && source.plugins.is_some() && has_clap {
+    let borrows = source
+        .plugins
+        .borrows_any(|format| crate::plugins::has_format(&document, format));
+    if source.playing && borrows {
         return Err(ShellError::Unavailable {
             command: command.to_owned(),
             reason: "the set is playing, and rendering it would take its plug-ins from the \
@@ -327,6 +328,7 @@ fn render_range(
             samples.extend_from_slice(block);
             Ok(())
         },
+        None,
     )
     .map_err(|error| match error {
         ExportError::Invalid(message) => invalid(command, message),
@@ -335,6 +337,13 @@ fn render_range(
     if truncated {
         notes.push(format!(
             "the range was cut to its first {longest} seconds, the longest this command renders"
+        ));
+    }
+    // Spec: external-devices R16, R27. A preview reaches no hardware: an
+    // external device sends nothing and brings back silence.
+    for device in document.external_devices() {
+        notes.push(format!(
+            "{device} sent nothing and played silence: a preview doesn't reach hardware"
         ));
     }
     let signatures = &settings.time_signatures;

@@ -5,9 +5,14 @@ use core::ops::Range;
 use std::any::Any;
 use std::sync::LazyLock;
 
+use bl_core::midi::MidiMessage;
 use bl_core::time::{Frames, SampleRate, TempoMap};
-use bl_model::{DeviceId, ParamId, TrackId};
+use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
+
+use crate::display::DisplayReader;
+use crate::modbus::{Bus, Control, ROWS};
+use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
 /// the next. The compiler moves a node instance into the new program when
@@ -40,6 +45,11 @@ pub enum NodeKey {
     /// Resampling (the routing spec). Its parameters are
     /// [`mixer::route`](crate::mixer::route).
     Input(TrackId),
+    /// A track's own input taken from the audio interface, Ext. In
+    /// (WP-2.13). Its parameters are
+    /// [`mixer::route`](crate::mixer::route); its source is the device
+    /// input the processor was given.
+    DeviceInput(TrackId),
     /// The track a device's sidechain takes as its Source (WP-2.19b). Its
     /// parameters are [`mixer::route`](crate::mixer::route).
     SidechainInput(DeviceId),
@@ -47,6 +57,38 @@ pub enum NodeKey {
     /// which make what the device's detector hears. Its parameters are
     /// [`sidechain`](crate::sidechain).
     Sidechain(DeviceId),
+    /// A track's cue switch in Cue mode (WP-3.18): the route that carries its
+    /// signal after its devices into the Cue Out's task. Its parameters are
+    /// [`mixer::route`](crate::mixer::route); solo mute is the switch off.
+    Cue(TrackId),
+    /// The mixer of the Cue Out's task, whose volume is the Cue Volume. Its
+    /// parameters are [`mixer::track`](crate::mixer::track).
+    CueMixer,
+    /// The mixer of a rack's chain, after the chain's devices (WP-5.1): its
+    /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
+    /// [`mixer::track`](crate::mixer::track).
+    ChainMixer(ChainId),
+    /// The filter at a rack chain's input (WP-5.3): its key, velocity and
+    /// chain select zones, which reach it as parameter changes numbered by
+    /// [`zones`](crate::zones).
+    ChainZones(ChainId),
+    /// The note routing of a drum rack's chain, which passes on the notes
+    /// its Receive answers at its Play note and remembers what sounds for
+    /// its choke group (the drum racks spec, R2, R4). Its parameters are
+    /// [`drum::param`](crate::drum::param).
+    ChainNotes(ChainId),
+    /// A drum chain's send to one of its rack's return chains, taken after
+    /// the chain's mixer (R6). Its parameters are
+    /// [`mixer::route`](crate::mixer::route).
+    ChainSend {
+        /// The drum chain.
+        chain: ChainId,
+        /// The return chain.
+        to: ChainId,
+    },
+    /// A drum rack's return chain's output into a return track (R8). Its
+    /// parameters are [`mixer::route`](crate::mixer::route).
+    ChainOutput(ChainId),
 }
 
 impl fmt::Display for NodeKey {
@@ -58,8 +100,16 @@ impl fmt::Display for NodeKey {
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
             Self::Input(track) => write!(f, "the input of {track}"),
+            Self::DeviceInput(track) => write!(f, "the interface input of {track}"),
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
+            Self::Cue(track) => write!(f, "the cue switch of {track}"),
+            Self::CueMixer => f.write_str("the mixer of the Cue Out"),
+            Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
+            Self::ChainZones(chain) => write!(f, "the zones of {chain}"),
+            Self::ChainNotes(chain) => write!(f, "the notes of {chain}"),
+            Self::ChainSend { chain, to } => write!(f, "the send from {chain} to {to}"),
+            Self::ChainOutput(chain) => write!(f, "the output of {chain}"),
         }
     }
 }
@@ -86,7 +136,7 @@ pub struct NodeEvent {
 }
 
 /// What a note event does (WP-2.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteKind {
     /// A key goes down.
     On,
@@ -94,6 +144,62 @@ pub enum NoteKind {
     Off,
     /// A voice stops at once, as a hi-hat's choke group stops it.
     Choke,
+    /// A per-note expression takes a new value (WP-2.17): the note the
+    /// event names bends, presses or slides while it sounds, and no other
+    /// note moves.
+    Expression {
+        /// Which expression.
+        expression: NoteExpression,
+        /// Its new value, in the expression's own units.
+        value: f32,
+    },
+    /// A control change (WP-5.44): the controller takes a new value for the
+    /// whole channel. The event's key, velocity and note ID mean nothing.
+    Control {
+        /// The controller number, from 0 to 127 (1 is the mod wheel).
+        controller: u8,
+        /// Its new value, from 0 to 1.
+        value: f32,
+    },
+    /// The channel's pitch bend (WP-5.44), as the pitch wheel sends it: the
+    /// channel's notes move by that fraction of the instrument's pitch-bend
+    /// range. The event's key, velocity and note ID mean nothing.
+    PitchBend {
+        /// From −1 to +1, 0 at the wheel's centre.
+        value: f32,
+    },
+    /// The channel's pressure (WP-5.44), one value for all its notes. The
+    /// event's key, velocity and note ID mean nothing.
+    ChannelPressure {
+        /// From 0 to 1.
+        value: f32,
+    },
+}
+
+impl NoteKind {
+    /// Whether it's a control change, pitch bend or channel pressure: a
+    /// message for the channel, not for a note.
+    #[must_use]
+    pub fn is_message(&self) -> bool {
+        matches!(
+            self,
+            Self::Control { .. } | Self::PitchBend { .. } | Self::ChannelPressure { .. }
+        )
+    }
+}
+
+/// A per-note expression an MPE controller changes, on the note its
+/// [`NoteEvent`] names; the note's own [`NoteEvent::note_id`] tells notes
+/// on one key apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NoteExpression {
+    /// Per-note pitch bend, from −1 to +1: the note moves by that fraction
+    /// of the instrument's pitch-bend range.
+    Bend,
+    /// Per-note pressure, from 0 to 1.
+    Pressure,
+    /// Per-note slide (MPE's timbre, controller 74), from 0 to 1.
+    Slide,
 }
 
 /// A note for a node, at a frame within the block (WP-2.6): what an
@@ -114,6 +220,70 @@ pub struct NoteEvent {
     /// The note's own ID, to tell notes on one key apart (MPE and CLAP's
     /// per-note expressions), or `None`.
     pub note_id: Option<u32>,
+}
+
+impl NoteEvent {
+    /// A channel message at `offset`, from a MIDI control change, channel
+    /// pressure or pitch bend; `None` for any other message.
+    #[must_use]
+    pub fn from_message(offset: u32, message: &MidiMessage) -> Option<Self> {
+        let unit = |byte: u8| f32::from(byte) / 127.0;
+        let kind = match message.status() & 0xF0 {
+            0xB0 => NoteKind::Control {
+                controller: message.data1(),
+                value: unit(message.data2()),
+            },
+            0xD0 => NoteKind::ChannelPressure {
+                value: unit(message.data1()),
+            },
+            0xE0 => {
+                let raw = i32::from(message.data1()) | i32::from(message.data2()) << 7;
+                NoteKind::PitchBend {
+                    value: if raw >= 8192 {
+                        (raw - 8192) as f32 / 8191.0
+                    } else {
+                        (raw - 8192) as f32 / 8192.0
+                    },
+                }
+            }
+            _ => return None,
+        };
+        Some(Self {
+            offset,
+            kind,
+            channel: message.channel()?,
+            key: 0,
+            velocity: 0.0,
+            note_id: None,
+        })
+    }
+
+    /// The MIDI message of a control change, channel pressure or pitch
+    /// bend; `None` for a note or an expression. The inverse of
+    /// [`from_message`](Self::from_message) for the values it makes.
+    #[must_use]
+    pub fn message(&self) -> Option<MidiMessage> {
+        let seven = |value: f32| (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+        let status = |high: u8| high | (self.channel & 0x0F);
+        match self.kind {
+            NoteKind::Control { controller, value } => {
+                MidiMessage::from_bytes(&[status(0xB0), controller & 0x7F, seven(value)])
+            }
+            NoteKind::ChannelPressure { value } => {
+                MidiMessage::from_bytes(&[status(0xD0), seven(value)])
+            }
+            NoteKind::PitchBend { value } => {
+                let value = value.clamp(-1.0, 1.0);
+                let raw = if value >= 0.0 {
+                    8192 + (value * 8191.0).round() as i32
+                } else {
+                    8192 + (value * 8192.0).round() as i32
+                };
+                MidiMessage::from_bytes(&[status(0xE0), (raw & 0x7F) as u8, (raw >> 7) as u8])
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Where a node writes the notes it sends on (WP-2.6), with room for a
@@ -143,6 +313,37 @@ impl NoteBuffer {
         } else {
             self.dropped += 1;
         }
+    }
+
+    /// Adds a note in order of offset, after the notes at its offset, but
+    /// before any note-on there if it ends a note, or drops and counts it if
+    /// the buffer is full. A channel message stays after the notes sent
+    /// before it. Never allocates.
+    pub fn insert(&mut self, note: NoteEvent) {
+        if self.notes.len() == self.notes.capacity() {
+            self.dropped += 1;
+            return;
+        }
+        let ons = |n: &NoteEvent| n.kind == NoteKind::On;
+        let mut at = self
+            .notes
+            .iter()
+            .rposition(|n| n.offset <= note.offset)
+            .map_or(0, |i| i + 1);
+        // Anything but a note-on, a channel message or a note's expression
+        // goes before the note-ons on its frame.
+        let expression = matches!(note.kind, NoteKind::Expression { .. });
+        if !(ons(&note) || note.kind.is_message() || expression) {
+            let frame = self.notes[..at]
+                .iter()
+                .rposition(|n| n.offset < note.offset)
+                .map_or(0, |i| i + 1);
+            at = self.notes[frame..at]
+                .iter()
+                .position(ons)
+                .map_or(at, |i| frame + i);
+        }
+        self.notes.insert(at, note);
     }
 
     /// The notes, in the order they were written.
@@ -223,6 +424,18 @@ pub trait Node: Send + 'static {
     /// effect; [`segments`] walks a block between them.
     fn process(&mut self, block: &mut Block<'_>);
 
+    /// Works out a modulator's output for a block part, before any track
+    /// runs (WP-5.10; the modulation spec, R20): the node writes its rows
+    /// into [`Control`]'s output and the rest of the program reads them as
+    /// it runs. A node that is a modulator takes its parameter changes
+    /// here, not in [`process`](Self::process), which then leaves the block
+    /// as it is. Returns whether the node is a modulator; the default is
+    /// no, and does nothing.
+    fn control(&mut self, ctl: &mut Control<'_>) -> bool {
+        let _ = ctl;
+        false
+    }
+
     /// Takes parameter changes while the node is switched off and doesn't
     /// process, as CLAP's `flush` does; their offsets mean nothing here. A
     /// node that keeps parameter values should apply them, or it comes back
@@ -237,10 +450,44 @@ pub trait Node: Send + 'static {
         drop(data);
     }
 
+    /// Ends every note the node started and still holds, by writing a
+    /// note-off for each at the block's first frame into `out`. The engine
+    /// calls it while the node is switched off, and on the first block after
+    /// the node was removed or moved in its chain, so no instrument further
+    /// down hangs on a note the node would have ended. The node forgets the
+    /// notes: calling it again writes nothing. The default writes nothing,
+    /// for a node that starts no notes.
+    fn release(&mut self, out: &mut NoteBuffer) {
+        let _ = out;
+    }
+
+    /// Whether the node played a clip in the block it last processed
+    /// (WP-2.13): a track's clip player says so while a clip of its track
+    /// sounds, so the track's input routes close under Monitor Auto
+    /// (the routing spec, R11). The default is no.
+    fn playing_clip(&self) -> bool {
+        false
+    }
+
+    /// Calls `report` for each parameter the node's last block played under
+    /// modulation (WP-5.9), with its base and the value it played, so the
+    /// engine can publish them. The default reports none.
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        let _ = report;
+    }
+
     /// How many frames the node delays its input by, for delay compensation
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// The reader of the node's display data, if it has a display (the
+    /// device framework spec, R26): the compiler asks once, when it makes
+    /// the node, and the shell reads the newest values the node publishes
+    /// after each block. The default is no display.
+    fn display(&mut self) -> Option<DisplayReader> {
+        None
     }
 }
 
@@ -261,6 +508,10 @@ pub struct Block<'a> {
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
+    /// What an external device brings back from the audio interface: the
+    /// input channels it is set to, planar with the block's channels and
+    /// stride (WP-5.34). `None` for every other device.
+    pub(crate) external: Option<&'a [f32]>,
     /// The notes the device plays in this block, in order of offset
     /// (WP-2.6). The engine sends none yet: MIDI clips and inputs reach
     /// devices with WP-2.1 and 2.2.
@@ -268,6 +519,15 @@ pub struct Block<'a> {
     /// Where the device writes the notes it sends on, if anything takes
     /// them (WP-2.6).
     pub(crate) notes_out: Option<&'a mut NoteBuffer>,
+    /// The Session slots playing on the tracks, with the frame each clip
+    /// launched on (WP-3.2). Empty for a block outside a program's run.
+    pub(crate) session: &'a [SessionPlayback],
+    /// What the modulators wrote for the frames of this block (WP-5.10).
+    pub(crate) modulation: Bus<'a>,
+    /// Where a modulator driven by audio, notes or MIDI writes its rows
+    /// while its track runs (WP-5.11): [`ROWS`] rows, `stride` apart. `None`
+    /// for any other node.
+    pub(crate) rows: Option<&'a mut [f32]>,
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -315,8 +575,12 @@ impl<'a> Block<'a> {
             sample_rate,
             tempo: &DEFAULT_TEMPO,
             sidechain: None,
+            external: None,
             notes: &[],
             notes_out: None,
+            session: &[],
+            modulation: Bus::EMPTY,
+            rows: None,
         }
     }
 
@@ -339,6 +603,41 @@ impl<'a> Block<'a> {
         }
     }
 
+    /// The same block with what the modulators wrote for its frames
+    /// (WP-5.10). For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_modulation(self, modulation: Bus<'a>) -> Self {
+        Self { modulation, ..self }
+    }
+
+    /// The same block with rows for a modulator driven by audio, notes or
+    /// MIDI to write ([`ROWS`] of them, `stride` apart). For tests of nodes
+    /// outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `rows` is too short.
+    #[must_use]
+    pub fn with_rows(self, rows: &'a mut [f32]) -> Self {
+        assert!(
+            rows.len() >= ROWS * self.stride,
+            "{ROWS} rows of {} don't fit {} values",
+            self.stride,
+            rows.len()
+        );
+        Self {
+            rows: Some(rows),
+            ..self
+        }
+    }
+
+    /// The same block with the Session slots playing on the tracks
+    /// (WP-3.2). For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_session(self, session: &'a [SessionPlayback]) -> Self {
+        Self { session, ..self }
+    }
+
     /// The same block with a sidechain signal: planar, with the block's
     /// channels and stride. For tests of nodes outside a program.
     ///
@@ -354,6 +653,25 @@ impl<'a> Block<'a> {
         );
         Self {
             sidechain: Some(sidechain),
+            ..self
+        }
+    }
+
+    /// The same block with what an external device brings back from the
+    /// interface: planar, with the block's channels and stride. For tests of
+    /// nodes outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `external` is too short.
+    #[must_use]
+    pub fn with_external(self, external: &'a [f32]) -> Self {
+        assert!(
+            self.channels == 0 || external.len() >= (self.channels - 1) * self.stride + self.frames,
+            "the external input is shorter than the block"
+        );
+        Self {
+            external: Some(external),
             ..self
         }
     }
@@ -382,6 +700,39 @@ impl<'a> Block<'a> {
     /// The transport as the block starts.
     pub fn transport(&self) -> TransportInfo {
         self.transport
+    }
+
+    /// What the modulators wrote for the frames of this block (WP-5.10):
+    /// the contributions and holds of the slots that map the node's
+    /// parameters.
+    pub fn modulation(&self) -> Bus<'a> {
+        self.modulation
+    }
+
+    /// Row `index` of the rows a modulator driven by audio, notes or MIDI
+    /// writes (WP-5.11), over the block's frames; empty for a node that
+    /// writes none.
+    pub fn row_mut(&mut self, index: usize) -> &mut [f32] {
+        let (stride, frames) = (self.stride, self.frames);
+        match self.rows.as_deref_mut() {
+            Some(rows) if index < ROWS => &mut rows[index * stride..index * stride + frames],
+            _ => &mut [],
+        }
+    }
+
+    /// The Session slots playing on the tracks, each with the song frame
+    /// its clip launched on (WP-3.2): a track's player sounds the slot clip
+    /// whose track is its own. Empty outside a program's run.
+    pub fn session(&self) -> &'a [SessionPlayback] {
+        self.session
+    }
+
+    /// The Session clip that sets `list`'s parameters in this block
+    /// (WP-3.12): the one playing on the list's track, or holding where it
+    /// stopped on a track that stays taken over.
+    #[must_use]
+    pub fn session_now(&self, list: &crate::AutomationList) -> crate::SessionNow<'a> {
+        list.now(self.session, self.tempo, self.sample_rate)
     }
 
     /// The song's tempo map, which places ticks on frames: the song
@@ -414,6 +765,15 @@ impl<'a> Block<'a> {
         }
     }
 
+    /// Sends a note on in order of offset, after the notes already at its
+    /// offset, but before any note-on there if it ends a note; otherwise as
+    /// [`send_note`](Self::send_note). Never allocates.
+    pub fn insert_note(&mut self, note: NoteEvent) {
+        if let Some(out) = self.notes_out.as_deref_mut() {
+            out.insert(note);
+        }
+    }
+
     /// One channel's samples.
     ///
     /// # Panics
@@ -441,6 +801,20 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.sidechain.map(|data| &data[start..start + self.frames])
+    }
+
+    /// What an external device brings back on one channel (WP-5.34): the
+    /// audio interface's input channels it is set to, a pair as left and
+    /// right and a single channel on both sides, silence where the interface
+    /// lacks the channel. `None` for a device that isn't an external one.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`channels`](Self::channels).
+    pub fn external(&self, index: usize) -> Option<&'a [f32]> {
+        assert!(index < self.channels, "channel {index} out of range");
+        let start = index * self.stride;
+        self.external.map(|data| &data[start..start + self.frames])
     }
 
     /// One channel's samples, writable.
@@ -573,6 +947,84 @@ mod tests {
         assert_eq!(all[1].events, &events[1..3]);
         assert_eq!(all[2].range, 63..64);
         assert_eq!(all[2].events, &events[3..]);
+    }
+
+    fn message(offset: u32, bytes: &[u8]) -> NoteEvent {
+        NoteEvent::from_message(offset, &MidiMessage::from_bytes(bytes).unwrap()).unwrap()
+    }
+
+    // Spec: device-framework R39
+    #[test]
+    fn channel_messages_round_trip_through_their_midi_bytes() {
+        for bytes in [
+            &[0xB2, 1, 64][..],
+            &[0xB0, 127, 0],
+            &[0xD5, 99],
+            &[0xE3, 0, 0],
+            &[0xE3, 0, 64],
+            &[0xE3, 127, 127],
+            &[0xE0, 1, 100],
+        ] {
+            let event = message(0, bytes);
+            assert!(event.kind.is_message());
+            assert_eq!(event.message().unwrap().bytes(), bytes, "{event:?}");
+        }
+        assert_eq!(
+            message(7, &[0xE1, 0, 64]).kind,
+            NoteKind::PitchBend { value: 0.0 }
+        );
+        assert_eq!(
+            message(7, &[0xE1, 127, 127]).kind,
+            NoteKind::PitchBend { value: 1.0 }
+        );
+        assert_eq!(
+            message(7, &[0xE1, 0, 0]).kind,
+            NoteKind::PitchBend { value: -1.0 }
+        );
+        assert_eq!(message(7, &[0xB4, 1, 127]).channel, 4);
+        // Notes, polyphonic pressure and program changes are not channel
+        // messages in this sense.
+        for bytes in [&[0x90, 60, 100][..], &[0xA0, 60, 10], &[0xC0, 5]] {
+            let message = MidiMessage::from_bytes(bytes).unwrap();
+            assert_eq!(NoteEvent::from_message(0, &message), None);
+        }
+    }
+
+    // Spec: device-framework R39
+    #[test]
+    fn a_message_keeps_its_place_among_the_notes_on_its_frame() {
+        let on = NoteEvent {
+            offset: 4,
+            kind: NoteKind::On,
+            channel: 0,
+            key: 60,
+            velocity: 1.0,
+            note_id: None,
+        };
+        let off = NoteEvent {
+            kind: NoteKind::Off,
+            key: 62,
+            ..on
+        };
+        let bend = message(4, &[0xE0, 0, 100]);
+        let control = message(4, &[0xB0, 1, 10]);
+        let mut buffer = NoteBuffer::with_capacity(8);
+        // A note-off goes before a note-on on its frame; messages go after
+        // whatever was sent before them, a note-on included.
+        for event in [control, on, bend, off, message(2, &[0xD0, 9])] {
+            buffer.insert(event);
+        }
+        let order: Vec<_> = buffer.notes().iter().map(|n| (n.offset, n.kind)).collect();
+        assert_eq!(
+            order,
+            [
+                (2, NoteKind::ChannelPressure { value: 9.0 / 127.0 }),
+                (4, control.kind),
+                (4, off.kind),
+                (4, on.kind),
+                (4, bend.kind),
+            ]
+        );
     }
 
     #[test]

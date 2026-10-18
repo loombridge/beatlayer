@@ -14,8 +14,8 @@ use std::f32::consts::FRAC_PI_2;
 
 use bl_model::DeviceId;
 use bl_shell::device_commands::{
-    SHOW_SIDECHAIN, SIDECHAIN_SECTION_WIDTH, SIDECHAIN_STRIP_WIDTH, SidechainSection,
-    TITLE_BAR_HEIGHT,
+    MidiSidechainSection, SHOW_SIDECHAIN, SIDECHAIN_SECTION_WIDTH, SIDECHAIN_STRIP_WIDTH,
+    SidechainSection, TITLE_BAR_HEIGHT,
 };
 use bl_shell::routing::{self, Chooser, Entry};
 use bl_shell::{Area, Invocation, Shell};
@@ -91,11 +91,11 @@ pub fn strip_buttons(frame: Rect) -> [Rect; 2] {
     [toggle, listen]
 }
 
-fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
+pub(crate) fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
-fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
+pub(crate) fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
     if response.has_focus() && crate::focus::outlined(ui.ctx()) {
         ui.painter().rect_stroke(
             rect.expand(1.5),
@@ -107,7 +107,7 @@ fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
 }
 
 /// What a click, or Enter with the focus on it, does to a button.
-fn pressed(ui: &Ui, response: &egui::Response) -> bool {
+pub(crate) fn pressed(ui: &Ui, response: &egui::Response) -> bool {
     response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
 }
 
@@ -315,11 +315,91 @@ pub fn draw(
     );
 }
 
+/// Draws a device's MIDI sidechain strip and, while shown, its section, in
+/// its frame at `frame` (WP-5.27; the routing spec, R34): the strip as a
+/// sidechain's, with the toggle alone, and the section holding the Source
+/// label and the MIDI source chooser. The rest of the device's MIDI
+/// sidechain is its parameters, in the panel's expanded part.
+pub fn draw_midi(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    device: DeviceId,
+    section: &MidiSidechainSection,
+    frame: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let strip = strip_rect(frame);
+    ui.painter_at(strip).rect_filled(strip, 0.0, c.control.0);
+    let [toggle, _] = strip_buttons(frame);
+    let id = control_id(device, "toggle");
+    let response = ui.interact(toggle, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, Area::Detail, None);
+    if pressed(ui, &response) {
+        invoke(
+            events,
+            SHOW_SIDECHAIN,
+            json!({ "device": device, "shown": !section.shown }),
+        );
+    }
+    ui.painter_at(toggle.expand(2.0)).rect(
+        toggle,
+        theme.sizes.corner,
+        if section.shown {
+            c.text_dim.0
+        } else {
+            c.window.0
+        },
+        Stroke::new(1.0, c.separator.0),
+        StrokeKind::Inside,
+    );
+    focus_ring(ui, theme, toggle, &response);
+    describe(
+        ui,
+        id,
+        Role::Button,
+        "Show/Hide Sidechain",
+        on_off(section.shown),
+    );
+
+    // "Sidechain" written up the strip.
+    let painter = ui.painter_at(strip);
+    let galley = painter.layout_no_wrap("Sidechain".to_owned(), theme.small_font(), c.text_dim.0);
+    let at = pos2(
+        strip.center().x - galley.size().y / 2.0,
+        (toggle.bottom() + 6.0 + galley.size().x).min(strip.bottom()),
+    );
+    painter.add(egui::epaint::TextShape::new(at, galley, c.text_dim.0).with_angle(-FRAC_PI_2));
+
+    if !section.shown {
+        return;
+    }
+    let [label, source, ..] = rows(frame);
+    ui.painter_at(label).text(
+        label.left_center(),
+        Align2::LEFT_CENTER,
+        "MIDI Source",
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    if let Some(chooser) = routing::midi_sidechain_source(shell.editor().document(), device) {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "midi-source"),
+            source,
+            &chooser,
+            events,
+        );
+    }
+}
+
 fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 
-fn describe(ui: &Ui, id: Id, role: Role, label: &str, value: &str) {
+pub(crate) fn describe(ui: &Ui, id: Id, role: Role, label: &str, value: &str) {
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(role);
         node.set_label(label.to_owned());
@@ -485,7 +565,7 @@ fn number_box(ui: &mut Ui, theme: &Theme, b: NumberBox, rect: Rect, events: &mut
 
 /// A chooser: a dark box with the choice and a ▼, whose list a click opens
 /// (observed); choosing an entry runs its command.
-fn draw_chooser(
+pub(crate) fn draw_chooser(
     ui: &mut Ui,
     theme: &Theme,
     id: Id,

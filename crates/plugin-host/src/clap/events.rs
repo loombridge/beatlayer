@@ -3,7 +3,9 @@
 //! is dropped and counted (real-time rule 4), never allocated for.
 
 use bl_engine::{NoteEvent, NoteKind};
-use clack_host::events::event_types::{NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
+use clack_host::events::event_types::{
+    MidiEvent, NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
+};
 use clack_host::events::io::{InputEventBuffer, OutputEventBuffer, TryPushError};
 use clack_host::events::spaces::CoreEventSpace;
 use clack_host::events::{Match, Pckn, UnknownEvent};
@@ -16,9 +18,11 @@ pub(crate) const EVENT_CAPACITY: usize = 1024;
 #[derive(Clone, Copy)]
 enum In {
     Param(ParamValueEvent),
+    Mod(ParamModEvent),
     On(NoteOnEvent),
     Off(NoteOffEvent),
     Choke(NoteChokeEvent),
+    Midi(MidiEvent),
 }
 
 impl In {
@@ -29,9 +33,11 @@ impl In {
     fn as_unknown(&self) -> &UnknownEvent {
         match self {
             Self::Param(e) => e.as_ref(),
+            Self::Mod(e) => e.as_ref(),
             Self::On(e) => e.as_ref(),
             Self::Off(e) => e.as_ref(),
             Self::Choke(e) => e.as_ref(),
+            Self::Midi(e) => e.as_ref(),
         }
     }
 }
@@ -74,8 +80,28 @@ impl InputList {
         }
     }
 
+    /// Adds a modulation of a parameter marked modulatable: its `amount`, in
+    /// the parameter's units, on top of its value, for every note and
+    /// channel.
+    pub(crate) fn param_mod(&mut self, time: u32, id: u32, amount: f64) {
+        if let Some(id) = ClapId::from_raw(id) {
+            self.push(In::Mod(ParamModEvent::new(
+                time,
+                id,
+                Pckn::match_all(),
+                amount,
+            )));
+        }
+    }
+
     /// Adds a note.
     pub(crate) fn note(&mut self, note: &NoteEvent) {
+        // Spec: clap-hosting R20. A channel message goes in as the MIDI
+        // event it is.
+        if let Some(message) = note.message() {
+            self.push(In::Midi(MidiEvent::new(note.offset, 0, message.padded())));
+            return;
+        }
         let pckn = Pckn::new(
             0u16,
             u16::from(note.channel.min(15)),
@@ -87,6 +113,12 @@ impl InputList {
             NoteKind::On => In::On(NoteOnEvent::new(note.offset, pckn, velocity)),
             NoteKind::Off => In::Off(NoteOffEvent::new(note.offset, pckn, velocity)),
             NoteKind::Choke => In::Choke(NoteChokeEvent::new(note.offset, pckn)),
+            // Per-note expressions wait for MPE hosting (the parity
+            // matrix's note): a plug-in's note port takes them then.
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => return,
         });
     }
 

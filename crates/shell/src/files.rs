@@ -13,9 +13,14 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use bl_model::{ContentHash, DeviceWindows, Editor, TrackId, TrackKind, registry};
+use bl_core::id::IdAllocator;
+use bl_model::{
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
+    MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, registry,
+};
 use bl_project::{
-    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
+    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
+    SetInfo, is_set,
 };
 use serde_json::json;
 
@@ -76,6 +81,13 @@ pub trait SetStore {
         Vec::new()
     }
 
+    /// Tells the store where an unsaved set's processed files are written
+    /// (the Temporary Folder, WP-4.20), so the first save can move them into
+    /// the project. A store that keeps no media table ignores it.
+    fn set_temporary_folder(&mut self, folder: PathBuf) {
+        let _ = folder;
+    }
+
     /// Gives the store where floating devices' windows sit (WP-2.5b), for
     /// the next save to write beside the document. A store that keeps no
     /// window frames ignores it.
@@ -86,6 +98,57 @@ pub trait SetStore {
     /// Where the open set's floating devices' windows sit, as it was saved.
     fn windows(&self) -> DeviceWindows {
         DeviceWindows::new()
+    }
+
+    /// Gives the store which views each rack shows (WP-5.2), for the next
+    /// save to write beside the document. A store that keeps no rack views
+    /// ignores it.
+    fn set_rack_views(&mut self, views: RackViewMap) {
+        let _ = views;
+    }
+
+    /// Which views each of the open set's racks shows, as it was saved.
+    fn rack_views(&self) -> RackViewMap {
+        RackViewMap::new()
+    }
+
+    /// Gives the store what each multisampler's views show (WP-5.13), for
+    /// the next save to write beside the document. A store that keeps none
+    /// ignores it.
+    fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        let _ = views;
+    }
+
+    /// What each of the open set's multisamplers' views showed, as it was
+    /// saved.
+    fn multisampler_views(&self) -> MultisamplerViews {
+        MultisamplerViews::new()
+    }
+
+    /// Gives the store which clips' MIDI Note Editors are folded (WP-2.3),
+    /// for the next save to write beside the document. A store that keeps
+    /// no folds ignores it.
+    fn set_folds(&mut self, folds: ClipFolds) {
+        let _ = folds;
+    }
+
+    /// Which of the open set's clips' MIDI Note Editors are folded, as it
+    /// was saved.
+    fn folds(&self) -> ClipFolds {
+        ClipFolds::new()
+    }
+
+    /// Gives the store the global launch quantisation and its switch
+    /// (WP-3.2), for the next save to write beside the document. A store
+    /// that keeps no launch settings ignores it.
+    fn set_launch(&mut self, launch: LaunchSettings) {
+        let _ = launch;
+    }
+
+    /// The open set's global launch quantisation and its switch, as it was
+    /// saved.
+    fn launch(&self) -> LaunchSettings {
+        LaunchSettings::default()
     }
 
     /// Writes `editor` to `path` as a copy without making it the open set:
@@ -135,9 +198,24 @@ pub struct ProjectFiles {
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
     added: BTreeMap<ContentHash, (PathBuf, u64)>,
+    /// What each multisampler's views show (WP-5.13): the open set's, then
+    /// the shell's for the next save.
+    multisamplers: MultisamplerViews,
+    /// The Temporary Folder, where a set never saved has its processed
+    /// files (WP-4.20).
+    temporary: Option<PathBuf>,
     /// Floating devices' window frames (WP-2.5b): the open set's, then the
     /// shell's for the next save.
     windows: DeviceWindows,
+    /// The views racks show (WP-5.2): the open set's, then the shell's for
+    /// the next save.
+    rack_views: RackViewMap,
+    /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
+    /// for the next save.
+    folds: ClipFolds,
+    /// The global launch quantisation and its switch (WP-3.2): the open
+    /// set's, then the shell's for the next save.
+    launch: LaunchSettings,
 }
 
 impl ProjectFiles {
@@ -157,12 +235,19 @@ impl ProjectFiles {
 
 impl SetStore for ProjectFiles {
     fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String> {
-        let (set, project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        let (set, mut project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        if set.info().is_some_and(SetInfo::before_relative_modulation) {
+            bl_devices::relative_clip_envelopes(&mut project.document);
+        }
         let editor = project.editor();
         let opened = set.path().to_owned();
         self.set = Some(set);
         self.media = project.media;
         self.windows = project.windows;
+        self.rack_views = project.rack_views;
+        self.multisamplers = project.multisamplers;
+        self.folds = project.folds;
+        self.launch = project.launch;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -177,6 +262,13 @@ impl SetStore for ProjectFiles {
         editor: &Editor,
     ) -> Result<(PathBuf, Vec<String>), String> {
         let placement = place_set(chosen)?;
+        // Spec: audio-clip-editing R5. A set never saved has its processed
+        // files in the Temporary Folder; they move into the new project.
+        let moved = if self.set.is_none() {
+            self.move_processed(ProjectFolder::of_set(&placement.path).root())?
+        } else {
+            Vec::new()
+        };
         let mut media = self.media.clone();
         let note = match &self.set {
             Some(set) => repoint_media(
@@ -192,6 +284,7 @@ impl SetStore for ProjectFiles {
                 Ok((placement.path, warnings))
             }
             Err(error) => {
+                self.move_back(moved);
                 if let Some(folder) = &placement.new_folder {
                     // Spec: app-shell R20. Only an empty folder can go, so
                     // this never removes anything but what the save made.
@@ -206,7 +299,19 @@ impl SetStore for ProjectFiles {
         self.set = None;
         self.media = Media::new();
         self.windows = DeviceWindows::new();
+        self.rack_views = RackViewMap::new();
+        self.multisamplers = MultisamplerViews::new();
+        self.folds = ClipFolds::new();
+        self.launch = LaunchSettings::default();
         self.added.clear();
+    }
+
+    fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        self.multisamplers = views;
+    }
+
+    fn multisampler_views(&self) -> MultisamplerViews {
+        self.multisamplers.clone()
     }
 
     fn set_windows(&mut self, windows: DeviceWindows) {
@@ -217,8 +322,36 @@ impl SetStore for ProjectFiles {
         self.windows.clone()
     }
 
+    fn set_rack_views(&mut self, views: RackViewMap) {
+        self.rack_views = views;
+    }
+
+    fn rack_views(&self) -> RackViewMap {
+        self.rack_views.clone()
+    }
+
+    fn set_folds(&mut self, folds: ClipFolds) {
+        self.folds = folds;
+    }
+
+    fn folds(&self) -> ClipFolds {
+        self.folds.clone()
+    }
+
+    fn set_launch(&mut self, launch: LaunchSettings) {
+        self.launch = launch;
+    }
+
+    fn launch(&self) -> LaunchSettings {
+        self.launch
+    }
+
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
         self.added.insert(hash, (path.to_path_buf(), size));
+    }
+
+    fn set_temporary_folder(&mut self, folder: PathBuf) {
+        self.temporary = Some(folder);
     }
 
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
@@ -259,7 +392,12 @@ impl SetStore for ProjectFiles {
         {
             warnings.push(note);
         }
-        let project = Project::from_editor(editor, media).with_windows(&self.windows);
+        let project = Project::from_editor(editor, media)
+            .with_windows(&self.windows)
+            .with_rack_views(&self.rack_views)
+            .with_multisamplers(&self.multisamplers)
+            .with_folds(&self.folds)
+            .with_launch(self.launch);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -351,6 +489,58 @@ impl SetStore for ProjectFiles {
 }
 
 impl ProjectFiles {
+    /// Moves each file the set wrote into the Temporary Folder into
+    /// `Samples/Processed/<kind>/` of the project folder `project`, under a
+    /// free name, and points `added` at it. Returns where each came from, to
+    /// put back if the save fails.
+    fn move_processed(&mut self, project: &Path) -> Result<Vec<(ContentHash, PathBuf)>, String> {
+        let Some(temporary) = self.temporary.clone() else {
+            return Ok(Vec::new());
+        };
+        let project = ProjectFolder::new(project);
+        let mut moved = Vec::new();
+        for (hash, (path, size)) in self.added.clone() {
+            let Some(rest) = path.strip_prefix(&temporary).ok() else {
+                continue;
+            };
+            // `<kind>/<name>`, as the shell writes them.
+            let mut parts = rest.components();
+            let (Some(Component::Normal(kind)), Some(Component::Normal(name)), None) =
+                (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let folder = project.processed(&kind.to_string_lossy());
+            let placed = std::fs::create_dir_all(&folder)
+                .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
+                .and_then(|()| free_import(&folder, &name.to_string_lossy()))
+                .and_then(|destination| move_file(&path, &destination).map(|()| destination));
+            match placed {
+                Ok(destination) => {
+                    self.added.insert(hash, (destination, size));
+                    moved.push((hash, path));
+                }
+                Err(error) => {
+                    self.move_back(moved);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(moved)
+    }
+
+    /// Puts files [`ProjectFiles::move_processed`] moved back where they
+    /// were, after a save that failed.
+    fn move_back(&mut self, moved: Vec<(ContentHash, PathBuf)>) {
+        for (hash, from) in moved {
+            if let Some((now, size)) = self.added.get(&hash).cloned()
+                && move_file(&now, &from).is_ok()
+            {
+                self.added.insert(hash, (from, size));
+            }
+        }
+    }
+
     /// The open set's project folder, the folder its file is in, if it has
     /// a file.
     fn folder(&self) -> Option<PathBuf> {
@@ -367,7 +557,12 @@ impl ProjectFiles {
         mut media: Media,
     ) -> Result<Vec<String>, String> {
         let warnings = self.add_media_to(&mut media, path);
-        let project = Project::from_editor(editor, media).with_windows(&self.windows);
+        let project = Project::from_editor(editor, media)
+            .with_windows(&self.windows)
+            .with_rack_views(&self.rack_views)
+            .with_multisamplers(&self.multisamplers)
+            .with_folds(&self.folds)
+            .with_launch(self.launch);
         let mut set = self
             .set
             .clone()
@@ -522,7 +717,7 @@ const MOST_IMPORT_COPIES: u32 = 1_000;
 /// A free path in `folder` for a copy of a file called `name`: the name
 /// itself, or `<stem> 2.<ext>` and so on when something already has it, so
 /// collecting never writes over a file (WP-2.25).
-fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
     let path = Path::new(name);
     let stem = path
         .file_stem()
@@ -553,6 +748,15 @@ fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
         "every name for {name} up to \"{stem} {MOST_IMPORT_COPIES}{extension}\" is taken in {}",
         folder.display()
     ))
+}
+
+/// Moves a file, copying it when `from` and `to` are on different volumes.
+fn move_file(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::rename(from, to).or_else(|_| {
+        std::fs::copy(from, to)
+            .and_then(|_| std::fs::remove_file(from))
+            .map_err(|e| format!("couldn't move {} to {}: {e}", from.display(), to.display()))
+    })
 }
 
 /// Re-points the media table's paths, relative to the project folder
@@ -626,9 +830,15 @@ fn lexical(path: &Path) -> PathBuf {
 /// return tracks, as a new set in Live has (layout.md, "Default state"),
 /// with an empty undo history. The shell shows it in the Arrangement View
 /// (IMP-04, D20).
+///
+/// The tracks come first and the default scenes after them, so the set's
+/// track IDs are the ones they have always been (the first track is 2); a
+/// new, empty set takes its scenes first instead ([`Editor::new`]).
 #[must_use]
 pub fn factory_default_set() -> Editor {
-    let mut editor = Editor::new();
+    let mut ids = IdAllocator::new();
+    let main = TrackId(ids.allocate());
+    let mut editor = Editor::from_document(Document::new(main, []), ids);
     let tracks = [
         (TrackKind::Midi, "1 MIDI"),
         (TrackKind::Midi, "2 MIDI"),
@@ -654,6 +864,15 @@ pub fn factory_default_set() -> Editor {
         )
         .expect("the factory default set's tracks are valid");
     }
+    for index in 0..DEFAULT_SCENE_COUNT {
+        let id: SceneId = editor.new_id();
+        registry::run(
+            &mut editor,
+            "scene.create",
+            json!({ "id": id, "index": index }),
+        )
+        .expect("the factory default set's scenes are valid");
+    }
     editor
         .clear_history()
         .expect("no transaction is open while building the default set");
@@ -667,7 +886,12 @@ pub fn factory_default_set() -> Editor {
 #[must_use]
 pub fn new_set_from(path: Option<&Path>) -> Editor {
     path.and_then(|path| SetFile::open(path).ok())
-        .map(|(_, project)| project.editor())
+        .map(|(set, mut project)| {
+            if set.info().is_some_and(SetInfo::before_relative_modulation) {
+                bl_devices::relative_clip_envelopes(&mut project.document);
+            }
+            project.editor()
+        })
         .unwrap_or_else(factory_default_set)
 }
 
@@ -685,6 +909,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]);
         assert_eq!(doc.returns().len(), 2);
+        assert_eq!(doc.scene_count(), DEFAULT_SCENE_COUNT);
         assert!(!editor.can_undo());
     }
 

@@ -14,14 +14,22 @@
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
 //!
+//! [`stems`] separates a mix into drums, bass, others, and vocals with a
+//! Demucs network (WP-9.1).
+//!
+//! [`cache`] keeps what is found in each audio file, by the file's content
+//! hash (WP-4.3).
+//!
 //! Analysis runs offline, on whatever thread calls it, never on an audio
 //! thread: it allocates freely.
 
+pub mod cache;
 pub mod key;
 pub mod levels;
 pub mod loudness;
 pub mod onsets;
 pub mod spectrum;
+pub mod stems;
 pub mod tempo;
 
 mod stft;

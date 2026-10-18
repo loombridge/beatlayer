@@ -33,12 +33,17 @@
 //! [`Agent::set_engine_attached`](crate::Agent::set_engine_attached).
 //! Without one (`bl-cli mcp` has none), the playback commands are refused,
 //! saying why, and scheduled commands wait.
+//!
+//! The Session View's launch and stop commands (WP-3.2) act in the engine
+//! too: [`send_session`] queues one as an [`EngineMessage::Session`], and a
+//! launch or a stop lands on the launch quantisation grid the same way the
+//! UI's do.
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
 use bl_engine::{
-    Action, EngineState, NodeKey, ParamValue, Report, ScheduledCommand, TransportCommand, mixer,
-    transport,
+    Action, EngineState, NodeKey, ParamValue, Report, ScheduledCommand, SessionCommand,
+    TransportCommand, mixer, session, transport,
 };
 use bl_model::registry as model;
 use bl_shell::Shell;
@@ -65,6 +70,10 @@ pub enum EngineMessage {
     /// with `Sender::transport` or `Engine::transport`, as the UI's
     /// transport commands are sent).
     Transport(TransportCommand),
+    /// Run this Session View command at the start of the next block (send
+    /// it with `Sender::session`), landing on the launch quantisation grid
+    /// (WP-3.2).
+    Session(SessionCommand),
     /// Schedule this command (send it with `Sender::schedule`).
     Schedule(ScheduledCommand),
     /// Cancel the scheduled command with this ID (`Sender::cancel`).
@@ -331,6 +340,22 @@ pub(crate) fn send_transport(ctx: &mut Ctx<'_>, id: &str, args: Value) -> Result
     }
     let command = transport::command_from_args(id, args).map_err(|error| error.to_string())?;
     ctx.state.outbox.push(EngineMessage::Transport(command));
+    Ok(())
+}
+
+/// Sends one of the Session View's launch or stop commands to the engine,
+/// through the host, which puts it on the engine's queue as the UI's
+/// launching goes: the agent never touches the audio thread.
+pub(crate) fn send_session(ctx: &mut Ctx<'_>, id: &str, args: Value) -> Result<(), String> {
+    if !ctx.state.engine_attached {
+        return Err(format!(
+            "nothing plays the song here: no engine is attached to this agent server \
+             (`bl-cli mcp` runs without one), so `{id}` can't launch or stop a clip. Attach an \
+             engine, or run the command where the set plays"
+        ));
+    }
+    let command = session::command_from_args(id, args).map_err(|error| error.to_string())?;
+    ctx.state.outbox.push(EngineMessage::Session(command));
     Ok(())
 }
 

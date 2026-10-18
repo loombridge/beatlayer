@@ -1,0 +1,72 @@
+# Session automation: recording control moves into Session clips
+
+- **Status:** partial
+- **Work packages:** WP-3.12
+- **Parity-matrix row:** Session automation recording
+- **Checked against:** the Live 12 reference manual, chapters 26 "Automation and Editing Envelopes" and 27 "Clip Envelopes", read 17 October 2026, and an observation of Live 12.4.3 on 17 October 2026
+
+## The behaviour
+
+A control moved while a Session recording runs, with Automation Arm on, is recorded into the Session clip that is being recorded or overdubbed, as an *Automation* envelope: an envelope that sets the parameter's value, as a track's Arrangement envelope does, where a Modulation envelope ([clip-envelopes](clip-envelopes.md)) only moves it. The envelope lives in the clip, on the clip's own timeline, and is linked to the clip's loop. While the clip plays, its Automation envelope sets the parameter and the track's Arrangement automation for that parameter has no effect; when the clip stops, the parameter keeps the last value the clip gave it until Back to Arrangement; and a control moved by hand takes the parameter back from the clip until the clip is launched again.
+
+This spec covers recording the moves, the Automation envelope kind, what plays while the clip plays and after it stops, the hand move, and Record Session automation in. It leaves to other specs: the Session recording of notes and audio ([session-recording](session-recording.md)), Arrangement automation ([automation](automation.md)), Modulation envelopes ([clip-envelopes](clip-envelopes.md)), and copying a Session performance into the Arrangement ([session-to-arrangement](session-to-arrangement.md)).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapters 26 and 27, the sections on recording automation in the Session View, automation arm, Session clip envelopes and the Automation and Modulation envelope kinds | With Automation Arm on, moving a mixer or device control while a Session recording runs saves the moves as automation in the Session clip of the armed track; with the Record Session automation in setting at All Tracks, in every playing Session clip. A Session clip's envelope is either an Automation envelope, which sets the value, or a Modulation envelope, which moves it; an Arrangement clip has Modulation envelopes only. Moving a control while no recording runs overrides the envelope, and launching the clip again takes the control back to it. |
+| S2 | Observation | Live 12.4.3 on macOS, 17 October 2026, 120 BPM, global quantisation one bar, Automation Arm on, a Utility device's Gain as the parameter | A track had an Arrangement envelope on Gain and a Session clip had an Automation envelope on Gain. Launching the clip handed Gain to the clip's envelope, and the Arrangement's value had no effect: Back to Arrangement lit, and Re-Enable Automation stayed off. Stopping the clip with its track's stop button left Gain at the clip's last value, and it stayed there until Back to Arrangement, which gave it the Arrangement's value. A hand move while the Arrangement's envelope ran lit Re-Enable Automation; launching the clip then gave Gain back to the clip's envelope, and Re-Enable Automation went out. A hand move while the clip played left Gain at the hand's value and lit Re-Enable Automation; stopping the clip left Gain at the hand's value and put Re-Enable Automation out. |
+| S3 | Observation | Live 12.4.3 on macOS, 17 October 2026, an armed audio track with slot 1's clip playing, and a MIDI track | Session Record made no new audio clip, whichever slot was selected; the Gain move went into the playing clip as an Automation envelope, and the Undo History named the step "Overdub Record". A second take into the same clip replaced the envelope from the move to the end of the loop. A MIDI track with a playing clip did the same. Clicking slot 2's own record button while slot 1 played recorded a new clip in slot 2, stopped slot 1, and put the move only into the new clip; the step was named "Slot Recording". |
+| S4 | Observation | Live 12.4.3 on macOS, 17 October 2026, the same takes | A recorded envelope began at the parameter's value when the take began and stepped to the new value at the move. Linked was on in the recorded envelopes, for the overdub and for the new slot recording alike. The Automation Arm button stayed lit and unchanged through the takes. |
+| S5 | Spec | [automation](automation.md) R5, R17; [clip-envelopes](clip-envelopes.md) R1, R2, R6; [session-view](session-view.md) R20, R23; [session-recording](session-recording.md) R1, R8 | A hand move turns an envelope off; a recorded touch replaces an envelope from its first move to its release and the old envelope resumes; a clip envelope is linked or not, and saves with the set; a launched Session clip takes its track over until Back to Arrangement; a MIDI track's playing clip is overdubbed by Session Record. |
+| S6 | Decision | Built this way, 17 October 2026 | The cases the observations leave open (see "To observe in Live"): audio clips' Automation envelopes are recorded nowhere and play nowhere; a stopped clip's value is held only until another clip launches on the track; a launch by a follow action doesn't give the clip its envelopes back; the held value is what the engine plays, not what the control shows. |
+
+## Rules
+
+- **R1.** While a Session recording runs and Automation Arm is on, a move of a control that automation can drive (a track's Volume, Pan, Track Activator or send level, or a device's parameter), by any command, is noted for the MIDI clip the recording writes on that control's track (R2), at its place in the clip's own time: for a clip the recording makes, the ticks since the take's first frame; for a clip that plays, the contents position the playhead has reached in the clip's loop (its Start marker to the loop brace's end, then round the brace). With Automation Arm off, nothing is noted. A control moved on a track whose clip isn't written (R5) is not noted. (S1, S3, S4)
+- **R2.** The clip that gets a track's moves is the one being recorded: a clip the recording makes in a slot (Session Record on an armed MIDI track with no clip playing, or a slot's own record button, which also stops the clip that played on its track), or the MIDI clip that plays on an armed MIDI track Session Record overdubs, in which case no new clip is made. A track whose recording makes no clip, such as an audio track, writes nothing. (S3)
+- **R3.** When the take ends, the noted moves are written into the clip's Automation envelope for the control, one breakpoint per move, in the recording's undo step. A clip with no such envelope gets one, linked: it begins at the value the control had at its first move, holds it until one tick before that move, and steps to the new value there. A control not released holds its last value for the rest of the loop pass (a first take is a latch); a control released by the end of a drag hands the envelope back to what it was there, as [automation](automation.md) R17 says. (S1, S4, S5)
+- **R4.** A later take over a clip that has the envelope replaces its breakpoints from the take's first move on the control to the release, or to the end of the loop pass where it isn't released, and leaves the rest. Every envelope written drives its parameter again. (S3, S5)
+- **R5.** Record Session automation in (`settings.set_record_session_automation_in`; Settings ▸ Record, Warp & Launch) chooses whose clips take the moves: `armed_tracks`, the default and Live's, the clips R2 names; `all_tracks`, the MIDI clip that plays on any track as well. The choice is a preference, not part of the set, and `settings.state` reads it back as `record_session_automation_in`. (S1)
+- **R6.** While a Session clip plays on a track it has taken over, an enabled Automation envelope of the clip sets its parameter: on each frame the parameter plays the envelope's value, in the parameter's own units, and the track's Arrangement automation for it has no effect. A parameter the clip has no Automation envelope for plays as it did. (S2)
+- **R7.** When the clip stops and the track stays taken over, the parameter holds the value the envelope gave it on the clip's last frame, over the Arrangement's automation and the control, until Back to Arrangement gives the track back and the Arrangement's value plays again. Launching another clip on the track that has no envelope for the parameter ends the hold. (S2, S6)
+- **R8.** The envelope's value on a frame follows the clip's own timeline through the tempo map: a linked envelope plays what the clip's contents play (from the Start marker to the loop brace's end, then round the brace, a clip that doesn't loop holding its last position), an unlinked one plays once from the clip's launch and holds its last value. The value depends on the frame alone, so a render is the same in any block size, and the node's delay holds it back as it does an Arrangement envelope's ([automation](automation.md) R4). Reading allocates nothing. (S5)
+- **R9.** Moving a control by hand turns off the Automation envelopes of the track's Session clips for it, as one undo step with the move: the control's value plays, and Re-Enable Automation lights. `automation.re_enable` and `automation.re_enable_for` turn the envelopes on again; so does launching the clip, or a scene that holds it, with `session.launch` or `session.launch_scene`, as one undo step when any was off. (S2, S5)
+- **R10.** A clip holds one envelope of each kind for a parameter: the six `clip.*envelope*` commands take `kind` (`modulation` by default, or `automation`), and the envelope's `enabled` flag is on unless R9 turned it off. An Automation envelope belongs to a Session clip: an Arrangement clip is refused one, and a set that holds one there doesn't load. A set saves the kind and the flag, and a set saved before them loads with Modulation envelopes, all on. An Arrangement clip's Modulation envelopes play as before, and a Session clip's Automation envelopes don't modulate. (S1, S5)
+- **R11.** A Session recording that overdubs a playing clip is one undo step named `Overdub Record`, and one made from a slot's own record button is named `Slot Recording`, as Live names them; the move and the envelope it makes are part of the step. (S3)
+
+## To observe in Live
+
+- Automation envelopes in audio clips, and Session Record on an armed audio track whose clip plays: Live makes no new audio clip there (S3), where [session-recording](session-recording.md) R1 records one.
+- Whether the held value (R7) outlasts a launch of a clip that has no envelope for the parameter, and what the control shows while it holds.
+- Whether a launch by a follow action gives a clip its envelopes back after a hand move (R9).
+- Whether a mouse touch and a controller's move end differently in a later take (the manual says touch and latch), and what a drag released mid-take writes in a Session clip.
+- Which tracks All Tracks (R5) records when no track is armed, and whether a scene launch with Start Recording on Scene Launch records them.
+- Whether launching a clip also puts out the Arrangement's override for the parameters it sets (S2 shows Re-Enable Automation going out).
+- What an unlinked recorded envelope looks like, and whether Linked can be off in a recording.
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/shell/tests/session_automation.rs`, `a_move_during_a_slot_recording_is_a_step_in_the_new_clips_envelope`, `with_automation_arm_off_nothing_is_recorded` | headless |
+| R2 | `crates/shell/tests/session_automation.rs`, `a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own` | headless |
+| R3 | `crates/shell/tests/session_automation.rs`, `a_move_during_a_slot_recording_is_a_step_in_the_new_clips_envelope` | headless |
+| R4 | `crates/shell/tests/session_automation.rs`, `a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own` | headless |
+| R5 | `crates/shell/tests/session_automation.rs`, `record_session_automation_in_chooses_which_tracks_write` | headless |
+| R6 | `crates/engine/tests/session_automation.rs`, `a_playing_clip_sets_the_parameter_over_the_arrangement_and_a_stop_holds_it`; `crates/devices/tests/session_automation.rs`, `a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops` | frame by frame |
+| R7 | `crates/engine/tests/session_automation.rs`, `a_playing_clip_sets_the_parameter_over_the_arrangement_and_a_stop_holds_it`; `crates/engine/src/session.rs`, `a_started_clip_takes_its_track_over_and_a_stop_leaves_it_so` | frame by frame, unit |
+| R8 | `crates/engine/src/automation.rs`, `a_clips_contents_lie_over_the_time_since_its_launch`; `crates/engine/tests/session_automation.rs`, `the_values_are_the_same_at_any_block_size`; `crates/devices/tests/session_automation.rs`, `a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops` | unit, frame by frame |
+| R9 | `crates/model/src/command.rs`, `a_hand_move_turns_a_session_clips_automation_off_until_it_is_re_enabled`; `crates/engine/tests/session_automation.rs`, `a_hand_move_takes_the_parameter_back_until_the_clip_is_re_enabled`; `crates/shell/tests/session_automation.rs`, `a_hand_move_takes_the_parameter_back_until_the_clip_launches_again` | unit, frame by frame, headless |
+| R10 | `crates/model/src/command.rs`, `a_session_clip_holds_an_automation_envelope_beside_its_modulation_one`; `crates/model/src/repr.rs`, `session_automation_envelopes_save_with_the_set_and_load_back` | unit |
+| R11 | `crates/shell/tests/session_automation.rs`, `a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own` | headless |
+
+Every engine and device test runs its blocks under the allocation trap, and the shell tests check that the stream's `heap_operations` stays 0.
+
+## Not built yet
+
+- The Clip View's Automation and Modulation switches for a Session clip's envelope ([modulation](modulation.md) R9): the commands take `kind`, the editor still edits Modulation envelopes only.
+- Automation envelopes of audio clips, which wait on warping like the Modulation ones ([clip-envelopes](clip-envelopes.md)).
+- Copying a Session clip's Automation envelope into the Arrangement's automation when a performance is recorded ([session-to-arrangement](session-to-arrangement.md)); the copy of the clip keeps it.
+- The knob showing the held value (R7): the control keeps the value it had.

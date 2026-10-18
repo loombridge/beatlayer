@@ -10,13 +10,15 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 1. [README.md](README.md): what Beatlayer is and how to build it.
 2. [CONTRIBUTING.md](CONTRIBUTING.md), and in it [Building without Ableton's code](CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
+3. The planning documents in [docs/](docs): [the roadmap](docs/01-roadmap.md), [the architecture](docs/02-architecture.md), [the build plan](docs/03-build-plan.md) ("How an agent uses this plan"), [the parity matrix](docs/04-parity-matrix.md), [the improvements over Live](docs/05-improvements.md), the behaviour specs in [docs/specs/](docs/specs), and [the UI parity reference](docs/ui-parity) before UI work.
 
-The roadmap, architecture, build plan, and parity plan aren't published yet; a maintainer gives you the work package and the context it needs.
+A change that alters a spec, the plan, or the UI parity reference changes it in the same pull request.
 
 ## Lines not crossed
 
 - No Ableton code, content, or trademarks, by any route.
 - Every user-facing action is a registered command with a schema, a description, and a permission class, so agents reach every feature through the agent API.
+- Anything an agent can set, it can read back: every command that isn't `read` names, in the readback table beside the registry, the read command or query field that shows its effect, or says why there is nothing to read. `cargo xtask commands` fails on one that doesn't.
 - The UI matches Live 12's placement, menus, and key bindings, with Beatlayer's own icons, typeface, and colours.
 - No allocation, lock, or blocking call on an audio thread.
 - Engine, model, and device crates never depend on a UI crate. `cargo xtask layers` enforces this.

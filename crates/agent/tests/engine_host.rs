@@ -312,3 +312,45 @@ fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
     );
     call(&mut client, "transport", json!({ "action": "stop" }));
 }
+
+#[test]
+fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
+    // Spec: recording R1, R2. `transport.set_recording` through the agent API
+    // gives the engine the take's rings first, as the Control Bar does: a set
+    // that has never been saved can't hold an armed audio track's file, and
+    // the shell says so. Starting a recording asks first; the person allows
+    // it.
+    let mut client = host();
+    client.transport().answer = Box::new(|_| true);
+    let track = audio_track(&mut client);
+    for (command, args) in [
+        (
+            "routing.set_input",
+            json!({ "track": track,
+                    "input": { "type": "external", "channel": { "type": "mono", "channel": 1 } } }),
+        ),
+        ("mixer.set_arm", json!({ "track": track, "arm": true })),
+        ("transport.set_recording", json!({ "recording": true })),
+    ] {
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+    }
+    wait(&mut client, "the engine to record", |c| {
+        c.transport().shell.poll_engine().recording
+    });
+    let message = client
+        .transport()
+        .shell
+        .message()
+        .map(|message| message.text.clone());
+    assert!(
+        message
+            .as_deref()
+            .is_some_and(|text| text.starts_with("the set has never been saved")),
+        "{message:?}"
+    );
+    call(&mut client, "transport", json!({ "action": "stop" }));
+}

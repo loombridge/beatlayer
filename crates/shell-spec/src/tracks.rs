@@ -19,6 +19,10 @@ pub const DUPLICATE_WITHOUT_CLIPS: &str = "track.duplicate_without_clips";
 /// 12.4.6), made distinct (decided).
 pub const DUPLICATE_WITHOUT_CLIPS_STEP: &str = "Duplicate Track(s) Without Clips";
 
+/// The undo step's name for Delete on the selected tracks (WP-4.22): Live's
+/// "Delete Track(s)", like "Duplicate Track(s)".
+pub const DELETE_STEP: &str = "Delete Track(s)";
+
 /// `track.group`: group the selected tracks (T24).
 pub const GROUP: &str = "track.group";
 

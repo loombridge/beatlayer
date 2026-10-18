@@ -10,8 +10,16 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::external::External;
+use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
+use crate::layers::Layers;
+use crate::modulator::{Mapping, ShapePoint};
+use crate::rack::{Chain, RackKind};
+use crate::sample_edits::SampleEdit;
 use crate::track::Input;
+
+/// The most sample slots a device's media can fill.
+pub const MAX_MEDIA_SLOTS: usize = 16;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -48,11 +56,35 @@ pub struct Device {
     #[serde(with = "param_pairs")]
     #[schemars(with = "Vec<(ParamId, f64)>")]
     pub params: OrdMap<ParamId, f64>,
+    /// Whether the device's B state is the active one, whose values
+    /// [`params`](Self::params) holds (device compare R1). Left out of the
+    /// saved set while A is active.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub b_active: bool,
+    /// The values of the state that isn't active, in the same form as
+    /// [`params`](Self::params) (device compare R1, R10). `None` while the
+    /// two states are equal, as a new device's are, and left out of the
+    /// saved set then. Use [`other_params`](Self::other_params) to read it.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "other_pairs")]
+    #[schemars(with = "Option<Vec<(ParamId, f64)>>")]
+    pub other_params: Option<OrdMap<ParamId, f64>>,
     /// The device's sidechain input, if its type declares one (WP-2.19b):
     /// where its detector can listen other than its own input. Left out
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// The device's routing to external hardware, if its type declares one
+    /// (WP-5.34): an external instrument's output port and channel, the
+    /// interface inputs it comes back on, and its Hardware Latency. Left out
+    /// of the saved set for a device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<External>,
+    /// The device's MIDI sidechain input, if its type declares one (the
+    /// routing spec, R32): a MIDI track whose notes and channel messages
+    /// the device hears beside its audio. Left out of the saved set for a
+    /// device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_sidechain: Option<MidiSidechain>,
     /// Whether the device floats in a window of its own rather than
     /// showing in the Device View (IMP-14, WP-2.5b), where its place in the
     /// chain shows as a strip. Only native devices float. Left out of the
@@ -66,11 +98,44 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
-    /// The media the device plays, by content hash (WP-2.16): the sampler's
-    /// sample, which the media store holds like a clip's audio (the sampler
-    /// spec, R11). Left out of the saved set for a device that plays none.
+    /// The media the device plays, by content hash, one entry per sample
+    /// slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the
+    /// eight-slot drum sampler's slots are 0 to 7. The media store holds
+    /// each like a clip's audio (the sampler spec, R11). A slot with no
+    /// sample is `None`, and the list never ends in one. Left out of the
+    /// saved set for a device that plays none; a set saved before slots
+    /// existed holds one hash, which loads as slot 0.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "media_slots"
+    )]
+    pub media: Vec<Option<ContentHash>>,
+    /// The edits made to the sample in slot 0 (WP-5.15, IMP-28; the
+    /// multisampler spec, R55): applied in order to the media, which the
+    /// file is never written for. A multisampler's layers hold their own.
+    /// Loading another sample clears them. Left out of the saved set while
+    /// there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_edits: Vec<SampleEdit>,
+    /// A multisampler's layers and the options of its layer list (WP-5.13,
+    /// the multisampler spec, R2). Left out of the saved set for a device
+    /// that holds none.
+    #[serde(default, skip_serializing_if = "Layers::is_default")]
+    pub layers: Layers,
+    /// The parameters a modulator maps, one per slot (the modulation spec,
+    /// R19). Left out of the saved set for a device that maps none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<Mapping>,
+    /// The breakpoints of a Shaper's shape (R23); `None` plays the
+    /// default shape. Left out of the saved set while it is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media: Option<ContentHash>,
+    pub shape: Option<Vec<ShapePoint>>,
+    /// A rack's chains, in order (WP-5.1). Empty for every device that
+    /// isn't a rack, and left out of the saved set then, so sets saved
+    /// before racks load unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chains: Vec<Chain>,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -156,7 +221,7 @@ pub type DeviceWindows = std::collections::BTreeMap<DeviceId, WindowFrame>;
 /// To (observed). While External is on, the device's detector hears that
 /// signal scaled by SC Gain, mixed with the device's own input by Mix;
 /// while it's off, its own input.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "A device's sidechain input: `enabled` (the External switch), `input` \
                    (Source: `none`, or `track` with a track and a `tap`), `gain` (SC Gain, \
@@ -197,6 +262,38 @@ impl Default for Sidechain {
             listen: false,
         }
     }
+}
+
+/// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
+/// whose notes and channel messages the device hears, played before that
+/// track's own devices. A new device has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
+                   channel messages the device hears, or absent for No Input."
+)]
+pub struct MidiSidechain {
+    /// The MIDI track it listens to, or `None` (No Input), as on a new
+    /// device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<TrackId>,
+}
+
+/// Reads a device's media: a list of slots, or the one hash (or `null`) a
+/// set saved before sample slots held, which is slot 0.
+fn media_slots<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Option<ContentHash>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Slots(Vec<Option<ContentHash>>),
+        One(Option<ContentHash>),
+    }
+    Ok(match Saved::deserialize(deserializer)? {
+        Saved::Slots(slots) => slots,
+        Saved::One(one) => one.into_iter().map(Some).collect(),
+    })
 }
 
 #[expect(
@@ -252,10 +349,44 @@ impl Device {
             enabled: true,
             show_preset_name: true,
             params: OrdMap::new(),
+            b_active: false,
+            other_params: None,
             sidechain: None,
+            external: None,
+            midi_sidechain: None,
             floating: false,
             plugin: None,
-            media: None,
+            media: Vec::new(),
+            sample_edits: Vec::new(),
+            layers: Layers::default(),
+            mappings: Vec::new(),
+            shape: None,
+            chains: Vec::new(),
+        }
+    }
+
+    /// The media in sample slot `slot`, if it holds any.
+    #[must_use]
+    pub fn media_at(&self, slot: usize) -> Option<ContentHash> {
+        self.media.get(slot).copied().flatten()
+    }
+
+    /// Puts `media` in sample slot `slot`, growing the list to reach it and
+    /// trimming empty slots off its end. Another sample in slot 0 clears the
+    /// edits made to the one before it.
+    pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
+        if slot == 0 && self.media_at(0) != media {
+            self.sample_edits.clear();
+        }
+        if self.media.len() <= slot {
+            if media.is_none() {
+                return;
+            }
+            self.media.resize(slot + 1, None);
+        }
+        self.media[slot] = media;
+        while self.media.last() == Some(&None) {
+            self.media.pop();
         }
     }
 
@@ -266,10 +397,78 @@ impl Device {
         matches!(self.kind, DeviceKind::Native { .. })
     }
 
+    /// Whether the device has A and B states: native devices do; racks
+    /// and plug-ins don't, as in Live (device compare R6).
+    #[must_use]
+    pub fn can_compare(&self) -> bool {
+        matches!(self.kind, DeviceKind::Native { .. })
+    }
+
+    /// The values of the state that isn't active.
+    #[must_use]
+    pub fn other_params(&self) -> &OrdMap<ParamId, f64> {
+        self.other_params.as_ref().unwrap_or(&self.params)
+    }
+
+    /// Sets one parameter in the active state only (device compare R2).
+    pub(crate) fn set_param(&mut self, param: ParamId, value: f64) {
+        let before = self.params.clone();
+        self.params.insert(param, value);
+        if self.can_compare() {
+            self.other_params.get_or_insert(before);
+            self.forget_equal_other();
+        }
+    }
+
+    /// Sets both states to `params`, with A active, as a device starts,
+    /// loading a preset does (device compare R9) and a copy does (R8).
+    pub fn set_both(&mut self, params: OrdMap<ParamId, f64>) {
+        self.params = params;
+        self.b_active = false;
+        self.other_params = None;
+    }
+
+    /// Makes the other state active (device compare R3).
+    pub(crate) fn compare_switch(&mut self) {
+        let other = self
+            .other_params
+            .take()
+            .unwrap_or_else(|| self.params.clone());
+        self.other_params = Some(std::mem::replace(&mut self.params, other));
+        self.b_active = !self.b_active;
+        self.forget_equal_other();
+    }
+
+    /// Copies the active state over the other (device compare R4).
+    pub(crate) fn compare_copy(&mut self) {
+        self.other_params = None;
+    }
+
+    fn forget_equal_other(&mut self) {
+        if self.other_params.as_ref() == Some(&self.params) {
+            self.other_params = None;
+        }
+    }
+
+    /// The same device with routing to external hardware, as a new external
+    /// device has.
+    #[must_use]
+    pub fn with_external(mut self) -> Self {
+        self.external = Some(External::default());
+        self
+    }
+
     /// The same device with a sidechain input, as a new device has.
     #[must_use]
     pub fn with_sidechain(mut self) -> Self {
         self.sidechain = Some(Sidechain::default());
+        self
+    }
+
+    /// The same device with a MIDI sidechain input, as a new device has.
+    #[must_use]
+    pub fn with_midi_sidechain(mut self) -> Self {
+        self.midi_sidechain = Some(MidiSidechain::default());
         self
     }
 
@@ -292,13 +491,18 @@ impl Device {
     }
 
     /// What its title bar shows: its preset's or given name while Show
-    /// Preset Name is on, and its own name while it's off.
+    /// Preset Name is on, and its own name while it's off. A multisampler
+    /// that nothing has named shows its first layer's name while it's on.
     #[must_use]
     pub fn title(&self) -> &str {
-        if self.show_preset_name {
-            &self.name
-        } else {
-            self.own_name()
+        if !self.show_preset_name {
+            return self.own_name();
+        }
+        // A multisampler no preset or Rename has named shows its first
+        // layer's name (the multisampler spec, R29).
+        match self.layers.list.first() {
+            Some(layer) if self.own_name.is_empty() => &layer.name,
+            _ => &self.name,
         }
     }
 
@@ -322,7 +526,7 @@ impl Device {
 /// Where a device goes in a chain. A chain holds its MIDI effects first,
 /// then its instrument, then its audio effects, as Live's does; only MIDI
 /// tracks hold MIDI effects and instruments, and a chain holds at most one
-/// instrument (racks, which hold more, arrive in milestone M5).
+/// instrument (a rack holds several, one to a chain).
 #[derive(
     Clone,
     Copy,
@@ -392,6 +596,11 @@ pub enum DeviceKind {
         /// URI.
         plugin_id: String,
     },
+    /// A rack (WP-5.1): a device that holds [`Device::chains`].
+    Rack {
+        /// Which of the four kinds of rack it is.
+        kind: RackKind,
+    },
 }
 
 /// A plug-in format.
@@ -406,6 +615,43 @@ pub enum PluginFormat {
     AudioUnit,
     /// LV2 (Linux).
     Lv2,
+}
+
+/// Serialises an optional set of parameter values as `param_pairs` does.
+mod other_pairs {
+    use imbl::OrdMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::param_pairs;
+    use crate::ids::ParamId;
+
+    struct Pairs(OrdMap<ParamId, f64>);
+
+    impl Serialize for Pairs {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            param_pairs::serialize(&self.0, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Pairs {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            param_pairs::deserialize(deserializer).map(Self)
+        }
+    }
+
+    #[expect(clippy::ref_option, reason = "serde passes a reference")]
+    pub(super) fn serialize<S: Serializer>(
+        params: &Option<OrdMap<ParamId, f64>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        params.clone().map(Pairs).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<OrdMap<ParamId, f64>>, D::Error> {
+        Ok(Option::<Pairs>::deserialize(deserializer)?.map(|pairs| pairs.0))
+    }
 }
 
 /// Serialises parameter values as a list of `[parameter, value]` pairs.

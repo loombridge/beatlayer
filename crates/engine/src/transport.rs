@@ -53,6 +53,14 @@ pub struct LocateArgs {
     pub position: Ticks,
 }
 
+/// The arguments of `transport.set_recording`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRecordingArgs {
+    /// Whether the transport is recording.
+    pub recording: bool,
+}
+
 /// Adds the transport's commands to a registry.
 ///
 /// # Errors
@@ -97,6 +105,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
             let LocateArgs { position } = serde_json::from_value(args).map_err(invalid)?;
             Ok(TransportCommand::Locate(position))
         }
+        Action::SetRecording => {
+            let SetRecordingArgs { recording } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(TransportCommand::SetRecording(recording))
+        }
     }
 }
 
@@ -135,6 +147,8 @@ enum Action {
     Run(TransportCommand),
     /// [`TransportCommand::Locate`], at the position in [`LocateArgs`].
     Locate,
+    /// [`TransportCommand::SetRecording`], with [`SetRecordingArgs`].
+    SetRecording,
 }
 
 /// One registered command.
@@ -153,15 +167,21 @@ impl Entry {
     fn spec(&self) -> CommandSpec {
         // Playback changes nothing in the project or on disk, so it's
         // `read` (D17's permission classes): an agent plays and stops
-        // without asking.
+        // without asking. Recording captures an input device, so it's
+        // `external`; `transport.stop_recording` is how an agent stops free.
+        let permission = match self.action {
+            Action::SetRecording => Permission::External,
+            _ => Permission::Read,
+        };
         let mut spec = CommandSpec::new(self.id, self.label)
             .description(self.description)
-            .permission(Permission::Read)
+            .permission(permission)
             .contexts(self.contexts.iter().copied())
             .result::<()>();
         spec = match self.action {
             Action::Run(_) => spec.args::<NoArgs>(),
             Action::Locate => spec.args::<LocateArgs>(),
+            Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
         for &(shortcut, position) in self.keys {
             let binding = Binding::new(shortcut);
@@ -266,6 +286,31 @@ const ENTRIES: &[Entry] = &[
         description: "Moves the insert marker to the playhead: where the song is playing now, \
             or where playback stopped. Use it to start again later from the current point. It \
             changes nothing in the project.",
+    },
+    Entry {
+        id: "transport.set_recording",
+        action: Action::SetRecording,
+        label: "Set Recording",
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets whether the transport is recording: while it is, each armed audio \
+            track records its input into the project's Samples/Recorded/, each armed MIDI track \
+            records the notes it receives, and the recording becomes a clip on its track when \
+            it ends; a count-in starts it a bar or more later. With MIDI Arrangement Overdub on, \
+            recorded notes merge into the MIDI clips already there. Features like Hear \
+            Metronome Only While Recording follow it too. Recording captures input devices, \
+            including a microphone, so the person is asked first, whichever way you set it: \
+            to stop a recording without asking, run `transport.stop_recording`.",
+    },
+    Entry {
+        id: "transport.stop_recording",
+        action: Action::Run(TransportCommand::SetRecording(false)),
+        label: "Stop Recording",
+        contexts: &[Global],
+        keys: &[],
+        description: "Stops recording, the same as `transport.set_recording` with `recording` \
+            false, and without asking the person. The recording becomes a clip on its track; \
+            playback goes on. It does nothing when the transport isn't recording.",
     },
 ];
 

@@ -5,7 +5,7 @@
 //! transaction, so it's one undo step and each part of it is checked as any
 //! edit is.
 
-use bl_model::{Command, Device, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
+use bl_model::{Command, DeviceId, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
 
 use crate::routing::{return_letter, track_label};
 
@@ -55,6 +55,7 @@ pub fn duplicate_without_clips(
     editor
         .transact(label, |editor| {
             let mut renames = Vec::new();
+            let mut devices = Vec::new();
             // The last first, so each original's place stays where it was.
             for &original in originals.iter().rev() {
                 let doc = editor.document();
@@ -72,9 +73,10 @@ pub fn duplicate_without_clips(
                     .iter()
                     .position(|&t| t == original)
                     .map_or(0, |i| i + 1);
-                let copy = copy_track(editor, original, parent, index, &mut renames)?;
+                let copy = copy_track(editor, original, parent, index, &mut renames, &mut devices)?;
                 copies.push(copy);
             }
+            map_copies(editor, &renames, &devices)?;
             for (copy, original) in renames {
                 rename_like(editor, copy, original)?;
             }
@@ -95,6 +97,7 @@ fn copy_track(
     parent: Option<TrackId>,
     index: usize,
     renames: &mut Vec<(TrackId, TrackId)>,
+    devices: &mut Vec<(DeviceId, DeviceId)>,
 ) -> Result<TrackId, EditError> {
     let source = editor
         .document()
@@ -153,10 +156,19 @@ fn copy_track(
         })?;
     }
     for (index, device) in source.devices().enumerate() {
-        let copy = Device {
-            id: editor.new_id(),
-            ..device.clone()
-        };
+        // New IDs for the device and everything inside its racks.
+        let mut copy = device.clone();
+        copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        copy.floating = device.floating;
+        // Its mappings come once the copies of its targets are there
+        // (`map_copies`).
+        let pairs: Vec<(DeviceId, DeviceId)> = device
+            .walk()
+            .map(|d| d.id)
+            .zip(copy.walk().map(|d| d.id))
+            .collect();
+        copy.clear_mappings();
+        devices.extend(pairs);
         editor.apply(Command::InsertDevice {
             track: id,
             index,
@@ -165,14 +177,15 @@ fn copy_track(
     }
     let children: Vec<TrackId> = source.children().collect();
     for (index, child) in children.into_iter().enumerate() {
-        copy_track(editor, child, Some(id), index, renames)?;
+        copy_track(editor, child, Some(id), index, renames, devices)?;
     }
     // The routing last, once the devices and the tracks inside are there.
-    let routing = *source.routing();
+    let routing = source.routing().clone();
     if source.kind().holds_clips() {
         editor.apply(Command::SetInput {
             track: id,
             input: routing.input,
+            channel: routing.channel,
         })?;
         editor.apply(Command::SetMonitor {
             track: id,
@@ -192,6 +205,54 @@ fn copy_track(
         })?;
     }
     Ok(id)
+}
+
+/// Maps the copies of modulators to the copies of their targets (the
+/// modulation spec, R19): a mapping whose target was duplicated too goes to
+/// the copy, and one whose target wasn't isn't copied. `tracks` and
+/// `devices` pair each copy with its original.
+fn map_copies(
+    editor: &mut Editor,
+    tracks: &[(TrackId, TrackId)],
+    devices: &[(DeviceId, DeviceId)],
+) -> Result<(), EditError> {
+    use bl_model::modulator::ModTarget;
+    let track_copy =
+        |original: TrackId| tracks.iter().find(|(_, o)| *o == original).map(|(c, _)| *c);
+    let device_copy = |original: DeviceId| {
+        devices
+            .iter()
+            .find(|(o, _)| *o == original)
+            .map(|(_, c)| *c)
+    };
+    for &(original, copy) in devices {
+        let mappings = editor
+            .document()
+            .device(original)
+            .map(|d| d.mappings.clone())
+            .unwrap_or_default();
+        for mapping in mappings {
+            let target = match mapping.target {
+                ModTarget::Mixer { track, param } => {
+                    track_copy(track).map(|track| ModTarget::Mixer { track, param })
+                }
+                ModTarget::Send { track, to } => {
+                    track_copy(track).map(|track| ModTarget::Send { track, to })
+                }
+                ModTarget::Device { device, param } => {
+                    device_copy(device).map(|device| ModTarget::Device { device, param })
+                }
+            };
+            if let Some(target) = target {
+                editor.apply(Command::MapModulator {
+                    device: copy,
+                    slot: mapping.slot,
+                    target,
+                })?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Gives `copy` its original's name, numbered for its own place where the
@@ -407,6 +468,111 @@ mod tests {
         assert_eq!(copies.len(), 3);
         assert_eq!(editor.undo_history().len(), 4);
         assert_eq!(editor.undo_history().next(), Some("Duplicate"));
+    }
+
+    // Spec: modulation R19
+    #[test]
+    fn a_duplicated_track_maps_its_own_copies() {
+        use bl_model::modulator::{ModTarget, WAVE_MOD};
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "1 Audio", None);
+        let two = add(&mut editor, TrackKind::Audio, "Other", None);
+        let device = |editor: &mut Editor, track, device_type: &str| {
+            let id: DeviceId = editor.new_id();
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index: 0,
+                    device: bl_model::Device::new(
+                        id,
+                        device_type,
+                        bl_model::DeviceKind::Native {
+                            device_type: device_type.to_owned(),
+                        },
+                    ),
+                })
+                .unwrap();
+            id
+        };
+        let wave = device(&mut editor, one, WAVE_MOD);
+        let eq = device(&mut editor, one, "beatlayer.eq");
+        let outside = device(&mut editor, two, "beatlayer.eq");
+        let map = |editor: &mut Editor, slot, target| {
+            editor
+                .apply(Command::MapModulator {
+                    device: wave,
+                    slot,
+                    target,
+                })
+                .unwrap();
+        };
+        map(
+            &mut editor,
+            0,
+            ModTarget::Device {
+                device: eq,
+                param: bl_model::ParamId(1),
+            },
+        );
+        map(
+            &mut editor,
+            1,
+            ModTarget::Mixer {
+                track: one,
+                param: bl_model::MixerParam::Pan,
+            },
+        );
+        map(
+            &mut editor,
+            2,
+            ModTarget::Device {
+                device: outside,
+                param: bl_model::ParamId(2),
+            },
+        );
+        let copies = duplicate_without_clips(&mut editor, &[one], "Duplicate").unwrap();
+        let doc = editor.document();
+        let copy = doc.track(copies[0]).unwrap();
+        let mut devices = copy.devices();
+        let (copy_eq, copy_wave) = {
+            let first = devices.next().unwrap();
+            let second = devices.next().unwrap();
+            if bl_model::modulator::is_modulator_kind(&first.kind) {
+                (second, first)
+            } else {
+                (first, second)
+            }
+        };
+        let targets: Vec<(u8, ModTarget)> = copy_wave
+            .mappings
+            .iter()
+            .map(|m| (m.slot, m.target))
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                (
+                    0,
+                    ModTarget::Device {
+                        device: copy_eq.id,
+                        param: bl_model::ParamId(1)
+                    }
+                ),
+                (
+                    1,
+                    ModTarget::Mixer {
+                        track: copies[0],
+                        param: bl_model::MixerParam::Pan
+                    }
+                ),
+            ],
+            "the copies of its targets, and not a target outside the copy"
+        );
+        assert_eq!(
+            doc.device(wave).unwrap().mappings.len(),
+            3,
+            "the original keeps its own"
+        );
     }
 
     #[test]

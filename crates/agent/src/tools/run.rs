@@ -14,6 +14,7 @@ use bl_core::id::Id;
 use bl_model::ChangeSet;
 use bl_model::registry::{self as model, REDO, UNDO};
 use bl_shell::permission::{CallPermission, raised_by_arguments};
+pub(crate) use bl_shell::placeholders::resolve_placeholders;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -87,57 +88,6 @@ pub(crate) fn definition() -> Value {
 /// Whether a command is a document edit, which can run in a batch.
 fn is_edit(id: &str) -> bool {
     model::handles(id) && id != UNDO && id != REDO
-}
-
-/// Replaces `{"$new": name}` and `{"$ref": name}` in `value`, issuing new
-/// IDs with `issue`. Every `$new` is replaced first, so a `$ref` may name
-/// an ID made anywhere in the same arguments.
-pub(crate) fn resolve_placeholders(
-    value: &mut Value,
-    names: &mut BTreeMap<String, u64>,
-    issue: &mut dyn FnMut() -> u64,
-) -> Result<(), String> {
-    replace(value, names, issue, "$new")?;
-    replace(value, names, issue, "$ref")
-}
-
-/// Replaces the placeholders with the key `kind` (`$new` or `$ref`).
-fn replace(
-    value: &mut Value,
-    names: &mut BTreeMap<String, u64>,
-    issue: &mut dyn FnMut() -> u64,
-    kind: &str,
-) -> Result<(), String> {
-    match value {
-        Value::Object(object) if object.len() == 1 && object.contains_key(kind) => {
-            let Some(Value::String(name)) = object.get(kind) else {
-                return Err(format!("`{kind}` takes a name, as a string"));
-            };
-            let id = if kind == "$new" {
-                if names.contains_key(name) {
-                    return Err(format!(
-                        "`{name}` already names an ID; give each new object its own name"
-                    ));
-                }
-                let id = issue();
-                names.insert(name.clone(), id);
-                id
-            } else {
-                *names.get(name).ok_or_else(|| {
-                    format!("`{name}` names no ID; make one with {{\"$new\": \"{name}\"}} first")
-                })?
-            };
-            *value = json!(id);
-            Ok(())
-        }
-        Value::Object(object) => object
-            .values_mut()
-            .try_for_each(|inner| replace(inner, names, issue, kind)),
-        Value::Array(items) => items
-            .iter_mut()
-            .try_for_each(|inner| replace(inner, names, issue, kind)),
-        _ => Ok(()),
-    }
 }
 
 /// A command looked up and its arguments made ready.
@@ -228,6 +178,21 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 index + 1,
                 step.command
             ));
+        }
+        // Spec: warping R7, R11, R23 to R27, R39 to R41. An edit is checked
+        // against the media and filled in from them, as the shell does when
+        // it runs one.
+        if is_edit(&step.command) {
+            match ctx.shell.prepare_edit(&step.command, args) {
+                Ok(prepared) => args = prepared,
+                Err(error) => {
+                    return failed(format!(
+                        "command {} (`{}`): {error}",
+                        index + 1,
+                        step.command
+                    ));
+                }
+            }
         }
         // Spec: agent-permissions R1 to R3. Each call's class is decided
         // from its arguments against the set as it is now.
@@ -362,9 +327,15 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     // Run them.
     let outcome: Result<(Vec<Value>, Option<String>), String> =
         if ready.len() == 1 && super::is_engine_command(ctx.shell, &ready[0].id) {
-            // A transport command goes to the engine, through the host.
+            // A transport or Session View command goes to the engine,
+            // through the host.
             let step = &ready[0];
-            super::time::send_transport(ctx, &step.id, step.args.clone())
+            let result = if bl_engine::transport::handles(&step.id) {
+                super::time::send_transport(ctx, &step.id, step.args.clone())
+            } else {
+                super::time::send_session(ctx, &step.id, step.args.clone())
+            };
+            result
                 .map(|()| {
                     let sent = json!({
                         "command": step.id,
@@ -437,39 +408,6 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn placeholders_issue_ids_and_refer_back() {
-        let mut next = 100;
-        let mut issue = || {
-            next += 1;
-            next
-        };
-        let mut names = BTreeMap::new();
-        // A reference may come before the ID it names in the arguments.
-        let mut args = json!({
-            "after": {"$ref": "bass"},
-            "id": {"$new": "bass"},
-            "list": [{"$new": "eq"}],
-            "name": "$new",
-        });
-        resolve_placeholders(&mut args, &mut names, &mut issue).unwrap();
-        assert_eq!(
-            args,
-            json!({
-                "after": 101,
-                "id": 101,
-                "list": [102],
-                "name": "$new",
-            })
-        );
-        let mut again = json!({"id": {"$new": "bass"}});
-        assert!(resolve_placeholders(&mut again, &mut names, &mut issue).is_err());
-        let mut unknown = json!([{"$ref": "drums"}]);
-        assert!(resolve_placeholders(&mut unknown, &mut names, &mut issue).is_err());
-        let mut wrong = json!({"$new": 3});
-        assert!(resolve_placeholders(&mut wrong, &mut names, &mut issue).is_err());
-    }
 
     #[test]
     fn batches_are_named_after_their_commands() {

@@ -19,9 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
-    AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, MidiData, Mixer, Note, ParamId, PluginFormat, SendTap,
-    TrackId, TrackKind,
+    AudioData, BeatsUpdate, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
+    Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer,
+    Monitor, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TonesUpdate, TrackId,
+    TrackKind, WarpMode,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -70,6 +71,11 @@ enum Op {
     SetMute(Index, bool),
     SetSolo(Index, bool),
     SetArm(Index, bool),
+    /// A track's input (WP-2.2): the first byte chooses the source (0 a
+    /// port, 1 All Ins, 2 the computer keyboard, 3 No Input) and the second
+    /// the channel (0 All Channels, 1 to 16, past that refused).
+    SetInput(Index, u8, u8),
+    SetMonitor(Index, u8),
     SoloExclusive(Index),
     ArmExclusive(Index),
     /// A send from one track to another, usually a return.
@@ -92,6 +98,7 @@ enum Op {
     SetClipLength(Index, u16),
     RenameClip(Index, u8),
     SetClipMute(Index, bool),
+    SetClipLaunchMode(Index, u8),
     SetClipData(Index, Data),
     TrimClipStart(Index, i16),
     /// One of an audio clip's settings (WP-1.4): its markers, loop brace,
@@ -117,6 +124,28 @@ enum Op {
     SetTimeSignatureChange(i16, u8, u8),
     SetLoop(i16, u16),
     SetLoopEnabled(bool),
+    CreateScene {
+        index: Index,
+    },
+    DeleteScene(Index),
+    MoveScene {
+        scene: Index,
+        index: Index,
+    },
+    RenameScene(Index, u8),
+    /// Duplicating a scene copies whatever clips it holds, with new IDs the
+    /// command itself works out when it's built.
+    DuplicateScene(Index),
+    CreateSlotClip {
+        track: Index,
+        scene: Index,
+        data: Data,
+    },
+    MoveSlotClip {
+        clip: Index,
+        track: Index,
+        scene: Index,
+    },
 }
 
 /// Clip data: usually whatever fits the track, sometimes the other kind.
@@ -171,6 +200,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetMute(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSolo(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetArm(t, b)),
+        1 => (i(), 0u8..4, 0u8..18).prop_map(|(t, s, c)| Op::SetInput(t, s, c)),
+        1 => (i(), 0u8..3).prop_map(|(t, m)| Op::SetMonitor(t, m)),
         1 => i().prop_map(Op::SoloExclusive),
         1 => i().prop_map(Op::ArmExclusive),
         3 => (i(), i(), value(0.0..1.0)).prop_map(|(t, to, v)| Op::SetSend(t, to, v)),
@@ -184,6 +215,7 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (i(), 0u16..256).prop_map(|(c, l)| Op::SetClipLength(c, l)),
         1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
+        1 => (i(), 0u8..4).prop_map(|(c, m)| Op::SetClipLaunchMode(c, m)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
         2 => (i(), -16i16..64).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
         3 => (i(), any::<u8>(), value(0.0..4.0), value(0.0..4.0))
@@ -204,6 +236,16 @@ fn op() -> impl Strategy<Value = Op> {
         // Sometimes before 1.1.1 or empty, which the document refuses.
         1 => (-2i16..64, 0u16..64).prop_map(|(start, length)| Op::SetLoop(start, length)),
         1 => any::<bool>().prop_map(Op::SetLoopEnabled),
+        // Scenes and the clips in their slots (WP-3.1).
+        1 => i().prop_map(|index| Op::CreateScene { index }),
+        1 => i().prop_map(Op::DeleteScene),
+        1 => (i(), i()).prop_map(|(scene, index)| Op::MoveScene { scene, index }),
+        1 => (i(), any::<u8>()).prop_map(|(scene, n)| Op::RenameScene(scene, n)),
+        1 => i().prop_map(Op::DuplicateScene),
+        1 => (i(), i(), data())
+            .prop_map(|(track, scene, data)| Op::CreateSlotClip { track, scene, data }),
+        1 => (i(), i(), i())
+            .prop_map(|(clip, track, scene)| Op::MoveSlotClip { clip, track, scene }),
     ]
 }
 
@@ -213,6 +255,16 @@ struct Targets {
     groups: Vec<TrackId>,
     clips: Vec<ClipId>,
     devices: Vec<DeviceId>,
+    scenes: Vec<SceneId>,
+    /// Tracks that can send to a return: audio, MIDI, and group tracks.
+    senders: Vec<TrackId>,
+    /// The return tracks.
+    returns: Vec<TrackId>,
+    /// The clips whose data is audio, for the audio-only clip commands.
+    audio_clips: Vec<ClipId>,
+    /// The clips on Arrangement lanes, for the commands that place a clip in
+    /// the Arrangement.
+    lane_clips: Vec<ClipId>,
 }
 
 impl Targets {
@@ -223,11 +275,28 @@ impl Targets {
             .copied()
             .filter(|t| doc.track(*t).unwrap().kind() == TrackKind::Group)
             .collect();
+        let audio_clips = doc
+            .clip_ids()
+            .filter(|id| doc.clip(*id).is_some_and(|clip| clip.data.is_audio()))
+            .collect();
+        let lane_clips = doc
+            .tracks()
+            .flat_map(|track| track.clips().map(|clip| clip.id))
+            .collect();
         Self {
             tracks,
             groups,
             clips: doc.clip_ids().collect(),
             devices: doc.device_ids().collect(),
+            scenes: doc.scenes().map(|scene| scene.id).collect(),
+            senders: doc
+                .track_order()
+                .into_iter()
+                .filter(|&id| doc.track(id).is_some_and(|track| track.kind().has_sends()))
+                .collect(),
+            returns: doc.returns().collect(),
+            audio_clips,
+            lane_clips,
         }
     }
 
@@ -252,11 +321,83 @@ impl Targets {
         }
     }
 
+    /// An existing audio clip, or one that doesn't exist.
+    fn audio_clip(&self, i: &Index) -> ClipId {
+        if self.audio_clips.is_empty() {
+            ClipId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.audio_clips)
+        }
+    }
+
+    /// An existing clip on an Arrangement lane, or one that doesn't exist:
+    /// the commands that place a clip in the Arrangement need one.
+    fn lane_clip(&self, i: &Index) -> ClipId {
+        if self.lane_clips.is_empty() {
+            ClipId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.lane_clips)
+        }
+    }
+
+    /// An existing track that can send, or one that doesn't exist.
+    fn sender(&self, i: &Index) -> TrackId {
+        if self.senders.is_empty() {
+            TrackId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.senders)
+        }
+    }
+
+    /// An existing return track, or one that doesn't exist.
+    fn return_track(&self, i: &Index) -> TrackId {
+        if self.returns.is_empty() {
+            TrackId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.returns)
+        }
+    }
+
     fn device(&self, i: &Index) -> DeviceId {
         if self.devices.is_empty() {
             DeviceId(Id::new(u64::MAX).unwrap())
         } else {
             *i.get(&self.devices)
+        }
+    }
+
+    /// An existing scene, or (if there are none) one that doesn't exist.
+    fn scene(&self, i: &Index) -> SceneId {
+        if self.scenes.is_empty() {
+            SceneId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.scenes)
+        }
+    }
+
+    /// A track that holds clips (audio or MIDI), or, if the song has none,
+    /// any track: the target of a slot edit.
+    fn clip_track(&self, i: &Index, doc: &Document) -> TrackId {
+        self.fitting(i, doc, None)
+    }
+
+    /// A track whose kind fits the clip's data, or any track.
+    fn fitting(&self, i: &Index, doc: &Document, audio: Option<bool>) -> TrackId {
+        let candidates: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .copied()
+            .filter(|&id| {
+                doc.track(id).is_some_and(|track| {
+                    track.kind().holds_clips()
+                        && audio.is_none_or(|audio| (track.kind() == TrackKind::Audio) == audio)
+                })
+            })
+            .collect();
+        if candidates.is_empty() {
+            self.track(i)
+        } else {
+            *i.get(&candidates)
         }
     }
 }
@@ -349,27 +490,46 @@ impl Op {
             Self::SoloExclusive(t) => Command::SoloExclusive { track: at.track(t) },
             Self::ArmExclusive(t) => Command::ArmExclusive { track: at.track(t) },
             Self::SetSend(t, to, level) => {
-                // Usually a return, if the song has one.
-                let returns: Vec<TrackId> = doc.returns().collect();
-                let to = if returns.is_empty() || to.index(8) == 0 {
+                // A track that can send, usually to a return.
+                let to = if to.index(8) == 0 {
                     at.track(to)
                 } else {
-                    *to.get(&returns)
+                    at.return_track(to)
                 };
                 Command::SetSend {
-                    track: at.track(t),
+                    track: at.sender(t),
                     to,
                     level: *level,
                 }
             }
             Self::SetSendTap(t, pre) => Command::SetSendTap {
-                track: at.track(t),
+                track: at.return_track(t),
                 tap: if *pre { SendTap::Pre } else { SendTap::Post },
             },
             Self::SetSoloInPlace(enabled) => Command::SetSoloInPlace { enabled: *enabled },
             Self::SetArm(t, arm) => Command::SetArm {
                 track: at.track(t),
                 arm: *arm,
+            },
+            Self::SetInput(t, source, channel) => Command::SetInput {
+                track: at.track(t),
+                input: match source {
+                    0 => Input::Port {
+                        name: format!("Port {channel}"),
+                    },
+                    1 => Input::AllIns,
+                    2 => Input::ComputerKeyboard,
+                    _ => Input::None,
+                },
+                channel: (*channel > 0).then_some(*channel),
+            },
+            Self::SetMonitor(t, monitor) => Command::SetMonitor {
+                track: at.track(t),
+                monitor: match monitor {
+                    0 => Monitor::In,
+                    1 => Monitor::Auto,
+                    _ => Monitor::Off,
+                },
             },
             Self::CreateClip {
                 track,
@@ -397,7 +557,7 @@ impl Op {
             Self::MoveClips(clips, by) => Command::MoveClips {
                 clips: clips
                     .iter()
-                    .map(|c| at.clip(c))
+                    .map(|c| at.lane_clip(c))
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect(),
@@ -415,6 +575,10 @@ impl Op {
                 clip: at.clip(c),
                 mute: *mute,
             },
+            Self::SetClipLaunchMode(c, mode) => Command::SetClipLaunchMode {
+                clip: at.clip(c),
+                mode: LaunchMode::ALL[usize::from(*mode)],
+            },
             Self::SetClipData(c, data) => {
                 let clip = at.clip(c);
                 let track_kind = doc.clip_track(clip).and_then(kind_of);
@@ -425,7 +589,7 @@ impl Op {
             }
             Self::TrimClipStart(c, by) => {
                 // Mostly inside the clip, sometimes past either end.
-                let clip = at.clip(c);
+                let clip = at.lane_clip(c);
                 let start = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.start);
                 Command::TrimClipStart {
                     clip,
@@ -433,19 +597,141 @@ impl Op {
                 }
             }
             Self::SetAudio(c, which, a, b) => {
-                let clip = at.clip(c);
+                let clip = at.audio_clip(c);
                 // Past 3 seconds (or not a number), an end is the file's.
                 let end = (*b <= 3.0).then_some(*b);
+                // Warp edits (WP-4.1): most are refused on a clip that
+                // isn't warped, or with these numbers, and must then change
+                // nothing; the ones that land are one undo step.
+                let ticks = Ticks((*a * 100_000.0) as i64);
+                match which % 21 {
+                    5 => {
+                        return Command::SetClipWarp {
+                            clip,
+                            warp: *a > 1.0,
+                        };
+                    }
+                    6 => {
+                        return Command::InsertWarpMarker {
+                            clips: vec![clip],
+                            beat: Some(ticks),
+                            time: None,
+                            pin_neighbours: false,
+                            transients: None,
+                        };
+                    }
+                    7 => {
+                        return Command::MoveWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![0],
+                            by: ticks - Ticks(150_000),
+                        };
+                    }
+                    8 => {
+                        return Command::ShiftWarpMarker {
+                            clips: vec![clip],
+                            marker: 0,
+                            by: *a - 1.0,
+                        };
+                    }
+                    9 => {
+                        return Command::DeleteWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![1],
+                        };
+                    }
+                    10 => {
+                        return Command::SetSegmentBpm {
+                            clip,
+                            marker: (*b > 1.0).then_some(0),
+                            bpm: *a * 60.0,
+                        };
+                    }
+                    11 => return Command::ScaleTempo { clip, factor: *a },
+                    // Transient edits and ranged markers (WP-4.3).
+                    12 => {
+                        return Command::InsertTransient {
+                            clip,
+                            time: *a - 1.0,
+                        };
+                    }
+                    13 => {
+                        return Command::DeleteTransients {
+                            clip,
+                            times: vec![*a - 1.0, *b],
+                        };
+                    }
+                    14 => {
+                        return Command::MoveTransient {
+                            clip,
+                            from: *a - 1.0,
+                            to: *b,
+                        };
+                    }
+                    15 => return Command::ResetTransients { clip },
+                    16 => {
+                        return Command::InsertWarpMarkers {
+                            clip,
+                            from: ticks - Ticks(150_000),
+                            to: ticks + Ticks(150_000),
+                            transients: Some(vec![*a, *b]),
+                        };
+                    }
+                    // Warp modes (WP-4.2): a value out of range is refused
+                    // and changes nothing.
+                    17 => {
+                        return Command::SetClipWarpMode {
+                            clip,
+                            mode: match (*a * 3.0) as u8 % 6 {
+                                0 => WarpMode::Beats,
+                                1 => WarpMode::Tones,
+                                2 => WarpMode::Texture,
+                                3 => WarpMode::RePitch,
+                                4 => WarpMode::Complex,
+                                _ => WarpMode::ComplexPro,
+                            },
+                        };
+                    }
+                    18 => {
+                        return Command::SetClipWarpSettings {
+                            clip,
+                            beats: Some(BeatsUpdate {
+                                transient_envelope: Some((*a * 40.0) as u32),
+                                ..BeatsUpdate::default()
+                            }),
+                            tones: (*b > 1.0).then_some(TonesUpdate {
+                                grain_size: Some(*a * 40.0),
+                            }),
+                            texture: None,
+                            complex_pro: None,
+                        };
+                    }
+                    19 => {
+                        return Command::SetClipRamMode {
+                            clip,
+                            ram: *a > 1.0,
+                        };
+                    }
+                    20 => {
+                        return Command::SetClipHighQuality {
+                            clip,
+                            high_quality: *a > 1.0,
+                        };
+                    }
+                    _ => {}
+                }
                 match which % 5 {
                     0 => Command::SetClipRegion {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     1 => Command::SetClipLoop {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     2 => Command::SetClipLoopEnabled {
                         clip,
@@ -537,6 +823,56 @@ impl Op {
                 length: Ticks::QUARTER * i64::from(*length),
             },
             Self::SetLoopEnabled(enabled) => Command::SetLoopEnabled { enabled: *enabled },
+            Self::CreateScene { index } => {
+                let scene_count = doc.scene_count();
+                Command::CreateScene {
+                    id: editor.new_id(),
+                    index: slot(index, scene_count),
+                }
+            }
+            Self::DeleteScene(s) => Command::DeleteScene { scene: at.scene(s) },
+            Self::MoveScene { scene, index } => Command::MoveScene {
+                scene: at.scene(scene),
+                index: slot(index, doc.scene_count().saturating_sub(1)),
+            },
+            Self::RenameScene(s, n) => Command::RenameScene {
+                scene: at.scene(s),
+                name: name(*n),
+            },
+            Self::DuplicateScene(s) => {
+                let scene = at.scene(s);
+                let tracks: Vec<TrackId> = doc
+                    .track_order()
+                    .into_iter()
+                    .filter(|&track| doc.slot(track, scene).is_some())
+                    .collect();
+                let clips = tracks
+                    .into_iter()
+                    .map(|track| (track, editor.new_id()))
+                    .collect();
+                Command::DuplicateScene {
+                    scene,
+                    id: editor.new_id(),
+                    clips,
+                }
+            }
+            Self::CreateSlotClip { track, scene, data } => {
+                let track = at.clip_track(track, doc);
+                let scene = at.scene(scene);
+                let data = clip_data(data, kind_of(track));
+                // A slot clip has no position in the Arrangement.
+                let clip = Clip::new(editor.new_id(), Ticks::ZERO, Ticks::WHOLE, data);
+                Command::CreateSlotClip { track, scene, clip }
+            }
+            Self::MoveSlotClip { clip, track, scene } => {
+                let clip = at.clip(clip);
+                let audio = doc.clip(clip).map(|clip| clip.data.is_audio());
+                Command::MoveSlotClip {
+                    clip,
+                    track: at.fitting(track, doc, audio),
+                    scene: at.scene(scene),
+                }
+            }
         }
     }
 }
@@ -579,6 +915,30 @@ fn starting_song() -> Editor {
         );
         editor.apply(Command::CreateClip { track, clip }).unwrap();
     }
+    // A clip in a Session slot, so the slot edits have one to work on.
+    let scene = editor
+        .document()
+        .scenes()
+        .next()
+        .expect("the default scenes")
+        .id;
+    for track in [audio, midi] {
+        let data = Data {
+            swap_kind: false,
+            media: 2,
+            notes: vec![(60, 100, 0, 4)],
+        };
+        let kind = editor.document().track(track).unwrap().kind();
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            clip_data(&data, Some(kind)),
+        );
+        editor
+            .apply(Command::CreateSlotClip { track, scene, clip })
+            .unwrap();
+    }
     let main = editor.document().main_id();
     for track in [audio, midi, ret, main] {
         let device = Device::new(
@@ -600,13 +960,15 @@ fn starting_song() -> Editor {
     editor
 }
 
-/// A track's own settings: name, mixer, sends, children, and chain order.
+/// A track's own settings: name, mixer, sends, children, chain order, and
+/// routing.
 type OwnSettings = (
     String,
     Mixer,
     Vec<(TrackId, f64)>,
     Vec<TrackId>,
     Vec<DeviceId>,
+    Routing,
 );
 
 /// A song flattened into plain maps, for working out change sets the slow
@@ -616,7 +978,10 @@ struct Flat {
     top: Vec<TrackId>,
     returns: Vec<TrackId>,
     tracks: BTreeMap<TrackId, OwnSettings>,
-    clips: BTreeMap<ClipId, (TrackId, Clip)>,
+    scenes: BTreeMap<SceneId, (usize, String)>,
+    /// Each clip and where it sits: its track, the scene whose slot holds it
+    /// (`null` for an Arrangement lane), and the clip.
+    clips: BTreeMap<ClipId, (TrackId, Option<SceneId>, Clip)>,
     devices: BTreeMap<DeviceId, (TrackId, Device)>,
 }
 
@@ -627,6 +992,11 @@ impl Flat {
             top: doc.top_level().collect(),
             returns: doc.returns().collect(),
             tracks: BTreeMap::new(),
+            scenes: doc
+                .scenes()
+                .enumerate()
+                .map(|(position, scene)| (scene.id, (position, scene.name.clone())))
+                .collect(),
             clips: BTreeMap::new(),
             devices: BTreeMap::new(),
         };
@@ -638,10 +1008,15 @@ impl Flat {
                 track.sends().collect(),
                 track.children().collect(),
                 devices,
+                track.routing().clone(),
             );
             flat.tracks.insert(track.id(), own);
             for clip in track.clips() {
-                flat.clips.insert(clip.id, (track.id(), clip.clone()));
+                flat.clips.insert(clip.id, (track.id(), None, clip.clone()));
+            }
+            for (scene, clip) in track.slots() {
+                flat.clips
+                    .insert(clip.id, (track.id(), Some(scene), clip.clone()));
             }
             for device in track.devices() {
                 flat.devices.insert(device.id, (track.id(), device.clone()));
@@ -691,6 +1066,7 @@ fn slow_changes(old: &Document, new: &Document) -> ChangeSet {
             || a.returns != b.returns
             || children(&a) != children(&b),
         tracks: diff(&a.tracks, &b.tracks),
+        scenes: diff(&a.scenes, &b.scenes),
         clips: diff(&a.clips, &b.clips),
         devices: diff(&a.devices, &b.devices),
     }
@@ -758,6 +1134,7 @@ fn undo_and_redo_all(editor: &mut Editor, versions: &[Document]) -> Result<(), T
 proptest! {
     #![proptest_config(config())]
 
+    // Spec: session-view R12
     /// The acceptance property: undoing every command gets the starting
     /// document back, and redoing them gets the final one.
     #[test]
@@ -768,10 +1145,10 @@ proptest! {
         for op in &ops {
             let before = editor.document().clone();
             let command = op.command(&mut editor);
-            let new_id = command.created_id();
+            let new_ids = command.created_ids();
             let result = editor.apply(command);
             if let Some(changes) = check_applied(&before, result, &editor)? {
-                if let Some(id) = new_id {
+                for id in new_ids {
                     // Every object ever created has its own ID.
                     prop_assert!(created.insert(id));
                 }

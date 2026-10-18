@@ -146,6 +146,14 @@ pub fn parse_binding(binding: &str, platform: Platform) -> Option<Vec<Chord>> {
                     index: None,
                 }]);
             }
+            // Fn-Right is End on macOS's compact keyboards (S-SES-021).
+            ("Fn", Platform::Mac) if last == "Right" => {
+                return Some(vec![Chord {
+                    key: Key::End,
+                    mods,
+                    index: None,
+                }]);
+            }
             _ => return None,
         }
     }
@@ -446,7 +454,24 @@ impl Keymap {
         mods: Mods,
         contexts: &[Context],
     ) -> Option<Hit<'_>> {
+        self.resolve_with(platform, key, mods, contexts, |_| true)
+    }
+
+    /// [`Keymap::resolve`], where a context's first shortcut that `runs`
+    /// decides, and the first one at all if none does. Two shortcuts that
+    /// share keys in one context, such as Hide Chains and Fold on Minus,
+    /// then each act where the other can't.
+    #[must_use]
+    pub fn resolve_with(
+        &self,
+        platform: Platform,
+        key: Key,
+        mods: Mods,
+        contexts: &[Context],
+        runs: impl Fn(&Hit<'_>) -> bool,
+    ) -> Option<Hit<'_>> {
         for &context in contexts {
+            let mut first = None;
             for entry in &self.entries {
                 if entry.status != Status::Bound {
                     continue;
@@ -463,13 +488,20 @@ impl Keymap {
                     .iter()
                     .find(|command| command.contexts.contains(&context))
                 {
-                    return Some(Hit {
+                    let hit = Hit {
                         entry,
                         command,
                         context,
                         index: chord.index,
-                    });
+                    };
+                    if runs(&hit) {
+                        return Some(hit);
+                    }
+                    first.get_or_insert(hit);
                 }
+            }
+            if first.is_some() {
+                return first;
             }
         }
         None

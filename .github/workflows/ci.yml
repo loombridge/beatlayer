@@ -131,7 +131,9 @@ jobs:
     name: check (${{ matrix.name }})
     needs: changes
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Windows takes about 27 minutes when every package is tested (a change
+    # to Cargo.lock), so 30 cut it off; 45, as the nightly run allows.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -193,6 +195,16 @@ jobs:
           tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
           # A prebuilt, checksummed binary or nothing: never compile it here.
           fallback: none
+
+      # A plug-in editor opens in a window Beatlayer owns (WP-2.10), so the
+      # tests that open one need an X display, which headless Linux runners
+      # don't have. Xvfb serves the rest of the job's steps. macOS and
+      # Windows runners have a desktop already.
+      - name: Start Xvfb (Linux)
+        if: needs.changes.outputs.code == 'true' && runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
 
       # See the note at the top: a pull request tests what it changes, at
       # quick depth; everything else tests everything, at full depth.

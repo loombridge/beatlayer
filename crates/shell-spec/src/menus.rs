@@ -16,18 +16,23 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
+use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
     FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
     FOCUS_TOGGLE_TAB_NAVIGATION, FOCUS_TOGGLE_WRAP_NAVIGATION, SET_COLLECT_ALL, SET_NEW, SET_OPEN,
-    SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_FULL_SCREEN,
-    VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS,
-    VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE,
+    VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW,
+    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
+    VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
+use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
-    FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
+    CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
+    RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
+    TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -74,6 +79,10 @@ pub enum Action {
     /// Runs whatever the first of these shortcuts runs in the focused
     /// context; disabled if none runs anything there.
     Shortcut(&'static [&'static str]),
+    /// Runs a command with these arguments (JSON), one of a radio group of
+    /// items that run the same command: the one the command's state
+    /// matches is checked.
+    Choice(&'static str, &'static str),
     /// Its command isn't built yet: shown, disabled. It may name the
     /// shortcut menus.md records for it, which the item displays.
     Pending(Option<&'static str>),
@@ -89,10 +98,22 @@ pub enum Action {
     Separator,
 }
 
+/// The row of Beatlayer's own Assistant item in the View menu (D24): Live
+/// has no assistant, so it is no row of menus.md.
+pub const D24: &str = "D24";
+
 /// The row of Beatlayer's own Duplicate Track Without Clips (IMP-12),
 /// next to Duplicate: an improvement, so not a row of menus.md, which
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
+
+/// The rows of the Create menu's Sample Editor items, which menus.md's note
+/// under the Create menu names but gives no rows (WP-4.10).
+pub const SAMPLE_WARP: &str = "WP-4.10-warp";
+/// See [`SAMPLE_WARP`].
+pub const SAMPLE_INSERT: &str = "WP-4.10-insert";
+/// See [`SAMPLE_WARP`].
+pub const SAMPLE_DELETE: &str = "WP-4.10-delete";
 
 /// Whether a row is one of Live's, in menus.md, rather than one of
 /// Beatlayer's improvements.
@@ -120,7 +141,7 @@ impl MenuItem {
     #[must_use]
     pub fn command(&self) -> Option<&'static str> {
         match self.action {
-            Action::Command(id) => Some(id),
+            Action::Command(id) | Action::Choice(id, _) => Some(id),
             _ => None,
         }
     }
@@ -185,7 +206,7 @@ impl Menu {
     }
 }
 
-use Action::{Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu, System};
+use Action::{Choice, Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu, System};
 
 pub(crate) type Row = (&'static str, &'static str, Action);
 
@@ -292,7 +313,7 @@ const EDIT: &[Row] = &[
     ),
     SEPARATOR,
     ("M-EDIT-016", "Compare: Switch to B", Key(&["S-DEV-011"])),
-    ("M-EDIT-017", "Compare: Copy A to B", Pending(None)),
+    ("M-EDIT-017", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     ("M-EDIT-018", "Cut Time", Key(&["S-ARR-015"])),
     ("M-EDIT-019", "Copy Time", Key(&["S-ARR-016"])),
@@ -395,9 +416,15 @@ const CREATE: &[Row] = &[
         "Insert Empty MIDI Clip",
         Key(&["S-SES-007", "S-ARR-037"]),
     ),
-    ("M-CREATE-009", "Capture MIDI", Pending(None)),
+    ("M-CREATE-009", "Capture MIDI", Cmd(CAPTURE_MIDI)),
     SEPARATOR,
     ("M-CREATE-010", "Create Fade", Key(&["S-ARR-008"])),
+    // The manual places these in the Create menu while the Sample Editor has
+    // focus (the note under menus.md's Create menu); they are disabled
+    // elsewhere.
+    (SAMPLE_WARP, "Insert Warp Marker", Key(&["S-SAMPLE-009"])),
+    (SAMPLE_INSERT, "Insert Transient", Key(&["S-SAMPLE-011"])),
+    (SAMPLE_DELETE, "Delete Transient", Key(&["S-SAMPLE-012"])),
     SEPARATOR,
     ("M-CREATE-011", "Slice to New MIDI Track", Pending(None)),
     (
@@ -418,7 +445,7 @@ const CREATE: &[Row] = &[
     (
         "M-CREATE-015",
         "Separate Stems to New Audio Tracks",
-        Pending(None),
+        Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
     ("M-CREATE-016", "Add Locator", Pending(None)),
@@ -463,7 +490,7 @@ const PLAYBACK: &[Row] = &[
     (
         "M-PLAY-011",
         "Hear Metronome Only While Recording",
-        Pending(None),
+        Cmd(crate::transport::SET_METRONOME_ONLY_WHILE_RECORDING),
     ),
     SEPARATOR,
     ("M-PLAY-012", "Back to Arrangement", Key(&["S-TRANS-009"])),
@@ -486,6 +513,7 @@ const VIEW: &[Row] = &[
     ),
     ("M-VIEW-007", "File Manager", Pending(None)),
     ("M-VIEW-008", "Undo History", Key(&["S-VIEW-021"])),
+    (D24, "Assistant", Cmd(VIEW_TOGGLE_ASSISTANT)),
     SEPARATOR,
     (
         "M-VIEW-009",
@@ -493,7 +521,7 @@ const VIEW: &[Row] = &[
         Cmd(VIEW_TOGGLE_SESSION_ARRANGEMENT),
     ),
     SEPARATOR,
-    ("M-VIEW-010", "Clip View", Key(&["S-VIEW-015"])),
+    ("M-VIEW-010", "Clip View", Cmd(VIEW_TOGGLE_CLIP_VIEW)),
     ("M-VIEW-011", "Device View", Key(&["S-VIEW-016"])),
     (
         "M-VIEW-012",
@@ -554,7 +582,7 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032c", "Volume", Cmd(MIXER_VOLUME)),
     ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Pending(None)),
-    ("M-VIEW-032e", "Crossfader", Pending(None)),
+    ("M-VIEW-032e", "Crossfader", Cmd(MIXER_CROSSFADER)),
     ("M-VIEW-032f", "Performance Impact", Pending(None)),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
@@ -569,7 +597,7 @@ const VIEW: &[Row] = &[
     (
         "M-VIEW-035",
         "Scene Tempo and Time Signature",
-        Pending(None),
+        Cmd(MIXER_SCENE_TEMPO),
     ),
     SEPARATOR,
     ("M-VIEW-036", "Automation Mode", Key(&["S-ENV-001"])),
@@ -698,7 +726,7 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-015", "Snap Automation to Grid", Pending(None)),
     ("M-OPT-016", "Fixed Grid", Key(&["S-GRID-006"])),
     SEPARATOR,
-    ("M-OPT-017", "Draw Mode", Key(&["S-GRID-001"])),
+    ("M-OPT-017", "Draw Mode", Cmd(VIEW_DRAW_MODE)),
     ("M-OPT-018", "Step Input Mode", Key(&["S-NOTE-044"])),
     SEPARATOR,
     ("M-OPT-019", "Highlight Scales", Key(&["S-NOTE-035"])),
@@ -710,13 +738,25 @@ const OPTIONS: &[Row] = &[
         Pending(None),
     ),
     SEPARATOR,
-    ("M-OPT-023", "Solo Switches", Pending(None)),
-    ("M-OPT-024", "Cue Switches", Pending(None)),
+    (
+        "M-OPT-023",
+        "Solo Switches",
+        Choice("mixer.set_cue_mode", r#"{"enabled":false}"#),
+    ),
+    (
+        "M-OPT-024",
+        "Cue Switches",
+        Choice("mixer.set_cue_mode", r#"{"enabled":true}"#),
+    ),
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
     ("M-OPT-026", "Lock Envelopes", Pending(None)),
-    ("M-OPT-027", "MIDI Arrangement Overdub", Pending(None)),
+    (
+        "M-OPT-027",
+        "MIDI Arrangement Overdub",
+        Cmd(crate::transport::SET_MIDI_OVERDUB),
+    ),
     SEPARATOR,
     (
         "M-OPT-028",
@@ -855,7 +895,10 @@ mod tests {
         let mut menus: Vec<(String, Vec<Reference>)> = Vec::new();
         for line in text.lines() {
             if let Some(heading) = line.strip_prefix("## ") {
-                if heading.starts_with("Context menus") {
+                // The menu bar's sections end where the Control Bar's and the
+                // context menus' begin.
+                if heading.starts_with("Control Bar menus") || heading.starts_with("Context menus")
+                {
                     break;
                 }
                 menus.push((heading.to_owned(), Vec::new()));

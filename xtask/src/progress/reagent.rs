@@ -290,15 +290,13 @@ impl Reagent {
 mod tests {
     use super::*;
 
-    /// Reagent's real plan, or `None` in a checkout without the planning
-    /// documents, where the test skips. With the documents present, the plan
-    /// must be there too.
+    /// Reagent's real plan, or `None` in a checkout without it, where the
+    /// test skips: the plan stays with the maintainers, so only their
+    /// checkouts have it.
     fn real_plan() -> Option<String> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        if !crate::ui_parity::reference_present(&root) {
-            eprintln!(
-                "skipped: the planning documents aren't published yet, and this checkout doesn't have them"
-            );
+        if !root.join(PATH).exists() {
+            eprintln!("skipped: this checkout doesn't have Reagent's plan");
             return None;
         }
         Some(std::fs::read_to_string(root.join(PATH)).expect("Reagent's plan is readable"))

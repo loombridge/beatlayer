@@ -526,6 +526,8 @@ fn the_section_reaches_assistive_technology() {
     }
     assert_eq!(Harness::node(&nodes, "Play").value, "stopped");
     assert_eq!(Harness::node(&nodes, "Arrangement Loop").value, "off");
+    assert_eq!(Harness::node(&nodes, "Punch-In").value, "off");
+    assert_eq!(Harness::node(&nodes, "Punch-Out").value, "off");
     assert_eq!(Harness::node(&nodes, "Loop Length Bars").value, "4");
     assert!(
         Harness::node(&nodes, "Arrangement Position Bars")
@@ -548,9 +550,6 @@ fn the_section_reaches_assistive_technology() {
     for (name, package) in [
         ("Arrangement Record", "WP-2.13"),
         ("MIDI Arrangement Overdub", "WP-2.14"),
-        ("Automation Arm", "WP-2.12"),
-        ("Punch-In", "WP-2.13"),
-        ("Metronome", "WP-2.15"),
         ("Tap Tempo", "M2"),
     ] {
         let node = Harness::node(&nodes, name);
@@ -559,5 +558,30 @@ fn the_section_reaches_assistive_technology() {
             "{name}"
         );
     }
+    // Metronome is now active (WP-2.15).
+    let metro = Harness::node(&nodes, "Metronome");
+    assert!(!metro.disabled, "Metronome should be active");
+    assert!(!state(&mut h.shell).metronome.enabled);
+
+    // Toggling via shortcut 'O'.
+    press(&mut h, Key::O, Modifiers::NONE);
+    h.settle();
+    assert!(state(&mut h.shell).metronome.enabled);
+
+    // Toggling via clicking the metronome switch.
+    h.accesskit(element_id(Element::Metronome), Action::Click);
+    h.settle();
+    assert!(!state(&mut h.shell).metronome.enabled);
+
+    // Punch-In and Punch-Out are active (WP-2.13): each click switches its
+    // own setting, and the Loop switch stays as it was.
+    for element in [Element::PunchIn, Element::PunchOut] {
+        h.accesskit(element_id(element), Action::Click);
+        h.settle();
+    }
+    let document = h.shell.editor().document();
+    assert!(document.settings().punch_in && document.settings().punch_out);
+    assert!(!document.settings().arrangement_loop.enabled);
+
     h.shell.audio_mut().stop();
 }

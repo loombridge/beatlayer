@@ -1,4 +1,4 @@
-//! Contour, the native eight-band parametric EQ (WP-2.18a, part 1; the eq
+//! EQ Eight, the native eight-band parametric EQ (WP-2.18a, part 1; the eq
 //! spec): eight filters per curve, two curves for the L/R and M/S modes, an
 //! optional oversampled path, adaptive Q, and the output spectrum the
 //! display draws.
@@ -21,11 +21,19 @@ use std::f64::consts::TAU;
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker, OrdMap,
+    ParamDescriptor, ParamId, ParamUnit,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+pub use crate::sections::{ANALYSER_BANDS, CURVE_POINTS};
+use crate::sections::{
+    Analyser, Biquad, Coeffs, DISPLAY_RATE, REFRESH_FRAMES, curve_freqs, curve_series, response_db,
+    spectrum_series,
+};
 
-/// Contour's device type.
+/// EQ Eight's device type.
 pub const EQ: &str = "beatlayer.contour";
 
 /// Bands, on each of the two curves.
@@ -80,7 +88,7 @@ pub const TYPES: [&str; 8] = [
 
 /// A band's response: the eight [`TYPES`], by their index.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Type {
+pub(crate) enum Type {
     LowCut48,
     LowCut12,
     LowShelf,
@@ -93,7 +101,7 @@ enum Type {
 
 impl Type {
     /// The eight types, in the chooser's order.
-    const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::LowCut48,
         Self::LowCut12,
         Self::LowShelf,
@@ -105,7 +113,7 @@ impl Type {
     ];
 
     /// The type the chooser's `index` names.
-    fn of(index: usize) -> Self {
+    pub(crate) fn of(index: usize) -> Self {
         Self::ALL[index.min(Self::ALL.len() - 1)]
     }
 
@@ -155,19 +163,6 @@ const ADAPTIVE_Q_AT_FULL_GAIN: f64 = 2.0;
 const CUT_STAGES: usize = 4;
 /// The most stages a band has.
 const MAX_STAGES: usize = CUT_STAGES;
-
-/// The analyser's window, in frames.
-const ANALYSER_WINDOW: usize = 1024;
-/// The analyser's bands, from [`ANALYSER_MIN_HZ`] to [`ANALYSER_MAX_HZ`].
-pub const ANALYSER_BANDS: usize = 64;
-const ANALYSER_MIN_HZ: f64 = 20.0;
-const ANALYSER_MAX_HZ: f64 = 20_000.0;
-/// What the analyser reads for a band with nothing in it, in dB.
-const ANALYSER_FLOOR_DB: f32 = -100.0;
-/// How often a band's coefficients are worked out, in frames: often enough
-/// that a knob's motion is smooth, rarely enough to keep the sin and cos
-/// cheap.
-const REFRESH_FRAMES: usize = 16;
 
 /// `band`'s (0-based) parameter `slot` on `curve` (0 or 1).
 #[must_use]
@@ -253,7 +248,7 @@ fn band_descriptors(curve: usize, band: usize) -> [ParamDescriptor; SLOTS] {
     ]
 }
 
-/// Contour's type: Beatlayer's own name and look, EQ Eight's behaviour.
+/// EQ Eight's type: Beatlayer's own look, EQ Eight's behaviour.
 #[must_use]
 pub fn eq_type() -> DeviceType {
     let mut params = vec![
@@ -274,7 +269,7 @@ pub fn eq_type() -> DeviceType {
             params.extend(band_descriptors(curve, band));
         }
     }
-    DeviceType::native(EQ, "Contour", DeviceRole::AudioEffect)
+    DeviceType::native(EQ, "EQ Eight", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -317,52 +312,16 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Contour to `registry`.
+/// Adds EQ Eight to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, eq_type(), |_, config| make(config));
 }
 
-/// Makes a Contour for `config`'s rate, channels, and block size. Every
+/// Makes an EQ Eight for `config`'s rate, channels, and block size. Every
 /// buffer it needs is made here, off the audio thread.
 #[must_use]
 pub fn make(config: &NodeConfig) -> Contour {
     Contour::new(config)
-}
-
-/// A biquad's coefficients, normalised so `a0` is 1.
-#[derive(Clone, Copy, Default)]
-struct Coeffs {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-}
-
-/// One second-order section: its coefficients and its state, transposed
-/// direct form II.
-#[derive(Clone, Copy, Default)]
-struct Biquad {
-    c: Coeffs,
-    z1: f32,
-    z2: f32,
-}
-
-impl Biquad {
-    /// Its output for `x`, advancing its state.
-    #[inline]
-    fn process(&mut self, x: f32) -> f32 {
-        let y = flush(self.c.b0 * x + self.z1);
-        self.z1 = flush(self.c.b1 * x - self.c.a1 * y + self.z2);
-        self.z2 = flush(self.c.b2 * x - self.c.a2 * y);
-        y
-    }
-}
-
-/// A value far below the audio's noise floor is left as zero rather than as
-/// a denormal, whose arithmetic is slow.
-fn flush(x: f32) -> f32 {
-    if x.abs() < 1e-30 { 0.0 } else { x }
 }
 
 /// The coefficient design of `kind` at `freq`, `gain_db`, and `q`, the
@@ -371,7 +330,7 @@ fn flush(x: f32) -> f32 {
 /// A shelf's `q` is the Q of the cookbook's `alpha` in place of its slope
 /// `S`, and a cut filter's is its resonance; the 48 dB cuts are four
 /// identical stages, so their curve is a plain cascade.
-fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
+pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
     let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
     let (sin, cos) = w0.sin_cos();
     let amplitude = 10f64.powf(gain_db / 40.0);
@@ -479,141 +438,6 @@ impl Band {
     }
 }
 
-/// The spectrum of the output, for the display: a window of samples at a
-/// time, at [`ANALYSER_BANDS`] logarithmic bands, in dB. Everything it
-/// writes it made with, so it doesn't allocate on the audio thread.
-struct Analyser {
-    /// The samples of the window being filled.
-    samples: Vec<f32>,
-    filled: usize,
-    /// The last complete window's bands, in dB.
-    bands: [f32; ANALYSER_BANDS],
-    /// The FFT's working buffers and its twiddles.
-    re: Vec<f32>,
-    im: Vec<f32>,
-    twiddle: Vec<(f32, f32)>,
-    /// The Hann window's weights.
-    weights: Vec<f32>,
-    /// Each band's first and last bin.
-    edges: [usize; ANALYSER_BANDS + 1],
-}
-
-impl Analyser {
-    fn new(rate: f64) -> Self {
-        let half = ANALYSER_WINDOW / 2;
-        let mut edges = [0usize; ANALYSER_BANDS + 1];
-        for (band, edge) in edges.iter_mut().enumerate() {
-            let ratio =
-                (ANALYSER_MAX_HZ / ANALYSER_MIN_HZ).powf(band as f64 / ANALYSER_BANDS as f64);
-            *edge = (((ANALYSER_MIN_HZ * ratio) * ANALYSER_WINDOW as f64 / rate).round() as usize)
-                .min(half);
-        }
-        Self {
-            samples: vec![0.0; ANALYSER_WINDOW],
-            filled: 0,
-            bands: [ANALYSER_FLOOR_DB; ANALYSER_BANDS],
-            re: vec![0.0; ANALYSER_WINDOW],
-            im: vec![0.0; ANALYSER_WINDOW],
-            twiddle: (0..ANALYSER_WINDOW / 2)
-                .map(|k| {
-                    let angle = -TAU * k as f64 / ANALYSER_WINDOW as f64;
-                    (angle.cos() as f32, angle.sin() as f32)
-                })
-                .collect(),
-            weights: (0..ANALYSER_WINDOW)
-                .map(|i| {
-                    let x = i as f64 / ANALYSER_WINDOW as f64;
-                    (0.5 - 0.5 * (TAU * x).cos()) as f32
-                })
-                .collect(),
-            edges,
-        }
-    }
-
-    /// Adds one output sample; a full window is measured and starts again.
-    fn push(&mut self, sample: f32) {
-        self.samples[self.filled] = sample;
-        self.filled += 1;
-        if self.filled == ANALYSER_WINDOW {
-            self.filled = 0;
-            self.measure();
-        }
-    }
-
-    /// Measures the window into [`bands`](Self::bands).
-    fn measure(&mut self) {
-        let weights = &self.weights;
-        for (i, (sample, weight)) in self.samples.iter().zip(weights).enumerate() {
-            self.re[i] = sample * weight;
-            self.im[i] = 0.0;
-        }
-        fft(&mut self.re, &mut self.im, &self.twiddle);
-        // A one-sided spectrum's amplitude: twice the bin over the window's
-        // weight, which a full-scale sine reads 0 dB at.
-        let window: f32 = weights.iter().sum();
-        let scale = 2.0 / window;
-        for (band, value) in self.bands.iter_mut().enumerate() {
-            // A band whose edges round to one bin reads that bin.
-            let low = self.edges[band];
-            let high = self.edges[band + 1].max(low + 1);
-            let peak = (low..high)
-                .map(|bin| self.re[bin].hypot(self.im[bin]))
-                .fold(0.0f32, f32::max);
-            let amplitude = peak * scale;
-            *value = if amplitude > 1.0e-5 {
-                20.0 * amplitude.log10()
-            } else {
-                ANALYSER_FLOOR_DB
-            };
-        }
-    }
-
-    /// The last window's bands, in dB, [`ANALYSER_MIN_HZ`] to
-    /// [`ANALYSER_MAX_HZ`], lowest first.
-    fn bands(&self) -> &[f32; ANALYSER_BANDS] {
-        &self.bands
-    }
-}
-
-/// An in-place radix-2 FFT of `re` (with `im` zero for real input), the
-/// twiddles precomputed.
-fn fft(re: &mut [f32], im: &mut [f32], twiddle: &[(f32, f32)]) {
-    let n = re.len();
-    // The bit-reversal permutation.
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let step = n / len;
-        let mut start = 0;
-        while start < n {
-            for k in 0..len / 2 {
-                let (wr, wi) = twiddle[k * step];
-                let (a, b) = (start + k, start + k + len / 2);
-                let (xr, xi) = (re[a], im[a]);
-                let (yr, yi) = (re[b] * wr - im[b] * wi, re[b] * wi + im[b] * wr);
-                re[a] = xr + yr;
-                im[a] = xi + yi;
-                re[b] = xr - yr;
-                im[b] = xi - yi;
-            }
-            start += len;
-        }
-        len <<= 1;
-    }
-}
-
 /// The mode: how the two curves map onto the channels.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -713,7 +537,7 @@ impl Plan {
     }
 }
 
-/// Contour's audio-thread half.
+/// EQ Eight's audio-thread half.
 pub struct Contour {
     rate: f64,
     /// Each channel's eight bands.
@@ -739,7 +563,7 @@ impl BandChain {
 }
 
 impl Contour {
-    /// A Contour for `config`, every buffer made here.
+    /// An EQ Eight for `config`, every buffer made here.
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
         let frames = config.max_frames.max(1);
@@ -882,29 +706,124 @@ impl NativeDevice for Contour {
 
         // 4. The analyser, on the output.
         if settings.value(params, ANALYZE) >= 0.5 {
-            if channels == 2 {
-                let mut iter = audio.channels_mut();
-                let left = iter.next().expect("two channels");
-                let right = iter.next().expect("two channels");
-                for (l, r) in left.iter().zip(right.iter()) {
-                    self.analyser.push((l + r) * 0.5);
-                }
-            } else {
-                for sample in audio.channel_mut(0) {
-                    self.analyser.push(*sample);
-                }
-            }
+            self.analyser.push_mix(audio);
         }
     }
 
     fn latency(&self) -> u32 {
         self.latency
     }
+
+    fn display_len(&self) -> usize {
+        ANALYSER_BANDS
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        out.copy_from_slice(self.analyser.bands());
+    }
+}
+
+/// The levels the display shows between its bottom and its top, in dB: the
+/// curves' boost and cut.
+const CURVE_RANGE_DB: [f32; 2] = [-18.0, 18.0];
+
+/// The device's display (the eq spec, R10 to R12): the spectrum while
+/// Analyze is on, each switched-on band's response and their sum on each
+/// curve, and a dot for each such band. `data` is what the node published,
+/// if an engine runs.
+#[must_use]
+pub fn display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
+    let text = |id: ParamId, v: f64| {
+        description
+            .param(id)
+            .map_or_else(String::new, |p| p.format(v))
+    };
+    let mode = Mode::of(value(MODE));
+    let adaptive = value(ADAPTIVE_Q) >= 0.5;
+    let plan = Plan {
+        mode,
+        adaptive,
+        bands: [[(false, Type::Peak); BANDS]; CURVES],
+    };
+    let names: &[&str] = match mode {
+        Mode::Stereo => &["Response"],
+        Mode::LeftRight => &["Left Response", "Right Response"],
+        Mode::MidSide => &["Mid Response", "Side Response"],
+    };
+    let series = curve_series;
+    let mut out = DeviceDisplay {
+        device,
+        live: data.is_some(),
+        view: None,
+        series: Vec::new(),
+        markers: Vec::new(),
+        readings: Vec::new(),
+    };
+    if let (Some(data), true) = (data, value(ANALYZE) >= 0.5) {
+        out.series.push(spectrum_series(data));
+    }
+    let freqs: Vec<f64> = curve_freqs();
+    for (curve, name) in names.iter().enumerate() {
+        let label = ['A', 'B'][curve];
+        let mut sum = vec![0.0f32; CURVE_POINTS];
+        for band in 0..BANDS {
+            if value(band_param(curve, band, ON)) < 0.5 {
+                continue;
+            }
+            let kind = Type::of(value(band_param(curve, band, TYPE)) as usize);
+            let freq = value(band_param(curve, band, FREQ));
+            let gain = if kind.has_gain() {
+                value(band_param(curve, band, GAIN_SLOT))
+            } else {
+                0.0
+            };
+            let q = plan.q(kind, value(band_param(curve, band, Q)), gain);
+            let c = coeffs(kind, freq, gain, q, DISPLAY_RATE);
+            let stages = kind.stages() as f64;
+            let response: Vec<f32> = freqs
+                .iter()
+                .map(|&hz| (stages * response_db(c, hz, DISPLAY_RATE)) as f32)
+                .collect();
+            for (total, r) in sum.iter_mut().zip(&response) {
+                *total += r;
+            }
+            let n = band + 1;
+            out.series.push(series(
+                format!("{label}{n} Response"),
+                CURVE_RANGE_DB,
+                true,
+                response,
+            ));
+            let freq_text = text(band_param(curve, band, FREQ), freq);
+            let mut marker = format!("{label}{n} {} {freq_text}", TYPES[kind.index()]);
+            if kind.has_gain() {
+                marker.push(' ');
+                marker.push_str(&text(band_param(curve, band, GAIN_SLOT), gain));
+            }
+            out.markers.push(DisplayMarker {
+                name: format!("{label}{n}"),
+                series: (*name).to_owned(),
+                x: freq as f32,
+                y: gain as f32,
+                text: marker,
+            });
+        }
+        out.series
+            .push(series((*name).to_owned(), CURVE_RANGE_DB, false, sum));
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sections::{ANALYSER_MAX_HZ, ANALYSER_MIN_HZ, ANALYSER_WINDOW};
 
     // Spec: eq R5
     #[test]

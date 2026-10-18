@@ -1,14 +1,17 @@
 //! Tracks and their mixer settings.
 
 use core::fmt;
+use std::collections::BTreeSet;
 
 use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::clip::Clip;
+use crate::automation::{Automation, AutomationTarget, TrackAutomation};
+use crate::clip::{Clip, EnvelopeKind, TakeLane};
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::rack::Chain;
 use crate::shared::Shared;
 
 /// The kind of a track, fixed when the track is created.
@@ -68,6 +71,42 @@ impl TrackKind {
     pub const fn has_sends(self) -> bool {
         matches!(self, Self::Audio | Self::Midi | Self::Group)
     }
+
+    /// Whether tracks of this kind have the crossfader's A/B assign
+    /// buttons: every kind but Main, which carries the crossfader itself
+    /// (the mixer spec, R23).
+    #[must_use]
+    pub const fn has_crossfade_assign(self) -> bool {
+        !matches!(self, Self::Main)
+    }
+}
+
+/// Which side of the crossfader a track is assigned to, through its A and B
+/// assign buttons (the mixer spec, R23). The two sides are exclusive: a
+/// track is on A, on B, or on neither, and one assigned to neither plays
+/// through at every crossfader position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "Which side of the crossfader a track is assigned to: `a`, `b`, or `none` \
+                   (the default), where the track plays through at every crossfader position."
+)]
+pub enum CrossfadeAssign {
+    /// On neither side: the crossfader doesn't change the track's level.
+    #[default]
+    None,
+    /// On the crossfader's A side.
+    A,
+    /// On the crossfader's B side.
+    B,
+}
+
+impl CrossfadeAssign {
+    /// Whether this is [`CrossfadeAssign::None`], the default.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
 }
 
 impl fmt::Display for TrackKind {
@@ -107,29 +146,100 @@ impl SendTap {
     }
 }
 
+/// One of the audio interface's channels: a single channel or a stereo
+/// pair, counted from 1 as Live's In/Out choosers show them (the routing
+/// spec, WP-2.13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", content = "channel", rename_all = "snake_case")]
+#[schemars(
+    description = "One of the audio interface's channels: `mono` a single channel, or `pair` a \
+                   stereo pair starting at it, counted from 1 (`{ \"type\": \"pair\", \
+                   \"channel\": 3 }` is the pair 3/4)."
+)]
+pub enum Channel {
+    /// A single channel, counted from 1.
+    Mono(u16),
+    /// A stereo pair: its first channel, counted from 1; the second is the
+    /// next one.
+    Pair(u16),
+}
+
+impl Default for Channel {
+    /// The first stereo pair, `1/2`: what an interface's first channels are
+    /// chosen as.
+    fn default() -> Self {
+        Self::Pair(1)
+    }
+}
+
+impl Channel {
+    /// Whether this is the default, `pair 1`.
+    #[must_use]
+    pub fn is_first_pair(&self) -> bool {
+        *self == Self::Pair(1)
+    }
+
+    /// Whether the two choices share a channel: `1/2` overlaps `2` and
+    /// `2/3`, not `3/4`.
+    #[must_use]
+    pub fn overlaps(self, other: Self) -> bool {
+        let span = |c: Self| match c {
+            Self::Mono(c) => (c, c),
+            Self::Pair(c) => (c, c.saturating_add(1)),
+        };
+        let (a, b) = (span(self), span(other));
+        a.0 <= b.1 && b.0 <= a.1
+    }
+
+    /// What Live's choosers show: `1` for one channel, `1/2` for a pair.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Mono(channel) => channel.to_string(),
+            Self::Pair(channel) => format!("{channel}/{}", u32::from(channel) + 1),
+        }
+    }
+}
+
 /// Where a track takes its input from: the In/Out section's input type
 /// chooser, Audio From on an audio track and MIDI From on a MIDI track, with
 /// its channel (the routing spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     description = "Where a track takes its input from. Audio tracks: `external` (Ext. In, the \
-                   audio interface's inputs; a new audio track's), `resampling` (the Main \
-                   output), `track` (another audio track, a return, or Main, tapped at `tap`), \
-                   or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI \
-                   track's), `computer_keyboard`, `track` (another MIDI track), or `none`."
+                   audio interface's inputs, with its `channel`; a new audio track's), \
+                   `resampling` (the Main output), `track` (another audio track, a MIDI track with \
+                   an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
+                   instrument or audio effect rack on that track, that chain's signal at \
+                   `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
+                   by its name as the MIDI settings list it), `track` (another MIDI track), or \
+                   `none`."
 )]
 pub enum Input {
     /// No Input.
     None,
-    /// Ext. In: the audio interface's inputs. Audio tracks only; it carries
-    /// silence until duplex audio (WP-2.13).
-    External,
-    /// All Ins: every MIDI input port, merged. MIDI tracks only; MIDI input
-    /// arrives with WP-2.2.
+    /// Ext. In: the audio interface's inputs, one channel or a stereo pair.
+    /// Audio tracks only.
+    External {
+        /// Which of the interface's inputs, counted from 1: a single channel
+        /// or a stereo pair. The first pair (1/2) by default.
+        #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
+        channel: Channel,
+    },
+    /// All Ins: every MIDI input port whose Track switch is on, and the
+    /// computer MIDI keyboard. MIDI tracks only.
     AllIns,
-    /// The computer MIDI keyboard. MIDI tracks only (WP-2.2).
+    /// The computer MIDI keyboard. MIDI tracks only.
     ComputerKeyboard,
+    /// One MIDI input port, by the name the MIDI system gives it. MIDI
+    /// tracks only. The track keeps the name while the port is away and
+    /// receives again when a port of that name returns.
+    Port {
+        /// The port's name, as the MIDI settings list it.
+        name: String,
+    },
     /// Resampling: the Main output. Audio tracks only.
     Resampling,
     /// Another track's signal.
@@ -141,6 +251,11 @@ pub enum Input {
         /// out.
         #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
         tap: Tap,
+        /// A chain of an instrument or audio effect rack on that track, at
+        /// any depth, whose signal is taken at `tap` instead of the
+        /// track's own (the racks spec, R38 to R41).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain: Option<ChainId>,
     },
 }
 
@@ -208,7 +323,8 @@ pub enum Monitor {
     description = "Where a track's audio goes: `default` (Main, or the group the track is \
                    in), `main` (Main, even from inside a group), `track` (another audio \
                    track's input, or the group the track is in), `sends_only` (only through \
-                   its sends), or `external` (Ext. Out)."
+                   its sends), or `external` (Ext. Out, the audio interface's outputs, with its \
+                   `channel`: a single channel or a stereo pair, the first pair by default)."
 )]
 pub enum Output {
     /// Main, or the group the track is in: where a new track's audio goes.
@@ -216,9 +332,14 @@ pub enum Output {
     Default,
     /// Main, even from a track inside a group.
     Main,
-    /// Ext. Out: the audio interface's outputs. It carries nothing until
-    /// external outputs arrive (WP-2.13).
-    External,
+    /// Ext. Out: the audio interface's outputs. The track plays on those
+    /// device channels and not into Main (WP-2.13).
+    External {
+        /// Which of the interface's outputs, counted from 1: a single
+        /// channel or a stereo pair. The first pair (1/2) by default.
+        #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
+        channel: Channel,
+    },
     /// Nowhere but the track's sends.
     SendsOnly,
     /// Another track: an audio track's input (Track In), or the group the
@@ -227,6 +348,53 @@ pub enum Output {
         /// The track.
         track: TrackId,
     },
+}
+
+/// Where a MIDI track's MIDI goes: the In/Out section's MIDI To chooser and
+/// its channel (the routing spec, R4; the external devices spec, R1, R2).
+///
+/// A track is saved as its ID alone, as MIDI To has always been; a port as
+/// its name and channel.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[schemars(
+    description = "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output \
+                   port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's \
+                   name as the MIDI settings list it, and the channel to send on, 1 to 16."
+)]
+pub enum MidiTo {
+    /// Another MIDI track's Track In.
+    Track(TrackId),
+    /// A MIDI output port, by the name the MIDI system gives it, and the
+    /// channel everything is sent on. The track keeps the name while the
+    /// port is away and sends again when a port of that name returns.
+    Port {
+        /// The port's name, as the MIDI settings list it.
+        name: String,
+        /// The channel, 1 to 16.
+        channel: u8,
+    },
+}
+
+impl MidiTo {
+    /// A port with Beatlayer's first channel, 1: what choosing a port in
+    /// the chooser takes.
+    #[must_use]
+    pub fn port(name: impl Into<String>) -> Self {
+        Self::Port {
+            name: name.into(),
+            channel: 1,
+        }
+    }
+
+    /// The track it names, if it names one.
+    #[must_use]
+    pub const fn track(&self) -> Option<TrackId> {
+        match self {
+            Self::Track(track) => Some(*track),
+            Self::Port { .. } => None,
+        }
+    }
 }
 
 impl Output {
@@ -239,37 +407,60 @@ impl Output {
 
 /// A track's In/Out settings: its input and its channel, Monitor, and its
 /// output (the routing spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct Routing {
-    /// Audio From or MIDI From, with its channel.
+    /// Audio From or MIDI From.
     pub input: Input,
+    /// The input channel: the MIDI channel to take, 1 to 16, or `None` for
+    /// All Channels. Only a MIDI port input has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u8>,
     /// The Monitor switch.
     pub monitor: Monitor,
     /// Audio To.
     #[serde(default, skip_serializing_if = "Output::is_default")]
     pub output: Output,
-    /// MIDI To, on a MIDI track: another MIDI track, or none (No Output,
-    /// a new MIDI track's).
+    /// MIDI To, on a MIDI track: another MIDI track, an output port with a
+    /// channel, or none (No Output, a new MIDI track's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub midi_output: Option<TrackId>,
+    pub midi_output: Option<MidiTo>,
+    /// Main Out, on Main: the interface's output channels the Main mix goes
+    /// to, as a stereo pair. Saved only where it differs from the first
+    /// pair.
+    #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
+    pub main_out: Channel,
+    /// Cue Out, on Main: the interface's output channels the cue mix goes
+    /// to, as a stereo pair. It carries the cue mix once cue mode is built
+    /// (a later package); the choice is kept and saved with the set.
+    #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
+    pub cue_out: Channel,
 }
 
 impl Routing {
     /// A new track's routing: an audio track takes Ext. In, a MIDI track
-    /// All Ins, both with Monitor Auto, and both go to Main (or
-    /// their group); MIDI To is No Output. Other kinds take no input.
+    /// All Ins on All Channels, both with Monitor Auto, and both go to Main
+    /// (or their group); MIDI To is No Output. Other kinds take no input.
+    /// Main Out and Cue Out are the interface's first pair.
     #[must_use]
     pub const fn new(kind: TrackKind) -> Self {
         let (input, monitor) = match kind {
-            TrackKind::Audio => (Input::External, Monitor::Auto),
+            TrackKind::Audio => (
+                Input::External {
+                    channel: Channel::Pair(1),
+                },
+                Monitor::Auto,
+            ),
             TrackKind::Midi => (Input::AllIns, Monitor::Auto),
             _ => (Input::None, Monitor::Off),
         };
         Self {
             input,
+            channel: None,
             monitor,
             output: Output::Default,
             midi_output: None,
+            main_out: Channel::Pair(1),
+            cue_out: Channel::Pair(1),
         }
     }
 
@@ -286,7 +477,7 @@ impl Routing {
 
 /// A track's mixer settings: its volume, pan, and switches. Its sends are
 /// [`Track::sends`]. The rules are in the mixer spec.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Mixer {
     /// Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite
     /// and never negative.
@@ -296,11 +487,19 @@ pub struct Mixer {
     /// Whether the track is muted: its Track Activator is off. Always off on
     /// the Main track.
     pub mute: bool,
-    /// Whether the track is soloed. Always off on the Main track.
+    /// Whether the track is soloed, or, in Cue mode, cue-switched. Always off
+    /// on the Main track.
     pub solo: bool,
     /// Whether the track is armed for recording. Only audio and MIDI tracks
     /// can be armed.
     pub arm: bool,
+    /// Which side of the crossfader the track plays on, set by its A and B
+    /// assign buttons; [`CrossfadeAssign::None`] (the default) plays through
+    /// at every position. Always `None` on the Main track, which carries
+    /// the crossfader itself (the mixer spec, R23). Saved only when it's
+    /// assigned, so a set saved before WP-3.17 loads unchanged.
+    #[serde(default, skip_serializing_if = "CrossfadeAssign::is_none")]
+    pub crossfade: CrossfadeAssign,
     /// Where sends to this track take their signal from: only a return
     /// track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set
     /// saved before WP-1.6 loads unchanged.
@@ -309,8 +508,8 @@ pub struct Mixer {
 }
 
 impl Default for Mixer {
-    /// Unity gain, centred, every switch off, and sends taken after the
-    /// mixer.
+    /// Unity gain, centred, every switch off, unassigned on the crossfader,
+    /// and sends taken after the mixer.
     fn default() -> Self {
         Self {
             volume: 1.0,
@@ -318,13 +517,14 @@ impl Default for Mixer {
             mute: false,
             solo: false,
             arm: false,
+            crossfade: CrossfadeAssign::None,
             tap: SendTap::Post,
         }
     }
 }
 
-/// A track: its mixer and sends, its device chain, and either its clips
-/// (audio and MIDI tracks) or the tracks inside it (groups).
+/// A track: its mixer, sends, and automation, its device chain, and either
+/// its clips (audio and MIDI tracks) or the tracks inside it (groups).
 ///
 /// Tracks change only through commands, so this type has no setters.
 #[derive(Clone, Debug, PartialEq)]
@@ -339,7 +539,23 @@ pub struct Track {
     pub(crate) routing: Routing,
     pub(crate) devices: Vector<Shared<Device>>,
     pub(crate) clips: OrdMap<ClipId, Shared<Clip>>,
+    /// The clips in the track's Session slots, by scene. A slot that holds
+    /// nothing isn't listed: every audio and MIDI track has a slot in every
+    /// scene, and a slot with no entry is empty. Return, group, and Main
+    /// tracks have none.
+    pub(crate) slots: OrdMap<SceneId, Shared<Clip>>,
+    /// The scenes whose slot's Clip Stop button was removed (WP-3.2, C-SLOT-006,
+    /// S-SES-005): every audio and MIDI slot has one until then. Return,
+    /// group, and Main tracks have none.
+    pub(crate) removed_stop_buttons: BTreeSet<SceneId>,
+    /// The take lanes under the Arrangement lane, in order (WP-2.13): one per
+    /// recorded loop pass. Audio tracks only.
+    pub(crate) take_lanes: Vector<TakeLane>,
     pub(crate) children: Vector<TrackId>,
+    /// One envelope per automated parameter of this track (WP-2.12): a
+    /// control of its mixer, one of its sends, or a parameter of a device in
+    /// its chain.
+    pub(crate) automation: TrackAutomation,
 }
 
 impl Track {
@@ -353,7 +569,11 @@ impl Track {
             routing: Routing::new(kind),
             devices: Vector::new(),
             clips: OrdMap::new(),
+            slots: OrdMap::new(),
+            removed_stop_buttons: BTreeSet::new(),
+            take_lanes: Vector::new(),
             children: Vector::new(),
+            automation: TrackAutomation::new(),
         }
     }
 
@@ -408,16 +628,103 @@ impl Track {
         self.devices.iter().map(|device| &**device)
     }
 
-    /// Where a device sits in the chain, counting from 0.
+    /// Where a device sits in the chain, counting from 0. Only devices in
+    /// the chain itself, not those inside its racks (see
+    /// [`find_device`](Self::find_device)).
     #[must_use]
     pub fn device_position(&self, device: DeviceId) -> Option<usize> {
         self.devices.iter().position(|d| d.id == device)
     }
 
-    /// The track's clips, ordered by ID. Only audio and MIDI tracks have
-    /// clips.
+    /// Every device of the track, those inside its racks included at any
+    /// depth, in signal order.
+    pub fn devices_deep(&self) -> impl Iterator<Item = &Device> {
+        self.devices.iter().flat_map(|device| device.walk())
+    }
+
+    /// The device with this ID, in the chain or inside one of its racks.
+    #[must_use]
+    pub fn find_device(&self, id: DeviceId) -> Option<&Device> {
+        self.devices.iter().find_map(|device| device.find(id))
+    }
+
+    /// The rack chain with this ID, at any depth.
+    #[must_use]
+    pub fn find_chain(&self, id: ChainId) -> Option<&Chain> {
+        self.devices.iter().find_map(|device| device.find_chain(id))
+    }
+
+    /// Whether the track's devices, racks and chains are laid out as
+    /// another version's are (see [`Device::same_shape`]).
+    #[must_use]
+    pub fn same_chain_shape(&self, other: &Self) -> bool {
+        self.devices.len() == other.devices.len()
+            && self
+                .devices
+                .iter()
+                .zip(&other.devices)
+                .all(|(a, b)| Shared::ptr_eq(a, b) || a.same_shape(b))
+    }
+
+    /// The track's clips, ordered by ID: those on its Arrangement lane.
+    /// Only audio and MIDI tracks have clips.
     pub fn clips(&self) -> impl ExactSizeIterator<Item = &Clip> + DoubleEndedIterator {
         self.clips.values().map(|clip| &**clip)
+    }
+
+    /// The clips in the track's Session slots, as `(scene, clip)` pairs
+    /// ordered by scene ID. Only audio and MIDI tracks hold them.
+    pub fn slots(&self) -> impl ExactSizeIterator<Item = (SceneId, &Clip)> + '_ {
+        self.slots.iter().map(|(&scene, clip)| (scene, &**clip))
+    }
+
+    /// The clip in the track's slot at `scene`, if the slot holds one.
+    #[must_use]
+    pub fn slot(&self, scene: SceneId) -> Option<&Clip> {
+        self.slots.get(&scene).map(|clip| &**clip)
+    }
+
+    /// Whether the slot at `scene` has a Clip Stop button (WP-3.2,
+    /// S-SES-005): every audio and MIDI slot has one until it's removed.
+    #[must_use]
+    pub fn has_stop_button(&self, scene: SceneId) -> bool {
+        self.kind.holds_clips() && !self.removed_stop_buttons.contains(&scene)
+    }
+
+    /// The scenes whose slots' Clip Stop buttons were removed, in order.
+    pub fn removed_stop_buttons(&self) -> impl ExactSizeIterator<Item = SceneId> + '_ {
+        self.removed_stop_buttons.iter().copied()
+    }
+
+    /// The clip with this ID, whether it sits on the Arrangement lane or in
+    /// a Session slot.
+    #[must_use]
+    pub fn clip(&self, id: ClipId) -> Option<&Clip> {
+        self.clips
+            .get(&id)
+            .or_else(|| self.slots.values().find(|clip| clip.id == id))
+            .map(|clip| &**clip)
+    }
+
+    /// The clip with this ID, to change in place, whether it sits on the
+    /// Arrangement lane or in a Session slot. The track's share of the clip
+    /// is copied out of the document it came from first, so editing it
+    /// leaves that version as it was.
+    pub(crate) fn clip_mut(&mut self, id: ClipId) -> Option<&mut Clip> {
+        if let Some(clip) = self.clips.get_mut(&id) {
+            return Some(Shared::make_mut(clip));
+        }
+        let scene = self
+            .slots
+            .iter()
+            .find(|(_, clip)| clip.id == id)
+            .map(|(&scene, _)| scene)?;
+        self.slots.get_mut(&scene).map(Shared::make_mut)
+    }
+
+    /// The take lanes under the track's Arrangement lane, nearest first.
+    pub fn take_lanes(&self) -> impl ExactSizeIterator<Item = &TakeLane> + '_ {
+        self.take_lanes.iter()
     }
 
     /// The tracks directly inside this one, in order. Only groups have them.
@@ -425,21 +732,92 @@ impl Track {
         self.children.iter().copied()
     }
 
+    /// The track's automation: one entry per automated parameter, in target
+    /// order.
+    pub fn automation(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&AutomationTarget, &Automation)> + '_ {
+        self.automation.iter()
+    }
+
+    /// The track's automation, keyed by the parameter it drives.
+    #[must_use]
+    pub fn automation_map(&self) -> &TrackAutomation {
+        &self.automation
+    }
+
+    /// The automation of one parameter of the track, if it has any.
+    #[must_use]
+    pub fn automation_for(&self, target: &AutomationTarget) -> Option<&Automation> {
+        self.automation.get(target)
+    }
+
+    /// Whether any of the track's envelopes is turned off: a control was
+    /// moved by hand and Re-Enable Automation hasn't run since. A Session
+    /// clip's automation envelope counts too (WP-3.12).
+    #[must_use]
+    pub fn automation_overridden(&self) -> bool {
+        self.automation
+            .values()
+            .any(|automation| !automation.enabled)
+            || self.slots.values().any(|clip| {
+                clip.envelopes
+                    .iter()
+                    .any(|envelope| envelope.kind == EnvelopeKind::Automation && !envelope.enabled)
+            })
+    }
+
+    /// Turns `target`'s envelope off, in the track's automation and in each
+    /// Session clip's automation envelopes: what moving the control by
+    /// hand does (automation R5, WP-3.12). A clip that isn't playing is
+    /// turned off too, and its launch turns it on again.
+    pub(crate) fn override_target(&mut self, target: &AutomationTarget) {
+        crate::automation::override_target(&mut self.automation, target);
+        self.set_clip_envelopes_enabled(|t| t == target, false);
+    }
+
+    /// Turns the Session clips' automation envelopes for the targets
+    /// `which` accepts on or off, copying only the clips that change.
+    pub(crate) fn set_clip_envelopes_enabled(
+        &mut self,
+        which: impl Fn(&AutomationTarget) -> bool,
+        enabled: bool,
+    ) {
+        let changing = |envelope: &crate::clip::ClipEnvelope| {
+            envelope.kind == EnvelopeKind::Automation
+                && envelope.enabled != enabled
+                && which(&envelope.target)
+        };
+        let scenes: Vec<SceneId> = self
+            .slots
+            .iter()
+            .filter(|(_, clip)| clip.envelopes.iter().any(changing))
+            .map(|(&scene, _)| scene)
+            .collect();
+        for scene in scenes {
+            if let Some(clip) = self.slots.get_mut(&scene) {
+                for envelope in &mut Shared::make_mut(clip).envelopes {
+                    if changing(envelope) {
+                        envelope.enabled = enabled;
+                    }
+                }
+            }
+        }
+    }
+
     /// Whether the track's own settings differ from another version's:
-    /// its name, mixer, sends, routing, children, or the order of its device chain,
-    /// but not the clips or devices themselves.
+    /// its name, mixer, sends, routing, children, automation, or the order
+    /// of its device chain, but not the clips or devices themselves.
     pub(crate) fn own_settings_differ(&self, other: &Self) -> bool {
         self.kind != other.kind
             || self.name != other.name
             || self.mixer != other.mixer
             || self.routing != other.routing
+            || self.removed_stop_buttons != other.removed_stop_buttons
+            || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
-            || !(self.devices.ptr_eq(&other.devices)
-                || self
-                    .devices
-                    .iter()
-                    .map(|d| d.id)
-                    .eq(other.devices.iter().map(|d| d.id)))
+            || !(self.automation.ptr_eq(&other.automation) || self.automation == other.automation)
+            || !(self.devices.ptr_eq(&other.devices) || self.same_chain_shape(other))
     }
 }

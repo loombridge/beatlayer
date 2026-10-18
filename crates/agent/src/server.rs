@@ -14,7 +14,9 @@ use bl_shell::perception::PreviewRenderOutcome;
 use bl_shell::perception_commands::{
     self as perception, AnalyzeArgs, AnalyzeResult, CaptureResult, PreviewArgs, View,
 };
-use lspk_agent::{Call, Credential, Media, Outcome, Program, Server, ServerInfo, Session};
+use lspk_agent::{
+    Call, Credential, Media, Outcome, Program, ResultFormat, Server, ServerInfo, Session,
+};
 use serde_json::{Value, json};
 
 use crate::guide;
@@ -145,7 +147,7 @@ impl RenderRequest {
             media: self.render.media,
             selection: self.render.selection,
             engine_rate: self.render.engine_rate,
-            plugins: None,
+            plugins: bl_shell::export::Hosts::default(),
             playing: self.render.playing,
             cancel: Some(cancel),
         };
@@ -384,6 +386,12 @@ impl Agent {
         }
     }
 
+    /// Writes tool results' text blocks in `format`: compact JSON, the
+    /// default, or TOON where a result holds a long table.
+    pub fn set_result_format(&mut self, format: ResultFormat) {
+        self.server.set_result_format(format);
+    }
+
     /// The kit's server, for the transports.
     pub(crate) fn server(&mut self) -> &mut Server<Beatlayer> {
         &mut self.server
@@ -607,10 +615,12 @@ impl Agent {
         if !running {
             // A transport command sent as the engine stopped has nothing to
             // move; scheduled commands wait for the next engine.
-            program
-                .state
-                .outbox
-                .retain(|message| !matches!(message, EngineMessage::Transport(_)));
+            program.state.outbox.retain(|message| {
+                !matches!(
+                    message,
+                    EngineMessage::Transport(_) | EngineMessage::Session(_)
+                )
+            });
             return;
         }
         let generation = shell.audio().engine_generation();
@@ -618,27 +628,30 @@ impl Agent {
             program.engine_generation = Some(generation);
             // The new engine holds none of the scheduled commands: send
             // every one still waiting, once.
-            program
-                .state
-                .outbox
-                .retain(|message| matches!(message, EngineMessage::Transport(_)));
+            program.state.outbox.retain(|message| {
+                matches!(
+                    message,
+                    EngineMessage::Transport(_) | EngineMessage::Session(_)
+                )
+            });
             let waiting = program.state.schedule.waiting_commands();
             program
                 .state
                 .outbox
                 .extend(waiting.into_iter().map(EngineMessage::Schedule));
         }
-        let audio = shell.audio_mut();
         for message in std::mem::take(&mut program.state.outbox) {
             // The engine ran while the call was handled; if it has just
-            // stopped, there's nothing to send to.
+            // stopped, there's nothing to send to. A transport command goes
+            // through the shell, so recording is set up as the UI's is.
             let _ = match message {
-                EngineMessage::Transport(command) => audio.send_transport(command),
-                EngineMessage::Schedule(command) => audio.schedule(command),
-                EngineMessage::Cancel(id) => audio.cancel(id),
+                EngineMessage::Transport(command) => shell.send_transport(command),
+                EngineMessage::Session(command) => shell.audio_mut().send_session(command),
+                EngineMessage::Schedule(command) => shell.audio_mut().schedule(command),
+                EngineMessage::Cancel(id) => shell.audio_mut().cancel(id),
             };
         }
-        let transport = audio.transport_state();
+        let transport = shell.audio_mut().transport_state();
         program.state.playhead = Some(Playhead::new(
             transport.playing,
             transport.position,

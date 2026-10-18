@@ -1,6 +1,14 @@
 {
   "about": "Golden references: each fixture in crates/cli/src/golden/fixtures.rs rendered to a 24-bit FLAC file. render_hash is an FNV-1a hash of the 32-bit float render the reference was made from. `cargo test` null-tests every fixture against its reference: bit-exact on the platform in made_on, below -96 dBFS elsewhere. Change references only with `cargo xtask golden --update`, and say why in the pull request.",
   "references": {
+    "beat-repeat": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a368c49255bdac9d"
+    },
     "clip-fades": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -24,6 +32,22 @@
       "frames": 180000,
       "bits": 24,
       "render_hash": "fnv1a64:6dfe12718a75e409"
+    },
+    "crossfade": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:953624a4115faf85"
+    },
+    "device-modulation": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:efcbe9b1174036c1"
     },
     "fader-gesture": {
       "made_on": "macos-aarch64",
@@ -80,6 +104,14 @@
       "frames": 96000,
       "bits": 24,
       "render_hash": "fnv1a64:ffa544717f30ea43"
+    },
+    "scene-tempo": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 192000,
+      "bits": 24,
+      "render_hash": "fnv1a64:2c3dffd4fc8faa9d"
     },
     "scheduled-commands": {
       "made_on": "macos-aarch64",
@@ -144,6 +176,30 @@
       "frames": 216000,
       "bits": 24,
       "render_hash": "fnv1a64:5c64fa15b51bc1d1"
+    },
+    "volume-modulation": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:bccff9f00f3060c9"
+    },
+    "warped-loop-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 156000,
+      "bits": 24,
+      "render_hash": "fnv1a64:039e665ec62c6374"
+    },
+    "warped-loop-140": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a47dbbb60c5813b7"
     }
   }
 }

@@ -21,7 +21,7 @@ use bl_audio_io::{
     PortRequest, ProcessContext, StreamRequest,
 };
 use bl_engine::testing::{self, Probe};
-use bl_engine::{Engine, EngineConfig, Processor};
+use bl_engine::{Engine, EngineConfig, Pool, PoolConfig, Processor};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
 use common::{RATE, dc, device, track};
 
@@ -72,9 +72,26 @@ fn wait(what: &str, mut done: impl FnMut() -> bool) {
 
 #[test]
 fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
+    recompiles_during_playback(0);
+}
+
+// WP-5.37: the same, with the tasks run by a pool of workers, whose blocks
+// run under the allocation trap too.
+#[test]
+fn a_thousand_recompiles_during_playback_pass_with_the_pool() {
+    recompiles_during_playback(3);
+}
+
+fn recompiles_during_playback(workers: usize) {
     let probe = Arc::new(Probe::default());
     let config = EngineConfig::new(RATE, 4096);
-    let (mut engine, processor) = Engine::start(config, testing::registry(&probe)).unwrap();
+    let (mut engine, mut processor) = Engine::start(config, testing::registry(&probe)).unwrap();
+    let pool = (workers > 0).then(|| {
+        let pool = Pool::start(&config, &PoolConfig::plain(workers)).unwrap();
+        let monitor = pool.monitor();
+        processor.set_pool(Some(pool));
+        monitor
+    });
 
     // Track A runs throughout: a counter and a DC. Track B takes the edits.
     let mut editor = Editor::new();
@@ -90,6 +107,7 @@ fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),
@@ -175,10 +193,21 @@ fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
         state.clock,
     );
 
-    // The audio thread ran under the trap, which saw nothing.
+    // The audio thread ran under the trap, which saw nothing, and neither
+    // did the workers' threads.
     assert!(stats.audio_thread.unwrap().trap_installed);
     assert_eq!(stats.heap_operations, 0);
-    assert_eq!(stats.dropouts, 0, "{stats:?}");
+    if let Some(pool) = &pool {
+        assert_eq!(pool.heap_operations(), 0);
+        assert_eq!(pool.panics(), 0);
+    }
+    // A dropout is a block whose callback took longer than the block lasts:
+    // a wall-clock result that other processes on a busy machine can cause.
+    // It's judged at full depth (pushes to main and the nightly run), which
+    // runs this test with the runner to itself; every run checks the rest.
+    if common::full_depth() {
+        assert_eq!(stats.dropouts, 0, "{stats:?}");
+    }
     assert_eq!(wrong_samples.load(Relaxed), 0, "a swap glitched the audio");
 
     // 1,000 programs swapped in, each taking over the last one's nodes.

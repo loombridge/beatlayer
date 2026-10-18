@@ -1,4 +1,4 @@
-//! Brickwall, the native look-ahead limiter (WP-2.18a, part 3; the limiter
+//! Limiter, the native look-ahead limiter (WP-2.18a, part 3; the limiter
 //! spec): keeps a signal's peaks at or below a ceiling, with an optional
 //! true-peak stage that holds inter-sample peaks too.
 //!
@@ -25,7 +25,7 @@ use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, Par
 
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
-/// Brickwall's device type.
+/// Limiter's device type.
 pub const LIMITER: &str = "beatlayer.brickwall";
 
 /// Ceiling: the highest level the output reaches, in dB.
@@ -79,7 +79,7 @@ const AUTO_FAST_MS: f64 = 20.0;
 const AUTO_SLOW_MS: f64 = 500.0;
 const AUTO_SUSTAIN_SECONDS: f64 = 0.1;
 
-/// The Brickwall device type.
+/// The Limiter device type.
 #[must_use]
 pub fn limiter_type() -> DeviceType {
     let params = vec![
@@ -133,16 +133,16 @@ pub fn limiter_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(LIMITER, "Brickwall", DeviceRole::AudioEffect)
+    DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds the Brickwall limiter to `registry`.
+/// Adds the Limiter to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, limiter_type(), make);
 }
 
-/// Makes a Brickwall for `device`'s values and `config`'s rate, channels,
+/// Makes a Limiter for `device`'s values and `config`'s rate, channels,
 /// and block size. Every buffer it needs is made here, off the audio
 /// thread, and its look-ahead comes from the set's value, so it reports
 /// its latency before it first runs.
@@ -197,7 +197,7 @@ impl MinQueue {
     }
 }
 
-/// Brickwall's audio-thread half.
+/// Limiter's audio-thread half.
 pub struct Brickwall {
     rate: f64,
     /// The most samples of look-ahead any choice asks for.

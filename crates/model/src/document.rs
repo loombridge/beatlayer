@@ -3,21 +3,31 @@
 use bl_core::id::Id;
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use imbl::{OrdMap, Vector};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::metronome::MetronomeSettings;
+use crate::rack::Chain;
+use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
 /// Song-wide settings.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Settings {
     /// The tempo map. The default is 120 BPM throughout.
     pub tempo: TempoMap,
     /// The time-signature map. The default is 4/4 throughout.
     pub time_signatures: TimeSignatureMap,
+    /// The Main track's crossfader, from 0 (the A end) through 0.5 (the
+    /// centre, where it starts) to 1 (the B end), as the Crossfader section
+    /// shows it (the mixer spec, R23). A set at the centre doesn't write it,
+    /// so a set saved before WP-3.17 loads unchanged.
+    #[serde(default = "centre", skip_serializing_if = "is_centre")]
+    pub crossfader: f64,
     /// The Arrangement loop: the loop brace and the Loop switch. A set saved
     /// before WP-1.5 has none and loads with the default; a set whose loop is
     /// the default doesn't write it, so the saved form of such a set is
@@ -31,23 +41,84 @@ pub struct Settings {
     /// it, so the saved form of such a set is unchanged.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub solo_in_place: bool,
+    /// Cue mode: whether the tracks' Solo switches are Cue switches that
+    /// feed the Cue Out instead of silencing the other tracks (the mixer
+    /// spec). Off in a new set, and not written when off. It plays only
+    /// while Main's Cue Out and Main Out don't overlap
+    /// ([`Document::cue_active`]).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub cue_mode: bool,
+    /// The Preview/Cue Volume knob on Main's strip: linear gain from 0 to
+    /// [`MAX_CUE_VOLUME`], 1 (0 dB) in a new set, where the knob's reset
+    /// goes. A set at the default doesn't write it.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub cue_volume: f64,
+    /// Metronome settings: enabled, count-in, sound, rhythm, and only while
+    /// recording (WP-2.15). A set whose metronome is default doesn't write it.
+    #[serde(default, skip_serializing_if = "MetronomeSettings::is_default")]
+    pub metronome: MetronomeSettings,
+    /// Punch-In: whether recording into the Arrangement starts at the loop
+    /// brace's start (WP-2.13). Off in a new set; a set with it off doesn't
+    /// write it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub punch_in: bool,
+    /// Punch-Out: whether recording into the Arrangement ends at the loop
+    /// brace's end (WP-2.13). Off in a new set; a set with it off doesn't
+    /// write it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub punch_out: bool,
+    /// MIDI Arrangement Overdub: whether notes recorded into the
+    /// Arrangement merge into the MIDI clips already there instead of
+    /// replacing them (WP-2.14). Off in a new set, and not written when off.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub midi_overdub: bool,
 }
 
 impl Default for Settings {
-    /// 120 BPM and 4/4 throughout, the default loop brace with the loop off,
-    /// and Solo in Place on.
+    /// 120 BPM and 4/4 throughout, the crossfader centred, the default loop
+    /// brace with the loop off, Solo in Place on, and default metronome
+    /// settings.
     fn default() -> Self {
         Self {
             tempo: TempoMap::default(),
             time_signatures: TimeSignatureMap::default(),
+            crossfader: centre(),
             arrangement_loop: ArrangementLoop::default(),
             solo_in_place: true,
+            cue_mode: false,
+            cue_volume: 1.0,
+            metronome: MetronomeSettings::default(),
+            punch_in: false,
+            punch_out: false,
+            midi_overdub: false,
         }
     }
 }
 
+/// The crossfader's centre, in fader positions.
+fn centre() -> f64 {
+    0.5
+}
+
+/// Whether the crossfader is at the centre, where a set's saved form leaves
+/// it out.
+fn is_centre(position: &f64) -> bool {
+    *position == centre()
+}
+
 fn on() -> bool {
     true
+}
+
+/// The Cue Volume's top, +6 dB as linear gain.
+pub const MAX_CUE_VOLUME: f64 = 1.995_262_314_968_879_5;
+
+fn unity() -> f64 {
+    1.0
+}
+
+fn is_unity(value: &f64) -> bool {
+    *value == 1.0
 }
 
 /// For serde's `skip_serializing_if`, which passes a reference.
@@ -55,10 +126,14 @@ fn is_on(value: &bool) -> bool {
     *value
 }
 
+fn is_off(value: &bool) -> bool {
+    !*value
+}
+
 /// The Arrangement loop: where the loop brace sits, and whether the Loop
 /// switch is on. With it on, playback that reaches the brace's end jumps
 /// back to its start (the transport spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ArrangementLoop {
     /// Where the brace starts: 0 (1.1.1) or later.
     pub start: Ticks,
@@ -129,6 +204,9 @@ pub struct Document {
     pub(crate) top: Vector<TrackId>,
     pub(crate) returns: Vector<TrackId>,
     pub(crate) tracks: OrdMap<TrackId, Shared<Track>>,
+    /// The scenes, in order, top to bottom. Each audio and MIDI track has a
+    /// clip slot in every scene; the clips live in the tracks.
+    pub(crate) scenes: Vector<Scene>,
     pub(crate) index: Index,
 }
 
@@ -138,16 +216,61 @@ pub struct Document {
 pub(crate) struct Index {
     /// The track that holds each clip.
     pub(crate) clip_track: OrdMap<ClipId, TrackId>,
-    /// The track whose chain holds each device.
+    /// The track whose chain holds each device, at any depth: a device in a
+    /// rack's chain belongs to the rack's track.
     pub(crate) device_track: OrdMap<DeviceId, TrackId>,
+    /// The track that holds each rack chain, at any depth (WP-5.1).
+    pub(crate) chain_track: OrdMap<ChainId, TrackId>,
     /// The group that holds each grouped track.
     pub(crate) parent: OrdMap<TrackId, TrackId>,
 }
 
+impl Index {
+    /// Records a device and everything inside it as belonging to `track`.
+    pub(crate) fn add_device(&mut self, device: &Device, track: TrackId) {
+        for device in device.walk() {
+            self.device_track.insert(device.id, track);
+            for chain in &device.chains {
+                self.chain_track.insert(chain.id, track);
+            }
+        }
+    }
+
+    /// Records a rack chain and everything inside it as belonging to
+    /// `track`.
+    pub(crate) fn add_chain(&mut self, chain: &Chain, track: TrackId) {
+        self.chain_track.insert(chain.id, track);
+        for device in &chain.devices {
+            self.add_device(device, track);
+        }
+    }
+
+    /// Forgets a rack chain and everything inside it.
+    pub(crate) fn remove_chain(&mut self, chain: &Chain) {
+        self.chain_track.remove(&chain.id);
+        for device in &chain.devices {
+            self.remove_device(device);
+        }
+    }
+
+    /// Forgets a device and everything inside it.
+    pub(crate) fn remove_device(&mut self, device: &Device) {
+        for device in device.walk() {
+            self.device_track.remove(&device.id);
+            for chain in &device.chains {
+                self.chain_track.remove(&chain.id);
+            }
+        }
+    }
+}
+
 impl Document {
-    /// An empty song: default settings and a Main track with this ID.
+    /// An empty song: default settings, a Main track with this ID, and one
+    /// unnamed scene per given ID, in order. A new set's scenes are the
+    /// eight a project's allocator hands out ([`Editor::new`](crate::Editor::new));
+    /// a document may also hold none.
     #[must_use]
-    pub fn new(main: TrackId) -> Self {
+    pub fn new(main: TrackId, scenes: impl IntoIterator<Item = SceneId>) -> Self {
         let mut tracks = OrdMap::new();
         tracks.insert(
             main,
@@ -159,6 +282,7 @@ impl Document {
             top: Vector::new(),
             returns: Vector::new(),
             tracks,
+            scenes: scenes.into_iter().map(Scene::new).collect(),
             index: Index::default(),
         }
     }
@@ -167,6 +291,42 @@ impl Document {
     #[must_use]
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Whether Cue mode can be on: Main's Cue Out and Main Out share no
+    /// output channel (the mixer spec, S10). Live greys out the Cue
+    /// Switches and the Main strip's Solo/Cue button otherwise.
+    #[must_use]
+    pub fn cue_available(&self) -> bool {
+        let routing = self.main().routing();
+        !routing.cue_out.overlaps(routing.main_out)
+    }
+
+    /// Whether the tracks' Solo switches are Cue switches now: the set is in
+    /// Cue mode and it can be.
+    #[must_use]
+    pub fn cue_active(&self) -> bool {
+        self.settings.cue_mode && self.cue_available()
+    }
+
+    /// A copy of the document whose tempo map or time-signature map is
+    /// replaced, for what a launched scene's tempo or signature overrides
+    /// while it holds (WP-3.5). The set itself keeps its maps: only the
+    /// engine's compiler plays the copy.
+    #[must_use]
+    pub fn with_maps(
+        &self,
+        tempo: Option<TempoMap>,
+        time_signatures: Option<TimeSignatureMap>,
+    ) -> Self {
+        let mut copy = self.clone();
+        if let Some(tempo) = tempo {
+            copy.settings.tempo = tempo;
+        }
+        if let Some(time_signatures) = time_signatures {
+            copy.settings.time_signatures = time_signatures;
+        }
+        copy
     }
 
     /// The Main track's ID.
@@ -181,6 +341,36 @@ impl Document {
         self.tracks
             .get(&self.main)
             .expect("a document always has its Main track")
+    }
+
+    /// The scenes, in order, top to bottom.
+    pub fn scenes(&self) -> impl ExactSizeIterator<Item = &Scene> + DoubleEndedIterator + '_ {
+        self.scenes.iter()
+    }
+
+    /// The scene with this ID.
+    #[must_use]
+    pub fn scene(&self, id: SceneId) -> Option<&Scene> {
+        self.scenes.iter().find(|scene| scene.id == id)
+    }
+
+    /// Where a scene sits among the scenes, counting from 0: its number
+    /// less 1.
+    #[must_use]
+    pub fn scene_position(&self, id: SceneId) -> Option<usize> {
+        self.scenes.iter().position(|scene| scene.id == id)
+    }
+
+    /// How many scenes there are.
+    #[must_use]
+    pub fn scene_count(&self) -> usize {
+        self.scenes.len()
+    }
+
+    /// The clip in a track's slot at `scene`, if the slot holds one.
+    #[must_use]
+    pub fn slot(&self, track: TrackId, scene: SceneId) -> Option<&Clip> {
+        self.track(track)?.slot(scene)
     }
 
     /// The track with this ID.
@@ -237,11 +427,12 @@ impl Document {
         self.tracks.len()
     }
 
-    /// The clip with this ID.
+    /// The clip with this ID, whether it sits in the Arrangement or in a
+    /// track's slot.
     #[must_use]
     pub fn clip(&self, id: ClipId) -> Option<&Clip> {
         let track = self.index.clip_track.get(&id)?;
-        self.tracks.get(track)?.clips.get(&id).map(|clip| &**clip)
+        self.tracks.get(track)?.clip(id)
     }
 
     /// The track that holds a clip.
@@ -265,11 +456,70 @@ impl Document {
     #[must_use]
     pub fn device(&self, id: DeviceId) -> Option<&Device> {
         let track = self.tracks.get(self.index.device_track.get(&id)?)?;
+        track.find_device(id)
+    }
+
+    /// The chain with this ID, in a rack at any depth.
+    #[must_use]
+    pub fn chain(&self, id: ChainId) -> Option<&Chain> {
+        let track = self.tracks.get(self.index.chain_track.get(&id)?)?;
+        track.find_chain(id)
+    }
+
+    /// The track that holds a rack's chain.
+    #[must_use]
+    pub fn chain_track(&self, id: ChainId) -> Option<TrackId> {
+        self.index.chain_track.get(&id).copied()
+    }
+
+    /// The rack a chain belongs to.
+    #[must_use]
+    pub fn chain_rack(&self, id: ChainId) -> Option<&Device> {
+        let track = self.tracks.get(self.index.chain_track.get(&id)?)?;
         track
             .devices
             .iter()
-            .find(|device| device.id == id)
-            .map(|device| &**device)
+            .find_map(|device| device.chain_rack(id))
+    }
+
+    /// Where a device sits: its track, the rack chain it is in (none for the
+    /// track's own chain), and its position there.
+    #[must_use]
+    pub fn device_place(&self, id: DeviceId) -> Option<crate::rack::DevicePlace> {
+        let track_id = self.device_track(id)?;
+        let track = self.track(track_id)?;
+        if let Some(index) = track.device_position(id) {
+            return Some(crate::rack::DevicePlace {
+                track: track_id,
+                chain: None,
+                index,
+            });
+        }
+        track
+            .devices_deep()
+            .flat_map(|rack| rack.chains.iter())
+            .find_map(|chain| {
+                let index = chain.devices.iter().position(|d| d.id == id)?;
+                Some(crate::rack::DevicePlace {
+                    track: track_id,
+                    chain: Some(chain.id),
+                    index,
+                })
+            })
+    }
+
+    /// The rack a chain belongs to and the chain's position in the rack's
+    /// list.
+    #[must_use]
+    pub fn chain_place(&self, id: ChainId) -> Option<(DeviceId, usize)> {
+        let rack = self.chain_rack(id)?;
+        let index = rack.chains.iter().position(|c| c.id == id)?;
+        Some((rack.id, index))
+    }
+
+    /// Every chain ID, in ID order.
+    pub fn chain_ids(&self) -> impl ExactSizeIterator<Item = ChainId> + '_ {
+        self.index.chain_track.keys().copied()
     }
 
     /// The track whose chain holds a device.
@@ -289,21 +539,25 @@ impl Document {
         self.index.device_track.len()
     }
 
-    /// Whether any track, clip, or device has this ID.
+    /// Whether any track, clip, device, or scene has this ID.
     #[must_use]
     pub fn contains(&self, id: Id) -> bool {
         self.tracks.contains_key(&TrackId(id))
             || self.index.clip_track.contains_key(&ClipId(id))
             || self.index.device_track.contains_key(&DeviceId(id))
+            || self.index.chain_track.contains_key(&ChainId(id))
+            || self.scenes.iter().any(|scene| scene.id.0 == id)
     }
 
-    /// The largest ID of any track, clip, or device.
+    /// The largest ID of any track, clip, device, or scene.
     #[must_use]
     pub fn max_id(&self) -> Id {
         let track = self.tracks.get_max().map(|(id, _)| id.0);
         let clip = self.index.clip_track.get_max().map(|(id, _)| id.0);
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
-        [track, clip, device]
+        let chain = self.index.chain_track.get_max().map(|(id, _)| id.0);
+        let scene = self.scenes.iter().map(|scene| scene.id.0).max();
+        [track, clip, device, chain, scene]
             .into_iter()
             .flatten()
             .max()
@@ -340,6 +594,7 @@ impl PartialEq for Document {
             && (self.top.ptr_eq(&other.top) || self.top == other.top)
             && (self.returns.ptr_eq(&other.returns) || self.returns == other.returns)
             && self.tracks == other.tracks
+            && (self.scenes.ptr_eq(&other.scenes) || self.scenes == other.scenes)
     }
 }
 
@@ -348,12 +603,20 @@ mod tests {
     use bl_core::id::IdAllocator;
 
     use super::*;
+    use crate::DEFAULT_SCENE_COUNT;
     use crate::command::Command;
+    use crate::track::CrossfadeAssign;
 
-    fn track_ids(n: usize) -> (TrackId, Vec<TrackId>) {
+    /// A new, empty song and the allocator that made it: its Main track and
+    /// its default scenes have IDs, and the returned `n` track IDs are free
+    /// to build tracks with.
+    fn song(n: usize) -> (Document, IdAllocator, TrackId, Vec<TrackId>) {
         let mut ids = IdAllocator::new();
         let main = TrackId(ids.allocate());
-        (main, (0..n).map(|_| TrackId(ids.allocate())).collect())
+        let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+        let doc = Document::new(main, scenes);
+        let tracks = (0..n).map(|_| TrackId(ids.allocate())).collect();
+        (doc, ids, main, tracks)
     }
 
     fn create(id: TrackId, kind: TrackKind, parent: Option<TrackId>, index: usize) -> Command {
@@ -366,15 +629,21 @@ mod tests {
         }
     }
 
+    // Spec: session-view R1
     #[test]
-    fn new_document_has_only_main() {
-        let (main, _) = track_ids(0);
-        let doc = Document::new(main);
+    fn a_new_document_has_main_and_the_default_scenes() {
+        let (doc, _, main, _) = song(0);
         assert_eq!(doc.track_count(), 1);
         assert_eq!(doc.main().kind(), TrackKind::Main);
         assert_eq!(doc.main().name(), "Main");
         assert_eq!(doc.track_order(), vec![main]);
-        assert_eq!(doc.max_id(), main.0);
+        assert_eq!(doc.scene_count(), DEFAULT_SCENE_COUNT);
+        assert!(doc.scenes().all(|scene| scene.name.is_empty()));
+        assert_eq!(
+            doc.max_id(),
+            doc.scenes().last().expect("eight scenes").id.0,
+            "the default scenes take the IDs after the Main track's"
+        );
         assert!(doc.contains(main.0));
         assert_eq!(doc.settings(), &Settings::default());
         doc.check_invariants().unwrap();
@@ -382,8 +651,7 @@ mod tests {
 
     #[test]
     fn display_order() {
-        let (main, t) = track_ids(6);
-        let mut doc = Document::new(main);
+        let (mut doc, _, main, t) = song(6);
         // A return created first still comes after every other track.
         doc.apply(&create(t[0], TrackKind::Return, None, 0))
             .unwrap();
@@ -414,8 +682,7 @@ mod tests {
 
     #[test]
     fn clones_share_and_stay_put() {
-        let (main, t) = track_ids(1);
-        let mut doc = Document::new(main);
+        let (mut doc, _, main, t) = song(1);
         let before = doc.clone();
         doc.apply(&create(t[0], TrackKind::Audio, None, 0)).unwrap();
         assert_eq!(before.track_count(), 1);
@@ -434,11 +701,28 @@ mod tests {
         assert_send_sync::<Document>();
     }
 
+    // Spec: mixer R24, R27
+    #[test]
+    fn cue_mode_and_the_cue_volume_save_and_load_back() {
+        let (mut doc, ..) = song(0);
+        doc.apply(&Command::SetCueOut {
+            channel: crate::Channel::Pair(3),
+        })
+        .unwrap();
+        doc.apply(&Command::SetCueMode { enabled: true }).unwrap();
+        doc.apply(&Command::SetCueVolume { volume: 0.5 }).unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["settings"]["cue_mode"], serde_json::json!(true));
+        assert_eq!(saved["settings"]["cue_volume"], serde_json::json!(0.5));
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, doc);
+        assert!(loaded.cue_active());
+    }
+
     // Spec: mixer R7, R8, R16
     #[test]
     fn the_mixer_is_saved_only_where_it_differs_from_a_new_set() {
-        let (main, t) = track_ids(3);
-        let mut doc = Document::new(main);
+        let (mut doc, _, _, t) = song(3);
         doc.apply(&create(t[0], TrackKind::Return, None, 0))
             .unwrap();
         doc.apply(&create(t[1], TrackKind::Audio, None, 0)).unwrap();
@@ -492,11 +776,50 @@ mod tests {
         assert!(serde_json::from_value::<Document>(broken).is_err());
     }
 
+    // Spec: mixer R23
+    #[test]
+    fn the_crossfader_and_the_assignments_save_only_where_they_differ() {
+        let (mut doc, _, _, t) = song(2);
+        doc.apply(&create(t[0], TrackKind::Audio, None, 0)).unwrap();
+        doc.apply(&create(t[1], TrackKind::Midi, None, 1)).unwrap();
+        // A new set: the fader is centred and no track is assigned, and
+        // neither is written, so sets saved before WP-3.17 look the same.
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert!(saved["settings"].get("crossfader").is_none());
+        assert!(saved["tracks"][0]["mixer"].get("crossfade").is_none());
+        assert!(saved["main"]["mixer"].get("crossfade").is_none());
+
+        doc.apply(&Command::SetCrossfader { position: 0.25 })
+            .unwrap();
+        doc.apply(&Command::SetCrossfadeAssign {
+            track: t[0],
+            assign: CrossfadeAssign::B,
+        })
+        .unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["settings"]["crossfader"], serde_json::json!(0.25));
+        assert_eq!(
+            saved["tracks"][0]["mixer"]["crossfade"],
+            serde_json::json!("b")
+        );
+        let loaded: Document = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A position outside 0 to 1, and an assignment on Main, don't load.
+        let mut broken = saved.clone();
+        broken["settings"]["crossfader"] = serde_json::json!(-1.0);
+        assert!(serde_json::from_value::<Document>(broken).is_err());
+        let mut broken = saved;
+        broken["main"]["mixer"]["crossfade"] = serde_json::json!("a");
+        assert!(serde_json::from_value::<Document>(broken).is_err());
+    }
+
     // Spec: transport R18
     #[test]
     fn a_new_sets_loop_is_four_bars_from_the_start_and_off() {
-        let (main, _) = track_ids(0);
-        let brace = Document::new(main).settings().arrangement_loop;
+        let (doc, _, _, _) = song(0);
+        let brace = doc.settings().arrangement_loop;
         assert_eq!(brace.start, Ticks::ZERO);
         assert_eq!(brace.length, Ticks::WHOLE * 4);
         assert_eq!(brace.end(), Ticks::WHOLE * 4);
@@ -507,8 +830,7 @@ mod tests {
     // Spec: transport R16, R17
     #[test]
     fn the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default() {
-        let (main, _) = track_ids(0);
-        let mut doc = Document::new(main);
+        let (mut doc, _, _, _) = song(0);
         let saved = serde_json::to_value(&doc).unwrap();
         assert!(
             saved["settings"].get("arrangement_loop").is_none(),

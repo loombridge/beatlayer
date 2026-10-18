@@ -86,9 +86,19 @@ object_id!(
     "clip"
 );
 object_id!(
+    /// The ID of a scene: a row of the Session grid.
+    SceneId,
+    "scene"
+);
+object_id!(
     /// The ID of a device in a track's device chain.
     DeviceId,
     "device"
+);
+object_id!(
+    /// The ID of a chain in a rack (WP-5.1).
+    ChainId,
+    "chain"
 );
 
 // A parameter of a device, numbered by the device: the plug-in kit's

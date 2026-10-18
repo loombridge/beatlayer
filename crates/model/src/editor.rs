@@ -10,7 +10,8 @@ use crate::changes::ChangeSet;
 use crate::command::Command;
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::TrackId;
+use crate::ids::{SceneId, TrackId};
+use crate::scene::DEFAULT_SCENE_COUNT;
 
 /// Owns the current document, its undo history, and the project's ID
 /// allocator. Every edit on the main thread goes through it.
@@ -118,13 +119,14 @@ impl From<ModelError> for EditError {
 }
 
 impl Editor {
-    /// An editor for a new, empty song (just the Main track) with an empty
-    /// history.
+    /// An editor for a new, empty song (the Main track and the default
+    /// scenes) with an empty history.
     #[must_use]
     pub fn new() -> Self {
         let mut ids = IdAllocator::new();
         let main = TrackId(ids.allocate());
-        Self::from_document(Document::new(main), ids)
+        let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+        Self::from_document(Document::new(main, scenes), ids)
     }
 
     /// An editor for a loaded document, with an empty history.
@@ -175,20 +177,20 @@ impl Editor {
     /// [`Editor::new_id`] didn't hand out or that's been used. Either way the
     /// document is as it was and any open transaction stays open.
     pub fn apply(&mut self, command: Command) -> Result<ChangeSet, EditError> {
-        let created = command.created_id();
-        if let Some(id) = created
-            && !self.unused_ids.contains(&id)
-        {
-            return Err(EditError::IdNotIssued(id));
+        let created = command.created_ids();
+        for id in &created {
+            if !self.unused_ids.contains(id) {
+                return Err(EditError::IdNotIssued(*id));
+            }
         }
         let before = self.document.clone();
         self.document.apply(&command)?;
-        if let Some(id) = created {
+        for id in created {
             self.unused_ids.remove(&id);
         }
         let changes = ChangeSet::between(&before, &self.document);
-        if self.open.is_empty() && !changes.is_empty() {
-            self.record(command.label().into(), before);
+        if self.open.is_empty() && !changes.is_empty() && command.records_undo() {
+            self.record(command.label_in(&before).into(), before);
         }
         Ok(changes)
     }
@@ -319,8 +321,11 @@ impl Editor {
             return Err(EditError::TransactionOpen);
         }
         let Step { label, document } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
+        let mut document = *document;
+        // Cue mode is no undo step, so undoing keeps it as it is.
+        document.settings.cue_mode = self.document.settings.cue_mode;
         let changes = ChangeSet::between(&self.document, &document);
-        let after = std::mem::replace(&mut self.document, *document);
+        let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
             document: Box::new(after),
@@ -340,8 +345,10 @@ impl Editor {
             return Err(EditError::TransactionOpen);
         }
         let Step { label, document } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
+        let mut document = *document;
+        document.settings.cue_mode = self.document.settings.cue_mode;
         let changes = ChangeSet::between(&self.document, &document);
-        let before = std::mem::replace(&mut self.document, *document);
+        let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
             document: Box::new(before),
@@ -480,6 +487,62 @@ mod tests {
         assert_eq!(editor.redo_history().collect::<Vec<_>>(), ["Create track"]);
         editor.redo().unwrap();
         assert!(editor.document().track(track).is_some());
+    }
+
+    // Spec: mixer R24, R27
+    #[test]
+    fn cue_mode_needs_separate_outputs_and_is_no_undo_step() {
+        use crate::{Channel, MAX_CUE_VOLUME};
+        let mut editor = Editor::new();
+        // Cue Out and Main Out both start at 1/2: Cue mode is refused.
+        assert!(!editor.document().cue_available());
+        assert!(matches!(
+            editor.apply(Command::SetCueMode { enabled: true }),
+            Err(EditError::Command(ModelError::CueOverlapsMain))
+        ));
+        editor
+            .apply(Command::SetCueOut {
+                channel: Channel::Pair(3),
+            })
+            .unwrap();
+        assert!(editor.document().cue_available());
+        let steps = editor.undo_history().len();
+
+        editor.apply(Command::SetCueMode { enabled: true }).unwrap();
+        assert!(editor.document().cue_active());
+        assert_eq!(editor.undo_history().len(), steps, "no undo step");
+
+        // The volume is a step, named as Live names it, and is bounded.
+        editor.apply(Command::SetCueVolume { volume: 0.5 }).unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Change \"Preview Volume\"")
+        );
+        for volume in [-0.1, MAX_CUE_VOLUME + 0.01, f64::NAN] {
+            assert!(editor.apply(Command::SetCueVolume { volume }).is_err());
+        }
+
+        // Undoing the volume leaves the mode as it is, and so does redo; the
+        // routing step before it brings the overlap back, which ends Cue
+        // mode in effect, not in the set.
+        editor.undo().unwrap();
+        assert_eq!(editor.document().settings().cue_volume, 1.0);
+        assert!(editor.document().settings().cue_mode);
+        editor.redo().unwrap();
+        assert!(editor.document().settings().cue_mode);
+        editor.undo().unwrap();
+        editor.undo().unwrap();
+        assert!(!editor.document().cue_available());
+        assert!(editor.document().settings().cue_mode);
+        assert!(!editor.document().cue_active());
+
+        // A set saves them only when they differ from a new set's.
+        editor
+            .apply(Command::SetCueMode { enabled: false })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert!(saved["settings"].get("cue_mode").is_none());
+        assert!(saved["settings"].get("cue_volume").is_none());
     }
 
     #[test]

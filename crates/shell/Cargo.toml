@@ -8,8 +8,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Measures the agent API's previews (WP-1.16).
-bl-analysis.workspace = true
+# Measures the agent API's previews (WP-1.16), and separates stems through
+# ONNX Runtime (WP-9.1).
+bl-analysis = { workspace = true, features = ["stems"] }
+# The built-in assistant (WP-2.23): the API keys in the OS keychain, and the
+# agent loop the panel runs (parts 1-2), whose tool calls the shell hosts.
+bl-assistant.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
@@ -22,9 +26,14 @@ bl-devices.workspace = true
 # drop thread that frees what it lets go of (WP-1.10). It depends on no UI
 # crate.
 bl-engine.workspace = true
+# Standard MIDI File import and export (WP-2.21).
+bl-interop.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true
+# MIDI ports and the computer MIDI keyboard (WP-2.2), and the queue they send
+# the engine's processor.
+bl-midi-io.workspace = true
 bl-model.workspace = true
 # CLAP plug-ins as devices (WP-2.6): the host, whose factory goes into each
 # engine's registry and whose main-thread work runs in the shell's poll.
@@ -35,6 +44,13 @@ bl-shell-spec.workspace = true
 # source. The version egui's hashing already brings in, so nothing new enters
 # the build.
 getrandom = "0.3.4"
+# Stem separation's packages (WP-9.1): each download's SHA-256 (the version
+# already in the build), and ONNX Runtime's library out of its release
+# archive, a gzipped tar or, on Windows, a zip.
+sha2 = "0.11"
+flate2 = "1.1"
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 # Hands the engine's processor to the audio thread once the stream has
@@ -42,14 +58,24 @@ serde_json = "1"
 rtrb = "0.4.0"
 
 [dev-dependencies]
-# The test plug-in, built from source, which the plug-in tests load.
+# The test plug-ins, built from source, which the plug-in tests load.
 bl-test-clap = { path = "../test-clap" }
+bl-test-vst3 = { path = "../test-vst3" }
+# Standard MIDI Files the import tests generate (WP-2.21).
+midly = "0.5.3"
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true
 # The kit's example plug-ins for offline render tests.
 bl-devices = { workspace = true, features = ["kit-examples"] }
 lspk-example-gain.workspace = true
+
+# `au_editor` runs on the process's main thread, where Apple makes a unit's
+# view controller; the test harness runs a `#[test]` on a worker thread, so
+# it is a binary with the harness off instead.
+[[test]]
+name = "au_editor"
+harness = false
 
 [lints]
 workspace = true

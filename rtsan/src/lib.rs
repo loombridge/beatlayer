@@ -12,6 +12,9 @@
 //! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
 //!   with node migration, parameter changes, scheduled commands, node data,
 //!   and the state for the UI, every block a real-time section.
+//! - `tests/device_displays.rs`: EQ Eight's spectrum and Compressor's gain
+//!   reduction published after every block, at blocks of 1 to 4,096 frames,
+//!   through parameter changes and program swaps (WP-5.43).
 //! - `tests/shell.rs`: the app's audio callback (`bl-shell`'s
 //!   `EngineCallback`): the engine's processor handed over through its
 //!   ring, run in blocks of its own size within the device's, and the test
@@ -31,5 +34,8 @@
 //!   clips, new clip lists swapped in as clips are edited (the old ones
 //!   freed by the collector), locates into clips, and tempo changes that
 //!   swap programs (WP-1.4).
+//! - `tests/multisampler.rs`: a multisampler's notes, loops and long layers
+//!   read in the background, with zone edits sent as node data while it
+//!   plays (WP-5.13).
 //! - `tests/preview.rs`: the browser's preview voice playing, replacing,
 //!   fading out, and letting go of 100 previews (WP-1.10).

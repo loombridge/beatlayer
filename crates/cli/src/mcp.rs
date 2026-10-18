@@ -11,7 +11,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bl_agent::Agent;
+use bl_agent::{Agent, ResultFormat};
 use bl_shell::{Shell, commands as ids};
 use serde_json::json;
 
@@ -30,6 +30,21 @@ pub struct McpArgs {
     /// ask, so without this flag they're refused.
     #[arg(long)]
     pub autonomous: bool,
+
+    /// How a tool result's text is written: `json` (compact JSON, the
+    /// default) or `toon`, which writes a result that holds a table of at
+    /// least 8 rows as TOON when that is shorter. `structuredContent` is
+    /// JSON either way.
+    #[arg(long, default_value = "json", value_parser = parse_result_format)]
+    pub result_format: ResultFormat,
+}
+
+fn parse_result_format(name: &str) -> Result<ResultFormat, String> {
+    match name {
+        "json" => Ok(ResultFormat::Json),
+        "toon" => Ok(ResultFormat::Toon),
+        _ => Err("expected `json` or `toon`".to_owned()),
+    }
 }
 
 /// Runs `bl-cli mcp` until standard input ends.
@@ -45,6 +60,7 @@ pub fn run(args: &McpArgs) -> Outcome {
             .map_err(|error| error.to_string())?;
     }
     let mut agent = Agent::headless(args.autonomous);
+    agent.set_result_format(args.result_format);
     eprintln!(
         "bl-cli mcp: serving the agent API on standard input and output ({}; {})",
         shell.set_name(),

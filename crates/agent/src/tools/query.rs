@@ -6,13 +6,21 @@
 //! selector is a name, a number is an ID (or, for a parameter, its number),
 //! `#n` is the nth in order, counting from 1, and `track main` is the Main
 //! track. A clip or device after a track is looked for on that track; on
-//! its own, anywhere in the song. The keywords `song`, `tracks`, `tempo`,
+//! its own, anywhere in the song. `scene 1` and `slot 3` count scenes from
+//! 1 as the Session View numbers them; `track "Bass" / slot 3` is that
+//! track's slot, and `track "Bass" / automation` its envelopes, one of them
+//! picked by its parameter (`automation "volume"`) or its number. The
+//! keywords `song`, `tracks`, `tempo`,
 //! `time signatures`, `history`, and `checkpoints` read those parts.
 
 use bl_core::time::{Ticks, TimeSignatureMap};
-use bl_model::{Clip, ClipData, ClipId, Device, DeviceId, Document, Track, TrackId};
+use bl_model::automation::{Automation, AutomationTarget};
+use bl_model::{
+    Chain, ChainId, Clip, ClipData, ClipId, Device, DeviceId, Document, SavedSong, Scene, SceneId,
+    TakeLane, Track, TrackId,
+};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{Ctx, ToolOutcome, args, done, failed, step, tool_definition};
@@ -26,7 +34,8 @@ pub(crate) enum Detail {
     /// Counts and the main facts, with long lists paged.
     #[default]
     Summary,
-    /// Everything, such as every note of a clip, still paged.
+    /// Everything the set saves for what you read, as the set file writes it
+    /// (under `saved`), such as every note of a clip, still paged.
     Full,
 }
 
@@ -39,7 +48,7 @@ pub(crate) struct QueryArgs {
     /// `tempo`. Leave it and `id` out for an overview of the whole song.
     #[serde(default)]
     path: Option<String>,
-    /// What to read, by its ID: any track, clip, or device.
+    /// What to read, by its ID: any track, clip, device, or rack chain.
     #[serde(default)]
     id: Option<u64>,
     /// How much to return.
@@ -60,12 +69,20 @@ pub(crate) fn definition() -> Value {
         "Query the project",
         "Reads the open project without changing it. With no arguments: an overview of the \
          song (its set, tempo, time signatures, counts, the tracks in order, and the undo \
-         history). With `id`: the track, clip, or device with that ID. With `path`: a readable \
+         history). With `id`: the track, clip, device, or rack chain with that ID (a rack's `chains`, each with its mixer and devices, read with the rack). With `path`: a readable \
          path such as `track \"Bass\"`, `track \"Bass\" / clip #1` (the first clip by start), \
          `track main`, `device \"EQ\" / param 0`, `clip \"Verse\"`, `tracks`, `tempo`, `time \
          signatures`, `history`, or `checkpoints`. Positions are given as bar.beat.sixteenth \
          (as Live shows them, from 1.1.1) and as ticks (705,600 to the quarter note). Long \
-         lists come a page at a time: pass the `next_offset` a result gives as `offset`.",
+         lists come a page at a time: pass the `next_offset` a result gives as `offset`. Also \
+         `scene 1` or `scene \"Verse\"`, `track \"Bass\" / slot 3` (a Session slot, scenes \
+         counted from 1), `track \"Bass\" / lane 1` (a take lane, with its \
+         passes), and `track \"Bass\" / automation` (its envelopes; \
+         `automation \"volume\"` reads one, with its points). With `detail: \"full\"` a \
+         track, clip, device, chain, scene, and the song (`song`) also return `saved`: everything \
+         the set file saves for it, in the file\'s own form, so a setting you can change is \
+         readable there; a list inside a list shows only its length, which the item\'s own \
+         path reads in full. The default `summary` stays compact.",
         true,
     )
 }
@@ -87,9 +104,7 @@ pub(crate) fn query(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     };
     if let Some(id) = query.id {
         return match find_id(document, id) {
-            Some(Found::Track(track)) => done(view.track(track)),
-            Some(Found::Clip(clip)) => done(view.clip(clip)),
-            Some(Found::Device(device)) => done(view.device(device)),
+            Some(found) => done(view.found(found)),
             None => failed(format!("nothing in the project has the ID {id}")),
         };
     }
@@ -121,9 +136,7 @@ pub(crate) fn query(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         [Segment::Keyword(keyword), ..] => failed(format!("`{keyword}` must be the whole path")),
         [before @ .., Segment::Pick(Kind::Param, selector)] => param(&view, before, selector),
         _ => match resolve(document, &segments) {
-            Ok(Found::Track(track)) => done(view.track(track)),
-            Ok(Found::Clip(clip)) => done(view.clip(clip)),
-            Ok(Found::Device(device)) => done(view.device(device)),
+            Ok(found) => done(view.found(found)),
             Err(message) => failed(message),
         },
     }
@@ -160,6 +173,15 @@ enum Found<'a> {
     Track(&'a Track),
     Clip(&'a Clip),
     Device(&'a Device),
+    /// A rack's chain (WP-5.1).
+    Chain(&'a Chain),
+    Scene(&'a Scene),
+    /// A track's Session slot at a scene.
+    Slot(&'a Track, &'a Scene),
+    /// One of a track's take lanes, with its place among them.
+    Lane(&'a Track, &'a TakeLane, usize),
+    /// A track's envelopes, or one of them.
+    Automation(&'a Track, Option<(&'a AutomationTarget, &'a Automation)>),
 }
 
 fn find_id(document: &Document, raw: u64) -> Option<Found<'_>> {
@@ -168,8 +190,12 @@ fn find_id(document: &Document, raw: u64) -> Option<Found<'_>> {
         Some(Found::Track(track))
     } else if let Some(clip) = document.clip(ClipId(id)) {
         Some(Found::Clip(clip))
+    } else if let Some(device) = document.device(DeviceId(id)) {
+        Some(Found::Device(device))
+    } else if let Some(chain) = document.chain(ChainId(id)) {
+        Some(Found::Chain(chain))
     } else {
-        document.device(DeviceId(id)).map(Found::Device)
+        document.scene(SceneId(id)).map(Found::Scene)
     }
 }
 
@@ -212,8 +238,32 @@ impl View<'_> {
         })
     }
 
+    fn found(&self, found: Found<'_>) -> Value {
+        match found {
+            Found::Track(track) => self.track(track),
+            Found::Clip(clip) => self.clip(clip),
+            Found::Device(device) => self.device(device),
+            Found::Chain(chain) => self.chain(chain),
+            Found::Scene(scene) => self.scene(scene),
+            Found::Slot(track, scene) => self.slot(track, scene),
+            Found::Lane(track, lane, number) => self.lane(track, lane, number),
+            Found::Automation(track, envelope) => self.automation(track, envelope),
+        }
+    }
+
+    /// The saved form of `object`, as the set file writes it, with its lists
+    /// bounded by the page.
+    fn saved(&self, object: &impl Serialize) -> Value {
+        let mut value = serde_json::to_value(object).unwrap_or_default();
+        bound(&mut value, self.page, false);
+        value
+    }
+
     fn track(&self, track: &Track) -> Value {
         let mut value = self.track_summary(track);
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(&self.document.saved_track(track.id()));
+        }
         let mut clips: Vec<&Clip> = track.clips().collect();
         clips.sort_by_key(|clip| (clip.start, clip.id));
         let clips: Vec<Value> = clips.iter().map(|clip| self.clip_summary(clip)).collect();
@@ -226,6 +276,30 @@ impl View<'_> {
         value["clips"] = self.page.slice(clips);
         value["devices"] = json!(devices);
         value["tracks_inside"] = json!(children);
+        // Take lanes show only on a track that has some, so a track without
+        // them reads as it did.
+        if track.take_lanes().len() > 0 {
+            let lanes: Vec<Value> = track
+                .take_lanes()
+                .map(|lane| {
+                    let clips: Vec<Value> = lane
+                        .clips
+                        .iter()
+                        .map(|clip| {
+                            json!({
+                                "name": clip.name,
+                                "start": self.position(clip.start),
+                                "end": self.position(clip.start.saturating_add(clip.length)),
+                                "length": Self::length(clip.length),
+                                "media": clip.data.media,
+                            })
+                        })
+                        .collect();
+                    json!({ "name": lane.name, "clips": clips })
+                })
+                .collect();
+            value["take_lanes"] = json!(lanes);
+        }
         value
     }
 
@@ -252,21 +326,113 @@ impl View<'_> {
         if let ClipData::Midi(midi) = &clip.data
             && self.detail == Detail::Full
         {
-            let mut notes: Vec<_> = midi.notes.iter().copied().collect();
+            let mut notes: Vec<_> = midi.notes.iter().cloned().collect();
             notes.sort_by_key(|note| (note.start, note.key));
             value["content"]["notes"] = self.page.slice(notes);
+        }
+        let slot = self
+            .document
+            .clip_track(clip.id)
+            .and_then(|id| self.document.track(id))
+            .and_then(|track| track.slots().find(|(_, held)| held.id == clip.id));
+        if let Some((scene, _)) = slot {
+            value["scene"] = json!(scene);
+        }
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(clip);
         }
         value
     }
 
     fn device_summary(&self, device: &Device) -> Value {
-        json!({
+        let mut value = json!({
             "id": device.id,
             "name": device.name,
             "kind": device.kind,
             "enabled": device.enabled,
             "params_set": device.params.len(),
-        })
+        });
+        // A rack's chains, each with its mixer and its devices, racks inside
+        // included (the racks spec, R17).
+        if device.rack_kind().is_some() {
+            let chains: Vec<Value> = device
+                .chains
+                .iter()
+                .filter(|c| !c.is_return)
+                .map(|c| self.chain_summary(c))
+                .collect();
+            value["chains"] = json!(chains);
+            // A drum rack's return chains (drum racks spec, R27).
+            if device.rack_kind() == Some(bl_model::RackKind::Drum) {
+                let returns: Vec<Value> = device
+                    .chains
+                    .iter()
+                    .filter(|c| c.is_return)
+                    .map(|c| self.chain_summary(c))
+                    .collect();
+                value["returns"] = json!(returns);
+            }
+        }
+        value
+    }
+
+    fn chain_summary(&self, chain: &Chain) -> Value {
+        let zone = |z: bl_model::Zone| {
+            json!({
+                "low": z.low,
+                "high": z.high,
+                "fade_low": z.fade_low,
+                "fade_high": z.fade_high,
+            })
+        };
+        let mixer = &chain.mixer;
+        let mut value = json!({
+            "id": chain.id,
+            "name": chain.name,
+            "colour": chain.colour,
+            "info": chain.info,
+            "mixer": {
+                "volume": mixer.volume,
+                "volume_db": decibels(mixer.volume),
+                "pan": mixer.pan,
+                "enabled": mixer.enabled,
+                "solo": mixer.solo,
+            },
+            "zones": {
+                "key": zone(chain.zones.key),
+                "velocity": zone(chain.zones.velocity),
+                "select": zone(chain.zones.select),
+            },
+            "devices": chain.devices.iter().map(|d| self.device_summary(d)).collect::<Vec<_>>(),
+        });
+        // What only a drum rack's chains have (drum racks spec, R27); a
+        // chain of any other rack holds the defaults.
+        if self
+            .document
+            .chain_rack(chain.id)
+            .and_then(Device::rack_kind)
+            == Some(bl_model::RackKind::Drum)
+        {
+            if chain.is_return {
+                value["audio_to"] = json!(chain.audio_to);
+            } else {
+                value["receive"] = json!(chain.receive);
+                value["play"] = json!(chain.play);
+                value["choke"] = json!(chain.choke);
+                value["sends"] = json!(chain.sends);
+            }
+        }
+        value
+    }
+
+    fn chain(&self, chain: &Chain) -> Value {
+        let mut value = self.chain_summary(chain);
+        value["rack"] = json!(self.document.chain_rack(chain.id).map(|rack| rack.id));
+        value["track"] = json!(self.document.chain_track(chain.id));
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(chain);
+        }
+        value
     }
 
     fn device(&self, device: &Device) -> Value {
@@ -278,11 +444,117 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // A multisampler's layers and the options of its layer list
+        // (WP-5.13, R30).
+        if !device.layers.is_default() {
+            let layers: Vec<Value> = device.layers.list.iter().map(|l| json!(l)).collect();
+            value["layers"] = json!({
+                "count": layers.len(),
+                "ram_mode": device.layers.ram_mode,
+                "snap": device.layers.snap,
+                "linear_loop_fades": device.layers.linear_loop_fades,
+                "list": self.page.slice(layers),
+            });
+        }
+        // Spec: modulation R18. A modulator's mappings, which
+        // `modulator.map` and `modulator.unmap` change, and a Shaper's
+        // shape.
+        if bl_model::modulator::is_modulator_kind(&device.kind) {
+            value["mappings"] = json!(device.mappings);
+            if let Some(shape) = &device.shape {
+                value["shape"] = json!(shape);
+            }
+        }
+        if device.can_compare() {
+            // Spec: device-compare R11.
+            let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {
+                params
+                    .iter()
+                    .map(|(param, value)| json!({ "param": param, "value": value }))
+                    .collect::<Vec<_>>()
+            };
+            let (a, b) = if device.b_active {
+                (device.other_params(), &device.params)
+            } else {
+                (&device.params, device.other_params())
+            };
+            value["compare"] = json!({
+                "active": if device.b_active { "B" } else { "A" },
+                "a": pairs(a),
+                "b": pairs(b),
+            });
+        }
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(device);
+        }
         // A plug-in's own commands, scoped to this device, which `run` and
         // `schedule` take like any other.
         let commands = self.shell.device_command_ids(device.id);
         if !commands.is_empty() {
             value["commands"] = json!(commands);
+        }
+        value
+    }
+
+    fn scene_summary(&self, scene: &Scene) -> Value {
+        let number = self.document.scene_position(scene.id).map(|at| at + 1);
+        json!({ "id": scene.id, "name": scene.name, "number": number })
+    }
+
+    fn scene(&self, scene: &Scene) -> Value {
+        let mut value = self.scene_summary(scene);
+        let slots: Vec<Value> = self
+            .document
+            .tracks()
+            .filter_map(|track| {
+                let clip = track.slot(scene.id)?;
+                Some(json!({ "track": track.id(), "clip": self.clip_summary(clip) }))
+            })
+            .collect();
+        value["slots"] = self.page.slice(slots);
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(scene);
+        }
+        value
+    }
+
+    fn slot(&self, track: &Track, scene: &Scene) -> Value {
+        let clip = track.slot(scene.id).map(|clip| self.clip(clip));
+        json!({
+            "track": track.id(),
+            "scene": self.scene_summary(scene),
+            "stop_button": !track.removed_stop_buttons().any(|id| id == scene.id),
+            "clip": clip,
+        })
+    }
+
+    fn lane(&self, track: &Track, lane: &TakeLane, number: usize) -> Value {
+        let passes: Vec<Value> = lane.clips.iter().map(|pass| self.saved(pass)).collect();
+        json!({
+            "track": track.id(),
+            "name": lane.name,
+            "number": number,
+            "passes": self.page.slice(passes),
+        })
+    }
+
+    fn automation(
+        &self,
+        track: &Track,
+        envelope: Option<(&AutomationTarget, &Automation)>,
+    ) -> Value {
+        let Some((target, automation)) = envelope else {
+            let envelopes: Vec<Value> = track
+                .automation()
+                .map(|(target, automation)| envelope_summary(target, automation))
+                .collect();
+            return json!({ "track": track.id(), "automation": self.page.slice(envelopes) });
+        };
+        let mut value = envelope_summary(target, automation);
+        value["track"] = json!(track.id());
+        if self.detail == Detail::Full {
+            let points: Vec<_> = automation.envelope.points().collect();
+            value["points"] = self.page.slice(points);
         }
         value
     }
@@ -333,7 +605,78 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         "checkpoints": ctx.state.checkpoints.len(),
     });
     value["tracks"] = view.track_list()["tracks"].take();
+    if view.detail == Detail::Full {
+        // The set file's own fields for the song: the settings (tempo map,
+        // time signatures, loop, punch, metronome and record switches), the
+        // launch quantisation saved beside them, and the scenes.
+        value["saved"] = view.saved(&SavedSong {
+            settings,
+            launch: shell.launch_settings(),
+            scenes: document.scenes().collect(),
+        });
+    }
     value
+}
+
+/// One envelope of a track, without its points.
+fn envelope_summary(target: &AutomationTarget, automation: &Automation) -> Value {
+    json!({
+        "parameter": target_label(target),
+        "target": target,
+        "enabled": automation.enabled,
+        "points": automation.envelope.points().len(),
+    })
+}
+
+/// The name an automation path picks an envelope by: `volume`, `send 12`,
+/// `device 41 param 3`.
+fn target_label(target: &AutomationTarget) -> String {
+    match target {
+        AutomationTarget::Mixer { param } => serde_json::to_value(param)
+            .ok()
+            .and_then(|name| name.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+        AutomationTarget::Send { to } => format!("send {}", to.0.get()),
+        AutomationTarget::Device { device, param } => {
+            format!("device {} param {}", device.0.get(), param.0)
+        }
+        AutomationTarget::Chain { chain, param } => format!(
+            "chain {} {}",
+            chain.0.get(),
+            serde_json::to_value(param)
+                .ok()
+                .and_then(|name| name.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ),
+        AutomationTarget::ChainSend { chain, to } => {
+            format!("chain {} send {}", chain.0.get(), to.0.get())
+        }
+        AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
+        AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
+        AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),
+    }
+}
+
+/// Bounds a saved form for a reply. The first list on each branch is paged
+/// like any other; a list of objects or lists inside a paged item shrinks to
+/// its length, which that item's own path reads in full.
+fn bound(value: &mut Value, page: Page, nested: bool) {
+    match value {
+        Value::Object(map) => map.values_mut().for_each(|v| bound(v, page, nested)),
+        Value::Array(items) if nested => {
+            if items.iter().any(|item| item.is_object() || item.is_array()) {
+                *value = json!({ "total": items.len() });
+            }
+        }
+        Value::Array(items) => {
+            let mut shown = page.slice(std::mem::take(items));
+            for item in shown["items"].as_array_mut().into_iter().flatten() {
+                bound(item, page, true);
+            }
+            *value = shown;
+        }
+        _ => {}
+    }
 }
 
 /// One part of a path.
@@ -351,6 +694,10 @@ enum Kind {
     Clip,
     Device,
     Param,
+    Scene,
+    Slot,
+    Lane,
+    Automation,
 }
 
 impl Kind {
@@ -360,6 +707,10 @@ impl Kind {
             Self::Clip => "clip",
             Self::Device => "device",
             Self::Param => "param",
+            Self::Scene => "scene",
+            Self::Slot => "slot",
+            Self::Lane => "lane",
+            Self::Automation => "automation",
         }
     }
 }
@@ -370,6 +721,8 @@ enum Selector {
     Id(u64),
     Position(usize),
     Main,
+    /// Everything of the kind: `automation` on its own.
+    All,
 }
 
 const KEYWORDS: &[&str] = &[
@@ -408,16 +761,25 @@ fn parse_path(path: &str) -> Result<Vec<Segment>, String> {
                 "clip" => Kind::Clip,
                 "device" => Kind::Device,
                 "param" | "parameter" => Kind::Param,
+                "scene" => Kind::Scene,
+                "slot" => Kind::Slot,
+                "lane" => Kind::Lane,
+                "automation" => Kind::Automation,
                 other => {
                     return Err(format!(
-                        "`{other}` isn't a kind; use track, clip, device, or param, or one of \
-                         the keywords {}",
+                        "`{other}` isn't a kind; use track, clip, device, param, scene, slot, \
+                         lane, or automation, or one of the keywords {}",
                         KEYWORDS.join(", ")
                     ));
                 }
             };
             rest = rest[word_end..].trim_start();
-            let (selector, after) = parse_selector(rest, kind)?;
+            let (selector, after) =
+                if kind == Kind::Automation && (rest.is_empty() || rest.starts_with('/')) {
+                    (Selector::All, rest)
+                } else {
+                    parse_selector(rest, kind)?
+                };
             segments.push(Segment::Pick(kind, selector));
             rest = after.trim_start();
         }
@@ -466,8 +828,15 @@ fn parse_selector(text: &str, kind: Kind) -> Result<(Selector, &str), String> {
         }
     } else if word.eq_ignore_ascii_case("main") && kind == Kind::Track {
         Selector::Main
-    } else if let Ok(id) = word.parse::<u64>() {
-        Selector::Id(id)
+    } else if let Ok(number) = word.parse::<u64>() {
+        // Scenes are counted as the Session View numbers them, from 1.
+        match kind {
+            Kind::Scene | Kind::Slot | Kind::Lane => match usize::try_from(number) {
+                Ok(n) if n >= 1 => Selector::Position(n),
+                _ => return Err(format!("`{word}`: scenes count from 1")),
+            },
+            _ => Selector::Id(number),
+        }
     } else if word.is_empty() {
         return Err(format!(
             "`{}` needs a name in quotes, an ID, or #n",
@@ -495,7 +864,7 @@ fn pick<'a, T>(
         Selector::Id(id) => items.into_iter().filter(|t| id_of(t) == *id).collect(),
         Selector::Position(n) => items.into_iter().skip(n - 1).take(1).collect(),
         Selector::Name(name) => items.into_iter().filter(|t| name_of(t) == *name).collect(),
-        Selector::Main => Vec::new(),
+        Selector::Main | Selector::All => Vec::new(),
     };
     match found.as_slice() {
         [one] => Ok(one),
@@ -519,6 +888,7 @@ fn describe(selector: &Selector) -> String {
         Selector::Id(id) => format!("the ID {id}"),
         Selector::Position(n) => format!("#{n}"),
         Selector::Main => "main".to_owned(),
+        Selector::All => "all".to_owned(),
     }
 }
 
@@ -572,10 +942,10 @@ fn resolve<'a>(document: &'a Document, segments: &[Segment]) -> Result<Found<'a>
             Kind::Device => {
                 let devices: Vec<&Device> = match track {
                     Some(track) if matches!(found, Some(Found::Track(_))) => {
-                        track.devices().collect()
+                        track.devices_deep().collect()
                     }
                     Some(_) => return Err("a device can follow only a track".to_owned()),
-                    None => document.tracks().flat_map(Track::devices).collect(),
+                    None => document.tracks().flat_map(Track::devices_deep).collect(),
                 };
                 Found::Device(pick(
                     *kind,
@@ -584,6 +954,76 @@ fn resolve<'a>(document: &'a Document, segments: &[Segment]) -> Result<Found<'a>
                     |d| d.id.0.get(),
                     |d| d.name.clone(),
                 )?)
+            }
+            Kind::Scene => {
+                if found.is_some() {
+                    return Err("a scene must be the whole path".to_owned());
+                }
+                let scenes: Vec<&Scene> = document.scenes().collect();
+                Found::Scene(pick(
+                    *kind,
+                    selector,
+                    scenes,
+                    |s| s.id.0.get(),
+                    |s| s.name.clone(),
+                )?)
+            }
+            Kind::Slot => {
+                let Some(track) = track.filter(|_| matches!(found, Some(Found::Track(_)))) else {
+                    return Err("a slot can follow only a track".to_owned());
+                };
+                if !track.kind().holds_clips() {
+                    return Err(format!("a {} track has no Session slots", track.kind()));
+                }
+                let scenes: Vec<&Scene> = document.scenes().collect();
+                let scene = pick(
+                    *kind,
+                    selector,
+                    scenes,
+                    |s| s.id.0.get(),
+                    |s| s.name.clone(),
+                )?;
+                Found::Slot(track, scene)
+            }
+            Kind::Lane => {
+                let Some(track) = track.filter(|_| matches!(found, Some(Found::Track(_)))) else {
+                    return Err("a lane can follow only a track".to_owned());
+                };
+                let lanes: Vec<&TakeLane> = track.take_lanes().collect();
+                let lane = pick(*kind, selector, lanes.clone(), |_| 0, |l| l.name.clone())?;
+                let number = lanes
+                    .iter()
+                    .position(|l| std::ptr::eq(*l, lane))
+                    .map_or(0, |at| at + 1);
+                Found::Lane(track, lane, number)
+            }
+            Kind::Automation => {
+                let Some(track) = track.filter(|_| matches!(found, Some(Found::Track(_)))) else {
+                    return Err("automation can follow only a track".to_owned());
+                };
+                let envelope = match selector {
+                    Selector::All => None,
+                    Selector::Name(name) => Some(
+                        track
+                            .automation()
+                            .find(|(target, _)| target_label(target) == *name)
+                            .ok_or_else(|| format!("no envelope drives {}", describe(selector)))?,
+                    ),
+                    Selector::Position(n) => Some(
+                        track
+                            .automation()
+                            .nth(n - 1)
+                            .ok_or_else(|| format!("no envelope matches {}", describe(selector)))?,
+                    ),
+                    _ => {
+                        return Err(
+                            "pick an envelope by its parameter, such as automation \"volume\", \
+                             or by #n"
+                                .to_owned(),
+                        );
+                    }
+                };
+                Found::Automation(track, envelope)
             }
             Kind::Param => return Err("a param must come last in a path".to_owned()),
         });

@@ -3,21 +3,25 @@
 //! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
 //! Fades on Clip Edges (L-SET-018, WP-1.4b), and Display & Input's
 //! keyboard settings (Outline View in Focus, Use Tab Key to Move Focus,
-//! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Auto-Hide Plug-In Windows
-//! (L-SET-017, WP-2.5b) are built; the other pages are
+//! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Plug-In Sources (WP-2.9b)
+//! and Auto-Hide Plug-In Windows (L-SET-017, WP-2.5b) are built; the other pages are
 //! in the chooser and say which package builds them. The Agents page
 //! (L-SET-020) is Beatlayer's own: the agent server's settings (WP-1.15),
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
+use bl_model::{LaunchMode, LaunchQuantization};
+use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
-    AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
-    TONE_MIN_HZ,
+    AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
+    TONE_MIN_DBFS, TONE_MIN_HZ,
 };
+use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
-    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
+    DefaultWarpMode, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeChoice,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
-use bl_shell::{Invocation, Shell, agent, commands as ids};
+use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
 use egui::{Align2, CentralPanel, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::{Value, json};
@@ -25,7 +29,7 @@ use serde_json::{Value, json};
 use crate::layout::SettingsLayout;
 use crate::main_window::{UiEvent, sample_rate_text};
 use crate::theme::Theme;
-use crate::widgets::{Choice, chooser, number_box, switch};
+use crate::widgets::{Choice, NO_LEDS, chooser, number_box, switch};
 
 /// The Settings window's state between frames.
 #[derive(Clone, Debug)]
@@ -38,6 +42,10 @@ pub struct SettingsUi {
     /// A move to the next or previous control, done at the start of the
     /// next frame.
     move_focus: Option<egui::FocusDirection>,
+    /// The assistant's API key being typed on the Agents page, before Set
+    /// stores it (WP-2.23, part 4). It's cleared once stored and never
+    /// echoed back from the shell.
+    assistant_key: String,
 }
 
 impl Default for SettingsUi {
@@ -54,6 +62,7 @@ impl SettingsUi {
             devices: None,
             stale: true,
             move_focus: None,
+            assistant_key: String::new(),
         }
     }
 
@@ -75,6 +84,9 @@ impl SettingsUi {
     pub fn prepare(&mut self, shell: &mut Shell) {
         if self.stale {
             self.devices = Some(shell.audio_mut().devices());
+            // The assistant's key lives in the keychain: read whether one is
+            // stored when the window opens, not every frame (WP-2.23).
+            shell.refresh_assistant_key();
             self.stale = false;
         }
     }
@@ -113,14 +125,20 @@ impl SettingsUi {
                     record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 SettingsPage::PlugIns => plug_ins_page(ui, shell, theme, &mut rows, &mut events),
-                SettingsPage::Agents => agents_page(ui, shell, theme, &mut rows, &mut events),
-                SettingsPage::TempoMidi => {
-                    rows.note(
+                SettingsPage::Agents => {
+                    agents_page(
                         ui,
-                        "The Tempo Follower, control surface, and MIDI port settings come with \
-                         later packages.",
+                        shell,
+                        theme,
+                        &mut rows,
+                        &mut events,
+                        &mut self.assistant_key,
                     );
                 }
+                SettingsPage::TempoMidi => {
+                    tempo_midi_page(ui, shell, theme, &mut rows, &mut events);
+                }
+                SettingsPage::FileFolder => file_folder_page(ui, shell, &mut rows, &mut events),
                 other => rows.note(
                     ui,
                     &format!(
@@ -161,6 +179,7 @@ impl SettingsUi {
             .map(|d| Choice {
                 label: d.name.clone(),
                 value: d.id.clone(),
+                leds: NO_LEDS,
             })
             .collect();
         let rect = rows.row(ui, "Driver Type", SettingsLayout::CHOOSER);
@@ -180,6 +199,7 @@ impl SettingsUi {
         let inputs: Vec<Choice<String>> = std::iter::once(Choice {
             label: "No Device".to_owned(),
             value: "none".to_owned(),
+            leds: NO_LEDS,
         })
         .chain(
             devices
@@ -189,6 +209,7 @@ impl SettingsUi {
                 .map(|d| Choice {
                     label: d.name.clone(),
                     value: d.id.clone(),
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -222,6 +243,7 @@ impl SettingsUi {
         let outputs: Vec<Choice<String>> = std::iter::once(Choice {
             label: default_name,
             value: "default".to_owned(),
+            leds: NO_LEDS,
         })
         .chain(
             devices
@@ -231,6 +253,7 @@ impl SettingsUi {
                 .map(|d| Choice {
                     label: d.name.clone(),
                     value: d.id.clone(),
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -268,10 +291,12 @@ impl SettingsUi {
         let channels: Vec<Choice<u16>> = std::iter::once(Choice {
             label: format!("All ({most})"),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain((1..=most.min(64)).map(|n| Choice {
             label: n.to_string(),
             value: n,
+            leds: NO_LEDS,
         }))
         .collect();
         let rect = rows.row(ui, "Output Config", SettingsLayout::CHOOSER);
@@ -295,6 +320,7 @@ impl SettingsUi {
             label: current_rate
                 .map_or_else(|| "Device's Own".to_owned(), |r| format!("{r} (Device)")),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain(
             device
@@ -303,6 +329,7 @@ impl SettingsUi {
                 .map(|r| Choice {
                     label: format!("{r} Hz"),
                     value: *r,
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -327,6 +354,7 @@ impl SettingsUi {
             label: default_buffer
                 .map_or_else(|| "Device's Own".to_owned(), |b| format!("{b} (Device)")),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain(
             device
@@ -336,6 +364,7 @@ impl SettingsUi {
                 .map(|b| Choice {
                     label: format!("{b} Samples"),
                     value: b,
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -361,6 +390,28 @@ impl SettingsUi {
             _ => "No device open.".to_owned(),
         };
         rows.text_row(ui, "Running At", &running);
+        // Spec: recording R7. The compensation is added to the device's
+        // reported latency when a recording is moved earlier; it changes
+        // recording only.
+        let rect = rows.row(ui, "Driver Error Compensation", SettingsLayout::NUMBER);
+        let compensation = status.settings.driver_error_compensation_ms;
+        if let Some(ms) = number_box(
+            ui,
+            theme,
+            "driver-error-compensation",
+            "Driver Error Compensation",
+            rect,
+            compensation,
+            (-COMPENSATION_LIMIT_MS, COMPENSATION_LIMIT_MS),
+            &|ms, steps| ms + f64::from(steps),
+            &format!("{compensation:.2} ms"),
+        ) {
+            configure(events, json!({ "driver_error_compensation_ms": ms }));
+        }
+        let overall = status
+            .overall_latency_ms
+            .map_or_else(|| "No device open.".to_owned(), |ms| format!("{ms:.2} ms"));
+        rows.text_row(ui, "Overall Latency", &overall);
 
         // The test section (D23): Live's tone switch, Tone Volume, and Tone
         // Frequency.
@@ -556,12 +607,13 @@ const fn switch_row(label: &'static str, package: &'static str) -> Pending {
     }
 }
 
-/// The Record section of Record, Warp & Launch, as observed in Live 12.4.6:
-/// none of it is built.
-const RECORD: [Pending; 7] = [
-    chooser_row("File Type", "WP-2.13"),
-    chooser_row("Bit Depth", "WP-2.13"),
-    chooser_row("Count-In", "WP-2.15"),
+/// The Record section of Record, Warp & Launch, as observed in Live 12.4.6,
+/// without Record Session automation in (WP-3.12), which is built and sits
+/// between its fifth row and its last. None of the rest is built.
+const RECORD: [Pending; 6] = [
+    chooser_row("File Type", "WP-2.13").showing("WAV"),
+    chooser_row("Bit Depth", "WP-2.13").showing("24"),
+    chooser_row("Count-In", "WP-2.15").showing("None"),
     Pending {
         label: "Exclusive",
         controls: &[
@@ -571,26 +623,8 @@ const RECORD: [Pending; 7] = [
         package: "WP-2.13",
         value: "",
     },
-    chooser_row("Clip Update Rate", "WP-2.13"),
-    chooser_row("Record Session automation in", "M3"),
-    switch_row("Start Transport With Record", "WP-2.13"),
-];
-
-/// The Warp/Fades rows before Create Fades on Clip Edges, which come with
-/// warping.
-const WARP: [Pending; 3] = [
-    chooser_row("Loop/Warp Short Samples", "M4"),
-    switch_row("Auto-Warp Long Samples", "M4"),
-    chooser_row("Default Warp Mode", "M4"),
-];
-
-/// The Launch section, which comes with the Session View.
-const LAUNCH: [Pending; 5] = [
-    chooser_row("Default Launch Mode", "M3"),
-    chooser_row("Default Launch Quantization", "M3"),
-    switch_row("Select on Launch", "M3"),
-    switch_row("Select Next Scene on Launch", "M3"),
-    switch_row("Start Recording on Scene Launch", "M3"),
+    chooser_row("Clip Update Rate", "WP-2.13").showing("1/16"),
+    switch_row("Start Transport With Record", "WP-2.13").showing("On"),
 ];
 
 /// The Tap Tempo section.
@@ -598,8 +632,10 @@ const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M
 
 /// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
 /// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
-/// Create Fades on Clip Edges, the fourth row of Warp/Fades, the only
-/// setting built (WP-1.4b). The other rows keep their places, pending.
+/// the Warp/Fades rows (WP-4.9, WP-1.4b) with Warp recorded audio, a
+/// Beatlayer addition after them (IMP-02), and the Launch section's rows
+/// (WP-3.4), the only settings built. The other rows keep their places,
+/// pending.
 fn record_warp_launch_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -608,13 +644,40 @@ fn record_warp_launch_page(
     events: &mut Vec<UiEvent>,
 ) {
     rows.heading(ui, "Record");
-    for row in &RECORD {
+    let (before, after) = RECORD.split_at(RECORD.len() - 1);
+    for row in before {
+        rows.pending(ui, row);
+    }
+    let choices = [
+        (SessionAutomationTracks::ArmedTracks, "Armed Tracks"),
+        (SessionAutomationTracks::AllTracks, "All Tracks"),
+    ]
+    .map(|(value, label)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    });
+    let rect = rows.row(ui, "Record Session automation in", SettingsLayout::CHOOSER);
+    if let Some(tracks) = chooser(
+        ui,
+        theme,
+        "record-session-automation-in",
+        "Record Session automation in",
+        rect,
+        &choices,
+        Some(&shell.record_session_automation_in()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+            json!({ "tracks": tracks }),
+        )));
+    }
+    for row in after {
         rows.pending(ui, row);
     }
     rows.heading(ui, "Warp/Fades");
-    for row in &WARP {
-        rows.pending(ui, row);
-    }
+    warp_rows(ui, shell, theme, rows, events);
     let rect = rows.row(ui, "Create Fades on Clip Edges", SettingsLayout::SWITCH);
     if let Some(on) = switch(
         ui,
@@ -629,35 +692,201 @@ fn record_warp_launch_page(
             json!({ "on": on }),
         )));
     }
-    rows.heading(ui, "Launch");
-    for row in &LAUNCH {
-        rows.pending(ui, row);
+    let rect = rows.row(ui, "Warp recorded audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "warp-recorded-audio",
+        "Warp recorded audio",
+        rect,
+        shell.warp_recorded_audio(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_WARP_RECORDED_AUDIO,
+            json!({ "on": on }),
+        )));
     }
+    rows.heading(ui, "Launch");
+    launch_rows(ui, shell, theme, rows, events);
     rows.heading(ui, "Tap Tempo");
     for row in &TAP_TEMPO {
         rows.pending(ui, row);
     }
 }
 
-/// Plug-Ins' Plug-In Sources section (L-SET-017): the plug-in hosts build
-/// it. Live's VST2 rows are left out, as Beatlayer doesn't host VST2 (the
-/// parity matrix: Out).
-const PLUG_IN_SOURCES: [Pending; 4] = [
-    Pending {
-        label: "Plug-In Sources",
-        controls: &[("Rescan", SettingsLayout::CHOOSER)],
-        package: "WP-2.6",
-        value: "Rescan",
-    },
-    switch_row("Use Audio Units v2", "WP-2.8"),
-    switch_row("Use Audio Units v3", "WP-2.8"),
-    switch_row("VST3 Plug-In System Folders", "WP-2.7"),
-];
+/// The Warp/Fades rows before Create Fades on Clip Edges (WP-4.9), in
+/// Live's order.
+fn warp_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let prefs = shell.warp_prefs();
+    let shorts: Vec<Choice<LoopWarpShortSamples>> = LoopWarpShortSamples::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Loop/Warp Short Samples", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "loop-warp-short-samples",
+        "Loop/Warp Short Samples",
+        rect,
+        &shorts,
+        Some(&prefs.loop_warp_short_samples),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+            json!({ "mode": mode }),
+        )));
+    }
+    let rect = rows.row(ui, "Auto-Warp Long Samples", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "auto-warp-long-samples",
+        "Auto-Warp Long Samples",
+        rect,
+        prefs.auto_warp_long_samples,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+            json!({ "on": on }),
+        )));
+    }
+    let modes: Vec<Choice<DefaultWarpMode>> = DefaultWarpMode::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Default Warp Mode", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "default-warp-mode",
+        "Default Warp Mode",
+        rect,
+        &modes,
+        Some(&prefs.default_warp_mode),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_WARP_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
+}
 
-/// Plug-Ins (L-SET-017): Plug-In Sources, pending until the plug-in hosts,
-/// then Plug-In Windows, whose Auto-Hide Plug-In Windows is built
-/// (WP-2.5b): floating devices' windows follow it as Live's plug-in windows
-/// do. Multiple and Auto-Open keep their places, pending.
+/// The Launch section's rows (WP-3.4), in Live's order.
+fn launch_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let prefs = shell.launch_prefs();
+    let modes: Vec<Choice<LaunchMode>> = LaunchMode::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Default Launch Mode", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "default-launch-mode",
+        "Default Launch Mode",
+        rect,
+        &modes,
+        Some(&prefs.default_mode),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
+    let steps: Vec<Choice<Option<LaunchQuantization>>> = std::iter::once(Choice {
+        label: "Global".to_owned(),
+        value: None,
+        leds: NO_LEDS,
+    })
+    .chain(LaunchQuantization::ALL.into_iter().map(|step| Choice {
+        label: step.label().to_owned(),
+        value: Some(step),
+        leds: NO_LEDS,
+    }))
+    .collect();
+    let rect = rows.row(ui, "Default Launch Quantization", SettingsLayout::CHOOSER);
+    if let Some(quantization) = chooser(
+        ui,
+        theme,
+        "default-launch-quantization",
+        "Default Launch Quantization",
+        rect,
+        &steps,
+        Some(&prefs.default_quantization),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+            json!({ "quantization": quantization }),
+        )));
+    }
+    let switches = [
+        (
+            "Select on Launch",
+            "select-on-launch",
+            prefs.select_on_launch,
+            ids::SETTINGS_SET_SELECT_ON_LAUNCH,
+        ),
+        (
+            "Select Next Scene on Launch",
+            "select-next-scene-on-launch",
+            prefs.select_next_scene_on_launch,
+            ids::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+        ),
+        (
+            "Start Recording on Scene Launch",
+            "start-recording-on-scene-launch",
+            prefs.start_recording_on_scene_launch,
+            ids::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+        ),
+    ];
+    for (label, id_salt, value, command) in switches {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                command,
+                json!({ "on": on }),
+            )));
+        }
+    }
+}
+
+/// Plug-Ins (L-SET-017): Plug-In Sources (WP-2.9b): Rescan, which scans
+/// the formats switched on afresh in the background, and the switches that
+/// say which formats are scanned and listed; Live's VST2 rows are left out,
+/// as Beatlayer doesn't host VST2 (the parity matrix: Out), and so is the
+/// VST3 custom folder, not built yet. Then Plug-In Windows, whose Auto-Hide
+/// Plug-In Windows is built (WP-2.5b): floating devices' windows follow it
+/// as Live's plug-in windows do. Multiple and Auto-Open keep their places,
+/// pending.
 fn plug_ins_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -666,8 +895,49 @@ fn plug_ins_page(
     events: &mut Vec<UiEvent>,
 ) {
     rows.heading(ui, "Plug-In Sources");
-    for row in &PLUG_IN_SOURCES {
-        rows.pending(ui, row);
+    let rect = rows.row(ui, "Rescan Plug-Ins", SettingsLayout::SWITCH);
+    if push_button(
+        ui,
+        theme,
+        "rescan-plug-ins",
+        "Rescan Plug-Ins",
+        "Rescan",
+        rect,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::plugin_commands::RESCAN,
+            json!({ "background": true }),
+        )));
+    }
+    let sources = shell.plugin_settings();
+    let switches = [
+        (
+            "Use Audio Units v2",
+            "use-audio-units-v2",
+            sources.use_audio_units_v2,
+            "use_audio_units_v2",
+        ),
+        (
+            "Use Audio Units v3",
+            "use-audio-units-v3",
+            sources.use_audio_units_v3,
+            "use_audio_units_v3",
+        ),
+        (
+            "Use VST3 Plug-In System Folders",
+            "vst3-system-folders",
+            sources.vst3_system_folders,
+            "vst3_system_folders",
+        ),
+    ];
+    for (label, id_salt, value, field) in switches {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::plugin_commands::SETTINGS,
+                json!({ field: on }),
+            )));
+        }
     }
     rows.heading(ui, "Plug-In Windows");
     rows.pending(
@@ -694,6 +964,47 @@ fn plug_ins_page(
     );
 }
 
+/// A push button in the Settings window, as Live's Rescan is: a rounded
+/// face with its text. Returns whether it was pressed.
+fn push_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    id_salt: &str,
+    name: &str,
+    text: &str,
+    rect: Rect,
+) -> bool {
+    let response = ui.interact(rect, Id::new(("push-button", id_salt)), Sense::click());
+    let pressed = response.clicked()
+        || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    let c = &theme.colors;
+    let painter = ui.painter_at(rect.expand(3.0));
+    let face = if response.hovered() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    painter.rect_filled(rect, rect.height() / 2.0, face);
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.font(),
+        c.text.0,
+    );
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
+        painter.rect_stroke(
+            rect,
+            rect.height() / 2.0,
+            Stroke::new(1.5, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    pressed
+}
+
 fn theme_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -707,6 +1018,7 @@ fn theme_page(
         .map(|t| Choice {
             label: t.label().to_owned(),
             value: t,
+            leds: NO_LEDS,
         })
         .collect();
     let rect = rows.row(ui, "Theme", SettingsLayout::CHOOSER);
@@ -732,6 +1044,67 @@ fn theme_page(
     );
 }
 
+/// File & Folder (L-SET-015): the Temporary Folder row, with its Browse
+/// button and path (WP-4.20). The page's other rows come with later
+/// packages.
+fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mut Vec<UiEvent>) {
+    rows.heading(ui, "Temporary Folder");
+    let rect = rows.row(ui, "Temporary Folder", SettingsLayout::CHOOSER);
+    if ui.put(rect, egui::Button::new("Browse")).clicked() {
+        // No path: the host asks for a folder.
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TEMPORARY_FOLDER,
+            json!({}),
+        )));
+    }
+    let path = shell.temporary_folder();
+    rows.copyable_row(ui, "Path", "temporary-folder", &path.to_string_lossy());
+}
+
+/// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
+/// output with its Track, Sync, and Remote switches, as the MIDI I/O spec
+/// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
+/// with later packages. Sync and Remote are kept and act when sync and MIDI
+/// mapping are built (R5).
+fn tempo_midi_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "MIDI");
+    rows.note(
+        ui,
+        "The Tempo Follower, control surface, and Takeover Mode settings come with later \
+         packages.",
+    );
+    rows.heading(ui, "MIDI Ports");
+    let ports = shell.midi().ports();
+    if ports.is_empty() {
+        rows.note(ui, "The computer offers no MIDI ports.");
+    }
+    for port in ports {
+        let label = format!("{}: {}", port.direction.label(), port.name);
+        let rects = rows.row_of(ui, &label, &[SettingsLayout::SWITCH; 3]);
+        for (rect, (name, on)) in rects.into_iter().zip([
+            ("Track", port.track),
+            ("Sync", port.sync),
+            ("Remote", port.remote),
+        ]) {
+            let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
+            if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
+                let mut args = json!({ "direction": port.direction, "name": port.name });
+                args[name.to_lowercase()] = json!(on);
+                events.push(UiEvent::Invoke(Invocation::new(midi_ids::SET_PORT, args)));
+            }
+        }
+        if let Some(error) = &port.error {
+            rows.note(ui, &format!("{label} couldn't be opened: {error}"));
+        }
+    }
+}
+
 /// The Agents page (L-SET-020, WP-1.15): the switch, where agents connect,
 /// the server's token, and the agents the person has allowed, each with its
 /// autonomous switch and its own token (WP-1.15c). Beatlayer's own page,
@@ -743,6 +1116,7 @@ fn agents_page(
     theme: &Theme,
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
+    assistant_key: &mut String,
 ) {
     let settings = shell.agent_settings();
     let status = shell.agent_status();
@@ -844,6 +1218,220 @@ fn agents_page(
          you first unless the agent is autonomous (the switch beside its name). Web pages \
          can't connect.",
     );
+    assistant_section(ui, shell, theme, rows, events, assistant_key);
+}
+
+/// The width of an assistant setting's text field on the Agents page.
+const ASSISTANT_FIELD: f32 = 240.0;
+
+/// The built-in assistant's settings on the Agents page (WP-2.23, part 4):
+/// the provider, its base URL and model, the API key entry (stored to the
+/// OS keychain, shown masked and never echoed), and the activity log. The
+/// assistant is Beatlayer's own, so this is a Beatlayer addition on the
+/// Agents page.
+fn assistant_section(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+    key: &mut String,
+) {
+    let settings = shell.assistant_settings();
+    let state = shell.assistant_state();
+    let invoke = |events: &mut Vec<UiEvent>, id: &str, args: Value| {
+        events.push(UiEvent::Invoke(Invocation::new(id, args)));
+    };
+    rows.heading(ui, "Assistant");
+
+    let rect = rows.row(ui, "Provider", SettingsLayout::DEVICE_CHOOSER);
+    let choices: Vec<Choice<AssistantProvider>> = AssistantProvider::ALL
+        .into_iter()
+        .map(|provider| Choice {
+            label: provider.label().to_owned(),
+            value: provider,
+            leds: NO_LEDS,
+        })
+        .collect();
+    if let Some(provider) = chooser(
+        ui,
+        theme,
+        "assistant-provider",
+        "Assistant Provider",
+        rect,
+        &choices,
+        Some(&settings.provider),
+        true,
+    ) {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_PROVIDER,
+            json!({ "provider": provider }),
+        );
+    }
+
+    // The base URL is only the OpenAI-compatible provider's: it's where
+    // OpenRouter and local servers are reached.
+    let rect = rows.row(ui, "Base URL", ASSISTANT_FIELD);
+    let mut base_url = settings.base_url.clone();
+    let response = ui
+        .put(
+            rect,
+            egui::TextEdit::singleline(&mut base_url)
+                .id_salt("assistant-base-url")
+                .hint_text("The provider's own")
+                .interactive(settings.provider.has_base_url()),
+        )
+        .on_hover_text(
+            "The OpenAI-compatible server's address, such as http://localhost:11434/v1 for \
+             Ollama. Empty uses the provider's own.",
+        );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant Base URL".to_owned());
+    });
+    if response.changed() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_BASE_URL,
+            json!({ "base_url": base_url }),
+        );
+    }
+
+    let rect = rows.row(ui, "Model", ASSISTANT_FIELD);
+    let mut model = settings.model.clone();
+    let response = ui.put(
+        rect,
+        egui::TextEdit::singleline(&mut model).id_salt("assistant-model"),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant Model".to_owned());
+    });
+    if response.changed() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_MODEL,
+            json!({ "model": model }),
+        );
+    }
+
+    // The API key: typed into a masked field, written to the keychain by
+    // `assistant.set_key` and never read back (WP-2.23, part 4).
+    rows.label(ui, "API Key");
+    let rect = Rect::from_min_size(
+        pos2(rows.layout.control_x, rows.y),
+        vec2(ASSISTANT_FIELD - COPY_BUTTON - 6.0, 18.0),
+    );
+    let response = ui.put(
+        rect,
+        egui::TextEdit::singleline(key)
+            .id_salt("assistant-key")
+            .password(true),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant API Key".to_owned());
+    });
+    let set = Rect::from_min_size(
+        pos2(rect.right() + 6.0, rect.top()),
+        vec2(COPY_BUTTON, rect.height()),
+    );
+    let response = ui.put(set, egui::Button::new("Set"));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Set Assistant API Key".to_owned());
+    });
+    if response.clicked() && !key.is_empty() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_KEY,
+            json!({ "key": key.clone() }),
+        );
+        key.clear();
+    }
+    rows.y += SettingsLayout::OPTION_ROW;
+    rows.text_row(
+        ui,
+        "Key",
+        if state.key_set {
+            "Stored in the keychain"
+        } else {
+            "None stored"
+        },
+    );
+    if state.key_set {
+        let rect = rows.row(ui, "Forget", SettingsLayout::CHOOSER);
+        let response = ui.put(rect, egui::Button::new("Forget Key"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Forget Assistant API Key".to_owned());
+        });
+        if response.clicked() {
+            invoke(events, assistant::ASSISTANT_FORGET_KEY, json!({}));
+        }
+    }
+
+    let rect = rows.row(ui, "Activity Log", SettingsLayout::CHOOSER);
+    let open = shell.assistant_log_open();
+    let response = ui.put(rect, egui::Button::new(if open { "Close" } else { "Open" }));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Open Assistant Activity Log".to_owned());
+    });
+    if response.clicked() {
+        invoke(events, assistant::ASSISTANT_TOGGLE_ACTIVITY_LOG, json!({}));
+    }
+    if open {
+        rows.heading(ui, "Recent Activity");
+        if shell.assistant_log().is_empty() {
+            rows.text_row(
+                ui,
+                "Activity Log",
+                "The assistant hasn't run a command yet.",
+            );
+        }
+        for entry in shell.assistant_log() {
+            let result = outcome_text(&entry.outcome);
+            rows.text_row(
+                ui,
+                &clock(entry.at),
+                &format!("{}: {result}", entry.command),
+            );
+        }
+    }
+
+    rows.note(
+        ui,
+        "The built-in assistant answers a prompt by running commands on the open set, the \
+         same tools the agent API offers. Its provider, base URL and model are kept with the \
+         preferences; its API key is stored only in your computer's keychain and never shown \
+         again. A command that deletes or reaches outside the project asks you first, unless \
+         you chose to always allow it.",
+    );
+}
+
+/// The activity log's result column: what came of a command the assistant
+/// ran, short enough for one line.
+fn outcome_text(outcome: &bl_shell::assistant::Outcome) -> String {
+    use bl_shell::assistant::Outcome;
+    const MAX: usize = 60;
+    let text = match outcome {
+        Outcome::Ran(value) => format!("ran, {value}"),
+        Outcome::Denied(message) => format!("denied: {message}"),
+        Outcome::Failed(message) => format!("failed: {message}"),
+    };
+    if text.chars().count() > MAX {
+        let short: String = text.chars().take(MAX).collect();
+        format!("{short}…")
+    } else {
+        text
+    }
+}
+
+/// An activity entry's time as `HH:MM:SS` in UTC, since the app keeps no
+/// local-time clock.
+fn clock(at: std::time::SystemTime) -> String {
+    let seconds = at
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let day = seconds % 86_400;
+    format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
 }
 
 /// The page chooser (L-SET-002): one row per page, in Live's order.
@@ -977,6 +1565,23 @@ impl<'a> Rows<'a> {
         let rect = Rect::from_min_size(pos2(self.layout.control_x, self.y), vec2(width, 18.0));
         self.y += SettingsLayout::OPTION_ROW;
         rect
+    }
+
+    /// A row with a label and controls of these widths side by side, as
+    /// Live's Exclusive Arm and Solo are; returns their rectangles.
+    fn row_of(&mut self, ui: &Ui, label: &str, widths: &[f32]) -> Vec<Rect> {
+        self.label(ui, label);
+        let mut x = self.layout.control_x;
+        let rects = widths
+            .iter()
+            .map(|&width| {
+                let rect = Rect::from_min_size(pos2(x, self.y), vec2(width, 18.0));
+                x += width + 4.0;
+                rect
+            })
+            .collect();
+        self.y += SettingsLayout::OPTION_ROW;
+        rects
     }
 
     /// A row that shows a value as text, read by assistive technology as a

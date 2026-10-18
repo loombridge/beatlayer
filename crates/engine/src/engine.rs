@@ -9,16 +9,21 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use bl_model::Document;
+use bl_model::{DeviceId, Document, LaunchSettings};
 use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
+use crate::capture::{CAPTURE_RING, CapturedMidi};
 use crate::compiler::{Compiler, Update};
-use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle};
+use crate::display::Displays;
+use crate::drum::ChainHits;
+use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
+use crate::recording::RecordingPlan;
 use crate::registry::Registry;
+use crate::session::{SceneOverride, SessionCommand};
 use crate::sources::Loaded;
 use crate::state::{EngineState, Monitor};
 
@@ -33,18 +38,29 @@ use crate::state::{EngineState, Monitor};
 pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
     let (producer, consumer) = RingBuffer::new(config.queue_capacity);
     let (report_producer, report_consumer) = RingBuffer::new(config.report_capacity);
+    let (capture_producer, capture_consumer) = RingBuffer::new(CAPTURE_RING);
     let (state_input, state_output) = triple_buffer::triple_buffer(&EngineState::with_capacity(
         config.max_tracks,
+        config.max_slots,
+        config.max_modulated,
+        config.max_processing,
         config.sample_rate,
     ));
     let sender = Sender {
         queue: producer,
         outbox: VecDeque::new(),
     };
-    let processor = Processor::new(*config, consumer, report_producer, state_input);
+    let processor = Processor::new(
+        *config,
+        consumer,
+        report_producer,
+        state_input,
+        capture_producer,
+    );
     let monitor = Monitor {
         state: state_output,
         reports: report_consumer,
+        captured: capture_consumer,
     };
     (sender, processor, monitor)
 }
@@ -79,6 +95,11 @@ impl Sender {
         }
     }
 
+    /// Sends the audio device's output latency in frames now (WP-5.34).
+    pub fn output_latency(&mut self, frames: u32) {
+        self.push(Message::OutputLatency(frames));
+    }
+
     /// Sends a parameter change.
     pub fn send_param(&mut self, event: ParamEvent) {
         self.push(Message::Param(event));
@@ -89,6 +110,12 @@ impl Sender {
     /// program doesn't have is dropped.
     pub fn send_data(&mut self, key: NodeKey, data: NodeData) {
         self.push(Message::Data { key, data });
+    }
+
+    /// Sends what the audio thread records while the transport records
+    /// (WP-2.13), wrapped so dropping it there frees nothing.
+    pub fn record(&mut self, plan: Owned<RecordingPlan>) {
+        self.push(Message::Record(plan));
     }
 
     /// Sends a transport command, which takes effect at the start of the
@@ -112,6 +139,13 @@ impl Sender {
     /// Schedules a command at a musical position.
     pub fn schedule(&mut self, command: ScheduledCommand) {
         self.push(Message::Schedule(command));
+    }
+
+    /// Sends a Session View command (WP-3.2): a launch, a stop, or the
+    /// global launch quantisation. It takes effect at the start of the next
+    /// block; a launch or a stop lands on its quantisation frame.
+    pub fn session(&mut self, command: SessionCommand) {
+        self.push(Message::Session(command));
     }
 
     /// Cancels a scheduled command that hasn't fired.
@@ -187,10 +221,26 @@ enum Request {
     Sync(Box<Document>),
     Param(ParamEvent),
     Data(NodeKey, NodeData),
+    /// The latency a device's node reports now, from a plug-in that
+    /// changed its own (WP-2.7).
+    Latency(DeviceId, u32),
+    /// The audio interface's output latency and round trip in frames now
+    /// (WP-5.34).
+    RoundTrip {
+        output: u32,
+        round_trip: u32,
+    },
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
+    /// A Session View command (WP-3.2).
+    Session(SessionCommand),
+    /// What the audio thread says a launched scene put in place: compile
+    /// the last document again under it (WP-3.5).
+    Override(SceneOverride),
     Flush(mpsc::Sender<()>),
+    /// What to record while the transport records (WP-2.13).
+    Record(Box<Owned<RecordingPlan>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -225,6 +275,9 @@ enum Held {
     Schedule(ScheduledCommand),
     /// A cancellation, perhaps of a carried command.
     Cancel(u64),
+    /// The launch quantisation, which nothing else carries to the processor
+    /// that takes over (a launch or a stop while nothing plays is dropped).
+    Quantization(LaunchSettings),
 }
 
 /// Restarts the engine from another thread: the hook a device supervisor
@@ -279,10 +332,15 @@ impl std::fmt::Debug for Request {
             Self::Sync(_) => "Sync",
             Self::Param(_) => "Param",
             Self::Data(..) => "Data",
+            Self::Latency(..) => "Latency",
+            Self::RoundTrip { .. } => "RoundTrip",
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
+            Self::Session(_) => "Session",
+            Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
+            Self::Record(_) => "Record",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -316,8 +374,14 @@ pub struct Engine {
     monitors: mpsc::Receiver<Monitor>,
     /// Reports from processors that have been replaced, not yet read.
     held: Vec<Report>,
+    /// Captured notes from processors that have been replaced, not yet read.
+    held_captured: Vec<CapturedMidi>,
+    /// The scene override the compiler thread was last told of.
+    override_sent: SceneOverride,
     gc: GcHandle,
     counts: Arc<Counts>,
+    displays: Displays,
+    hits: ChainHits,
     // Dropped last, after the compiler thread has let go of everything.
     drop_thread: DropThread,
 }
@@ -362,6 +426,8 @@ impl Engine {
             (None, None)
         };
         let mut compiler = Compiler::new(config, registry, gc.clone());
+        let displays = compiler.displays();
+        let hits = compiler.chain_hits();
         let counts = Arc::new(Counts::default());
         let (requests, receiver) = mpsc::channel();
         // Spec: audio-clips R17. Clips' sources open on a thread of their
@@ -387,9 +453,13 @@ impl Engine {
             monitor,
             monitors,
             held: Vec::new(),
+            held_captured: Vec::new(),
+            override_sent: SceneOverride::default(),
             gc,
             counts,
             drop_thread,
+            displays,
+            hits,
         };
         Ok((engine, processor))
     }
@@ -415,6 +485,10 @@ impl Engine {
         while let Ok(monitor) = self.monitors.try_recv() {
             let mut old = mem::replace(&mut self.monitor, monitor);
             self.held.extend(old.reports());
+            self.held_captured.extend(old.captured());
+            // The processor that takes over starts with the set's own maps,
+            // and the compiler thread has compiled for it.
+            self.override_sent = SceneOverride::default();
         }
     }
 
@@ -440,6 +514,32 @@ impl Engine {
     /// Sends data to a node (see [`Sender::send_data`]).
     pub fn send_data(&self, key: NodeKey, data: NodeData) {
         self.request(Request::Data(key, data));
+    }
+
+    /// Sets what the engine records while the transport records (WP-2.13):
+    /// the armed tracks' inputs and the rings their samples go to. The plan
+    /// replaces any earlier one; the audio thread drops it when the take
+    /// ends, which closes the rings and tells the writer the take is over.
+    pub fn record(&self, plan: crate::recording::RecordingPlan) {
+        self.request(Request::Record(Box::new(self.gc.wrap(plan))));
+    }
+
+    /// Reports `device`'s node's latency now, as a plug-in that restarted
+    /// for a new one does: the compiler compiles a program whose delay
+    /// compensation uses it, so a latency change reaches the running song
+    /// (WP-2.7; delay-compensation R6).
+    pub fn set_device_latency(&self, device: DeviceId, frames: u32) {
+        self.request(Request::Latency(device, frames));
+    }
+
+    /// Reports the audio interface's latency now, in frames: `output`, the
+    /// output latency it reports, which MIDI to ports is sent after, and
+    /// `round_trip`, its reported output and input latency plus Driver
+    /// Error Compensation, which the external devices report to delay
+    /// compensation, so a change reaches the running song (the external
+    /// devices spec, R4, R13).
+    pub fn set_latency(&self, output: u32, round_trip: u32) {
+        self.request(Request::RoundTrip { output, round_trip });
     }
 
     /// Wraps a value as node data, to send with [`Engine::send_data`].
@@ -486,6 +586,11 @@ impl Engine {
         self.request(Request::Cancel(id));
     }
 
+    /// Sends a Session View command (WP-3.2).
+    pub fn session(&self, command: SessionCommand) {
+        self.request(Request::Session(command));
+    }
+
     /// Waits, up to `timeout`, until everything sent so far is on the queue
     /// to the audio thread. Returns whether it got there. (The audio thread
     /// takes it at its next block.) While no device runs the engine, it
@@ -499,7 +604,29 @@ impl Engine {
     /// The latest state the audio thread published.
     pub fn state(&mut self) -> &EngineState {
         self.adopt();
+        // Spec: session-view R23. A scene's launch changed the maps the
+        // audio thread plays under: the compiler thread compiles the last
+        // document under them, so the Arrangement's clips follow the tempo.
+        let scene_override = self.monitor.state().scene_override;
+        if scene_override != self.override_sent {
+            self.override_sent = scene_override;
+            self.request(Request::Override(scene_override));
+        }
         self.monitor.state()
+    }
+
+    /// The display data the running program's devices publish after each
+    /// block (the device framework spec, R26).
+    #[must_use]
+    pub fn displays(&self) -> &Displays {
+        &self.displays
+    }
+
+    /// How many notes have reached each drum chain of the running program
+    /// (the drum racks spec, R20).
+    #[must_use]
+    pub fn chain_hits(&self) -> &ChainHits {
+        &self.hits
     }
 
     /// Reports from the audio thread since the last call.
@@ -508,6 +635,16 @@ impl Engine {
         let mut reports = mem::take(&mut self.held);
         reports.extend(self.monitor.reports());
         reports
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call,
+    /// oldest first, with those of processors that have been replaced
+    /// (WP-3.14).
+    pub fn captured(&mut self) -> Vec<CapturedMidi> {
+        self.adopt();
+        let mut notes = mem::take(&mut self.held_captured);
+        notes.extend(self.monitor.captured());
+        notes
     }
 
     /// What the compiler thread has done.
@@ -602,7 +739,7 @@ fn compile_loop(
                     let Some(sender) = sender.as_mut() else {
                         // A loop edit still reaches the next processor, after
                         // the loop it carries over.
-                        if let Some(command) = compiler.remember(&document) {
+                        for command in compiler.remember(&document) {
                             detached.push(Held::Transport(command, When::Now));
                         }
                         counts.deferred.fetch_add(1, Relaxed);
@@ -627,6 +764,30 @@ fn compile_loop(
                         sender.send_data(key, data);
                     }
                 }
+                Request::RoundTrip { output, round_trip } => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.output_latency(output);
+                        let update = compiler.round_trip(round_trip);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
+                    }
+                }
+                Request::Latency(device, frames) => {
+                    // While no processor runs, the next restart compiles
+                    // every node anew, and they read their plug-ins'
+                    // latency themselves.
+                    if let Some(sender) = sender.as_mut() {
+                        let update = compiler.latency(device, frames);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        } else {
+                            counts.without_program.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
+                    }
+                }
                 Request::Transport(command, at) => match sender.as_mut() {
                     Some(sender) => sender.transport_at(command, at),
                     // Spec: device-changes R7. Starting the song while no
@@ -646,7 +807,35 @@ fn compile_loop(
                     Some(sender) => sender.cancel(id),
                     None => detached.push(Held::Cancel(id)),
                 },
+                Request::Session(command) => match sender.as_mut() {
+                    Some(sender) => sender.session(command),
+                    // Spec: device-changes R7. Nothing plays while no device
+                    // runs the engine, so only the quantisation waits; a
+                    // launch or a stop for the stopped song is dropped.
+                    None => {
+                        if let SessionCommand::SetQuantization(settings) = command {
+                            detached.push(Held::Quantization(settings));
+                        }
+                    }
+                },
+                Request::Override(scene_override) => {
+                    // Without a processor the next restart compiles the
+                    // set's own maps.
+                    if let Some(sender) = sender.as_mut() {
+                        let update = compiler.set_override(scene_override);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
+                    }
+                }
                 Request::Flush(ack) => flushes.push(ack),
+                Request::Record(plan) => {
+                    // While no processor runs, nothing records it.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.record(*plan);
+                    }
+                }
                 Request::Detach => {
                     // Frees the queue to the processor that stopped, and
                     // anything still waiting for room in it. What's held
@@ -734,6 +923,9 @@ fn restart_with(
             }
             Held::Schedule(command) => sender.schedule(command),
             Held::Cancel(id) => sender.cancel(id),
+            Held::Quantization(settings) => {
+                sender.session(SessionCommand::SetQuantization(settings))
+            }
         }
     }
     deliver(&mut sender, &mut processor);

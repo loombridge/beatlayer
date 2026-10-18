@@ -6,6 +6,7 @@ use bl_agent::client::{Client, InProcess};
 use bl_agent::{Agent, EngineMessage, QuestionKind, guide};
 use bl_core::time::Ticks;
 use bl_engine::{Action, ScheduledCommand, TransportCommand};
+use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::Shell;
 use serde_json::{Value, json};
 
@@ -165,6 +166,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
     assert_eq!(
         ids,
         [
+            "track.add_take_lane",
             "track.create",
             "track.delete",
             "track.duplicate_without_clips",
@@ -174,12 +176,18 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.ungroup"
         ]
     );
-    let delete = &tracks["commands"][1];
+    let delete = &tracks["commands"][2];
     assert_eq!(delete["permission"], "destructive");
     assert_eq!(delete["access"], "refused to agents");
 
     let found = call(&mut client, "list_commands", json!({ "search": "volume" }));
-    assert_eq!(found["commands"][0]["command"], "mixer.set_volume");
+    let ids: Vec<&Value> = found["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["command"])
+        .collect();
+    assert!(ids.contains(&&json!("mixer.set_volume")), "{ids:?}");
     assert!(
         call_err(&mut client, "list_commands", json!({ "area": "nowhere" }))
             .contains("no commands")
@@ -722,7 +730,7 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 /// Every transport command, the engine's and the loop's, by ID.
 /// The transport's commands: the engine's playback commands, the loop's
 /// (the document's), and the shell's Return to Start and state (WP-1.18).
-const TRANSPORT_COMMANDS: [&str; 11] = [
+const TRANSPORT_COMMANDS: [&str; 21] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
@@ -732,8 +740,18 @@ const TRANSPORT_COMMANDS: [&str; 11] = [
     "transport.return_to_start",
     "transport.set_loop",
     "transport.set_loop_enabled",
+    "transport.set_metronome_count_in",
+    "transport.set_metronome_enabled",
+    "transport.set_metronome_only_while_recording",
+    "transport.set_metronome_rhythm",
+    "transport.set_metronome_sound",
+    "transport.set_midi_overdub",
+    "transport.set_punch_in",
+    "transport.set_punch_out",
+    "transport.set_recording",
     "transport.state",
     "transport.stop",
+    "transport.stop_recording",
 ];
 
 const BAR: i64 = 2_822_400;
@@ -917,6 +935,93 @@ fn with_an_engine_transport_commands_go_to_its_queue_in_order() {
 }
 
 #[test]
+fn the_metronome_settings_run_through_the_agent_api() {
+    // Spec: metronome R8
+    let mut client = headless(true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "transport.set_metronome_enabled", "args": { "enabled": true } },
+            { "command": "transport.set_metronome_count_in", "args": { "count_in": "2_bars" } },
+            { "command": "transport.set_metronome_sound", "args": { "sound": "wood" } },
+            { "command": "transport.set_metronome_rhythm", "args": { "rhythm": "1/8" } },
+            { "command": "transport.set_metronome_only_while_recording",
+              "args": { "only_while_recording": true } },
+        ] }),
+    );
+    let settings = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .settings()
+        .metronome;
+    assert_eq!(
+        settings,
+        bl_model::MetronomeSettings {
+            enabled: true,
+            count_in: CountIn::Bars2,
+            sound: MetronomeSound::Wood,
+            rhythm: MetronomeRhythm::Eighth,
+            only_while_recording: true,
+        }
+    );
+}
+
+#[test]
+fn the_punch_switches_and_the_compensation_run_through_the_agent_api() {
+    // Spec: recording R6, R7; WP-2.13
+    let mut client = headless(true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "transport.set_punch_in", "args": { "enabled": true } },
+            { "command": "transport.set_punch_out", "args": { "enabled": true } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "audio.configure",
+              "args": { "driver_error_compensation_ms": 12.345 } },
+        ] }),
+    );
+    let transport = client.transport();
+    let settings = transport.shell.editor().document().settings();
+    assert!(settings.punch_in && settings.punch_out);
+    assert!(
+        !settings.arrangement_loop.enabled,
+        "punch needs no Loop switch"
+    );
+    assert_eq!(
+        transport
+            .shell
+            .audio()
+            .settings()
+            .driver_error_compensation_ms,
+        12.35
+    );
+    // The switches are saved with the set and undo switches them back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo" }] }),
+    );
+    assert!(
+        !client
+            .transport()
+            .shell
+            .editor()
+            .document()
+            .settings()
+            .punch_out
+    );
+}
+
+#[test]
 fn scheduled_commands_are_checked_when_scheduled_and_wait_for_the_song() {
     let mut client = headless(false);
     let result = call(
@@ -1007,6 +1112,93 @@ fn the_guide_s_example_runs_as_written() {
         json!({ "path": "track \"Bass\" / clip #1", "detail": "full" }),
     );
     assert_eq!(bass["content"]["notes"]["items"][0]["key"], 36);
+}
+
+#[test]
+fn an_agent_quantises_and_transposes_notes_by_command() {
+    // Spec: piano-roll (WP-2.3 part 3). Quantise and transpose reach the
+    // Clip View's notes through the same commands the mouse runs, and each
+    // call is one undo step labelled with the agent's name (agent-permissions
+    // R6).
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 705_600, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 130,
+                                        "length": 480 },
+                                      { "key": 120, "velocity": 100, "start": 500,
+                                        "length": 480 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+
+    // Quantise the first note to 1/16 lines at 100 percent.
+    let quantised = call(
+        &mut client,
+        "run",
+        json!({ "label": "Quantise the notes", "commands": [
+            { "command": "note.quantize",
+              "args": { "clip": clip, "notes": [0], "grid": 120, "amount": 100 } },
+        ] }),
+    );
+    assert_eq!(quantised["ran"], 1);
+    assert_eq!(quantised["undo_step"], "test-agent: Quantise the notes");
+    let notes = agent_notes(&mut client);
+    assert_eq!(notes[0], (60, 120), "the start landed on the line");
+
+    // Transposing past key 127 is refused and changes nothing; down an
+    // octave is one labelled undo step.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [
+                { "command": "note.move",
+                  "args": { "clip": clip, "notes": [1], "semitones": 12 } },
+            ] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(
+        refused.text.contains("0 to 127"),
+        "the refusal names the keys: {}",
+        refused.text
+    );
+    assert_eq!(agent_notes(&mut client)[1].0, 120, "and changes nothing");
+    let moved = call(
+        &mut client,
+        "run",
+        json!({ "label": "Transpose down", "commands": [
+            { "command": "note.move",
+              "args": { "clip": clip, "notes": [1], "semitones": -12 } },
+        ] }),
+    );
+    assert_eq!(moved["undo_step"], "test-agent: Transpose down");
+    assert_eq!(agent_notes(&mut client)[1].0, 108, "an octave down");
+}
+
+/// The MIDI clips' notes, as (key, start) pairs by start then key.
+fn agent_notes(client: &mut Client<InProcess>) -> Vec<(u8, i64)> {
+    let document = client.transport().shell.editor().document();
+    let mut notes = Vec::new();
+    for track in document.tracks() {
+        for clip in track.clips() {
+            if let bl_model::ClipData::Midi(midi) = &clip.data {
+                notes.extend(midi.notes.iter().map(|note| (note.key, note.start.get())));
+            }
+        }
+    }
+    notes.sort_by_key(|note| (note.1, note.0));
+    notes
 }
 
 #[test]

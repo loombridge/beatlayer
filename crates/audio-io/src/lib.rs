@@ -21,15 +21,19 @@
 //!
 //! | Backend | Platform | Built on | Duplex |
 //! |---|---|---|---|
-//! | Core Audio | macOS | `cpal` | not yet |
-//! | WASAPI (shared) | Windows | `cpal` | not yet |
+//! | Core Audio | macOS | `cpal` | two streams, one device |
+//! | WASAPI (shared) | Windows | `cpal` | two streams, one device |
 //! | ASIO | Windows, `asio` feature | `azo` | yes |
-//! | JACK, ALSA | Linux | `cpal` | not yet |
+//! | JACK, ALSA | Linux | `cpal` | two streams, one device |
 //! | Null | all | a timer thread | yes |
 //!
 //! `cpal` 0.18 has no duplex streams on Core Audio or PipeWire, so its
-//! backends refuse a request with input. Beatlayer's own Core Audio backend
-//! replaces it on macOS in a later package.
+//! backends open an input stream alongside the output stream on the same
+//! device and carry the samples between the two callbacks through a
+//! lock-free ring made when the stream opens (WP-2.13). The two callbacks
+//! run on the one device's clock. A caller that needs input and output on
+//! different devices needs an aggregate device, which Beatlayer's own Core
+//! Audio backend brings in a later package.
 //!
 //! On Linux, PipeWire plays through its ALSA plug-in and its JACK server.
 //! `cpal`'s native PipeWire host stays off until `deny.toml` allows the
@@ -61,6 +65,7 @@ bl_rt::install_trap!();
 mod buffer;
 mod cpal_backend;
 mod error;
+mod latency;
 mod null;
 mod power;
 mod runner;
@@ -446,6 +451,14 @@ pub struct StreamInfo {
     pub buffer_size: Option<u32>,
     /// The largest block [`AudioCallback::process`] receives.
     pub max_block_frames: u32,
+    /// Frames between a sound arriving at the device's input and the stream
+    /// getting it, as the device reports. Zero when it reports none. A
+    /// backend that measures it as the stream runs says so in
+    /// [`Stream::latency`].
+    pub input_latency: u32,
+    /// Frames between the stream handing the device a sound and it coming
+    /// out, as the device reports. Zero when it reports none.
+    pub output_latency: u32,
     /// The macOS audio workgroup the stream's audio thread works in, as it
     /// was when the stream opened. `None` on other platforms.
     pub workgroup: Option<WorkgroupInfo>,
@@ -521,12 +534,33 @@ pub trait Backend {
     ) -> Result<Box<dyn Stream>, Error>;
 }
 
+/// The latency a device reports, in frames, each direction counting its
+/// buffer once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Latency {
+    /// Between a sound arriving at the input and the stream getting it.
+    pub input: u32,
+    /// Between the stream handing the device a sound and it coming out.
+    pub output: u32,
+}
+
 /// A running or paused connection to a device.
 ///
 /// Dropping a stream stops it.
 pub trait Stream {
     /// What the stream runs at.
     fn info(&self) -> &StreamInfo;
+
+    /// The device's latency now: [`StreamInfo`]'s, or, for a stream that
+    /// measures it from its first callbacks (where the platform's API hides
+    /// the figure), the measurement once it is in and zero before.
+    fn latency(&self) -> Latency {
+        let info = self.info();
+        Latency {
+            input: info.input_latency,
+            output: info.output_latency,
+        }
+    }
 
     /// Starts calling the callback.
     fn start(&mut self) -> Result<(), Error>;

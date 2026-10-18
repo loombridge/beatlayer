@@ -8,7 +8,30 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The messages and events the engine takes (WP-2.2).
 bl-core.workspace = true
+# Ports on Core MIDI (macOS), the ALSA sequencer (Linux), and Windows
+# Multimedia MIDI (WP-2.2). MIT. Pinned to the release WP-2.2 evaluated;
+# building on Linux needs the ALSA development headers, which bl-audio-io
+# already needs.
+midir = "=0.11.1"
+# The lock-free queue from the MIDI threads to the audio thread (D14).
+rtrb = "0.4.0"
+
+# Scheduled output: the crates `midir` is built on, at the versions it
+# resolves to, so a message goes to Core MIDI or the ALSA sequencer with its
+# time. Windows needs none: a timer thread sends there.
+[target.'cfg(target_os = "macos")'.dependencies]
+coremidi = "=0.9.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "=0.11.0"
+
+[dev-dependencies]
+# The whole path, port to engine, in the tests.
+bl-engine.workspace = true
+bl-model.workspace = true
+bl-rt.workspace = true
 
 [lints]
 workspace = true

@@ -53,12 +53,38 @@ pub enum Pacing {
 }
 
 /// Settings for the null backend.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NullOptions {
     /// How blocks are paced.
     pub pacing: Pacing,
     /// If set, a running stream stops by itself after this many frames.
     pub frame_limit: Option<u64>,
+    /// How many input and output channels each device has. Zero — and the
+    /// default — means [`CHANNELS`], two.
+    pub channels: u16,
+}
+
+impl Default for NullOptions {
+    fn default() -> Self {
+        Self {
+            pacing: Pacing::default(),
+            frame_limit: None,
+            channels: CHANNELS,
+        }
+    }
+}
+
+impl NullOptions {
+    /// The channels a device has: [`channels`](Self::channels), or
+    /// [`CHANNELS`] if it's zero.
+    #[must_use]
+    pub fn device_channels(&self) -> u16 {
+        if self.channels == 0 {
+            CHANNELS
+        } else {
+            self.channels
+        }
+    }
 }
 
 /// One simulated device.
@@ -75,12 +101,26 @@ struct SimDevice {
     rate_changes: AtomicU64,
 }
 
+/// One input channel's test tone: a frequency in hertz and a peak
+/// amplitude, as `f32` bits, written by [`NullControl::set_input_tone`] and
+/// read by the device's thread with relaxed atomics.
+#[derive(Debug)]
+struct InputTone {
+    hz: AtomicU32,
+    amplitude: AtomicU32,
+}
+
 /// What one null backend's devices and streams share.
 #[derive(Debug)]
 struct World {
     /// Fixed when the backend is made, so a stream's thread reads it without
     /// a lock.
     devices: Vec<SimDevice>,
+    /// How many input and output channels each device has.
+    channels: u16,
+    /// The test tone each input channel carries, silent by default
+    /// (WP-2.13).
+    input: Vec<InputTone>,
     /// While set, no stream calls back: the machine sleeps.
     asleep: AtomicBool,
     /// Bumped by [`NullControl::stall`]: streams opened before stop calling
@@ -92,7 +132,7 @@ struct World {
 }
 
 impl World {
-    fn new(devices: &[(&str, &str)]) -> Self {
+    fn new(devices: &[(&str, &str)], channels: u16) -> Self {
         assert!(!devices.is_empty(), "a null backend needs a device");
         for (i, (local, _)) in devices.iter().enumerate() {
             assert!(
@@ -109,6 +149,13 @@ impl World {
                     present: AtomicBool::new(true),
                     rate: AtomicU32::new(DEFAULT_RATE),
                     rate_changes: AtomicU64::new(0),
+                })
+                .collect(),
+            channels,
+            input: (0..channels)
+                .map(|_| InputTone {
+                    hz: AtomicU32::new(0.0f32.to_bits()),
+                    amplitude: AtomicU32::new(0.0f32.to_bits()),
                 })
                 .collect(),
             asleep: AtomicBool::new(false),
@@ -147,8 +194,9 @@ impl World {
 }
 
 /// A backend whose devices run the callback on a timer: two input and two
-/// output channels, the standard sample rates, and buffers of 16 to 8,192
-/// frames. Input is silence.
+/// output channels by default (more with [`NullOptions::channels`]), the
+/// standard sample rates, and buffers of 16 to 8,192 frames. Input is
+/// silence until a test tone is set.
 ///
 /// Made with [`new`](Self::new) or [`with_options`](Self::with_options), it
 /// has one device, `null:null`. Made with
@@ -159,6 +207,15 @@ impl World {
 pub struct NullBackend {
     options: NullOptions,
     world: Arc<World>,
+    /// The input and output latency, in frames, that a stream reports in its
+    /// [`StreamInfo`] (WP-2.13).
+    latency: (u32, u32),
+    /// If set, each input channel carries the output channel of the same
+    /// index this many frames late instead of its test tone, as a cable from
+    /// the interface's output to its input does (WP-2.13). It can't be less
+    /// than a block, because a block's input is read before its output is
+    /// made; a stream with a bigger buffer is refused.
+    loopback_delay: Option<u32>,
 }
 
 impl Default for NullBackend {
@@ -171,6 +228,22 @@ impl NullBackend {
     /// A null backend paced in real time.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This backend with streams that report `input` and `output` frames of
+    /// latency (WP-2.13).
+    #[must_use]
+    pub fn with_latency(mut self, input: u32, output: u32) -> Self {
+        self.latency = (input, output);
+        self
+    }
+
+    /// This backend with each input channel carrying the output channel of
+    /// the same index `delay` frames late (WP-2.13).
+    #[must_use]
+    pub fn with_loopback(mut self, delay: u32) -> Self {
+        self.loopback_delay = Some(delay);
+        self
     }
 
     /// A null backend with these settings.
@@ -186,11 +259,19 @@ impl NullBackend {
     ///
     /// If `devices` is empty or names an ID twice.
     pub fn with_devices(options: NullOptions, devices: &[(&str, &str)]) -> (Self, NullControl) {
-        let world = Arc::new(World::new(devices));
+        let world = Arc::new(World::new(devices, options.device_channels()));
         let control = NullControl {
             world: Arc::clone(&world),
         };
-        (Self { options, world }, control)
+        (
+            Self {
+                options,
+                world,
+                latency: (0, 0),
+                loopback_delay: None,
+            },
+            control,
+        )
     }
 
     /// The ID of the device a plain null backend has.
@@ -205,8 +286,8 @@ impl NullBackend {
             name: device.name.clone(),
             is_default_output: default == Some(index),
             is_default_input: default == Some(index),
-            output_channels: CHANNELS,
-            input_channels: CHANNELS,
+            output_channels: self.world.channels,
+            input_channels: self.world.channels,
             sample_rates: STANDARD_SAMPLE_RATES.to_vec(),
             current_sample_rate: Some(device.rate.load(Ordering::Acquire)),
             buffer_sizes: BufferSizes::Range {
@@ -244,15 +325,15 @@ impl NullBackend {
 
 /// Checks one direction of a request and returns its channel count, or 0 if
 /// the request doesn't ask for that direction.
-fn channels_for(port: Option<&PortRequest>, direction: &str) -> Result<u16, Error> {
+fn channels_for(port: Option<&PortRequest>, available: u16, direction: &str) -> Result<u16, Error> {
     let Some(port) = port else {
         return Ok(0);
     };
-    let channels = port.channels.unwrap_or(CHANNELS);
-    if !(1..=CHANNELS).contains(&channels) {
+    let channels = port.channels.unwrap_or(available);
+    if !(1..=available).contains(&channels) {
         return Err(Error::new(
             ErrorKind::UnsupportedConfig,
-            format!("the null device has 1 or 2 {direction} channels, not {channels}"),
+            format!("the null device has 1 to {available} {direction} channels, not {channels}"),
         ));
     }
     Ok(channels)
@@ -296,8 +377,8 @@ impl Backend for NullBackend {
                 "a null stream's input and output are on one device",
             ));
         }
-        let output_channels = channels_for(request.output.as_ref(), "output")?;
-        let input_channels = channels_for(request.input.as_ref(), "input")?;
+        let output_channels = channels_for(request.output.as_ref(), self.world.channels, "output")?;
+        let input_channels = channels_for(request.input.as_ref(), self.world.channels, "input")?;
 
         let device = &self.world.devices[index];
         let sample_rate = request
@@ -310,6 +391,14 @@ impl Backend for NullBackend {
             ));
         }
         let frames = request.buffer_size.unwrap_or(DEFAULT_BUFFER);
+        if let Some(delay) = self.loopback_delay
+            && delay < frames
+        {
+            return Err(Error::new(
+                ErrorKind::UnsupportedConfig,
+                format!("a loopback of {delay} frames is shorter than the {frames}-frame buffer"),
+            ));
+        }
         if !(MIN_BUFFER..=MAX_BUFFER).contains(&frames) {
             return Err(Error::new(
                 ErrorKind::UnsupportedConfig,
@@ -354,6 +443,12 @@ impl Backend for NullBackend {
             counters: Arc::clone(&counters),
             input: PlanarScratch::new(input_channels.into(), frames as usize),
             output: PlanarScratch::new(output_channels.into(), frames as usize),
+            input_phases: vec![0.0; input_channels.into()],
+            loopback: self.loopback_delay.map(|delay| {
+                (0..input_channels.min(output_channels))
+                    .map(|_| VecDeque::from(vec![0.0; delay as usize]))
+                    .collect()
+            }),
             frames: frames as usize,
             sample_rate,
             options: self.options,
@@ -382,6 +477,8 @@ impl Backend for NullBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
+            input_latency: self.latency.0,
+            output_latency: self.latency.1,
             workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(NullStream {
@@ -454,6 +551,23 @@ impl NullControl {
         self.world.devices[self.world.index(local)]
             .rate
             .load(Ordering::Acquire)
+    }
+
+    /// Sets the sine the null device's input `channel` carries, counted from
+    /// 0, for tests of what a device's input does (WP-2.13): `hz` hertz at
+    /// `amplitude` peak (brought within 0 to 1). A stream's channels that
+    /// aren't set carry silence, and a new stream starts every tone at phase
+    /// zero, so two channels set alike stay in phase. A frequency or
+    /// amplitude of zero makes the channel silent.
+    ///
+    /// # Panics
+    ///
+    /// If the backend has no input channel with this index.
+    pub fn set_input_tone(&self, channel: u16, hz: f64, amplitude: f32) {
+        let tone = &self.world.input[usize::from(channel)];
+        tone.hz.store((hz as f32).to_bits(), Ordering::Relaxed);
+        tone.amplitude
+            .store(amplitude.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Makes every stream open now stop calling back for good, without
@@ -537,6 +651,11 @@ struct NullEngine {
     counters: Arc<Counters>,
     input: PlanarScratch,
     output: PlanarScratch,
+    /// Each input channel's test tone phase, carried across blocks.
+    input_phases: Vec<f64>,
+    /// With a loopback, the last `delay` frames each output channel played,
+    /// oldest first, which the same input channel reads.
+    loopback: Option<Vec<VecDeque<f32>>>,
     frames: usize,
     sample_rate: u32,
     options: NullOptions,
@@ -607,9 +726,15 @@ impl NullEngine {
                 let _ = interval.start(self.period);
             }
             self.runner.device_callback(self.frames);
+            self.fill_input();
             let input = self.input.view(self.frames);
             let mut output = self.output.view_mut(self.frames);
             self.runner.run(Some(timestamp), &input, &mut output);
+            if let Some(lines) = &mut self.loopback {
+                for (line, played) in lines.iter_mut().zip(output.as_buffer().iter()) {
+                    line.extend(played);
+                }
+            }
             if let Some(interval) = &self.interval {
                 let _ = interval.finish();
             }
@@ -617,6 +742,46 @@ impl NullEngine {
         }
         self.runner.release_thread();
         self
+    }
+
+    /// Fills the input scratch with the test tones (WP-2.13): each input
+    /// channel carries the sine [`NullControl::set_input_tone`] set, silent
+    /// unless one was, with its phase carried across blocks so a tone is
+    /// continuous. Real-time safe: reads atomics, writes the scratch the
+    /// stream made.
+    fn fill_input(&mut self) {
+        let rate = f64::from(self.sample_rate.max(1));
+        let frames = self.frames;
+        let mut view = self.input.view_mut(frames);
+        if let Some(lines) = &mut self.loopback {
+            for (index, channel) in view.iter_mut().enumerate() {
+                match lines.get_mut(index) {
+                    Some(line) => channel
+                        .iter_mut()
+                        .for_each(|s| *s = line.pop_front().unwrap_or(0.0)),
+                    None => channel.fill(0.0),
+                }
+            }
+            return;
+        }
+        for (index, channel) in view.iter_mut().enumerate() {
+            let tone = &self.world.input[index];
+            let hz = f64::from(f32::from_bits(tone.hz.load(Ordering::Relaxed)));
+            let amplitude = f32::from_bits(tone.amplitude.load(Ordering::Relaxed));
+            let phase = &mut self.input_phases[index];
+            if hz <= 0.0 || amplitude == 0.0 {
+                channel.fill(0.0);
+                continue;
+            }
+            let step = hz / rate;
+            for sample in channel.iter_mut() {
+                *sample = (std::f64::consts::TAU * *phase).sin() as f32 * amplitude;
+                *phase += step;
+                if *phase >= 1.0 {
+                    *phase -= 1.0;
+                }
+            }
+        }
     }
 
     /// What the simulated hardware lets the stream do now, reporting what a
@@ -837,6 +1002,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::Free,
             frame_limit: Some(300 * 48_000),
+            channels: 2,
         };
         let run = run(options, 128, None);
         assert_eq!(run.blocks, 112_500);
@@ -856,6 +1022,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::RealTime,
             frame_limit: Some(20 * 480),
+            channels: 2,
         };
         let run = run(options, 480, None);
         assert_eq!(run.stats.blocks, 20);
@@ -874,6 +1041,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::RealTime,
             frame_limit: Some(10 * 64),
+            channels: 2,
         };
         let run = run(options, 64, Some((3, Duration::from_millis(20))));
         assert!(run.stats.late_blocks >= 1);
@@ -888,6 +1056,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::RealTime,
             frame_limit: Some(10 * 128),
+            channels: 2,
         };
         let run = run(options, 128, None);
         assert_eq!(run.faults, 0);
@@ -911,6 +1080,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::Free,
             frame_limit: Some(10 * 128),
+            channels: 2,
         };
         let report = run(options, 128, None)
             .stats
@@ -934,6 +1104,7 @@ mod tests {
         let free = NullBackend::with_options(NullOptions {
             pacing: Pacing::Free,
             frame_limit: None,
+            channels: 2,
         });
         let stream = free.open_stream(&duplex(256), Box::new(Silence)).unwrap();
         assert!(stream.info().workgroup.is_none());
@@ -953,6 +1124,7 @@ mod tests {
         let options = NullOptions {
             pacing: Pacing::Free,
             frame_limit: Some(10 * 64),
+            channels: 2,
         };
         let run = run(options, 64, Some((3, Duration::from_millis(5))));
         assert_eq!(run.stats.dropouts, 0);
@@ -963,6 +1135,7 @@ mod tests {
         let backend = NullBackend::with_options(NullOptions {
             pacing: Pacing::Free,
             frame_limit: None,
+            channels: 2,
         });
         let blocks = Arc::new(AtomicU64::new(0));
         let faults = Arc::new(AtomicU64::new(0));
@@ -1092,6 +1265,55 @@ mod tests {
         assert_eq!(
             info.output_device.as_ref().map(|d| d.id.clone()),
             Some(NullBackend::device_id())
+        );
+    }
+
+    /// Records the highest level each input channel carries.
+    struct HearInput(Arc<Mutex<[f32; 4]>>);
+
+    impl AudioCallback for HearInput {
+        fn process(
+            &mut self,
+            _: &ProcessContext,
+            input: &AudioBuffer<'_>,
+            _: &mut AudioBufferMut<'_>,
+        ) {
+            let mut peaks = self.0.lock().unwrap();
+            for (channel, samples) in input.iter().enumerate() {
+                let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+                peaks[channel] = peaks[channel].max(peak);
+            }
+        }
+    }
+
+    // Spec: routing R2, WP-2.13
+    #[test]
+    fn an_input_tone_reaches_only_the_channels_it_is_set_on() {
+        let options = NullOptions {
+            channels: 4,
+            ..NullOptions::default()
+        };
+        let (backend, control) = NullBackend::with_devices(options, &[(LOCAL, NAME)]);
+        control.set_input_tone(2, 300.0, 0.5);
+        let peaks = Arc::new(Mutex::new([0.0f32; 4]));
+        let mut stream = backend
+            .open_stream(&duplex(256), Box::new(HearInput(Arc::clone(&peaks))))
+            .unwrap();
+        assert_eq!(
+            (stream.info().input_channels, stream.info().output_channels),
+            (4, 4),
+        );
+        stream.start().unwrap();
+        wait_for("the tone", || peaks.lock().unwrap()[2] > 0.4);
+        stream.stop().unwrap();
+        let peaks = peaks.lock().unwrap();
+        assert!(peaks[2] > 0.4, "channel 3 carries the tone: {peaks:?}");
+        assert!(
+            peaks
+                .iter()
+                .enumerate()
+                .all(|(channel, peak)| channel == 2 || *peak == 0.0),
+            "the other channels stay silent: {peaks:?}"
         );
     }
 

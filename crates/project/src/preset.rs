@@ -16,6 +16,9 @@
 //! preset's name is its file's name. Plug-ins' own state (WP-2.6) will be
 //! a new field, read as absent from schema 1 files.
 //!
+//! Rack and chain presets are schema 2 of the same format
+//! ([`crate::rack_preset`]).
+//!
 //! Presets live in the User Library: `Presets/<category>/<device name>/`
 //! for Save Preset, and `Defaults/<category>/<device name>.blpreset` for Save
 //! as Default Preset, where the category is `Audio Effects`, `Instruments`,
@@ -53,6 +56,10 @@ pub struct Preset {
     pub device_name: String,
     /// The parameter values set, each finite.
     pub params: OrdMap<ParamId, f64>,
+    /// A Shaper's breakpoint shape (the modulation spec, R12, R23);
+    /// `None` for the default shape and for any other device. A preset
+    /// holds no mappings.
+    pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,6 +70,8 @@ struct File {
     saved_by: String,
     device: DeviceInfo,
     params: Vec<(ParamId, f64)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shape: Option<Vec<bl_model::modulator::ShapePoint>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -127,6 +136,7 @@ impl Preset {
             role: device.role,
             device_name: device.own_name().to_owned(),
             params: device.params.clone(),
+            shape: device.shape.clone(),
         }
     }
 
@@ -165,6 +175,7 @@ impl Preset {
                 name: self.device_name.clone(),
             },
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
+            shape: self.shape.clone(),
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -180,6 +191,11 @@ impl Preset {
     pub fn decode(bytes: &[u8]) -> Result<Self, PresetError> {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| PresetError::Invalid(e.to_string()))?;
+        if value.get("rack").is_some() || value.get("chain").is_some() {
+            return Err(PresetError::Invalid(
+                "it holds a rack or a chain, not a device".to_owned(),
+            ));
+        }
         if value.get("format").and_then(serde_json::Value::as_str) != Some(PRESET_FORMAT) {
             return Err(PresetError::Invalid(format!(
                 "its format isn't \"{PRESET_FORMAT}\""
@@ -211,11 +227,19 @@ impl Preset {
                 )));
             }
         }
+        // A preset saved before T197 names the device as Beatlayer then did.
+        let mut device_name = file.device.name;
+        if let DeviceKind::Native { device_type } = &file.device.kind
+            && let Some(now) = crate::migrate::renamed_device(device_type, &device_name)
+        {
+            device_name = now.to_owned();
+        }
         Ok(Self {
             kind: file.device.kind,
             role: file.device.role,
-            device_name: file.device.name,
+            device_name,
             params,
+            shape: file.shape,
         })
     }
 
@@ -238,35 +262,41 @@ impl Preset {
         Self::decode(&fs::read(path).map_err(io)?)
     }
 
-    /// Writes the preset to `path`, making its folder if need be. The file
-    /// is written beside it under a hidden name and renamed into place, so
-    /// `path` holds a whole preset, old or new, whenever the write stops.
+    /// Writes the preset to `path`, making its folder if need be, whole or
+    /// not at all.
     ///
     /// # Errors
     ///
     /// [`PresetError::Io`] if it can't be written.
     pub fn save(&self, path: &Path) -> Result<(), PresetError> {
-        let io = |error| PresetError::Io {
-            path: path.to_owned(),
-            error,
-        };
-        let folder = path.parent().unwrap_or(Path::new("."));
-        fs::create_dir_all(folder).map_err(io)?;
-        let name = path
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let hidden = folder.join(format!(".{name}.saving"));
-        let written = (|| {
-            let mut file = fs::File::create(&hidden)?;
-            file.write_all(&self.encode())?;
-            file.sync_all()?;
-            fs::rename(&hidden, path)
-        })();
-        if written.is_err() {
-            fs::remove_file(&hidden).ok();
-        }
-        written.map_err(io)
+        write_whole(path, &self.encode())
     }
+}
+
+/// Writes `bytes` to `path`, making its folder if need be. The file is
+/// written beside it under a hidden name and renamed into place, so `path`
+/// holds a whole file, old or new, whenever the write stops.
+pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), PresetError> {
+    let io = |error| PresetError::Io {
+        path: path.to_owned(),
+        error,
+    };
+    let folder = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(folder).map_err(io)?;
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let hidden = folder.join(format!(".{name}.saving"));
+    let written = (|| {
+        let mut file = fs::File::create(&hidden)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        fs::rename(&hidden, path)
+    })();
+    if written.is_err() {
+        fs::remove_file(&hidden).ok();
+    }
+    written.map_err(io)
 }
 
 /// The preset's name: its file's name without the extension.
@@ -321,13 +351,16 @@ pub fn presets_folder(user_library: &Path, device: &Device) -> PathBuf {
 /// `<User Library>/Defaults/<category>/<device's own name>.blpreset`.
 #[must_use]
 pub fn default_preset_path(user_library: &Path, device: &Device) -> PathBuf {
+    default_path(user_library, device.role, device.own_name())
+}
+
+/// The default preset's path for a device with this role and own name.
+#[must_use]
+pub fn default_path(user_library: &Path, role: DeviceRole, own_name: &str) -> PathBuf {
     user_library
         .join("Defaults")
-        .join(category(device.role))
-        .join(format!(
-            "{}.{PRESET_EXTENSION}",
-            file_safe(device.own_name())
-        ))
+        .join(category(role))
+        .join(format!("{}.{PRESET_EXTENSION}", file_safe(own_name)))
 }
 
 /// A path in `folder` for a new preset named `name` that no file has yet:
@@ -385,6 +418,21 @@ mod tests {
         assert_eq!(Preset::decode(&bytes).unwrap(), preset);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("\"format\": \"beatlayer-preset\""), "{text}");
+    }
+
+    // Spec: device-chains R16
+    #[test]
+    fn a_preset_saved_under_a_devices_old_name_loads_under_its_new_one() {
+        let old = Device::new(
+            DeviceId(Id::new(8).unwrap()),
+            "Squeeze",
+            DeviceKind::Native {
+                device_type: "beatlayer.squeeze".to_owned(),
+            },
+        );
+        let loaded = Preset::decode(&Preset::of(&old).encode()).unwrap();
+        assert_eq!(loaded.device_name, "Compressor");
+        assert_eq!(loaded.kind, old.kind);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! and 4, returns A-Reverb and B-Delay, and Main. The behaviour is in the
 //! routing spec.
 
-use bl_model::{Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_model::{Channel, Input, MidiTo, Monitor, Output, Tap, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::routing::{self, Chooser, InOut, return_letter, track_label};
 use serde_json::json;
@@ -38,7 +38,13 @@ fn observed_set() -> Set {
 }
 
 fn section(shell: &Shell, track: TrackId) -> InOut {
-    routing::in_out(shell.editor().document(), track).unwrap()
+    routing::in_out(shell.editor().document(), track, &shell.interface()).unwrap()
+}
+
+/// The In/Out section with an interface whose channels `interface` names,
+/// for the choosers that list the device's channels.
+fn section_with(shell: &Shell, track: TrackId, interface: &routing::Interface) -> InOut {
+    routing::in_out(shell.editor().document(), track, interface).unwrap()
 }
 
 fn clips(shell: &Shell, track: TrackId) -> (Chooser, Chooser, Monitor, Chooser, Chooser) {
@@ -106,7 +112,9 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         ]
     );
     assert_eq!(input.text, "Ext. In");
-    assert_eq!(channel.pending, Some(routing::DUPLEX_AUDIO));
+    assert_eq!(channel.pending, None, "the channel list follows the device");
+    assert_eq!(channel.text, "1/2", "the first pair, with no device open");
+    assert_eq!(channel.labels(), Vec::<&str>::new());
     assert_eq!(monitor, Monitor::Auto);
     assert_eq!(
         output.labels(),
@@ -140,7 +148,8 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
             .input,
         Input::Track {
             track: audio[1],
-            tap: Tap::PostFx
+            tap: Tap::PostFx,
+            chain: None,
         }
     );
     assert_eq!(
@@ -148,7 +157,7 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         Some("Change \"Routing\"")
     );
 
-    // A MIDI track: All Ins (disabled until MIDI input), and No Output.
+    // A MIDI track: All Ins, and No Output.
     let (input, channel, monitor, output, _) = clips(&shell, midi[0]);
     assert_eq!(
         input.labels(),
@@ -163,8 +172,9 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         ]
     );
     assert_eq!(input.text, "All Ins");
-    assert!(input.run_for("All Ins").is_none(), "MIDI input is WP-2.2's");
-    assert_eq!(channel.pending, Some(routing::MIDI_IO));
+    assert!(input.run_for("All Ins").is_some());
+    assert_eq!(channel.text, "All Channels");
+    assert_eq!(channel.pending, None);
     assert_eq!(monitor, Monitor::Auto);
     assert_eq!(
         output.labels(),
@@ -201,14 +211,237 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
     let (_, channel) = output_only(&shell, returns[0]);
     assert_eq!(channel.labels(), ["Track In"]);
 
-    // Main: Cue Out and Main Out wait for the audio interface's outputs.
+    // Main: Cue Out and Main Out list the interface's outputs, which
+    // arrive with the audio interface (WP-2.13); with none open, only
+    // Configure…, as Live shows with no audio device (observed).
     match section(&shell, shell.editor().document().main_id()) {
         InOut::Main { cue, main } => {
-            assert_eq!(cue.labels(), ["Configure…"]);
-            assert_eq!(main.pending, Some(routing::DUPLEX_AUDIO));
+            assert_eq!(cue.labels(), ["Configure…", "─"]);
+            assert_eq!(cue.text, "1/2");
+            assert_eq!(main.labels(), ["Configure…", "─"]);
+            assert_eq!(main.text, "1/2");
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// The Ext. In channel and Main Out choosers list the open interface's
+/// channels, and the agent API sets both, as the routing spec's commands do
+/// (WP-2.13).
+#[test]
+fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
+    let Set {
+        mut shell, audio, ..
+    } = observed_set();
+    let interface = routing::Interface {
+        inputs: 4,
+        outputs: 4,
+        ..routing::Interface::default()
+    };
+
+    // Ext. In's channel: the single channels, then the pairs.
+    let channel_of = |shell: &Shell| match section_with(shell, audio[0], &interface) {
+        InOut::Clips { input_channel, .. } => input_channel,
+        other => panic!("{other:?}"),
+    };
+    let channel = channel_of(&shell);
+    assert_eq!(channel.labels(), ["1", "2", "3", "4", "1/2", "3/4"]);
+    assert_eq!(channel.text, "1/2");
+    shell
+        .run(
+            "routing.set_input",
+            json!({ "track": audio[0], "input": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    assert_eq!(channel_of(&shell).text, "3");
+    let channel = channel_of(&shell);
+    choose(&mut shell, &channel, "4");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Mono(4)
+        }
+    );
+    let channel = channel_of(&shell);
+    choose(&mut shell, &channel, "3/4");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Pair(3)
+        }
+    );
+
+    // Main Out and Cue Out: the interface's output pairs, set by command.
+    let main_id = shell.editor().document().main_id();
+    let (cue, main) = match section_with(&shell, main_id, &interface) {
+        InOut::Main { cue, main } => (cue, main),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(cue.labels(), ["Configure…", "─", "1/2", "3/4"]);
+    assert_eq!(main.labels(), ["Configure…", "─", "1/2", "3/4"]);
+    assert_eq!(main.text, "1/2");
+    shell
+        .run(
+            "routing.set_main_out",
+            json!({ "channel": { "type": "pair", "channel": 3 } }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "routing.set_cue_out",
+            json!({ "channel": { "type": "pair", "channel": 2 } }),
+        )
+        .unwrap();
+    let routing = shell
+        .editor()
+        .document()
+        .track(main_id)
+        .unwrap()
+        .routing()
+        .clone();
+    assert_eq!(routing.main_out, Channel::Pair(3));
+    assert_eq!(routing.cue_out, Channel::Pair(2));
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (cue, main) = match section_with(&shell, main_id, &interface) {
+        InOut::Main { cue, main } => (cue, main),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(main.text, "3/4");
+    assert_eq!(cue.text, "2/3");
+    // A mono channel is refused for Main Out.
+    assert!(
+        shell
+            .run(
+                "routing.set_main_out",
+                json!({ "channel": { "type": "mono", "channel": 1 } }),
+            )
+            .is_err()
+    );
+}
+
+/// Ext. Out is a live choice of every Audio To that lists it, with a channel
+/// chooser of the interface's outputs, and the agent API sets it
+/// (WP-2.13).
+// Spec: routing R3, R16, R20
+#[test]
+fn ext_out_takes_the_interfaces_outputs_as_its_channel() {
+    let Set {
+        mut shell,
+        audio,
+        returns,
+        ..
+    } = observed_set();
+    let interface = routing::Interface {
+        outputs: 4,
+        ..routing::Interface::default()
+    };
+    let to = |shell: &Shell, track: TrackId, interface: &routing::Interface| match section_with(
+        shell, track, interface,
+    ) {
+        InOut::Clips {
+            output,
+            output_channel,
+            ..
+        }
+        | InOut::Output {
+            output,
+            output_channel,
+        } => (output, output_channel),
+        other => panic!("{other:?}"),
+    };
+
+    // Chosen, it takes the first pair; one undo step.
+    let (output, _) = to(&shell, audio[0], &interface);
+    choose(&mut shell, &output, "Ext. Out");
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (output, channel) = to(&shell, audio[0], &interface);
+    assert_eq!(output.text, "Ext. Out");
+    assert_eq!(channel.labels(), ["1", "2", "3", "4", "1/2", "3/4"]);
+    assert_eq!(channel.text, "1/2");
+
+    // Dimmed with no device open.
+    let (_, channel) = to(&shell, audio[0], &routing::Interface::default());
+    assert!(!channel.enabled());
+    assert_eq!(channel.text, "1/2");
+
+    // Another channel; choosing Ext. Out again keeps it.
+    let (_, channel) = to(&shell, audio[0], &interface);
+    choose(&mut shell, &channel, "3");
+    let (output, channel) = to(&shell, audio[0], &interface);
+    assert_eq!(channel.text, "3");
+    choose(&mut shell, &output, "Ext. Out");
+    let routing = shell
+        .editor()
+        .document()
+        .track(audio[0])
+        .unwrap()
+        .routing()
+        .clone();
+    assert_eq!(
+        routing.output,
+        Output::External {
+            channel: Channel::Mono(3)
+        }
+    );
+
+    // A return takes it by command, with its channel.
+    shell
+        .run(
+            "routing.set_output",
+            json!({ "track": returns[0], "output": { "type": "external", "channel": { "type": "pair", "channel": 3 } } }),
+        )
+        .unwrap();
+    let (output, channel) = to(&shell, returns[0], &interface);
+    assert_eq!(
+        (output.text.as_str(), channel.text.as_str()),
+        ("Ext. Out", "3/4")
+    );
+
+    // A set opened on a device with fewer outputs keeps the choice, drawn
+    // dimmed (unobserved).
+    let two = routing::Interface {
+        outputs: 2,
+        ..routing::Interface::default()
+    };
+    let (_, channel) = to(&shell, returns[0], &two);
+    assert_eq!((channel.text.as_str(), channel.enabled()), ("3/4", false));
+    shell
+        .run(
+            "routing.set_output",
+            json!({ "track": returns[0], "output": { "type": "external", "channel": { "type": "pair", "channel": 65535 } } }),
+        )
+        .unwrap();
+    assert!(!to(&shell, returns[0], &two).1.enabled(), "no overflow");
 }
 
 // Spec: routing R16, R6
@@ -366,5 +599,354 @@ fn returns_past_z_take_two_letters() {
             .filter(|t| t.kind() == TrackKind::Return)
             .count()
             == 30
+    );
+}
+
+/// Adds a rack named `name` of `kind` to the selected track, or into
+/// `chain`, with chains of these names; returns the rack and its chains.
+fn add_rack(
+    shell: &mut Shell,
+    chain: Option<bl_model::ChainId>,
+    kind: &str,
+    role: &str,
+    name: &str,
+    chains: &[&str],
+) -> (bl_model::DeviceId, Vec<bl_model::ChainId>) {
+    let device = json!({ "kind": { "rack": { "kind": kind } }, "name": name, "role": role });
+    let args = match chain {
+        Some(chain) => json!({ "device": device, "chain": chain }),
+        None => json!({ "device": device }),
+    };
+    let rack: bl_model::DeviceId =
+        serde_json::from_value(shell.invoke("device.add", args).unwrap()["device"].clone())
+            .unwrap();
+    shell
+        .invoke("device.rename", json!({ "device": rack, "name": name }))
+        .unwrap();
+    let ids = chains
+        .iter()
+        .enumerate()
+        .map(|(n, chain_name)| {
+            let id: bl_model::ChainId = shell.new_id();
+            shell
+                .invoke(
+                    "chain.add",
+                    json!({ "rack": rack, "index": n,
+                            "chain": { "id": id, "name": chain_name, "devices": [] } }),
+                )
+                .unwrap();
+            id
+        })
+        .collect();
+    (rack, ids)
+}
+
+fn select(shell: &mut Shell, track: TrackId) {
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+}
+
+// Spec: racks R38, R39
+#[test]
+fn a_track_with_racks_offers_three_taps_per_chain() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+        ..
+    } = observed_set();
+    // Track 4 holds an audio effect rack of two chains.
+    select(&mut shell, audio[1]);
+    let (_, chains) = add_rack(
+        &mut shell,
+        None,
+        "audio_effect",
+        "audio_effect",
+        "Verb",
+        &["Wet", "Dry"],
+    );
+    // A MIDI track is listed once it holds an instrument, with the taps of
+    // its instrument rack's chains.
+    let (input, ..) = clips(&shell, audio[0]);
+    assert!(!input.labels().contains(&"1-MIDI"), "no instrument yet");
+    select(&mut shell, midi[0]);
+    add_rack(
+        &mut shell,
+        None,
+        "instrument",
+        "instrument",
+        "Keys",
+        &["Pad"],
+    );
+    let (input, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        input.labels(),
+        [
+            "Ext. In",
+            "Configure…",
+            "─",
+            "Resampling",
+            "─",
+            "1-MIDI",
+            "4-Audio",
+            "A-Reverb",
+            "B-Delay",
+            "Main",
+            "─",
+            "No Input"
+        ]
+    );
+
+    // Choosing the track taps its Post Mixer; its channel chooser then
+    // lists its own taps and a rack | chain | tap for each of the chains.
+    choose(&mut shell, &input, "4-Audio");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        channel.labels(),
+        [
+            "Pre FX",
+            "Post FX",
+            "Post Mixer",
+            "Verb | Wet | Pre FX",
+            "Verb | Wet | Post FX",
+            "Verb | Wet | Post Mixer",
+            "Verb | Dry | Pre FX",
+            "Verb | Dry | Post FX",
+            "Verb | Dry | Post Mixer",
+        ]
+    );
+    assert_eq!(channel.text, "Post Mixer");
+    choose(&mut shell, &channel, "Verb | Dry | Post FX");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::Track {
+            track: audio[1],
+            tap: Tap::PostFx,
+            chain: Some(chains[1]),
+        }
+    );
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (input, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(input.text, "4-Audio");
+    assert_eq!(channel.text, "Verb | Dry | Post FX");
+    // Back to the track's own tap.
+    choose(&mut shell, &channel, "Post FX");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(channel.text, "Post FX");
+
+    // A MIDI track's instrument rack is tapped the same way.
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(channel.labels()[3], "Keys | Pad | Pre FX");
+    // MIDI From offers the tracks only.
+    let (input, ..) = clips(&shell, midi[1]);
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, midi[1]);
+    assert_eq!(channel.labels(), ["Pre FX", "Post FX", "Post Mixer"]);
+}
+
+// Spec: racks R39
+#[test]
+fn chain_taps_read_rack_chain_and_tap_in_signal_order() {
+    let Set {
+        mut shell, audio, ..
+    } = observed_set();
+    select(&mut shell, audio[1]);
+    // Outer's first chain holds Inner; a drum rack's chains aren't offered.
+    let (_, outer) = add_rack(
+        &mut shell,
+        None,
+        "audio_effect",
+        "audio_effect",
+        "Outer",
+        &["A", "B"],
+    );
+    add_rack(
+        &mut shell,
+        Some(outer[0]),
+        "audio_effect",
+        "audio_effect",
+        "Inner",
+        &["I1", "I2"],
+    );
+    let (input, ..) = clips(&shell, audio[0]);
+    choose(&mut shell, &input, "4-Audio");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    let racks_and_chains: Vec<&str> = channel
+        .labels()
+        .into_iter()
+        .skip(3)
+        .filter_map(|label| label.strip_suffix(" | Pre FX"))
+        .collect();
+    assert_eq!(
+        racks_and_chains,
+        ["Outer | A", "Inner | I1", "Inner | I2", "Outer | B"],
+        "a nested rack straight after the chain that holds it"
+    );
+    assert_eq!(channel.labels().len(), 3 + 4 * 3);
+}
+
+// Spec: external-devices R1, R2
+#[test]
+fn midi_to_lists_the_output_ports_before_configure() {
+    let Set {
+        mut shell, midi, ..
+    } = observed_set();
+    let interface = routing::Interface {
+        midi_outputs: vec!["Synth".to_owned(), "Drum Box".to_owned()],
+        ..routing::Interface::default()
+    };
+    let to = |shell: &Shell, interface: &routing::Interface| match section_with(
+        shell, midi[0], interface,
+    ) {
+        InOut::Clips {
+            output,
+            output_channel,
+            ..
+        } => (output, output_channel),
+        other => panic!("not a clip track's section: {other:?}"),
+    };
+
+    // The ports come first, in the system's order, then Configure… ─ the
+    // other MIDI tracks ─ No Output, which stays the default.
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(
+        output.labels(),
+        [
+            "Synth",
+            "Drum Box",
+            "Configure…",
+            "─",
+            "2-MIDI",
+            "─",
+            "No Output"
+        ]
+    );
+    assert_eq!(output.text, "No Output");
+    assert_eq!(channel.labels(), Vec::<&str>::new());
+
+    // Choosing a port takes channel 1, and lists 1 to 16.
+    choose(&mut shell, &output, "Synth");
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(output.text, "Synth");
+    assert_eq!(channel.text, "1");
+    assert_eq!(channel.labels().len(), 16);
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(midi[0])
+            .unwrap()
+            .routing()
+            .midi_output,
+        Some(MidiTo::port("Synth"))
+    );
+
+    // Another channel, then the same port again: it keeps the channel.
+    choose(&mut shell, &channel, "7");
+    let (output, _) = to(&shell, &interface);
+    choose(&mut shell, &output, "Synth");
+    let (_, channel) = to(&shell, &interface);
+    assert_eq!(channel.text, "7");
+
+    // A track in its place has Track In alone, and each change is one undo
+    // step.
+    choose(&mut shell, &output, "2-MIDI");
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(output.text, "2-MIDI");
+    assert_eq!(channel.labels(), ["Track In"]);
+    shell.invoke("edit.undo", json!({})).unwrap();
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(
+        (output.text.as_str(), channel.text.as_str()),
+        ("Synth", "7")
+    );
+
+    // The port goes, or its Track switch turns off: the track keeps its
+    // name, dimmed, and sends nowhere.
+    let gone = routing::Interface::default();
+    let (output, _) = to(&shell, &gone);
+    assert_eq!(output.labels()[0], "Synth");
+    assert!(output.run_for("Synth").is_none(), "the name is dimmed");
+    assert_eq!(output.text, "Synth");
+}
+
+// Spec: drum-racks R10
+#[test]
+fn a_drum_rack_offers_its_return_chains_taps() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+        ..
+    } = observed_set();
+    select(&mut shell, midi[0]);
+    let (rack, drums) = add_rack(&mut shell, None, "drum", "instrument", "Drums", &["Kick"]);
+    let gain = bl_engine::testing::gain_type();
+    let made: bl_shell::device_commands::ChainAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "chain.create",
+                json!({ "rack": rack, "returns": true,
+                        "device": { "kind": gain.kind, "name": "Gain", "role": gain.role } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    shell
+        .invoke(
+            "chain.rename",
+            json!({ "chain": made.chain, "name": "Reverb" }),
+        )
+        .unwrap();
+    let (input, ..) = clips(&shell, audio[0]);
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        channel.labels(),
+        [
+            "Pre FX",
+            "Post FX",
+            "Post Mixer",
+            "Drums | Reverb | Pre FX",
+            "Drums | Reverb | Post FX",
+            "Drums | Reverb | Post Mixer",
+        ],
+        "the return chain's three taps, and none of the drum chains'"
+    );
+    choose(&mut shell, &channel, "Drums | Reverb | Post Mixer");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::Track {
+            track: midi[0],
+            tap: Tap::PostMixer,
+            chain: Some(made.chain),
+        }
+    );
+    // A drum chain can't be tapped.
+    assert!(
+        shell
+            .invoke(
+                "routing.set_input",
+                json!({ "track": audio[0], "input":
+                    { "type": "track", "track": midi[0], "tap": "pre_fx", "chain": drums[0] } }),
+            )
+            .is_err()
     );
 }

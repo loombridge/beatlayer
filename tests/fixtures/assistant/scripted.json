@@ -1,0 +1,2321 @@
+{
+  "version": 1,
+  "provider": "open-ai",
+  "base_url": "",
+  "model": "scripted",
+  "system": "You are the assistant built into Beatlayer, a digital audio workstation. Use the tools to look at and change the person's set, and say briefly what you did. Everything you change in one turn is one undo step. A command that creates something needs a new ID: write {\"$new\": \"name\"} where the ID goes, and {\"$ref\": \"name\"} wherever a later call in the turn refers to it. Positions and lengths are in ticks, 705600 to the quarter note.",
+  "tools": [
+    "agent_approve_client",
+    "agent_forget_client",
+    "agent_new_client_token",
+    "agent_new_token",
+    "agent_set_autonomous",
+    "agent_set_server",
+    "app_about",
+    "app_hide",
+    "app_quit",
+    "app_settings",
+    "arrangement_automation_arm",
+    "arrangement_automation_mode",
+    "arrangement_copy",
+    "arrangement_cut",
+    "arrangement_delete",
+    "arrangement_duplicate",
+    "arrangement_fixed_grid",
+    "arrangement_focus_title_bar",
+    "arrangement_fold_groups",
+    "arrangement_fold_tracks",
+    "arrangement_follow",
+    "arrangement_loop_selection",
+    "arrangement_move_clips",
+    "arrangement_narrow_grid",
+    "arrangement_nudge",
+    "arrangement_optimize_height",
+    "arrangement_optimize_width",
+    "arrangement_overview",
+    "arrangement_paste",
+    "arrangement_resize_clips",
+    "arrangement_scroll",
+    "arrangement_select_all",
+    "arrangement_select_clips",
+    "arrangement_select_loop",
+    "arrangement_select_time",
+    "arrangement_select_tracks",
+    "arrangement_set_grid",
+    "arrangement_set_insert_marker",
+    "arrangement_set_track_height",
+    "arrangement_show_automation",
+    "arrangement_show_range",
+    "arrangement_show_track",
+    "arrangement_snap_to_grid",
+    "arrangement_split",
+    "arrangement_state",
+    "arrangement_triplet_grid",
+    "arrangement_unfold_all",
+    "arrangement_widen_grid",
+    "arrangement_zoom",
+    "arrangement_zoom_back",
+    "arrangement_zoom_to_selection",
+    "assistant_forget_key",
+    "assistant_send",
+    "assistant_set_base_url",
+    "assistant_set_key",
+    "assistant_set_model",
+    "assistant_set_panel_width",
+    "assistant_set_provider",
+    "assistant_stop",
+    "assistant_toggle_activity_log",
+    "assistant_toggle_floating",
+    "audio_configure",
+    "audio_devices",
+    "audio_set_test_tone",
+    "audio_status",
+    "audio_toggle_engine",
+    "automation_delete",
+    "automation_delete_breakpoint",
+    "automation_move_breakpoint",
+    "automation_re_enable",
+    "automation_re_enable_for",
+    "automation_set_breakpoint",
+    "automation_set_curve",
+    "browser_add_folder",
+    "browser_add_to_arrangement",
+    "browser_focus_search",
+    "browser_load_selected",
+    "browser_open_folder",
+    "browser_open_place",
+    "browser_preview",
+    "browser_remove_folder",
+    "browser_search",
+    "browser_select",
+    "browser_set_preview",
+    "browser_state",
+    "browser_stop_preview",
+    "clip_create",
+    "clip_create_in_slot",
+    "clip_delete",
+    "clip_delete_envelope",
+    "clip_delete_envelope_breakpoint",
+    "clip_move",
+    "clip_move_by",
+    "clip_move_envelope_breakpoint",
+    "clip_move_to_slot",
+    "clip_rename",
+    "clip_set_data",
+    "clip_set_envelope_breakpoint",
+    "clip_set_envelope_curve",
+    "clip_set_envelope_linked",
+    "clip_set_fades",
+    "clip_set_gain",
+    "clip_set_length",
+    "clip_set_loop",
+    "clip_set_loop_enabled",
+    "clip_set_midi_loop",
+    "clip_set_midi_region",
+    "clip_set_mute",
+    "clip_set_region",
+    "clip_trim_start",
+    "clip_view_quantize_settings",
+    "clip_view_select_notes",
+    "device_add",
+    "device_copy",
+    "device_cut",
+    "device_duplicate",
+    "device_fold",
+    "device_hot_swap",
+    "device_insert",
+    "device_load_preset",
+    "device_load_sample",
+    "device_move",
+    "device_parameters",
+    "device_paste",
+    "device_remove",
+    "device_rename",
+    "device_save_default_preset",
+    "device_save_preset",
+    "device_select",
+    "device_set_enabled",
+    "device_set_floating",
+    "device_set_param",
+    "device_set_sample",
+    "device_set_show_preset_name",
+    "device_set_sidechain_enabled",
+    "device_set_sidechain_gain",
+    "device_set_sidechain_input",
+    "device_set_sidechain_listen",
+    "device_set_sidechain_mix",
+    "device_set_state",
+    "device_set_window",
+    "device_show_sidechain",
+    "device_windows",
+    "device_view_state",
+    "edit_redo",
+    "edit_undo",
+    "export_audio",
+    "focus_arrangement",
+    "focus_browser",
+    "focus_control_bar",
+    "focus_next",
+    "focus_next_neighbor",
+    "focus_previous",
+    "focus_previous_neighbor",
+    "focus_toggle_tab_navigation",
+    "focus_toggle_wrap_navigation",
+    "midi_export_clip",
+    "midi_import_file",
+    "mixer_arm_exclusive",
+    "mixer_set_arm",
+    "mixer_set_crossfade_assign",
+    "mixer_set_crossfader",
+    "mixer_set_mute",
+    "mixer_set_pan",
+    "mixer_set_send",
+    "mixer_set_send_tap",
+    "mixer_set_solo",
+    "mixer_set_solo_in_place",
+    "mixer_set_volume",
+    "mixer_solo_exclusive",
+    "mixer_view_crossfader",
+    "mixer_view_focus",
+    "mixer_view_in_out",
+    "mixer_view_return_tracks",
+    "mixer_view_scroll",
+    "mixer_view_sends",
+    "mixer_view_state",
+    "mixer_view_toggle",
+    "mixer_view_volume",
+    "note_add",
+    "note_delete",
+    "note_move",
+    "note_quantize",
+    "note_ramp_value",
+    "note_resize",
+    "note_set_value",
+    "perception_analyze",
+    "perception_capture_view",
+    "perception_preview",
+    "plugin_info",
+    "plugin_list",
+    "plugin_load",
+    "plugin_load_au",
+    "plugin_rescan",
+    "plugin_scan",
+    "plugin_set_panel_param",
+    "plugin_set_window",
+    "plugin_settings",
+    "plugin_show_window",
+    "routing_set_cue_out",
+    "routing_set_input",
+    "routing_set_main_out",
+    "routing_set_midi_output",
+    "routing_set_monitor",
+    "routing_set_output",
+    "scene_create",
+    "scene_delete",
+    "scene_duplicate",
+    "scene_move",
+    "scene_rename",
+    "session_copy_clip_to_slot",
+    "session_deactivate",
+    "session_delete",
+    "session_drop_files",
+    "session_duplicate_scene",
+    "session_focus",
+    "session_insert_empty_midi_clip",
+    "session_insert_scene",
+    "session_larger_quantization",
+    "session_launch",
+    "session_launch_scene",
+    "session_scroll",
+    "session_select",
+    "session_select_all",
+    "session_select_edge",
+    "session_set_quantization",
+    "session_set_quantization_enabled",
+    "session_smaller_quantization",
+    "session_state",
+    "session_stop_all",
+    "session_stop_selected",
+    "session_stop_track",
+    "session_triplet_quantization",
+    "set_collect_all_and_save",
+    "set_discard_changes",
+    "set_new",
+    "set_open",
+    "set_relink_missing",
+    "set_save",
+    "set_save_as",
+    "set_save_as_default",
+    "set_save_as_template",
+    "settings_next_page",
+    "settings_previous_page",
+    "settings_set_auto_hide_plug_in_windows",
+    "settings_set_create_fades_on_clip_edges",
+    "settings_set_outline_view_in_focus",
+    "settings_set_theme",
+    "slot_set_stop_button",
+    "song_delete_tempo_breakpoint",
+    "song_delete_time_signature_change",
+    "song_move_tempo_breakpoint",
+    "song_move_time_signature_change",
+    "song_set_tempo",
+    "song_set_tempo_breakpoint",
+    "song_set_time_signature_change",
+    "song_set_time_signatures",
+    "track_create",
+    "track_delete",
+    "track_duplicate_without_clips",
+    "track_group",
+    "track_move",
+    "track_rename",
+    "track_ungroup",
+    "transport_continue",
+    "transport_insert_marker_to_playhead",
+    "transport_locate",
+    "transport_play",
+    "transport_play_from_insert_marker",
+    "transport_play_stop",
+    "transport_return_to_start",
+    "transport_set_loop",
+    "transport_set_loop_enabled",
+    "transport_set_metronome_count_in",
+    "transport_set_metronome_enabled",
+    "transport_set_metronome_only_while_recording",
+    "transport_set_metronome_rhythm",
+    "transport_set_metronome_sound",
+    "transport_set_recording",
+    "transport_state",
+    "transport_stop",
+    "view_draw_mode",
+    "view_fold_notes",
+    "view_full_screen",
+    "view_lane",
+    "view_set_zoom",
+    "view_toggle_assistant",
+    "view_toggle_browser",
+    "view_toggle_clip_view",
+    "view_toggle_info_view",
+    "view_toggle_plug_in_windows",
+    "view_toggle_session_arrangement",
+    "view_zoom_in",
+    "view_zoom_out",
+    "view_zoom_reset",
+    "window_close"
+  ],
+  "exchanges": [
+    {
+      "messages": [
+        {
+          "role": "User",
+          "parts": [
+            {
+              "Text": "Make a 16-bar track at 96 BPM in 4/4, in A minor. Set the tempo first. Then make four new MIDI tracks named Drums, Bass, Chords and Lead, each with a Drift instrument (device type beatlayer.cascade, role instrument) on it. Put one MIDI clip on each track, starting at bar 1 and exactly 16 bars long (45158400 ticks), with notes all the way through bar 16. Drums: a kick on key 36 on beats 1 and 3, a snare on key 38 on beats 2 and 4, and a closed hat on key 42 on every beat. Bass: A1 (key 33) and E2 (key 40) in half notes. Chords: Am, F, C and G, one chord per bar, a whole note each, repeating through all 16 bars. Lead: a quarter-note melody in the A minor scale around key 69. Say briefly what you built when you are done."
+            }
+          ]
+        }
+      ],
+      "response": {
+        "text": "",
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "name": "song_set_tempo",
+            "arguments": {
+              "tempo": [
+                {
+                  "bpm": 96.0,
+                  "kind": "constant",
+                  "start": 0
+                }
+              ]
+            }
+          },
+          {
+            "id": "call_track_drums",
+            "name": "track_create",
+            "arguments": {
+              "id": {
+                "$new": "drums"
+              },
+              "index": 4,
+              "kind": "midi",
+              "name": "Drums"
+            }
+          },
+          {
+            "id": "call_track_bass",
+            "name": "track_create",
+            "arguments": {
+              "id": {
+                "$new": "bass"
+              },
+              "index": 5,
+              "kind": "midi",
+              "name": "Bass"
+            }
+          },
+          {
+            "id": "call_track_chords",
+            "name": "track_create",
+            "arguments": {
+              "id": {
+                "$new": "chords"
+              },
+              "index": 6,
+              "kind": "midi",
+              "name": "Chords"
+            }
+          },
+          {
+            "id": "call_track_lead",
+            "name": "track_create",
+            "arguments": {
+              "id": {
+                "$new": "lead"
+              },
+              "index": 7,
+              "kind": "midi",
+              "name": "Lead"
+            }
+          }
+        ],
+        "stop": "End"
+      }
+    },
+    {
+      "messages": [
+        {
+          "role": "User",
+          "parts": [
+            {
+              "Result": {
+                "id": "call_1",
+                "name": "song_set_tempo",
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":true,\"tracks\":{}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_track_drums",
+                "name": "track_create",
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"16\":\"added\"}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_track_bass",
+                "name": "track_create",
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"17\":\"added\"}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_track_chords",
+                "name": "track_create",
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"18\":\"added\"}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_track_lead",
+                "name": "track_create",
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"19\":\"added\"}}"
+              }
+            }
+          ]
+        }
+      ],
+      "response": {
+        "text": "",
+        "tool_calls": [
+          {
+            "id": "call_device_drums",
+            "name": "device_add",
+            "arguments": {
+              "device": {
+                "kind": {
+                  "native": {
+                    "device_type": "beatlayer.cascade"
+                  }
+                },
+                "name": "Drift",
+                "role": "instrument"
+              },
+              "track": {
+                "$ref": "drums"
+              }
+            }
+          },
+          {
+            "id": "call_device_bass",
+            "name": "device_add",
+            "arguments": {
+              "device": {
+                "kind": {
+                  "native": {
+                    "device_type": "beatlayer.cascade"
+                  }
+                },
+                "name": "Drift",
+                "role": "instrument"
+              },
+              "track": {
+                "$ref": "bass"
+              }
+            }
+          },
+          {
+            "id": "call_device_chords",
+            "name": "device_add",
+            "arguments": {
+              "device": {
+                "kind": {
+                  "native": {
+                    "device_type": "beatlayer.cascade"
+                  }
+                },
+                "name": "Drift",
+                "role": "instrument"
+              },
+              "track": {
+                "$ref": "chords"
+              }
+            }
+          },
+          {
+            "id": "call_device_lead",
+            "name": "device_add",
+            "arguments": {
+              "device": {
+                "kind": {
+                  "native": {
+                    "device_type": "beatlayer.cascade"
+                  }
+                },
+                "name": "Drift",
+                "role": "instrument"
+              },
+              "track": {
+                "$ref": "lead"
+              }
+            }
+          }
+        ],
+        "stop": "End"
+      }
+    },
+    {
+      "messages": [
+        {
+          "role": "User",
+          "parts": [
+            {
+              "Result": {
+                "id": "call_device_drums",
+                "name": "device_add",
+                "content": "{\"default_preset\":null,\"device\":20,\"new_track\":false,\"track\":16}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_device_bass",
+                "name": "device_add",
+                "content": "{\"default_preset\":null,\"device\":21,\"new_track\":false,\"track\":17}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_device_chords",
+                "name": "device_add",
+                "content": "{\"default_preset\":null,\"device\":22,\"new_track\":false,\"track\":18}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_device_lead",
+                "name": "device_add",
+                "content": "{\"default_preset\":null,\"device\":23,\"new_track\":false,\"track\":19}"
+              }
+            }
+          ]
+        }
+      ],
+      "response": {
+        "text": "",
+        "tool_calls": [
+          {
+            "id": "call_clip_drums",
+            "name": "clip_create",
+            "arguments": {
+              "clip": {
+                "data": {
+                  "midi": {
+                    "notes": [
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 0,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 0,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 705600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 705600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 1411200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 1411200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 2116800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 2116800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 2822400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 2822400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 3528000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 3528000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 4233600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 4233600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 4939200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 4939200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 5644800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 5644800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 6350400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 6350400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 7056000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 7056000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 7761600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 7761600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 8467200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 8467200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 9172800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 9172800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 9878400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 9878400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 10584000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 10584000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 11289600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 11289600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 11995200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 11995200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 12700800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 12700800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 13406400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 13406400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 14112000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 14112000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 14817600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 14817600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 15523200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 15523200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 16228800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 16228800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 16934400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 16934400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 17640000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 17640000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 18345600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 18345600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 19051200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 19051200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 19756800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 19756800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 20462400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 20462400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 21168000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 21168000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 21873600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 21873600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 22579200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 22579200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 23284800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 23284800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 23990400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 23990400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 24696000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 24696000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 25401600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 25401600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 26107200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 26107200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 26812800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 26812800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 27518400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 27518400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 28224000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 28224000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 28929600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 28929600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 29635200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 29635200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 30340800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 30340800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 31046400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 31046400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 31752000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 31752000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 32457600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 32457600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 33163200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 33163200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 33868800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 33868800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 34574400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 34574400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 35280000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 35280000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 35985600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 35985600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 36691200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 36691200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 37396800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 37396800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 38102400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 38102400,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 38808000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 38808000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 39513600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 39513600,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 40219200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 40219200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 40924800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 40924800,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 41630400,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 41630400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 42336000,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 42336000,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 43041600,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 43041600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 43747200,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 36,
+                        "length": 352800,
+                        "start": 43747200,
+                        "velocity": 110
+                      },
+                      {
+                        "key": 42,
+                        "length": 176400,
+                        "start": 44452800,
+                        "velocity": 70
+                      },
+                      {
+                        "key": 38,
+                        "length": 352800,
+                        "start": 44452800,
+                        "velocity": 100
+                      }
+                    ]
+                  }
+                },
+                "id": {
+                  "$new": "drums-clip"
+                },
+                "length": 45158400,
+                "mute": false,
+                "name": "drums",
+                "start": 0
+              },
+              "track": {
+                "$ref": "drums"
+              }
+            }
+          },
+          {
+            "id": "call_clip_bass",
+            "name": "clip_create",
+            "arguments": {
+              "clip": {
+                "data": {
+                  "midi": {
+                    "notes": [
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 0,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 1411200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 2822400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 4233600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 5644800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 7056000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 8467200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 9878400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 11289600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 12700800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 14112000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 15523200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 16934400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 18345600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 19756800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 21168000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 22579200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 23990400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 25401600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 26812800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 28224000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 29635200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 31046400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 32457600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 33868800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 35280000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 36691200,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 38102400,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 39513600,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 40924800,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 33,
+                        "length": 1411200,
+                        "start": 42336000,
+                        "velocity": 100
+                      },
+                      {
+                        "key": 40,
+                        "length": 1411200,
+                        "start": 43747200,
+                        "velocity": 100
+                      }
+                    ]
+                  }
+                },
+                "id": {
+                  "$new": "bass-clip"
+                },
+                "length": 45158400,
+                "mute": false,
+                "name": "bass",
+                "start": 0
+              },
+              "track": {
+                "$ref": "bass"
+              }
+            }
+          },
+          {
+            "id": "call_clip_chords",
+            "name": "clip_create",
+            "arguments": {
+              "clip": {
+                "data": {
+                  "midi": {
+                    "notes": [
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 0,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 0,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 64,
+                        "length": 2822400,
+                        "start": 0,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 53,
+                        "length": 2822400,
+                        "start": 2822400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 2822400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 2822400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 48,
+                        "length": 2822400,
+                        "start": 5644800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 52,
+                        "length": 2822400,
+                        "start": 5644800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 5644800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 8467200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 59,
+                        "length": 2822400,
+                        "start": 8467200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 62,
+                        "length": 2822400,
+                        "start": 8467200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 11289600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 11289600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 64,
+                        "length": 2822400,
+                        "start": 11289600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 53,
+                        "length": 2822400,
+                        "start": 14112000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 14112000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 14112000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 48,
+                        "length": 2822400,
+                        "start": 16934400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 52,
+                        "length": 2822400,
+                        "start": 16934400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 16934400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 19756800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 59,
+                        "length": 2822400,
+                        "start": 19756800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 62,
+                        "length": 2822400,
+                        "start": 19756800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 22579200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 22579200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 64,
+                        "length": 2822400,
+                        "start": 22579200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 53,
+                        "length": 2822400,
+                        "start": 25401600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 25401600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 25401600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 48,
+                        "length": 2822400,
+                        "start": 28224000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 52,
+                        "length": 2822400,
+                        "start": 28224000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 28224000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 31046400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 59,
+                        "length": 2822400,
+                        "start": 31046400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 62,
+                        "length": 2822400,
+                        "start": 31046400,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 33868800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 33868800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 64,
+                        "length": 2822400,
+                        "start": 33868800,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 53,
+                        "length": 2822400,
+                        "start": 36691200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 57,
+                        "length": 2822400,
+                        "start": 36691200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 60,
+                        "length": 2822400,
+                        "start": 36691200,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 48,
+                        "length": 2822400,
+                        "start": 39513600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 52,
+                        "length": 2822400,
+                        "start": 39513600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 39513600,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 55,
+                        "length": 2822400,
+                        "start": 42336000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 59,
+                        "length": 2822400,
+                        "start": 42336000,
+                        "velocity": 80
+                      },
+                      {
+                        "key": 62,
+                        "length": 2822400,
+                        "start": 42336000,
+                        "velocity": 80
+                      }
+                    ]
+                  }
+                },
+                "id": {
+                  "$new": "chords-clip"
+                },
+                "length": 45158400,
+                "mute": false,
+                "name": "chords",
+                "start": 0
+              },
+              "track": {
+                "$ref": "chords"
+              }
+            }
+          },
+          {
+            "id": "call_clip_lead",
+            "name": "clip_create",
+            "arguments": {
+              "clip": {
+                "data": {
+                  "midi": {
+                    "notes": [
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 0,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 705600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 1411200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 2116800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 2822400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 3528000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 4233600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 4939200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 5644800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 6350400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 7056000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 7761600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 8467200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 9172800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 9878400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 10584000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 11289600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 11995200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 12700800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 13406400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 14112000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 14817600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 15523200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 16228800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 16934400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 17640000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 18345600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 19051200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 19756800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 20462400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 21168000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 21873600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 22579200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 23284800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 23990400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 24696000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 25401600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 26107200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 26812800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 27518400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 28224000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 28929600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 29635200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 30340800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 31046400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 31752000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 32457600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 33163200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 33868800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 34574400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 35280000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 35985600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 36691200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 37396800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 38102400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 38808000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 69,
+                        "length": 705600,
+                        "start": 39513600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 40219200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 40924800,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 41630400,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 76,
+                        "length": 705600,
+                        "start": 42336000,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 74,
+                        "length": 705600,
+                        "start": 43041600,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 72,
+                        "length": 705600,
+                        "start": 43747200,
+                        "velocity": 95
+                      },
+                      {
+                        "key": 71,
+                        "length": 705600,
+                        "start": 44452800,
+                        "velocity": 95
+                      }
+                    ]
+                  }
+                },
+                "id": {
+                  "$new": "lead-clip"
+                },
+                "length": 45158400,
+                "mute": false,
+                "name": "lead",
+                "start": 0
+              },
+              "track": {
+                "$ref": "lead"
+              }
+            }
+          }
+        ],
+        "stop": "End"
+      }
+    },
+    {
+      "messages": [
+        {
+          "role": "User",
+          "parts": [
+            {
+              "Result": {
+                "id": "call_clip_drums",
+                "name": "clip_create",
+                "content": "{\"clips\":{\"24\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_clip_bass",
+                "name": "clip_create",
+                "content": "{\"clips\":{\"25\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_clip_chords",
+                "name": "clip_create",
+                "content": "{\"clips\":{\"26\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+              }
+            },
+            {
+              "Result": {
+                "id": "call_clip_lead",
+                "name": "clip_create",
+                "content": "{\"clips\":{\"27\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+              }
+            }
+          ]
+        }
+      ],
+      "response": {
+        "text": "I set the tempo to 96 BPM and made four MIDI tracks, Drums, Bass, Chords and Lead, each with a Drift and a 16-bar clip. It is all one undo step.",
+        "tool_calls": [],
+        "stop": "End"
+      }
+    }
+  ]
+}

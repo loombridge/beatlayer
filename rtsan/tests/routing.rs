@@ -15,8 +15,8 @@ use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, KEY, Probe};
 use bl_engine::{Collector, Compiler, EngineConfig, TransportCommand, channel};
 use bl_model::{
-    Command, Device, DeviceId, DeviceKind, Editor, Input, Monitor, Output, SendTap, Tap, TrackId,
-    TrackKind,
+    Chain, ChainId, Command, Device, DeviceId, DeviceKind, Editor, Input, Monitor, Output,
+    RackKind, SendTap, Tap, TrackId, TrackKind,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -109,11 +109,40 @@ fn routing_and_sidechains_pass_under_rtsan() {
     tone(&mut editor, d, 550.0);
     let gate_d = key(&mut editor, d);
 
+    // A track with an audio effect rack of two chains, the first holding a
+    // rack of its own, and a track that takes their taps (the racks spec,
+    // R38 to R41).
+    let racked = track(&mut editor, TrackKind::Audio, None);
+    tone(&mut editor, racked, 770.0);
+    let (rack, nested): (DeviceId, DeviceId) = (editor.new_id(), editor.new_id());
+    let (outer, inner_chain, other): (ChainId, ChainId, ChainId) =
+        (editor.new_id(), editor.new_id(), editor.new_id());
+    editor
+        .apply(Command::InsertDevice {
+            track: racked,
+            index: 1,
+            device: Device::rack(rack, RackKind::AudioEffect)
+                .with_chain(Chain::new(outer, "Outer").with_devices(vec![
+                    Device::rack(nested, RackKind::AudioEffect)
+                        .with_chain(Chain::new(inner_chain, "Inner")),
+                ]))
+                .with_chain(Chain::new(other, "Other")),
+        })
+        .unwrap();
+    let tapper = track(&mut editor, TrackKind::Audio, None);
+    editor
+        .apply(Command::SetMonitor {
+            track: tapper,
+            monitor: Monitor::In,
+        })
+        .unwrap();
+
     let resampler = track(&mut editor, TrackKind::Audio, None);
     editor
         .apply(Command::SetInput {
             track: resampler,
             input: Input::Resampling,
+            channel: None,
         })
         .unwrap();
     editor
@@ -142,6 +171,15 @@ fn routing_and_sidechains_pass_under_rtsan() {
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
+    let take = |tap, chain| Command::SetInput {
+        track: tapper,
+        input: Input::Track {
+            track: racked,
+            tap,
+            chain: Some(chain),
+        },
+        channel: None,
+    };
     let mut programs = 1;
     for round in 0..2_000u64 {
         let command = match round % 96 {
@@ -158,6 +196,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: a,
                     tap: Tap::PostFx,
+                    chain: None,
                 },
             }),
             6 => Some(Command::SetSidechainEnabled {
@@ -181,7 +220,9 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: a,
                     tap: Tap::PreFx,
+                    chain: None,
                 },
+                channel: None,
             }),
             16 => Some(Command::SetMonitor {
                 track: b,
@@ -196,6 +237,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: b,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
             }),
             22 => Some(Command::SetSidechainListen {
@@ -211,7 +253,9 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: a,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
+                channel: None,
             }),
             28 => Some(Command::SetMonitor {
                 track: b,
@@ -226,6 +270,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: inner,
                     tap: Tap::PostFx,
+                    chain: None,
                 },
             }),
             34 => Some(Command::SetSidechainEnabled {
@@ -251,6 +296,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: c,
                     tap: Tap::PreFx,
+                    chain: None,
                 },
             }),
             48 => Some(Command::SetOutput {
@@ -262,7 +308,9 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 input: Input::Track {
                     track: b,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
+                channel: None,
             }),
             52 => Some(Command::SetOutput {
                 track: group,
@@ -275,12 +323,14 @@ fn routing_and_sidechains_pass_under_rtsan() {
             56 => Some(Command::SetInput {
                 track: a,
                 input: Input::None,
+                channel: None,
             }),
             58 => Some(Command::SetSidechainInput {
                 device: gate_c,
                 input: Input::Track {
                     track: c,
                     tap: Tap::PostFx,
+                    chain: None,
                 },
             }),
             60 => Some(Command::SetSidechainInput {
@@ -302,12 +352,14 @@ fn routing_and_sidechains_pass_under_rtsan() {
             68 => Some(Command::SetInput {
                 track: b,
                 input: Input::None,
+                channel: None,
             }),
             70 => Some(Command::SetSidechainInput {
                 device: gate_d,
                 input: Input::Track {
                     track: r1,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
             }),
             72 => Some(Command::SetSidechainGain {
@@ -333,6 +385,18 @@ fn routing_and_sidechains_pass_under_rtsan() {
             82 => Some(Command::SetSidechainInput {
                 device: gate_d,
                 input: Input::None,
+            }),
+            84 => Some(take(Tap::PreFx, outer)),
+            86 => Some(take(Tap::PostFx, other)),
+            88 => Some(take(Tap::PostMixer, inner_chain)),
+            90 => Some(take(Tap::PostFx, inner_chain)),
+            92 => Some(Command::SetDeviceEnabled {
+                device: nested,
+                enabled: false,
+            }),
+            94 => Some(Command::SetDeviceEnabled {
+                device: nested,
+                enabled: true,
             }),
             _ => None,
         };
@@ -363,6 +427,128 @@ fn routing_and_sidechains_pass_under_rtsan() {
         "2,000 blocks of routing and sidechains under RealtimeSanitizer: {} parameter changes, \
          {} swaps, peak engine load {:.1}%",
         state.counters.events_applied,
+        state.swaps,
+        state.cpu_load_max * 100.0
+    );
+}
+
+/// MIDI sidechains under RealtimeSanitizer (WP-5.27): a MIDI track playing a
+/// clip's notes reaches the probe on an audio track, and the source is
+/// switched between MIDI tracks, cleared, and set again, and its track
+/// deleted, while the engine plays and swaps programs.
+#[test]
+fn midi_sidechains_pass_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_engine::testing::HEAR;
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, testing::registry(&probe), collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let keys = [
+        track(&mut editor, TrackKind::Midi, None),
+        track(&mut editor, TrackKind::Midi, None),
+        track(&mut editor, TrackKind::Midi, None),
+    ];
+    for (n, &keys) in keys.iter().enumerate() {
+        let notes: Vec<Note> = (0..16)
+            .map(|i| {
+                Note::new(
+                    48 + (n as u8 * 5 + i as u8 * 3) % 40,
+                    Ticks(TICKS_PER_QUARTER / 4 * i),
+                    Ticks(TICKS_PER_QUARTER / 4),
+                    100,
+                )
+            })
+            .collect();
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track: keys,
+                clip: Clip::new(
+                    id,
+                    Ticks::ZERO,
+                    Ticks(TICKS_PER_QUARTER * 4),
+                    ClipData::Midi(MidiData::new(notes)),
+                ),
+            })
+            .unwrap();
+    }
+    let audio = track(&mut editor, TrackKind::Audio, None);
+    tone(&mut editor, audio, 220.0);
+    let hear = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track: audio,
+            index: 1,
+            device: Device::new(
+                hear,
+                "Test MIDI Sidechain",
+                DeviceKind::Native {
+                    device_type: HEAR.to_owned(),
+                },
+            )
+            .with_midi_sidechain(),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let mut programs = 1u64;
+    for round in 0..2_000u64 {
+        let command = match round {
+            20 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[0]),
+            }),
+            200 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[1]),
+            }),
+            400 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: None,
+            }),
+            600 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[2]),
+            }),
+            900 => Some(Command::DeleteTrack { track: keys[2] }),
+            1_000 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[0]),
+            }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            let update = compiler.sync(editor.document());
+            programs += u64::from(update.program.is_some());
+            sender.send_update(update);
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert_eq!(state.counters.migration_mismatches, 0);
+    assert_eq!(state.swaps, programs);
+    assert!(programs >= 7, "{programs} programs");
+    eprintln!(
+        "2,000 blocks of MIDI sidechains under RealtimeSanitizer: {} swaps, \
+         peak engine load {:.1}%",
         state.swaps,
         state.cpu_load_max * 100.0
     );

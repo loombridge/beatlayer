@@ -15,6 +15,9 @@ asio = ["bl-audio-io/asio"]
 # `bl-cli mcp`: the agent API over stdio, on a headless shell (WP-1.15).
 bl-agent.workspace = true
 bl-shell.workspace = true
+# `bl-cli assistant`: one assistant turn, headless, with its key from the
+# OS keychain (WP-2.23, T107).
+bl-assistant.workspace = true
 bl-project.workspace = true
 bl-engine.workspace = true
 # `bl-cli device-changes`: the engine on a device through device changes.
@@ -53,6 +56,15 @@ bl-media.workspace = true
 # The test plug-in, built from source, which `bl-cli export` renders with
 # (WP-2.6b).
 bl-test-clap = { path = "../test-clap" }
+# The M2 song test (T108) loads the VST3 test plug-in too, plays the test
+# MIDI backend as the keyboard, and decodes the audio it exports.
+bl-test-vst3 = { path = "../test-vst3" }
+bl-midi-io.workspace = true
+# The sweeps' spectral centroids come from the octave bands.
+bl-analysis.workspace = true
+# The agent API's MIDI file tests write and read Standard MIDI Files
+# (WP-2.21).
+bl-interop.workspace = true
 
 [lints]
 workspace = true

@@ -53,6 +53,9 @@ fn registry() -> Registry {
     bl_shell::register(&mut registry).unwrap();
     // The transport's commands (WP-1.5), which the playback keys bind.
     bl_engine::transport::register(&mut registry).unwrap();
+    // The Session View's launching and stopping (WP-3.2), which its grid
+    // runs and its keys reach.
+    bl_engine::session::register(&mut registry).unwrap();
     registry
 }
 
@@ -271,6 +274,48 @@ fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
     assert_eq!(hit(Platform::Mac, cmd_option, &devices), None);
 }
 
+// Spec: racks R9, R11. Group and Ungroup have their keys in the Device View
+// (S-DEV-001, S-DEV-002), and the Edit menu's items reach them there.
+#[test]
+fn the_group_and_ungroup_keys_reach_their_commands_in_the_device_view() {
+    let keymap = Keymap::live12();
+    let devices = [Context::DeviceView, Context::Global];
+    let hit = |platform, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, Key::G, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    for (platform, group, ungroup) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        assert_eq!(
+            hit(platform, group, &devices).as_deref(),
+            Some("device.group"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(platform, ungroup, &devices).as_deref(),
+            Some("device.ungroup"),
+            "{platform:?}"
+        );
+        // Elsewhere the same keys are the Arrangement's (Group Tracks).
+        assert_ne!(
+            hit(platform, group, &[Context::Arrangement, Context::Global]).as_deref(),
+            Some("device.group"),
+            "{platform:?}"
+        );
+    }
+}
+
 #[test]
 fn keys_resolve_to_commands_in_their_contexts() {
     // Spec: app-shell R16.
@@ -455,4 +500,158 @@ fn platform_items_and_corrected_keys_follow_the_reference() {
     assert_eq!(video.mac, ["Cmd+Option+Shift+V"]);
     assert_eq!(video.win, ["Ctrl+Alt+Shift+V"]);
     assert!(matches!(video.status, Status::Pending { .. }));
+}
+
+// Spec: racks R20. Plus shows the selected rack's chain list and Minus hides
+// it (S-DEV-012, S-DEV-013); Minus is Fold (S-DEV-014) where the list isn't
+// shown.
+#[test]
+fn plus_and_minus_show_and_hide_chains_and_minus_folds_otherwise() {
+    let keymap = Keymap::live12();
+    let devices = [Context::DeviceView, Context::Global];
+    for platform in [Platform::Mac, Platform::Other] {
+        let plus = keymap
+            .resolve(
+                platform,
+                Key::Plus,
+                mods(false, false, false, false),
+                &devices,
+            )
+            .unwrap();
+        assert_eq!(plus.entry.id, "S-DEV-012");
+        assert_eq!(plus.command.id, "rack.set_view");
+        assert_eq!(plus.command.args["view"], "chain_list");
+        assert_eq!(plus.command.args["shown"], true);
+        // `=` carries Plus on most keyboards.
+        assert_eq!(
+            keymap
+                .resolve(
+                    platform,
+                    Key::Equals,
+                    mods(false, false, false, false),
+                    &devices
+                )
+                .unwrap()
+                .entry
+                .id,
+            "S-DEV-012"
+        );
+        let minus = |runs: &dyn Fn(&str) -> bool| {
+            keymap
+                .resolve_with(
+                    platform,
+                    Key::Minus,
+                    mods(false, false, false, false),
+                    &devices,
+                    |hit| runs(&hit.command.id),
+                )
+                .map(|hit| (hit.entry.id.clone(), hit.command.id.clone()))
+        };
+        // While the chain list shows, Hide Chains runs; where it can't, Fold.
+        assert_eq!(
+            minus(&|_| true),
+            Some(("S-DEV-013".to_owned(), "rack.set_view".to_owned()))
+        );
+        assert_eq!(
+            minus(&|id| id == "device.fold"),
+            Some(("S-DEV-014".to_owned(), "device.fold".to_owned()))
+        );
+        // With neither able, the first still decides, so the key is refused.
+        assert_eq!(minus(&|_| false).unwrap().0, "S-DEV-013");
+    }
+}
+
+// Spec: racks R22. S solos the selected chain while a chain list has the
+// focus (S-SES-023), and the edit keys act on the chains there.
+#[test]
+fn s_solos_the_selected_chain() {
+    let keymap = Keymap::live12();
+    let chains = [Context::RackChains, Context::DeviceView, Context::Global];
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        let hit = |key, m| {
+            keymap
+                .resolve(platform, key, m, &chains)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(hit(Key::S, plain).as_deref(), Some("chain.solo"));
+        assert_eq!(hit(Key::Delete, plain).as_deref(), Some("chain.delete"));
+        // Without the chain list's focus, S is not the chain's.
+        assert_ne!(
+            keymap
+                .resolve(
+                    platform,
+                    Key::S,
+                    plain,
+                    &[Context::DeviceView, Context::Global]
+                )
+                .map(|hit| hit.command.id.clone())
+                .as_deref(),
+            Some("chain.solo")
+        );
+        let command = if platform == Platform::Mac {
+            mods(true, false, false, false)
+        } else {
+            mods(false, true, false, false)
+        };
+        for (key, id) in [
+            (Key::C, "chain.copy"),
+            (Key::X, "chain.cut"),
+            (Key::V, "chain.paste"),
+            (Key::D, "chain.duplicate"),
+            (Key::R, "chain.rename"),
+        ] {
+            assert_eq!(hit(key, command).as_deref(), Some(id), "{key:?}");
+        }
+    }
+}
+
+// Spec: drum-racks R18. D switches between a Drum Rack and its last
+// selected pad (S-VIEW-007), wherever the keys are read, on both platforms.
+#[test]
+fn d_switches_hot_swap_between_the_rack_and_its_pad() {
+    let keymap = Keymap::live12();
+    for platform in [Platform::Mac, Platform::Other] {
+        for contexts in [
+            vec![Context::Global],
+            vec![Context::DeviceView, Context::Global],
+        ] {
+            let hit = keymap
+                .resolve(
+                    platform,
+                    Key::D,
+                    mods(false, false, false, false),
+                    &contexts,
+                )
+                .map(|hit| hit.command.id.clone());
+            assert_eq!(
+                hit.as_deref(),
+                Some("rack.switch_hot_swap_target"),
+                "{platform:?} {contexts:?}"
+            );
+        }
+    }
+    let entry = keymap.entry_for("S-VIEW-007").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+}
+
+// Spec: racks R44. Q switches hot-swap on and off for the selected device
+// (S-DEV-008 in the Device View, S-VIEW-006 elsewhere).
+#[test]
+fn q_toggles_hot_swap() {
+    let keymap = Keymap::live12();
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        for contexts in [
+            &[Context::DeviceView, Context::Global][..],
+            &[Context::Browser, Context::Global][..],
+        ] {
+            let hit = keymap.resolve(platform, Key::Q, plain, contexts);
+            assert_eq!(
+                hit.map(|hit| hit.command.id.clone()).as_deref(),
+                Some("device.hot_swap"),
+                "{platform:?} in {contexts:?}"
+            );
+        }
+    }
 }

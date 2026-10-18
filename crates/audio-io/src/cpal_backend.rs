@@ -5,6 +5,13 @@
 //! planar scratch buffers by the [`CallbackRunner`], then interleaved and
 //! converted into the device's buffer.
 //!
+//! `cpal` has no duplex streams, so a stream that asks for input opens two
+//! `cpal` streams on one device — the output one and an input one — and
+//! [`DuplexBridge`] carries the input samples from the input callback to the
+//! output callback through a lock-free ring made when the stream opens.
+//! Both callbacks run on the one device's clock, so the ring's fill stays
+//! put; it absorbs the jitter between the two callbacks.
+//!
 //! Two `cpal` behaviours matter on macOS. A stream at a rate other than the
 //! device's current one changes the device's nominal rate, which persists
 //! after Beatlayer quits, so a request without a rate uses the current rate.
@@ -19,15 +26,17 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample, SupportedBufferSize, SupportedStreamConfigRange};
 
-use bl_rt::RtThreadConfig;
+use bl_rt::{AudioThreadSetup, RtThreadConfig};
 
 use crate::buffer::PlanarScratch;
+use crate::latency::{self, Gauge, Slot};
 use crate::runner::{CallbackRunner, frames_to_duration};
 use crate::stats::Counters;
 use crate::{
     AudioBuffer, AudioCallback, Backend, BackendKind, BufferSizes, DEFAULT_MAX_BLOCK_FRAMES,
-    DeviceId, DeviceInfo, DeviceSelector, Error, ErrorKind, OpenDevice, STANDARD_SAMPLE_RATES,
-    SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats, Workgroup, WorkgroupInfo,
+    DeviceId, DeviceInfo, DeviceSelector, Error, ErrorKind, Latency, OpenDevice,
+    STANDARD_SAMPLE_RATES, SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats, Workgroup,
+    WorkgroupInfo,
 };
 
 /// The buffer size assumed for an audio thread's scheduling period when the
@@ -35,6 +44,10 @@ use crate::{
 /// runs. Only macOS uses the period, and only for a thread Core Audio hasn't
 /// already made real-time.
 const ASSUMED_BUFFER: u32 = 512;
+
+/// How many device buffers of duplex input the ring holds, so the input
+/// callback can run ahead of the output callback between their deadlines.
+const DUPLEX_BACKLOG: usize = 4;
 
 /// The `cpal` backends this machine can run, best first.
 pub(crate) fn available() -> Vec<BackendKind> {
@@ -151,20 +164,10 @@ impl Backend for CpalBackend {
         request: &StreamRequest,
         callback: Box<dyn AudioCallback>,
     ) -> Result<Box<dyn Stream>, Error> {
-        if request.input.is_some() {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                format!(
-                    "{} streams through cpal are output-only: cpal 0.18 has no duplex streams \
-                     on Core Audio or PipeWire. Input arrives with recording (WP-2.13).",
-                    self.kind
-                ),
-            ));
-        }
         let output = request.output.as_ref().ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidInput,
-                "a stream needs output, input, or both",
+                "a cpal stream needs output; input opens alongside it",
             )
         })?;
 
@@ -212,29 +215,56 @@ impl Backend for CpalBackend {
                     format!("{name} can't play {channels} {noun} at {sample_rate} Hz"),
                 )
             })?;
-        let buffer_size = match request.buffer_size {
-            None => cpal::BufferSize::Default,
-            Some(frames) => {
-                if let SupportedBufferSize::Range { min, max } = *range.buffer_size()
-                    && !(min..=max).contains(&frames)
-                {
-                    return Err(Error::new(
-                        ErrorKind::UnsupportedConfig,
-                        format!("{name} takes buffers of {min} to {max} frames, not {frames}"),
-                    ));
-                }
-                cpal::BufferSize::Fixed(frames)
-            }
-        };
         let config = cpal::StreamConfig {
             channels,
             sample_rate,
-            buffer_size,
+            buffer_size: buffer_size(request.buffer_size, &range, &name)?,
         };
         let max_block_frames = request
             .buffer_size
             .unwrap_or(0)
             .max(DEFAULT_MAX_BLOCK_FRAMES);
+
+        // Input opens alongside the output, on the same device: one clock.
+        // `cpal` has no duplex streams, so it's a second stream and a
+        // lock-free ring between the two callbacks.
+        let input = match &request.input {
+            None => None,
+            Some(port) => {
+                if let DeviceSelector::Id(input_id) = &port.device
+                    && input_id != &id
+                {
+                    return Err(Error::new(
+                        ErrorKind::UnsupportedConfig,
+                        format!(
+                            "a cpal stream's input and output must be one device, and `{input_id}` \
+                             isn't `{id}`; an aggregate of several devices comes with a later package"
+                        ),
+                    ));
+                }
+                let current = device.default_input_config().map_err(from_cpal)?;
+                let channels = port.channels.unwrap_or(current.channels());
+                let ranges: Vec<SupportedStreamConfigRange> = device
+                    .supported_input_configs()
+                    .map_err(from_cpal)?
+                    .collect();
+                let range = choose_range(&ranges, channels, sample_rate, current.sample_format())
+                    .ok_or_else(|| {
+                    let noun = if channels == 1 { "channel" } else { "channels" };
+                    Error::new(
+                        ErrorKind::UnsupportedConfig,
+                        format!("{name} can't record {channels} {noun} at {sample_rate} Hz"),
+                    )
+                })?;
+                let config = cpal::StreamConfig {
+                    channels,
+                    sample_rate,
+                    buffer_size: buffer_size(request.buffer_size, &range, &name)?,
+                };
+                Some((range.sample_format(), config))
+            }
+        };
+        let input_channels = input.as_ref().map_or(0, |(_, config)| config.channels);
 
         // Core Audio's I/O thread is real-time and already in its device's
         // workgroup; other real-time threads join the same one.
@@ -253,6 +283,20 @@ impl Backend for CpalBackend {
         };
 
         let counters = Arc::new(Counters::new());
+        let (input_slot, output_slot) = (Slot::default(), Slot::default());
+        let (input_render, push) = match input_channels {
+            0 => (None, None),
+            channels => {
+                let (render, push) = duplex_input(
+                    channels.into(),
+                    max_block_frames as usize,
+                    Arc::clone(&counters),
+                    thread_config.clone(),
+                    Gauge::new(Arc::clone(&input_slot), sample_rate),
+                );
+                (Some(render), Some(push))
+            }
+        };
         let render = Render {
             runner: CallbackRunner::new(
                 callback,
@@ -264,30 +308,195 @@ impl Backend for CpalBackend {
             scratch: PlanarScratch::new(channels.into(), max_block_frames as usize),
             channels: channels.into(),
             sample_rate,
+            input: input_render,
+            gauge: Gauge::new(Arc::clone(&output_slot), sample_rate),
         };
         let format = range.sample_format();
         let stream = build(&device, config, format, render, Arc::clone(&counters))?;
+        let input_stream = match (input, push) {
+            (Some((format, config)), Some(push)) => Some(build_input(
+                &device,
+                config,
+                format,
+                push,
+                Arc::clone(&counters),
+            )?),
+            _ => None,
+        };
+        let reported = reported_latency(self.kind, &id);
         let info = StreamInfo {
             backend: self.kind,
-            output_device: Some(OpenDevice { id, name }),
-            input_device: None,
+            output_device: Some(OpenDevice {
+                id: id.clone(),
+                name: name.clone(),
+            }),
+            input_device: (input_channels > 0).then_some(OpenDevice { id, name }),
             follows_default,
             sample_rate,
             output_channels: channels,
-            input_channels: 0,
+            input_channels,
             sample_format: sample_format(format),
             requested_buffer_size: request.buffer_size,
             buffer_size: stream.buffer_size().ok(),
             max_block_frames,
+            input_latency: reported.map_or(0, |(input, _)| input),
+            output_latency: reported.map_or(0, |(_, output)| output),
             workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(CpalStream {
             stream,
+            input: input_stream,
             info,
             counters,
             workgroup,
+            measured: reported.is_none().then_some((input_slot, output_slot)),
         }))
     }
+}
+
+/// The device's input and output latency in frames where the platform has a
+/// query `cpal` doesn't wrap: Core Audio's device properties. `None` means the
+/// stream measures it instead (WASAPI, ALSA and JACK hide the handle, and so
+/// does Core Audio's device when its lookup fails).
+fn reported_latency(kind: BackendKind, id: &DeviceId) -> Option<(u32, u32)> {
+    #[cfg(target_os = "macos")]
+    if kind == BackendKind::CoreAudio {
+        return latency::core_audio::of_device(id.local());
+    }
+    let _ = (kind, id);
+    None
+}
+
+/// The two sides of the duplex bridge, with room for [`DUPLEX_BACKLOG`]
+/// blocks in the ring between them.
+fn duplex_input(
+    channels: usize,
+    frames: usize,
+    counters: Arc<Counters>,
+    thread_config: RtThreadConfig,
+    gauge: Gauge,
+) -> (DuplexInput, PushInput) {
+    let (producer, consumer) = rtrb::RingBuffer::new(channels * frames * DUPLEX_BACKLOG);
+    // The input callback is an audio thread of its own, so it's set up as
+    // the output's is (the architecture's real-time rules); the reports it
+    // publishes are for whoever reads the stream's, which nothing does
+    // here.
+    let (setup, _reports) = AudioThreadSetup::new(thread_config);
+    (
+        DuplexInput {
+            consumer,
+            scratch: PlanarScratch::new(channels, frames),
+            counters: Arc::clone(&counters),
+            started: false,
+        },
+        PushInput {
+            producer,
+            counters,
+            setup,
+            gauge,
+        },
+    )
+}
+
+/// The output callback's side of the duplex bridge: the input samples the
+/// device delivered, drained into planar scratch for the callback runner.
+/// Made when the stream opens: the callback allocates nothing and locks
+/// nothing. Where the ring is short (the input side is behind), it plays
+/// what's there and silence, and counts an xrun.
+struct DuplexInput {
+    consumer: rtrb::Consumer<f32>,
+    scratch: PlanarScratch,
+    counters: Arc<Counters>,
+    /// Whether the input side has delivered anything yet.
+    started: bool,
+}
+
+impl DuplexInput {
+    /// Fills the scratch with `frames` frames from the ring, whole frames
+    /// only, silence where it's short. Real-time safe.
+    fn drain(&mut self, frames: usize) {
+        let channels = self.scratch.channels().max(1);
+        let whole = (self.consumer.slots() / channels).min(frames);
+        let mut view = self.scratch.view_mut(frames);
+        for frame in 0..whole {
+            for channel in view.iter_mut() {
+                // `whole` frames are in the ring; a failure would need
+                // another taker.
+                channel[frame] = self.consumer.pop().unwrap_or(0.0);
+            }
+        }
+        for channel in view.iter_mut() {
+            channel[whole..].fill(0.0);
+        }
+        // Until the input side has delivered anything, silence is what a
+        // stream that just opened plays, not an xrun.
+        if whole > 0 {
+            self.started = true;
+        } else if self.started && whole < frames {
+            self.counters.record_xrun();
+        }
+    }
+}
+
+/// The input callback's side of the duplex bridge: pushes each device block
+/// into the ring, interleaved, whole frames only, and drops what doesn't
+/// fit (the output side is behind), counting an xrun. The callback
+/// allocates nothing and locks nothing.
+struct PushInput {
+    producer: rtrb::Producer<f32>,
+    counters: Arc<Counters>,
+    /// The input thread's set-up, run on its first block.
+    setup: AudioThreadSetup,
+    /// Measures the input latency where the platform won't report it.
+    gauge: Gauge,
+}
+
+impl PushInput {
+    /// Pushes one interleaved device block of `channels` channels. Real-time
+    /// safe.
+    fn push<T: SizedSample>(&mut self, data: &[T], channels: usize)
+    where
+        f32: FromSample<T>,
+    {
+        if !self.setup.is_current_thread() {
+            // The API's input thread, set up as the output's is: real-time
+            // priority where the API hasn't given it, denormals flushed.
+            bl_rt::realtime(|| {
+                self.setup.enter();
+            });
+        }
+        let channels = channels.max(1);
+        let frames = data.len() / channels;
+        let whole = (self.producer.slots() / channels).min(frames);
+        for &sample in &data[..whole * channels] {
+            // The ring has room; a failure would need another pusher.
+            let _ = self.producer.push(f32::from_sample_(sample));
+        }
+        if whole < frames {
+            self.counters.record_xrun();
+        }
+    }
+}
+
+/// The buffer size for a stream on `range`: the request's, if the range
+/// takes it, or the device's default.
+fn buffer_size(
+    requested: Option<u32>,
+    range: &SupportedStreamConfigRange,
+    name: &str,
+) -> Result<cpal::BufferSize, Error> {
+    let Some(frames) = requested else {
+        return Ok(cpal::BufferSize::Default);
+    };
+    if let SupportedBufferSize::Range { min, max } = *range.buffer_size()
+        && !(min..=max).contains(&frames)
+    {
+        return Err(Error::new(
+            ErrorKind::UnsupportedConfig,
+            format!("{name} takes buffers of {min} to {max} frames, not {frames}"),
+        ));
+    }
+    Ok(cpal::BufferSize::Fixed(frames))
 }
 
 /// The supported range to open: the device's current format if it fits,
@@ -405,11 +614,16 @@ struct Render {
     scratch: PlanarScratch,
     channels: usize,
     sample_rate: u32,
+    /// The duplex input, when the device has one.
+    input: Option<DuplexInput>,
+    /// Measures the output latency where the platform won't report it.
+    gauge: Gauge,
 }
 
 impl Render {
     /// Fills one device buffer: splits it into blocks, runs each through the
-    /// callback, and interleaves the result into the device's format.
+    /// callback, and interleaves the result into the device's format. With a
+    /// duplex input, the block's input comes from the bridge.
     fn render<T: SizedSample + FromSample<f32>>(
         &mut self,
         data: &mut [T],
@@ -417,14 +631,23 @@ impl Render {
     ) {
         let channels = self.channels.max(1);
         self.runner.device_callback(data.len() / channels);
-        let start = stream_time(info.timestamp().callback);
+        let stamps = info.timestamp();
+        self.gauge
+            .feed(stamps.playback.saturating_duration_since(stamps.callback));
+        let start = stream_time(stamps.callback);
         let mut done = 0u64;
         for chunk in data.chunks_mut(self.scratch.capacity() * channels) {
             let frames = chunk.len() / channels;
             let timestamp = start + frames_to_duration(done, self.sample_rate);
             let mut block = self.scratch.view_mut(frames);
-            self.runner
-                .run(Some(timestamp), &AudioBuffer::empty(frames), &mut block);
+            let input = match self.input.as_mut() {
+                Some(input) => {
+                    input.drain(frames);
+                    input.scratch.view(frames)
+                }
+                None => AudioBuffer::empty(frames),
+            };
+            self.runner.run(Some(timestamp), &input, &mut block);
             interleave(&self.scratch.view(frames), chunk);
             done += frames as u64;
         }
@@ -447,6 +670,61 @@ fn interleave<T: FromSample<f32>>(source: &AudioBuffer<'_>, target: &mut [T]) {
             frame[channel_index] = T::from_sample_(sample);
         }
     }
+}
+
+/// Builds the device's input stream, converting the device's samples and
+/// pushing them into `push`.
+fn build_input(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    format: cpal::SampleFormat,
+    push: PushInput,
+    counters: Arc<Counters>,
+) -> Result<cpal::Stream, Error> {
+    fn typed<T: SizedSample + FromSample<f32> + Send + 'static>(
+        device: &cpal::Device,
+        config: cpal::StreamConfig,
+        mut push: PushInput,
+        counters: Arc<Counters>,
+    ) -> Result<cpal::Stream, cpal::Error>
+    where
+        f32: FromSample<T>,
+    {
+        let channels = usize::from(config.channels);
+        device.build_input_stream::<T, _, _>(
+            config,
+            move |data, info| {
+                let stamps = info.timestamp();
+                push.gauge
+                    .feed(stamps.callback.saturating_duration_since(stamps.capture));
+                push.push(data, channels);
+            },
+            move |error| record(&counters, &error),
+            None,
+        )
+    }
+    use cpal::{I24, U24};
+    let stream = match format {
+        cpal::SampleFormat::I8 => typed::<i8>(device, config, push, counters),
+        cpal::SampleFormat::I16 => typed::<i16>(device, config, push, counters),
+        cpal::SampleFormat::I24 => typed::<I24>(device, config, push, counters),
+        cpal::SampleFormat::I32 => typed::<i32>(device, config, push, counters),
+        cpal::SampleFormat::I64 => typed::<i64>(device, config, push, counters),
+        cpal::SampleFormat::U8 => typed::<u8>(device, config, push, counters),
+        cpal::SampleFormat::U16 => typed::<u16>(device, config, push, counters),
+        cpal::SampleFormat::U24 => typed::<U24>(device, config, push, counters),
+        cpal::SampleFormat::U32 => typed::<u32>(device, config, push, counters),
+        cpal::SampleFormat::U64 => typed::<u64>(device, config, push, counters),
+        cpal::SampleFormat::F32 => typed::<f32>(device, config, push, counters),
+        cpal::SampleFormat::F64 => typed::<f64>(device, config, push, counters),
+        other => {
+            return Err(Error::new(
+                ErrorKind::UnsupportedConfig,
+                format!("Beatlayer can't read {other} samples"),
+            ));
+        }
+    };
+    stream.map_err(from_cpal)
 }
 
 fn build(
@@ -495,9 +773,14 @@ fn build(
 
 struct CpalStream {
     stream: cpal::Stream,
+    /// The device's input stream, when it runs duplex.
+    input: Option<cpal::Stream>,
     info: StreamInfo,
     counters: Arc<Counters>,
     workgroup: Option<Workgroup>,
+    /// The measured latency, when the platform reports none: the input's and
+    /// the output's, each published once.
+    measured: Option<(Slot, Slot)>,
 }
 
 impl Stream for CpalStream {
@@ -505,13 +788,33 @@ impl Stream for CpalStream {
         &self.info
     }
 
+    fn latency(&self) -> Latency {
+        match &self.measured {
+            Some((input, output)) => Latency {
+                input: latency::published(input).unwrap_or(0),
+                output: latency::published(output).unwrap_or(0),
+            },
+            None => Latency {
+                input: self.info.input_latency,
+                output: self.info.output_latency,
+            },
+        }
+    }
+
     fn start(&mut self) -> Result<(), Error> {
         self.counters.request_resync();
+        if let Some(input) = &self.input {
+            input.play().map_err(from_cpal)?;
+        }
         self.stream.play().map_err(from_cpal)
     }
 
     fn stop(&mut self) -> Result<(), Error> {
-        self.stream.pause().map_err(from_cpal)
+        let output = self.stream.pause().map_err(from_cpal);
+        match &self.input {
+            Some(input) => output.and(input.pause().map_err(from_cpal)),
+            None => output,
+        }
     }
 
     fn stats(&self) -> StreamStats {
@@ -583,6 +886,56 @@ mod tests {
         assert!(choose_range(&ranges, 1, 48_000, cpal::SampleFormat::F32).is_none());
         assert!(choose_range(&ranges, 2, 96_000, cpal::SampleFormat::F32).is_none());
         assert!(choose_range(&ranges, 2, 44_100, cpal::SampleFormat::F32).is_some());
+    }
+
+    /// The duplex bridge carries whole frames from the input side to the
+    /// output side, and counts the frames neither side has.
+    #[test]
+    fn the_duplex_bridge_carries_whole_frames_both_ways() {
+        let counters = Arc::new(Counters::new());
+        let config = RtThreadConfig {
+            period: frames_to_duration(4, 48_000),
+            promote: false,
+            workgroup: None,
+        };
+        let gauge = Gauge::new(Slot::default(), 48_000);
+        let (mut out, mut inp) = duplex_input(2, 4, Arc::clone(&counters), config, gauge);
+
+        // Before the input side has delivered anything, the output plays
+        // silence: that's a stream just opened, not an xrun.
+        out.drain(2);
+        let view = out.scratch.view(2);
+        assert!(view.channel(0).iter().all(|&s| s == 0.0));
+        assert_eq!(counters.snapshot().xruns, 0);
+
+        // One block of 2 channels, interleaved.
+        inp.push(&[1.0f32, 10.0, 2.0, 20.0], 2);
+        out.drain(2);
+        let view = out.scratch.view(2);
+        assert_eq!(view.channel(0), &[1.0, 2.0]);
+        assert_eq!(view.channel(1), &[10.0, 20.0]);
+        assert_eq!(counters.snapshot().xruns, 0);
+
+        // The output side asks for more than the ring holds: silence, one
+        // xrun, and the next block starts on a frame boundary.
+        out.drain(2);
+        let view = out.scratch.view(2);
+        assert!(view.channel(0).iter().all(|&s| s == 0.0));
+        assert_eq!(counters.snapshot().xruns, 1);
+        inp.push(&[3.0f32, 30.0], 2);
+        out.drain(1);
+        assert_eq!(out.scratch.view(1).channel(0), &[3.0]);
+        assert_eq!(out.scratch.view(1).channel(1), &[30.0]);
+
+        // Pushing more than the ring takes drops whole frames and counts an
+        // xrun, rather than splitting a frame across the ring's edge.
+        let long: Vec<f32> = (0..64).map(|i| i as f32).collect();
+        inp.push(&long, 2);
+        assert_eq!(counters.snapshot().xruns, 2);
+        out.drain(4);
+        let view = out.scratch.view(4);
+        assert_eq!(view.channel(0), &[0.0, 2.0, 4.0, 6.0]);
+        assert_eq!(view.channel(1), &[1.0, 3.0, 5.0, 7.0]);
     }
 
     #[test]

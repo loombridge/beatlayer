@@ -83,7 +83,7 @@ fn add_sampler(shell: &mut Shell) -> DeviceId {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: SAMPLER.to_owned() },
-                        "name": "Snapshot",
+                        "name": "Simpler",
                         "role": DeviceRole::Instrument,
                     }
                 }),
@@ -114,7 +114,7 @@ fn sample_of(shell: &Shell, device: DeviceId) -> Option<ContentHash> {
         .document()
         .device(device)
         .expect("the sampler")
-        .media
+        .media_at(0)
 }
 
 // Spec: sampler R11

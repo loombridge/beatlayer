@@ -53,7 +53,7 @@ use bl_model::{ContentHash, Document, Editor};
 use serde::{Deserialize, Serialize};
 
 use crate::Outcome;
-use crate::render::{self, Cue, Settings, Summary, dbfs, to_i24};
+use crate::render::{self, Cue, Launch, Settings, Summary, dbfs, to_i24};
 
 /// The references' sample rate.
 pub const SAMPLE_RATE: SampleRate = SampleRate::HZ_48000;
@@ -108,6 +108,9 @@ pub struct Scene {
     /// The transport's moves, each on its frame. Most fixtures play from
     /// the start: [`Cue::PLAY`] alone.
     pub cues: Vec<Cue>,
+    /// The launches and stops asked of the Session View, each on its frame
+    /// (WP-3.5).
+    pub launches: Vec<Launch>,
     /// Frames to render, at [`SAMPLE_RATE`].
     pub frames: u64,
 }
@@ -134,7 +137,7 @@ impl Scene {
     /// `bl-cli render` plays a saved set.
     #[must_use]
     pub fn plays_as_saved(&self) -> bool {
-        self.schedule.is_empty() && self.cues == [Cue::PLAY]
+        self.schedule.is_empty() && self.cues == [Cue::PLAY] && self.launches.is_empty()
     }
 }
 
@@ -166,6 +169,13 @@ impl Fixture {
     /// Renders the song in blocks of `block` frames.
     #[must_use]
     pub fn render_in_blocks(&self, block: usize) -> Render {
+        self.render_with_workers(block, 0)
+    }
+
+    /// Renders the song in blocks of `block` frames, its tasks run by
+    /// `workers` workers beside the rendering thread (WP-5.37).
+    #[must_use]
+    pub fn render_with_workers(&self, block: usize, workers: usize) -> Render {
         let scene = self.scene();
         let settings = Settings {
             sample_rate: SAMPLE_RATE,
@@ -173,12 +183,17 @@ impl Fixture {
             frames: scene.frames,
         };
         let mut samples = Vec::with_capacity(scene.frames as usize * 2);
-        let summary = render::render_with(
+        let script = render::Script {
+            schedule: &scene.schedule,
+            cues: &scene.cues,
+            launches: &scene.launches,
+        };
+        let summary = render::render_launching_with_workers(
             scene.document(),
             Arc::new(scene.media.clone()),
-            &scene.schedule,
-            &scene.cues,
+            &script,
             &settings,
+            workers,
             |output| render::interleave(output, &mut samples),
         );
         Render {

@@ -1,5 +1,6 @@
-//! `bl-cli export`: a set's Main output exported to a WAV, AIFF, or FLAC
-//! file, faster than real time, with no audio device (WP-1.12).
+//! `bl-cli export`: a set's Main output exported to a WAV, AIFF, FLAC, or
+//! MP3 file, faster than real time, with no audio device (WP-1.12;
+//! WP-2.26).
 //!
 //! It opens the set in a headless shell and runs `export.audio` there, the
 //! command an agent runs, so the command line, the agent API, and the app
@@ -22,11 +23,11 @@ pub struct ExportArgs {
     pub project: PathBuf,
 
     /// The file to write. Its extension gives the file type: `.wav`,
-    /// `.aif` or `.aiff`, or `.flac`.
+    /// `.aif` or `.aiff`, `.flac`, or `.mp3`.
     pub output: PathBuf,
 
     /// Bits per sample: 16 or 24 (integers), or 32 (floating point; WAV
-    /// and AIFF only).
+    /// and AIFF only). MP3 has no bit depth, so it ignores this.
     #[arg(long, value_parser = ["16", "24", "32"])]
     pub bit_depth: String,
 
@@ -64,6 +65,11 @@ pub struct ExportArgs {
     /// Replace OUTPUT if it exists.
     #[arg(long)]
     pub replace: bool,
+
+    /// Add the tail the song leaves after the range's end onto the file's
+    /// start, so the file loops without a cut tail.
+    #[arg(long)]
+    pub render_as_loop: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -71,6 +77,7 @@ pub enum Type {
     Wav,
     Aiff,
     Flac,
+    Mp3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -118,12 +125,14 @@ fn command_args(args: &ExportArgs, shell: &Shell) -> Result<Value, String> {
         },
         "normalize": args.normalize,
         "replace": args.replace,
+        "render_as_loop": args.render_as_loop,
     });
     if let Some(file_type) = args.file_type {
         command["file_type"] = json!(match file_type {
             Type::Wav => FileType::Wav,
             Type::Aiff => FileType::Aiff,
             Type::Flac => FileType::Flac,
+            Type::Mp3 => FileType::Mp3,
         });
     }
     if let Some(start) = start {
@@ -165,17 +174,20 @@ pub fn run(args: &ExportArgs) -> Outcome {
         "length:    {:.3} s: {} frames at {} Hz, {} channels",
         result.seconds, result.frames, result.sample_rate, result.channels
     );
-    println!(
-        "format:    {} {}-bit{}{}",
-        result.file_type.name(),
-        result.bit_depth,
-        if result.bit_depth == 32 { " float" } else { "" },
-        match result.dither {
-            Dither::None => String::new(),
-            Dither::NoiseShaped => ", noise shaped dither".to_owned(),
-            other => format!(", {other:?} dither").to_lowercase(),
-        }
-    );
+    match result.file_type {
+        FileType::Mp3 => println!("format:    MP3 320 kbps CBR"),
+        _ => println!(
+            "format:    {} {}-bit{}{}",
+            result.file_type.name(),
+            result.bit_depth,
+            if result.bit_depth == 32 { " float" } else { "" },
+            match result.dither {
+                Dither::None => String::new(),
+                Dither::NoiseShaped => ", noise shaped dither".to_owned(),
+                other => format!(", {other:?} dither").to_lowercase(),
+            }
+        ),
+    }
     if result.render_rate != result.sample_rate {
         println!(
             "rendered:  at {} Hz, converted to {} Hz",

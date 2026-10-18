@@ -7,7 +7,7 @@ members = ["crates/*", "xtask"]
 exclude = ["xtask/fixtures", "spikes", "rtsan"]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
@@ -37,26 +37,27 @@ bl-ui = { path = "crates/ui" }
 bl-shell = { path = "crates/shell" }
 bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
+bl-assistant = { path = "crates/assistant" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
-lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
-lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
-lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
-lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
+lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
+lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
+lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
 # The format layer: kit plug-ins compiled in as native devices (bl-devices),
 # and the host side of its agent-commands CLAP extension (bl-plugin-host).
-lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
-lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b", default-features = false }
+lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
 # The kit's DSP, voice management and wavetables, for the native polysynth
 # (WP-2.17): zero-delay-feedback filters and envelopes, polyphonic voices,
 # and band-limited oscillators.
-lspk-dsp = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
-lspk-voice = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
-lspk-wavetable = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-dsp = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
+lspk-voice = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
+lspk-wavetable = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b" }
 # The kit's example plug-ins, as native devices behind bl-devices' `kit-examples`
 # feature, without their own exports.
-lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
-lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
+lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b", default-features = false }
+lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "fbf23cd99a14cbfff7f5246f1cd3af526380073b", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

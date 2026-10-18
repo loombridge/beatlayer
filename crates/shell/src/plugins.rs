@@ -11,14 +11,16 @@
 //! agents list, run, query, and schedule them like any other command.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bl_commands::schemars::Schema;
 use bl_commands::{CommandSpec, Context, Permission};
 use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
+use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
-use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::scan::{SCANNED_FORMATS, ScanReport, Scanner, system_paths};
+use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins::{
     BlockedItem, PluginInfo, PluginScan, ScannedItem, SetPlugin, SetPluginList,
 };
@@ -93,7 +95,7 @@ pub fn device_commands(
     let mut found = Vec::new();
     for track in doc.tracks() {
         let label = crate::routing::track_label(doc, track.id());
-        for device in track.devices() {
+        for device in track.devices_deep() {
             let own = if kit.handles(&device.kind) {
                 kit.commands(device.id)
             } else if is_clap(doc, device.id) {
@@ -127,27 +129,122 @@ pub fn is_clap(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
-/// Whether the set has a CLAP device.
+/// Whether `device` is an Audio Unit device in `doc` (WP-2.8).
 #[must_use]
-pub fn has_clap(doc: &Document) -> bool {
-    !clap_devices(doc).is_empty()
+pub fn is_au(doc: &Document, device: DeviceId) -> bool {
+    doc.device(device).is_some_and(|d| {
+        matches!(
+            d.kind,
+            DeviceKind::Plugin {
+                format: PluginFormat::AudioUnit,
+                ..
+            }
+        )
+    })
+}
+
+/// Whether the set has a plug-in device of `format`.
+#[must_use]
+pub fn has_format(doc: &Document, format: PluginFormat) -> bool {
+    !devices(doc, format).is_empty()
+}
+
+/// Whether the set has a CLAP, VST3 or Audio Unit device: an offline render
+/// of it borrows the engine's plug-ins (offline-plugin-renders R1).
+#[must_use]
+pub fn has_plugin(doc: &Document) -> bool {
+    [
+        PluginFormat::Clap,
+        PluginFormat::Vst3,
+        PluginFormat::AudioUnit,
+    ]
+    .into_iter()
+    .any(|format| has_format(doc, format))
+}
+
+/// Whether `device` is a VST3 plug-in device in `doc`.
+#[must_use]
+pub fn is_vst3(doc: &Document, device: DeviceId) -> bool {
+    doc.device(device).is_some_and(|d| {
+        matches!(
+            d.kind,
+            DeviceKind::Plugin {
+                format: PluginFormat::Vst3,
+                ..
+            }
+        )
+    })
+}
+
+/// Whether `device` is a plug-in device of a hosted format in `doc`.
+#[must_use]
+pub fn is_plugin(doc: &Document, device: DeviceId) -> bool {
+    is_clap(doc, device) || is_vst3(doc, device)
+}
+
+/// Whether `path` names a VST3 bundle or module: its own name or a folder
+/// on it ends in `.vst3`.
+#[must_use]
+pub fn is_vst3_path(path: &Path) -> bool {
+    path.components().any(|part| {
+        part.as_os_str()
+            .to_str()
+            .is_some_and(|name| name.ends_with(".vst3"))
+    })
 }
 
 /// Every CLAP device in the set.
 fn clap_devices(doc: &Document) -> Vec<DeviceId> {
+    devices(doc, PluginFormat::Clap)
+}
+
+/// Every Audio Unit device in the set.
+fn au_devices(doc: &Document) -> Vec<DeviceId> {
+    devices(doc, PluginFormat::AudioUnit)
+}
+
+/// Every plug-in device of `format` in the set, in track order.
+fn devices(doc: &Document, format: PluginFormat) -> Vec<DeviceId> {
     doc.tracks()
-        .flat_map(|track| track.devices().map(|d| d.id).collect::<Vec<_>>())
-        .filter(|device| is_clap(doc, *device))
+        .flat_map(|track| track.devices_deep().map(|d| d.id).collect::<Vec<_>>())
+        .filter(|device| {
+            doc.device(*device).is_some_and(|d| {
+                matches!(
+                    d.kind,
+                    DeviceKind::Plugin {
+                        format: found,
+                        ..
+                    } if found == format
+                )
+            })
+        })
         .collect()
 }
 
-/// Spec: clap-hosting R8. Takes each running plug-in's state into the set,
-/// without an undo step, so saving or copying the device keeps it: CLAP
-/// plug-ins' and kit plug-ins' compiled in. A device whose plug-in isn't
-/// running keeps the state it had.
-pub fn capture_states(plugins: &ClapHost, kit: &KitHost, editor: &mut Editor) {
+/// Spec: clap-hosting R8, au-hosting R8, which vst3-hosting's state rules
+/// mirror. Takes each running plug-in's state into the set, without an undo
+/// step, so saving or copying the device keeps it: CLAP plug-ins', Audio
+/// Units', VST3 plug-ins', and kit plug-ins' compiled in. A device whose
+/// plug-in isn't running keeps the state it had.
+pub fn capture_states(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    kit: &KitHost,
+    editor: &mut Editor,
+) {
     for device in clap_devices(editor.document()) {
         if let Ok(state) = plugins.save_state(device) {
+            let _ = editor.amend_plugin_state(device, Some(state));
+        }
+    }
+    for device in au_devices(editor.document()) {
+        if let Ok(state) = au.save_state(device) {
+            let _ = editor.amend_plugin_state(device, Some(state));
+        }
+    }
+    for device in devices(editor.document(), PluginFormat::Vst3) {
+        if let Ok(state) = vst3.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
         }
     }
@@ -156,7 +253,7 @@ pub fn capture_states(plugins: &ClapHost, kit: &KitHost, editor: &mut Editor) {
         .tracks()
         .flat_map(|track| {
             track
-                .devices()
+                .devices_deep()
                 .filter(|d| kit.handles(&d.kind))
                 .map(|d| d.id)
                 .collect::<Vec<_>>()
@@ -203,10 +300,32 @@ pub fn apply_param_changes(
     changed
 }
 
-/// What `plugin.info` reports for `device`.
+/// What `plugin.info` reports for `device`, from whichever host has it:
+/// the CLAP host's report for a CLAP device, the Audio Unit host's for an
+/// Audio Unit, or the VST3 host's.
 #[must_use]
-pub fn info(plugins: &ClapHost, device: DeviceId) -> Option<PluginInfo> {
-    let status = plugins.status(device)?;
+pub fn info(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    device: DeviceId,
+) -> Option<PluginInfo> {
+    if let Some(status) = plugins.status(device).or_else(|| au.status(device)) {
+        return Some(PluginInfo {
+            device,
+            plugin: status.plugin_id,
+            path: status.path.to_string_lossy().into_owned(),
+            active: status.active,
+            latency: status.latency,
+            failure: status.failure,
+            has_window: status.has_editor,
+            window_open: status.editor_open,
+            window_shown: status.editor_open && !status.editor_hidden,
+            window: None,
+            values: status.values,
+        });
+    }
+    let status = vst3.status(device)?;
     Some(PluginInfo {
         device,
         plugin: status.plugin_id,
@@ -222,21 +341,37 @@ pub fn info(plugins: &ClapHost, device: DeviceId) -> Option<PluginInfo> {
     })
 }
 
-/// Runs a scan (or a rescan) and reports it for `plugin.scan` /
-/// `plugin.rescan` (WP-2.9).
+/// Runs a scan (or a rescan) over every format the scanner describes and
+/// reports it for `plugin.scan` / `plugin.rescan` (WP-2.9). With no paths,
+/// each format's own system folders are scanned; with paths, all of them
+/// are searched for each format's files.
 #[must_use]
 pub fn scan_report(
     scanner: &Scanner,
-    format: PluginFormat,
-    paths: &[PathBuf],
+    paths: Option<&[PathBuf]>,
     fresh: bool,
+    formats: &[PluginFormat],
     hidden: &BTreeSet<String>,
 ) -> PluginScan {
-    let report = if fresh {
-        scanner.rescan(format, paths)
-    } else {
-        scanner.scan(format, paths)
-    };
+    let mut report = ScanReport::default();
+    for &format in formats {
+        let format_paths: Vec<PathBuf> = match paths {
+            Some(paths) => paths.to_vec(),
+            None => system_paths(format),
+        };
+        let found = if fresh {
+            scanner.rescan(format, &format_paths)
+        } else {
+            scanner.scan(format, &format_paths)
+        };
+        report.scanned += found.scanned;
+        report.cached += found.cached;
+        report.plugins.extend(found.plugins);
+        report.blocked.extend(found.blocked);
+    }
+    report
+        .plugins
+        .sort_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
     PluginScan {
         plugins: report
             .plugins
@@ -266,6 +401,24 @@ pub fn scan_report(
     }
 }
 
+/// The formats the browser lists and a scan of the system folders covers
+/// (WP-2.9b; the plug-in scanning spec, R12): CLAP always (Live has no
+/// CLAP, so no switch), VST3 with Use VST3 Plug-In System Folders, and
+/// Audio Units with Use Audio Units v2 on macOS.
+#[must_use]
+pub fn listed_formats(prefs: &crate::settings::Preferences) -> Vec<PluginFormat> {
+    SCANNED_FORMATS
+        .iter()
+        .copied()
+        .filter(|format| match format {
+            PluginFormat::Clap => true,
+            PluginFormat::Vst3 => prefs.vst3_system_folders,
+            PluginFormat::AudioUnit => prefs.use_audio_units_v2,
+            PluginFormat::Lv2 => false,
+        })
+        .collect()
+}
+
 /// Every plug-in `doc` uses, grouped by format and ID, for `plugin.list`
 /// (IMP-29).
 #[must_use]
@@ -274,7 +427,7 @@ pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
     let blocked = scanner.blocked();
     let mut order: Vec<(String, SetPlugin)> = Vec::new();
     for track in doc.tracks() {
-        for device in track.devices() {
+        for device in track.devices_deep() {
             let DeviceKind::Plugin { format, plugin_id } = &device.kind else {
                 continue;
             };

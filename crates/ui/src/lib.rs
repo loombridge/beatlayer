@@ -27,28 +27,50 @@
 //! - [`device_view`]: the Device View (WP-2.4): the selected track's
 //!   device chain in frames with Live's title bar, folding, the device
 //!   context menu, dragging devices, and hot-swapping's bar in the browser.
+//! - [`rack_view`]: a rack in the Device View (WP-5.2): its view column, chain
+//!   list, and the selected chain's devices.
 //! - [`device_panel`]: the generic device UI (WP-2.5): any described
 //!   device's controls and display cells, drawn from its descriptors and
 //!   its layout.
+//! - [`clip_view`]: the Clip View (WP-2.3): the MIDI Note Editor, with its
+//!   key track, grid, and note editing.
 //!
 //! Nothing here owns a window or an event loop: the app (`beatlayer`)
 //! drives these from its winit loop, and tests drive them headless with an
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod assistant_panel;
 pub mod browser;
+pub mod clip_envelope;
+pub mod clip_view;
 pub mod control_bar;
+pub mod device_display;
 pub mod device_panel;
 pub mod device_view;
+pub mod drum_view;
+pub mod external;
 pub mod focus;
+pub mod follow_controls;
 pub mod in_out;
 pub mod input;
 pub mod keymap;
+pub mod launch_panel;
 pub mod layout;
 pub mod main_window;
+pub mod mapping;
 pub mod menus;
 pub mod mixer;
+pub mod multisampler;
+pub mod rack_view;
+pub mod sample_display;
+pub mod sample_editor;
+pub mod scene_fields;
+pub mod scene_view;
+pub mod session_view;
 pub mod settings_window;
 pub mod sidechain;
+pub mod stems_dialog;
 pub mod theme;
+pub mod track_menu;
 pub mod widgets;

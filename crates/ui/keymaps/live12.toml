@@ -80,7 +80,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view", "browser"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-007"
@@ -91,7 +94,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["D"]
 win = ["D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.switch_hot_swap_target", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-008"
@@ -197,7 +203,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+3"]
 win = ["Ctrl+Alt+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_clip_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-016"
@@ -283,7 +292,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+1"]
 win = ["Alt+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.focus", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-003"
@@ -551,7 +563,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.group", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-002"
@@ -562,7 +577,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.ungroup", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-003"
@@ -573,7 +591,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Option+click a device activator"]
 win = ["Alt+click a device activator"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.set_enabled_all", contexts = ["device-view"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-DEV-004"
@@ -629,7 +650,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-009"
@@ -665,7 +689,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["P"]
 win = ["P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.compare_switch", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-001"
@@ -679,6 +706,7 @@ win = ["Ctrl+X"]
 status = "bound"
 commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
+  { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
 ]
 
@@ -694,6 +722,7 @@ win = ["Ctrl+C"]
 status = "bound"
 commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
+  { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
 ]
 
@@ -709,6 +738,7 @@ win = ["Ctrl+V"]
 status = "bound"
 commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
+  { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
 ]
 
@@ -724,6 +754,7 @@ win = ["Ctrl+D"]
 status = "bound"
 commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement"] },
+  { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
 ]
 
@@ -739,6 +770,7 @@ win = ["Delete"]
 status = "bound"
 commands = [
   { id = "arrangement.delete", contexts = ["arrangement"] },
+  { id = "chain.delete", contexts = ["rack-chains"] },
   { id = "device.remove", contexts = ["device-view"] },
 ]
 
@@ -781,6 +813,7 @@ mac = ["Cmd+R"]
 win = ["Ctrl+R"]
 status = "bound"
 commands = [
+  { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
 ]
@@ -989,7 +1022,10 @@ trigger = "latch"
 milestone = "M2"
 mac = ["A"]
 win = ["A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.automation_mode", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ENV-002"
@@ -1242,7 +1278,7 @@ mac = ["Option+Shift+F"]
 win = ["Alt+Shift+F"]
 status = "bound"
 commands = [
-  { id = "arrangement.follow", contexts = ["global", "arrangement"] },
+  { id = "arrangement.follow", contexts = ["global", "arrangement", "sample-editor"] },
 ]
 
 [[shortcut]]
@@ -1324,7 +1360,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-002"
@@ -1335,7 +1374,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-003"
@@ -1346,7 +1388,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+1"]
 win = ["Alt+Shift+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "notes" } },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-004"
@@ -1357,7 +1402,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Shift+2"]
 win = ["Alt+Shift+2"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "envelopes" } },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-005"
@@ -1401,7 +1449,8 @@ trigger = "press"
 milestone = "M4"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Left and Right move the selected warp markers by one step of the editing grid (`clip.move_warp_markers`)"
 
 [[shortcut]]
 id = "S-SAMPLE-004"
@@ -1412,7 +1461,8 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Cmd-Left and Cmd-Right select the previous or next warp marker (`clip_view.select_warp_markers`)"
 
 [[shortcut]]
 id = "S-SAMPLE-005"
@@ -1420,10 +1470,13 @@ action = "Scroll the display to follow playback"
 context = "sample-editor"
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 mac = ["Option+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.follow", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-006"
@@ -1434,7 +1487,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: with the Start marker selected, Shift-Left and Shift-Right move the clip's region by one step of the editing grid (`clip.set_region`)"
 
 [[shortcut]]
 id = "S-SAMPLE-007"
@@ -1442,10 +1496,13 @@ action = "Zoom to the clip selection"
 context = "sample-editor"
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 mac = ["Z"]
 win = ["Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "selection" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-008"
@@ -1453,10 +1510,13 @@ action = "Zoom back from the clip selection"
 context = "sample-editor"
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 mac = ["X"]
 win = ["X"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "back" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-009"
@@ -1467,7 +1527,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+I"]
 win = ["Ctrl+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.insert_warp_marker", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-010"
@@ -1478,7 +1541,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.delete_warp_markers", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-011"
@@ -1489,7 +1555,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+I"]
 win = ["Ctrl+Shift+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.insert_transient", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-012"
@@ -1500,7 +1569,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+Delete"]
 win = ["Ctrl+Shift+Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.delete_transients", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-013"
@@ -1508,10 +1580,13 @@ action = "Fit the content to the editor's width"
 context = "sample-editor"
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 mac = ["W"]
 win = ["W"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "whole" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-014"
@@ -1519,10 +1594,13 @@ action = "Fit the content to the editor's height"
 context = "sample-editor"
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 mac = ["H"]
 win = ["H"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "height" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-001"
@@ -1643,7 +1721,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+U"]
 win = ["Ctrl+U"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "note.quantize", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-012"
@@ -1940,7 +2021,10 @@ trigger = "latch"
 milestone = "M2"
 mac = ["B"]
 win = ["B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.draw_mode", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-GRID-002"
@@ -2033,7 +2117,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+6"]
 win = ["Ctrl+6"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "sixteenth" } },
+]
 
 [[shortcut]]
 id = "S-GQ-002"
@@ -2044,7 +2131,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+7"]
 win = ["Ctrl+7"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "eighth" } },
+]
 
 [[shortcut]]
 id = "S-GQ-003"
@@ -2055,7 +2145,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+8"]
 win = ["Ctrl+8"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "quarter" } },
+]
 
 [[shortcut]]
 id = "S-GQ-004"
@@ -2066,7 +2159,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+9"]
 win = ["Ctrl+9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "1_bar" } },
+]
 
 [[shortcut]]
 id = "S-GQ-005"
@@ -2077,7 +2173,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+0"]
 win = ["Ctrl+0"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "none" } },
+]
 
 [[shortcut]]
 id = "S-SES-001"
@@ -2088,7 +2187,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.launch_selected", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-002"
@@ -2099,7 +2201,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Up", "Down", "Left", "Right"]
 win = ["Up", "Down", "Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Session View: the arrows select the neighbouring slot, across the tracks and down the scenes (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-003"
@@ -2110,7 +2213,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_all", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-004"
@@ -2132,7 +2238,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "slot.set_stop_button", contexts = ["session"], toggles = "stop_button" },
+]
 
 [[shortcut]]
 id = "S-SES-006"
@@ -2143,7 +2252,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Enter"]
 win = ["Ctrl+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.stop_selected", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-007"
@@ -2154,7 +2266,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+M"]
 win = ["Ctrl+Shift+M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.insert_empty_midi_clip", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-008"
@@ -2165,7 +2280,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+I"]
 win = ["Ctrl+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.insert_scene", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-009"
@@ -2176,7 +2294,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+I"]
 win = ["Ctrl+Shift+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.capture_and_insert_scene", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-010"
@@ -2187,7 +2308,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Up and Down select the scene above or below (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-011"
@@ -2198,7 +2320,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["PageUp", "PageDown"]
 win = ["PageUp", "PageDown"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Page Up and Page Down move eight scenes (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-012"
@@ -2209,7 +2332,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+F9"]
 win = ["Ctrl+Shift+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.record", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-013"
@@ -2220,7 +2346,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Shift+Enter"]
 win = ["Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.toggle_follow_actions", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-014"
@@ -2231,7 +2360,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+Enter"]
 win = ["Ctrl+Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.create_follow_action_chain", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-015"
@@ -2275,7 +2407,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["0"]
 win = ["0"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.deactivate", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-019"
@@ -2286,7 +2421,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Esc goes to the highlighted track's title bar (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-020"
@@ -2297,7 +2433,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Home", "Fn+Left"]
 win = ["Home"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "first" } },
+]
 
 [[shortcut]]
 id = "S-SES-021"
@@ -2308,7 +2447,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["End", "Fn+Right"]
 win = ["End"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "last" } },
+]
 
 [[shortcut]]
 id = "S-SES-022"
@@ -2319,7 +2461,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["End", "Fn+Right"]
 win = ["End"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "last" } },
+]
 
 [[shortcut]]
 id = "S-SES-023"
@@ -2330,7 +2475,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["S"]
 win = ["S"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "chain.solo", contexts = ["rack-chains"] },
+]
 
 [[shortcut]]
 id = "S-ARR-001"
@@ -3200,7 +3348,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+F9"]
 win = ["Ctrl+Shift+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.record", contexts = ["global", "session"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-009"
@@ -3211,7 +3362,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["F10"]
 win = ["F10"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.back_to_arrangement", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-010"
@@ -3236,7 +3390,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["O"]
 win = ["O"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "transport.set_metronome_enabled", contexts = ["global"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-ENGINE-001"
@@ -3505,7 +3662,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["M"]
 win = ["M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "midi.toggle_computer_keyboard", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-MAP-004"
@@ -3516,7 +3676,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Z", "X"]
 win = ["Z", "X"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, Z and X move its octave (`midi.computer_keyboard_octave`)"
 
 [[shortcut]]
 id = "S-MAP-005"
@@ -3527,7 +3688,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["C", "V"]
 win = ["C", "V"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, C and V step its velocity (`midi.computer_keyboard_velocity`)"
 
 [[shortcut]]
 id = "S-MAP-006"
@@ -3538,7 +3700,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["A", "W", "S", "E", "D", "F", "T", "G", "Y", "H", "U", "J", "K", "O", "L", "P"]
 win = ["A", "W", "S", "E", "D", "F", "T", "G", "Y", "H", "U", "J", "K", "O", "L", "P"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, its note keys play and release notes (`midi.computer_keyboard_key`)"
 
 [[shortcut]]
 id = "S-MAP-007"
@@ -3549,7 +3712,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Shift (with the letter)"]
 win = ["Shift (with the letter)"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, a letter with Shift runs its shortcut as it would with the keyboard off"
 
 [[shortcut]]
 id = "S-SET-001"
@@ -3818,7 +3982,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Up and Down transpose the selected notes by a semitone (`note.move`)"
 
 [[shortcut]]
 id = "S-A11Y-009"
@@ -3829,7 +3994,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Up", "Shift+Down"]
 win = ["Shift+Up", "Shift+Down"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Shift-Up and Shift-Down transpose the selected notes by an octave (`note.move`)"
 
 [[shortcut]]
 id = "S-A11Y-010"
@@ -3862,7 +4028,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Left", "Option+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Option-Left and Option-Right (Ctrl on Windows) move the insert marker by one step of the editing grid (`clip_view.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-013"
@@ -3873,7 +4040,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: with nothing selected, Shift-Left and Shift-Right start or extend a time selection by one step of the editing grid (`clip_view.select_time`)"
 
 [[shortcut]]
 id = "S-A11Y-014"
@@ -4052,7 +4220,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["F"]
 win = ["F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.fold_notes", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-039"
@@ -4177,7 +4348,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Plus"]
 win = ["Plus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = true, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-013"
@@ -4188,7 +4362,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = false, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-014"
@@ -4227,7 +4404,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+1"]
 win = ["Ctrl+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.smaller_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-025"
@@ -4238,7 +4418,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+2"]
 win = ["Ctrl+2"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.larger_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-026"
@@ -4249,7 +4432,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+3"]
 win = ["Ctrl+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.triplet_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-027"
@@ -4260,7 +4446,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+4"]
 win = ["Ctrl+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization_enabled", contexts = ["session"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-SES-028"

@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::Peaks;
-use bl_model::{ClipData, ClipId, ContentHash, Document, Track, TrackId};
+use bl_model::{ClipData, ClipId, ContentHash, Document, Track, TrackId, WarpMap};
 use bl_shell::arrangement::Horizontal;
 use bl_shell::arrangement::grid::{self, Step};
 use bl_shell::arrangement::rows::{Row, rows_between};
@@ -328,7 +328,12 @@ pub fn build_lanes(
             let y = row_y(row);
             rect(
                 out,
-                [lanes.left(), y, lanes.right(), y + row.height],
+                [
+                    lanes.left(),
+                    y,
+                    lanes.right(),
+                    y + row.height + row.automation,
+                ],
                 colors.lane_selected.0,
             );
         }
@@ -372,7 +377,7 @@ pub fn build_lanes(
 
     // Lines between tracks.
     for row in &rows[visible.clone()] {
-        let bottom = row_y(row) + row.height;
+        let bottom = row_y(row) + row.height + row.automation;
         if row.height >= 3.0 {
             rect(
                 out,
@@ -445,6 +450,7 @@ pub fn build_lanes(
                     // Down to a line on the shortest lanes, as Optimize
                     // Height makes them with 200 tracks.
                     let band = (top + title + edge, bottom - edge);
+                    let warp = warp_of(doc, span.id);
                     if band.1 - band.0 >= 1.0
                         && let Known::Ready { peaks, base } = library.get(media, atlas)
                     {
@@ -456,6 +462,7 @@ pub fn build_lanes(
                                 start: Ticks(span.origin),
                                 draw: (dx0.max(x0), dx1.min(x1)),
                                 band,
+                                warp: warp.as_ref().map(|(map, shift)| (map, *shift)),
                             },
                             tempo,
                             horizontal,
@@ -513,12 +520,29 @@ struct WaveClip<'a> {
     draw: (f32, f32),
     /// The top and bottom of the waveform's area.
     band: (f32, f32),
+    /// A warped clip's map, and the tick of the arrangement that its beat 0
+    /// falls on: the file is drawn through it, each segment between two
+    /// warp markers stretched to the beats it plays on (sample editor R4).
+    warp: Option<(&'a WarpMap, f64)>,
 }
 
-/// Adds one waveform band per channel and returns how many. The media plays
-/// from its first frame where the clip's contents begin, at its own speed
-/// (WP-1.4 adds clip regions; warping is M4), so the frame under a point is
-/// worked out through the tempo map at the drawn part's left edge.
+/// A warped audio clip's map and the tick its beat 0 falls on.
+fn warp_of(doc: &Document, clip: ClipId) -> Option<(WarpMap, f64)> {
+    let value = doc.clip(clip)?;
+    match &value.data {
+        ClipData::Audio(audio) if audio.warp => {
+            let map = audio.warp_map().ok()?;
+            Some((map, value.start.get() as f64 - audio.start))
+        }
+        _ => None,
+    }
+}
+
+/// Adds one waveform band per channel and returns how many. An unwarped
+/// clip's media plays from its first frame where the clip's contents begin,
+/// at its own speed, so the frame under a point is worked out through the
+/// tempo map at the drawn part's left edge. A warped clip's is drawn through
+/// its warp map instead (see [`WaveClip::warp`]).
 fn waveform(
     out: &mut SlotData,
     clip: &WaveClip<'_>,
@@ -534,6 +558,18 @@ fn waveform(
     if right <= left || peaks.frames() == 0 {
         return 0;
     }
+    if let Some((map, shift)) = clip.warp {
+        return warped_waveform(
+            out,
+            clip,
+            map,
+            shift,
+            horizontal,
+            lanes,
+            pixels_per_point,
+            colour,
+        );
+    }
     let at_left = horizontal.at(f64::from(left - lanes.left()));
     let seconds = tempo.ticks_to_seconds(at_left) - tempo.ticks_to_seconds(clip.start);
     let frame_left = (seconds * rate).max(0.0);
@@ -541,13 +577,41 @@ fn waveform(
     let bpm = tempo.bpm_at(at_left).get();
     let seconds_per_tick = 60.0 / (bpm * Ticks::QUARTER.get() as f64);
     let frames_per_point = horizontal.ticks_per_point * seconds_per_tick * rate;
-    let frames_per_pixel = frames_per_point / f64::from(pixels_per_point);
     // Where the media ends, on screen.
     let media_right = f64::from(left) + (peaks.frames() as f64 - frame_left) / frames_per_point;
     let right = right.min(media_right as f32);
     if right <= left {
         return 0;
     }
+    band(
+        out,
+        clip,
+        frame_left,
+        frames_per_point,
+        (left, right),
+        pixels_per_point,
+        colour,
+    )
+}
+
+/// Adds the waveform's bands for the part of the media that plays between
+/// the points `span`, starting at `frame_left` and running at
+/// `frames_per_point` frames to the point.
+fn band(
+    out: &mut SlotData,
+    clip: &WaveClip<'_>,
+    frame_left: f64,
+    frames_per_point: f64,
+    span: (f32, f32),
+    pixels_per_point: f32,
+    colour: Color32,
+) -> usize {
+    let peaks = clip.peaks;
+    let (left, right) = span;
+    if right <= left {
+        return 0;
+    }
+    let frames_per_pixel = frames_per_point / f64::from(pixels_per_point);
     let level = peaks.level_for(frames_per_pixel);
     let frames_per_peak = Peaks::frames_per_peak(level) as f64;
     let peak_left = frame_left / frames_per_peak;
@@ -576,6 +640,62 @@ fn waveform(
             color: rgba(colour),
         });
         count += 1;
+    }
+    count
+}
+
+/// Draws a warped clip's waveform: one stretch of bands for each segment of
+/// its warp map that falls in view, each running at the speed that segment
+/// plays the file, so the waveform lines up with the beats it plays on. The
+/// markers in view are found by binary search.
+#[expect(clippy::too_many_arguments, reason = "the waveform's whole geometry")]
+fn warped_waveform(
+    out: &mut SlotData,
+    clip: &WaveClip<'_>,
+    map: &WarpMap,
+    shift: f64,
+    horizontal: Horizontal,
+    lanes: Rect,
+    pixels_per_point: f32,
+    colour: Color32,
+) -> usize {
+    let rate = f64::from(clip.peaks.sample_rate());
+    let file = clip.peaks.frames() as f64 / rate;
+    let (left, right) = clip.draw;
+    // The beat of the contents under a point, and the point of a beat.
+    let beat_at = |x: f32| horizontal.at(f64::from(x - lanes.left())).get() as f64 - shift;
+    let x_of = |beat: f64| lanes.left() + horizontal.x(Ticks((beat + shift).round() as i64)) as f32;
+    // The file plays from time 0 to its end: draw only the beats inside it.
+    let (first, last) = (map.time_to_beat(0.0), map.time_to_beat(file));
+    let (from, to) = (beat_at(left).max(first), beat_at(right).min(last));
+    if to <= from {
+        return 0;
+    }
+    let markers = map.markers();
+    let mut next = markers.partition_point(|m| (m.beat as f64) <= from);
+    let mut start = from;
+    let mut count = 0;
+    while start < to {
+        // Each stretch runs to the next marker, or to the end of the view.
+        let end = markers.get(next).map_or(to, |m| (m.beat as f64).min(to));
+        if end > start {
+            let (t0, t1) = (map.beat_to_time(start), map.beat_to_time(end));
+            let (x0, x1) = (x_of(start), x_of(end));
+            if x1 > x0 && t1 > t0 {
+                let frames_per_point = (t1 - t0) * rate / f64::from(x1 - x0);
+                count += band(
+                    out,
+                    clip,
+                    t0 * rate,
+                    frames_per_point,
+                    (x0, x1.min(right)),
+                    pixels_per_point,
+                    colour,
+                );
+            }
+        }
+        start = end;
+        next += 1;
     }
     count
 }

@@ -1,4 +1,4 @@
-//! Squeeze, the native compressor (WP-2.18a, part 2; the compressor spec):
+//! Compressor, the native compressor (WP-2.18a, part 2; the compressor spec):
 //! threshold, ratio to infinity, attack, release with Auto Release, knee,
 //! the Peak, RMS and Expand modes, the Lin and Log envelope shapes, look
 //! ahead, Makeup, Out, Dry/Wet, and the sidechain section: the framework's
@@ -24,11 +24,17 @@ use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
+    DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
+};
 
+use crate::dynamics::{
+    LOOKAHEAD_SECONDS, SC_TYPES, ScFilter, curve_db, level_db, lookahead_frames, step_of,
+};
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
-/// Squeeze's device type.
+/// Compressor's device type.
 pub const COMPRESSOR: &str = "beatlayer.squeeze";
 
 /// Threshold: the level above which the gain turns down, in dB.
@@ -70,10 +76,6 @@ pub const SC_RES: ParamId = ParamId(15);
 /// top are to observe.
 const RATIO_MAX: f64 = 100.0;
 
-/// The look-ahead times the chooser offers, in seconds (the manual: zero,
-/// one and ten ms).
-const LOOKAHEAD_SECONDS: [f64; 3] = [0.0, 0.001, 0.010];
-
 /// The Lookahead choice a device without a saved value starts at.
 const DEFAULT_LOOKAHEAD: usize = 0;
 
@@ -83,18 +85,6 @@ const MODE_EXPAND: usize = 2;
 
 /// The Env choices: Lin, then Log.
 const ENV_LOG: usize = 1;
-
-/// The SC Filter's Type choices.
-const SC_TYPES: [&str; 3] = ["Low Pass", "Band Pass", "High Pass"];
-
-/// The lowest level the static curve reads, in dB: silence is the floor,
-/// not minus infinity.
-const FLOOR_DB: f64 = -120.0;
-
-/// The deepest reduction the curve asks for, and the highest expansion, in
-/// dB. The expansion's cap is Beatlayer's own; Live's limit is to observe.
-const MIN_GAIN_DB: f64 = -120.0;
-const MAX_EXPAND_DB: f64 = 24.0;
 
 /// The RMS detector's averaging time, in milliseconds: a longer window than
 /// any peak, so short peaks barely register in RMS mode. Beatlayer's own.
@@ -111,7 +101,7 @@ const AUTO_SUSTAIN_SECONDS: f64 = 0.3;
 /// Beatlayer's own; Live's shape is to observe.
 const LOG_DEPTH_DB: f32 = 6.0;
 
-/// The Squeeze device type.
+/// The Compressor device type.
 #[must_use]
 pub fn compressor_type() -> DeviceType {
     let params = vec![
@@ -183,9 +173,13 @@ pub fn compressor_type() -> DeviceType {
             .logarithmic()
             .describe("The sidechain filter's resonance."),
     ];
-    DeviceType::native(COMPRESSOR, "Squeeze", DeviceRole::AudioEffect)
+    DeviceType::native(COMPRESSOR, "Compressor", DeviceRole::AudioEffect)
         .with_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_views(&VIEWS),
+        )
 }
 
 /// The device's layout: the ratio, attack's and release's controls on the
@@ -233,97 +227,27 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds the Squeeze compressor to `registry`.
+/// Adds the Compressor compressor to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, compressor_type(), |device, config| {
         Squeeze::new(device, config)
     });
 }
 
-/// A second-order filter (an RBJ biquad), for the sidechain's SC Filter.
-/// Coefficients are worked out off the audio thread's hot path, once per
-/// stretch, from the parameters' values.
-struct Biquad {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-    x1: f32,
-    x2: f32,
-    y1: f32,
-    y2: f32,
-}
-
-impl Biquad {
-    fn new() -> Self {
-        Self {
-            b0: 1.0,
-            b1: 0.0,
-            b2: 0.0,
-            a1: 0.0,
-            a2: 0.0,
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
-        }
-    }
-
-    /// Sets its coefficients for `kind` at `hz` with resonance `q`, at
-    /// `rate`. The cutoff is held just below Nyquist, so any value is safe.
-    fn set(&mut self, kind: usize, hz: f64, q: f64, rate: f64) {
-        let w = core::f64::consts::TAU * hz.min(rate * 0.49) / rate;
-        let (sin, cos) = w.sin_cos();
-        let alpha = sin / (2.0 * q.max(0.05));
-        let (b0, b1, b2, a0, a1, a2) = match kind {
-            // A band pass with a 0 dB peak at the center.
-            1 => (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha),
-            // A high pass.
-            2 => {
-                let k = 0.5 * (1.0 + cos);
-                (k, -2.0 * k, k, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
-            }
-            // A low pass.
-            _ => {
-                let k = 0.5 * (1.0 - cos);
-                (k, 1.0 - cos, k, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
-            }
-        };
-        self.b0 = (b0 / a0) as f32;
-        self.b1 = (b1 / a0) as f32;
-        self.b2 = (b2 / a0) as f32;
-        self.a1 = (a1 / a0) as f32;
-        self.a2 = (a2 / a0) as f32;
-    }
-
-    /// One sample through it.
-    fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
-            - self.a1 * self.y1
-            - self.a2 * self.y2;
-        self.x2 = self.x1;
-        self.x1 = x;
-        self.y2 = self.y1;
-        self.y1 = y;
-        y
+/// The dB the static curve moves per dB over the threshold. The top of the
+/// ratio's range is an infinite ratio: the slope is 1 (expansion's stays
+/// finite).
+fn curve_slope(ratio: f64, expand: bool) -> f64 {
+    if expand {
+        ratio - 1.0
+    } else if ratio >= RATIO_MAX {
+        1.0
+    } else {
+        1.0 - 1.0 / ratio
     }
 }
 
-/// The look-ahead in samples for the Look chooser's `choice`.
-fn lookahead_frames(choice: f64, rate: f64, max: usize) -> usize {
-    let choice = (choice.max(0.0) as usize).min(LOOKAHEAD_SECONDS.len() - 1);
-    ((LOOKAHEAD_SECONDS[choice] * rate).ceil() as usize).min(max)
-}
-
-/// The per-sample step of a one-pole whose time constant is `ms`
-/// milliseconds: after `ms` it has closed the gap by 1 - 1/e.
-fn step_of(ms: f64, rate: f64) -> f32 {
-    let samples = (ms * 0.001 * rate).max(1.0);
-    (1.0 - (-1.0 / samples).exp()) as f32
-}
-
-/// Squeeze's audio-thread half.
+/// Compressor's audio-thread half.
 pub struct Squeeze {
     rate: f64,
     /// The most samples of look-ahead any choice asks for.
@@ -335,12 +259,16 @@ pub struct Squeeze {
     targets: Vec<f32>,
     gains: Vec<f32>,
     delay: [DelayLine; 2],
-    filter: [Biquad; 2],
+    filter: [ScFilter; 2],
     /// Each channel's mean square, for the RMS detector.
     rms: [f32; 2],
     /// The gain now, and how long a reduction has been held (Auto Release).
     gain: f32,
     hold_frames: f32,
+    /// The loudest input and output samples since the display last
+    /// published, as linear amplitude.
+    peak_in: f32,
+    peak_out: f32,
 }
 
 impl Squeeze {
@@ -361,33 +289,12 @@ impl Squeeze {
             targets: vec![0.0; frames],
             gains: vec![0.0; frames],
             delay: [DelayLine::new(max_lookahead), DelayLine::new(max_lookahead)],
-            filter: [Biquad::new(), Biquad::new()],
+            filter: [ScFilter::new(), ScFilter::new()],
             rms: [0.0; 2],
             gain: 1.0,
             hold_frames: 0.0,
-        }
-    }
-
-    /// The detector's level in dB for `level`, floored at [`FLOOR_DB`].
-    fn level_db(level: f64) -> f64 {
-        20.0 * level.max(db_to_gain(FLOOR_DB)).log10()
-    }
-
-    /// The static curve's gain in dB for a level `db`: compression turns
-    /// the gain down above the threshold over the knee, expansion turns it
-    /// up. `slope` is the dB the curve moves per dB over the threshold.
-    fn curve_db(db: f64, threshold: f64, slope: f64, knee: f64, expand: bool) -> f64 {
-        let over = db - threshold;
-        let half = 0.5 * knee;
-        let shape = if knee > 0.0 && over < half && over > -half {
-            (over + half) * (over + half) / (2.0 * knee)
-        } else {
-            over.max(0.0)
-        };
-        if expand {
-            (slope * shape).min(MAX_EXPAND_DB)
-        } else {
-            (-slope * shape).max(MIN_GAIN_DB)
+            peak_in: 0.0,
+            peak_out: 0.0,
         }
     }
 }
@@ -407,15 +314,7 @@ impl NativeDevice for Squeeze {
         let ratio = params.value(at(RATIO)).clamp(1.0, RATIO_MAX);
         let mode = (params.value(at(MODE)) as usize).min(MODE_EXPAND);
         let expand = mode == MODE_EXPAND;
-        // The top of the ratio's range is an infinite ratio: the curve's
-        // slope is 1 (expansion's stays finite).
-        let slope = if expand {
-            ratio - 1.0
-        } else if ratio >= RATIO_MAX {
-            1.0
-        } else {
-            1.0 - 1.0 / ratio
-        };
+        let slope = curve_slope(ratio, expand);
         let knee = params.value(at(KNEE));
         let auto = params.value(at(AUTO_RELEASE)) >= 0.5;
         let log_envelope = params.value(at(ENVELOPE)) as usize == ENV_LOG;
@@ -461,6 +360,7 @@ impl NativeDevice for Squeeze {
             for (i, target) in self.targets[..frames].iter_mut().enumerate() {
                 let keyed = audio.sidechain(channel).map(|key| key[i]);
                 let sample = keyed.unwrap_or_else(|| audio.channel_mut(channel)[i]);
+                self.peak_in = self.peak_in.max(sample.abs());
                 let filtered = if sc_on {
                     self.filter[channel].process(sample)
                 } else {
@@ -473,8 +373,8 @@ impl NativeDevice for Squeeze {
                 } else {
                     f64::from(filtered.abs())
                 };
-                let db = Self::level_db(level);
-                let gain = db_to_gain(Self::curve_db(db, threshold, slope, knee, expand)) as f32;
+                let db = level_db(level);
+                let gain = db_to_gain(curve_db(db, threshold, slope, knee, expand)) as f32;
                 *target = target.min(gain);
             }
         }
@@ -520,7 +420,9 @@ impl NativeDevice for Squeeze {
                 self.delay[channel].write(sample);
                 let mix = wet[i] * 0.01;
                 let level = self.gains[i] * makeup * out[i];
-                audio.channel_mut(channel)[i] = delayed * (mix * level + (1.0 - mix));
+                let output = delayed * (mix * level + (1.0 - mix));
+                self.peak_out = self.peak_out.max(output.abs());
+                audio.channel_mut(channel)[i] = output;
             }
         }
     }
@@ -528,4 +430,102 @@ impl NativeDevice for Squeeze {
     fn latency(&self) -> u32 {
         self.lookahead
     }
+
+    fn display_len(&self) -> usize {
+        DISPLAY_VALUES
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        let db = |level: f32| level_db(f64::from(level)) as f32;
+        out[0] = db(self.gain);
+        out[1] = db(self.peak_in);
+        out[2] = db(self.peak_out);
+        self.peak_in = 0.0;
+        self.peak_out = 0.0;
+    }
+}
+
+/// What the node publishes: the gain now, and the input's and the output's
+/// peaks since the last block, all in dB.
+const DISPLAY_VALUES: usize = 3;
+
+/// The views the display offers (the compressor spec, R16), the first the
+/// one it starts in.
+pub const VIEWS: [&str; 3] = ["Transfer Curve", "Activity", "Collapsed"];
+
+/// The transfer curve's input levels, in dB, one point per dB.
+const CURVE_FROM_DB: f32 = -60.0;
+const CURVE_POINTS: usize = 61;
+
+/// The device's display (the compressor spec, R15): the gain reduction and
+/// the input's and output's levels, the transfer curve, and the threshold
+/// and the level now as markers on it. `data` is what the node published,
+/// if an engine runs.
+#[must_use]
+pub fn display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
+    let expand = (value(MODE) as usize).min(MODE_EXPAND) == MODE_EXPAND;
+    let slope = curve_slope(value(RATIO).clamp(1.0, RATIO_MAX), expand);
+    let (threshold, knee) = (value(THRESHOLD), value(KNEE));
+    let through = |db: f64| db + curve_db(db, threshold, slope, knee, expand);
+    let reading = |name: &str, level: f32| DisplayReading {
+        name: name.to_owned(),
+        value: level,
+        unit: "dB".to_owned(),
+        text: format!("{level:.1} dB"),
+    };
+    let mut out = DeviceDisplay {
+        device,
+        live: data.is_some(),
+        view: None,
+        series: vec![DisplaySeries {
+            name: "Transfer Curve".to_owned(),
+            unit: "dB".to_owned(),
+            x_unit: "dB".to_owned(),
+            x_range: [CURVE_FROM_DB, 0.0],
+            log_x: false,
+            y_range: [CURVE_FROM_DB, 0.0],
+            detail: false,
+            values: (0..CURVE_POINTS)
+                .map(|i| through(f64::from(CURVE_FROM_DB) + i as f64) as f32)
+                .collect(),
+        }],
+        markers: vec![DisplayMarker {
+            name: "Threshold".to_owned(),
+            series: "Transfer Curve".to_owned(),
+            x: threshold as f32,
+            y: through(threshold) as f32,
+            text: format!(
+                "Threshold {}",
+                description
+                    .param(THRESHOLD)
+                    .map_or_else(String::new, |p| p.format(threshold))
+            ),
+        }],
+        readings: Vec::new(),
+    };
+    if let Some([gain, input, output]) =
+        data.and_then(|d| <[f32; DISPLAY_VALUES]>::try_from(d).ok())
+    {
+        out.readings = vec![
+            reading("Gain Reduction", gain),
+            reading("Input", input),
+            reading("Output", output),
+        ];
+        if input > CURVE_FROM_DB {
+            out.markers.push(DisplayMarker {
+                name: "Level".to_owned(),
+                series: "Transfer Curve".to_owned(),
+                x: input,
+                y: through(f64::from(input)) as f32,
+                text: format!("Level {input:.1} dB"),
+            });
+        }
+    }
+    out
 }

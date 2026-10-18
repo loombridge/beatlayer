@@ -3,8 +3,10 @@
 use bl_core::time::{Frames, Ticks};
 use bl_model::ParamId;
 
-use crate::gc::Program;
+use crate::gc::{Owned, Program};
 use crate::node::{NodeData, NodeKey, ParamValue};
+use crate::recording::RecordingPlan;
+use crate::session::SessionCommand;
 
 /// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +95,24 @@ pub enum TransportCommand {
     SetInsertMarker(Ticks),
     /// Sets the Arrangement loop, or switches it off with `None`.
     SetLoop(Option<LoopRegion>),
+    /// Sets the metronome settings (WP-2.15).
+    SetMetronome(bl_model::MetronomeSettings),
+    /// Sets whether the transport is recording.
+    SetRecording(bool),
+    /// Sets where recording punches in and out (WP-2.13).
+    SetPunch(Punch),
+}
+
+/// Where recording starts and stops, as the Arrangement loop brace and the
+/// Punch-In and Punch-Out switches give it, whether or not the Loop switch is
+/// on (WP-2.13). A side whose switch is off is `None`: recording starts
+/// when playback does, or runs until it stops.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Punch {
+    /// The punch-in point: the brace's start.
+    pub start: Option<Ticks>,
+    /// The punch-out point: the brace's end, the first position not recorded.
+    pub end: Option<Ticks>,
 }
 
 /// The part of the song the Arrangement loop repeats: playback that reaches
@@ -170,8 +190,19 @@ pub enum Report {
 pub(crate) enum Message {
     Program(Program),
     Param(ParamEvent),
-    Data { key: NodeKey, data: NodeData },
+    Data {
+        key: NodeKey,
+        data: NodeData,
+    },
     Transport(TransportCommand, When),
+    /// A Session View command (WP-3.2): a launch, a stop, or the global
+    /// launch quantisation.
+    Session(SessionCommand),
     Schedule(ScheduledCommand),
     Cancel(u64),
+    /// What to record while the transport records (WP-2.13).
+    Record(Owned<RecordingPlan>),
+    /// The frames between the engine handing the device a sound and it
+    /// coming out, as the device reports it now (WP-5.34).
+    OutputLatency(u32),
 }

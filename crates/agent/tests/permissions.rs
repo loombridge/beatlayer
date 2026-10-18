@@ -9,8 +9,9 @@
 //! spec.
 
 use bl_agent::client::{Client, InProcess};
-use bl_agent::{Agent, Credential, Outcome, QuestionKind};
+use bl_agent::{Agent, Credential, EngineMessage, Outcome, QuestionKind};
 use bl_commands::Permission;
+use bl_engine::TransportCommand;
 use bl_shell::{GesturePhase, Invocation, Shell};
 use serde_json::{Value, json};
 
@@ -315,6 +316,52 @@ fn a_drop_from_the_browser_over_clips_is_destructive_as_well_as_external() {
 }
 
 #[test]
+fn a_midi_import_over_clips_is_destructive_as_well_as_external() {
+    // Spec: agent-permissions R1, R3. The file isn't read before the person
+    // allows it, so an import is destructive when a clip on its track ends
+    // after where it lands.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let held = clip(&mut client, midi, "Held", 4, 2);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.mid");
+    let import = |at: u64, track: Option<u64>| {
+        let mut args = json!({ "path": path.to_string_lossy(), "at": at * BAR });
+        if let Some(track) = track {
+            args["track"] = json!(track);
+        }
+        args
+    };
+    let went = attempt(&mut client, "midi.import_file", &import(5, Some(midi)));
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "destructive and external".to_owned()
+        }
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("Import MIDI File (destructive and external)"),
+        "{asked}"
+    );
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "midi.import_file",
+                               "args": import(5, Some(midi)) }], "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["replaces"], json!([held]));
+
+    // After every clip on the track, or with no track (new tracks), it's
+    // external only.
+    for args in [import(7, Some(midi)), import(0, None)] {
+        let went = attempt(&mut client, "midi.import_file", &args);
+        assert!(went.asked, "external still asks");
+        assert_eq!(went.permission, "external", "{args}");
+    }
+}
+
+#[test]
 fn an_autonomous_agent_s_move_over_clips_runs_without_asking() {
     // Spec: agent-permissions R2, R8.
     let (mut client, _, a, b) = two_clips(4);
@@ -382,6 +429,71 @@ fn a_scheduled_move_over_clips_asks_when_it_s_scheduled() {
         asked.contains("At 2.1.1: Move Clips (destructive)"),
         "{asked}"
     );
+}
+
+#[test]
+fn starting_a_recording_asks_first_and_stopping_never_does() {
+    // Recording captures an input device, so it is `external`.
+    let start = json!({ "commands": [{ "command": "transport.set_recording",
+                                       "args": { "recording": true } }] });
+    let stop = json!({ "commands": [{ "command": "transport.stop_recording" }] });
+
+    // The person declines: nothing reaches the engine.
+    let mut client = app();
+    client.transport().agent.set_engine_attached(true);
+    let connected = client.transport().asked.len();
+    let result = client.call("run", start.clone()).unwrap();
+    assert!(
+        result.is_error && result.text.contains("declined"),
+        "{result:?}"
+    );
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert!(client.transport().agent.take_engine_messages().is_empty());
+
+    // Stopping runs without asking.
+    call(&mut client, "run", stop.clone());
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert_eq!(
+        client.transport().agent.take_engine_messages(),
+        [EngineMessage::Transport(TransportCommand::SetRecording(
+            false
+        ))]
+    );
+
+    // Autonomous, it records.
+    client
+        .transport()
+        .shell
+        .run(
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": true }),
+        )
+        .unwrap();
+    call(&mut client, "run", start.clone());
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert_eq!(
+        client.transport().agent.take_engine_messages(),
+        [EngineMessage::Transport(TransportCommand::SetRecording(
+            true
+        ))]
+    );
+
+    // Headless, it is refused unless the server was started autonomous.
+    for autonomous in [false, true] {
+        let mut client = Client::new(InProcess::new(
+            Agent::headless(autonomous),
+            Shell::headless(),
+        ));
+        client.initialize("script").unwrap();
+        client.transport().agent.set_engine_attached(true);
+        let result = client.call("run", start.clone()).unwrap();
+        assert_eq!(result.is_error, !autonomous, "{}", result.text);
+        assert_eq!(
+            client.transport().agent.take_engine_messages().len(),
+            usize::from(autonomous)
+        );
+        call(&mut client, "run", stop.clone());
+    }
 }
 
 #[test]

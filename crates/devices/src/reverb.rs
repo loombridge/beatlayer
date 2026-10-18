@@ -1,4 +1,4 @@
-//! Rotunda, the algorithmic reverb (WP-2.18b, part 1; the reverb spec):
+//! Reverb, the algorithmic reverb (WP-2.18b, part 1; the reverb spec):
 //! an input filter, early reflections, a diffusion network, a chorus
 //! section, the global predelay, size, decay and freeze controls, a stereo
 //! width, and the reflect, diffuse and dry/wet output controls.
@@ -21,7 +21,7 @@ use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, Par
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Rotunda's device type.
+/// Reverb's device type.
 pub const REVERB: &str = "beatlayer.rotunda";
 
 /// Low Cut: whether the input's low-cut filter runs.
@@ -83,7 +83,7 @@ pub const DIFFUSE: ParamId = ParamId(27);
 /// The dry/wet balance.
 pub const DRY_WET: ParamId = ParamId(28);
 
-/// How many parameters Rotunda has.
+/// How many parameters Reverb has.
 const PARAMS: usize = 29;
 
 /// The Damping chooser's choices.
@@ -144,7 +144,7 @@ const SMOOTH_SLOW_SECONDS: f64 = 1.0;
 /// A state value below this is left as zero rather than as a denormal.
 const FLUSH: f32 = 1e-30;
 
-/// The reverb's type: Beatlayer's own name and look, Live's controls
+/// The reverb's type: Beatlayer's own look, Live's controls
 /// (the reverb spec, "The behaviour").
 #[must_use]
 pub fn reverb_type() -> DeviceType {
@@ -259,7 +259,7 @@ pub fn reverb_type() -> DeviceType {
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry and the reverberated signal."),
     ];
-    DeviceType::native(REVERB, "Rotunda", DeviceRole::AudioEffect)
+    DeviceType::native(REVERB, "Reverb", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -340,7 +340,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Rotunda to `registry`.
+/// Adds Reverb to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, reverb_type(), |_, config| Reverb::new(config));
 }

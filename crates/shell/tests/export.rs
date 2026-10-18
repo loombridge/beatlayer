@@ -203,8 +203,12 @@ fn an_empty_set_or_a_bad_range_is_refused() {
             "extension",
         ),
         (
-            json!({ "path": ok("a.mp3"), "bit_depth": 24, "sample_rate": 48000 }),
+            json!({ "path": ok("a.ogg"), "bit_depth": 24, "sample_rate": 48000 }),
             "extension",
+        ),
+        (
+            json!({ "path": ok("a.mp3"), "bit_depth": 24, "sample_rate": 96000 }),
+            "MP3 holds",
         ),
         (
             json!({ "path": ok("a.wav"), "bit_depth": 8, "sample_rate": 48000 }),
@@ -238,6 +242,35 @@ fn an_empty_set_or_a_bad_range_is_refused() {
         assert!(error.to_string().contains(says), "{args}: {error}");
     }
     assert_eq!(scratch.names(), ["Tone.wav"], "nothing written");
+}
+
+/// Spec: export R23 (WP-2.26). An MP3 export takes the extension, writes a
+/// file Beatlayer's decoder reads back at the export's rate, and refuses a
+/// `file_type` that disagrees with the extension.
+#[test]
+fn an_mp3_export_takes_the_extension() {
+    let scratch = Scratch::new("mp3");
+    let mut shell = shell_with_a_clip(&scratch);
+    let written = export(
+        &mut shell,
+        json!({ "path": text(&scratch.path("mix.mp3")), "bit_depth": 16,
+                "sample_rate": 44100 }),
+    );
+    assert_eq!(written.file_type, ids::FileType::Mp3);
+    assert_eq!(written.dither, ids::Dither::None, "MP3 has no dither");
+    let decoder = bl_media::Decoder::open(&written.path).unwrap();
+    assert_eq!(decoder.info().sample_rate, 44_100);
+    assert_eq!(
+        decoder.decode_to_end().unwrap().frames() as u64,
+        written.frames
+    );
+
+    let error = refused(
+        &mut shell,
+        json!({ "path": text(&scratch.path("mix.mp3")), "bit_depth": 16,
+                "sample_rate": 48000, "file_type": "wav" }),
+    );
+    assert!(error.to_string().contains("extension"), "{error}");
 }
 
 /// Spec: export R11.
@@ -637,6 +670,44 @@ fn all_tracks_and_selected_tracks_write_one_file_per_track() {
     );
 }
 
+/// Spec: export R26 (WP-4.17). Each file of a multi-track loop render folds
+/// its own track's tail: a track with a reverb gets the reverb's, and one
+/// without gets nothing added.
+#[test]
+fn each_track_of_a_loop_render_adds_its_own_tail() {
+    let scratch = Scratch::new("loop-tracks");
+    let (mut shell, kick, _) = shell_with_two_tracks(&scratch);
+    shell
+        .run(
+            "device.add",
+            json!({
+                "track": kick,
+                "device": { "kind": { "native": { "device_type": "beatlayer.rotunda" } },
+                            "name": "Reverb", "role": "audio_effect" },
+            }),
+        )
+        .unwrap();
+    // The first half second, 705,600 ticks to the quarter note.
+    for (name, looped) in [("Plain", false), ("Loop", true)] {
+        let result = export(
+            &mut shell,
+            json!({
+                "path": text(&scratch.path(&format!("{name}.wav"))),
+                "rendered_track": "all_tracks",
+                "bit_depth": 32,
+                "sample_rate": 48000,
+                "start": 0,
+                "length": 705_600,
+                "render_as_loop": looped,
+            }),
+        );
+        assert_eq!(result.frames, 24_000);
+    }
+    let read = |name: &str| std::fs::read(scratch.path(name)).unwrap();
+    assert_ne!(read("Plain - Kick.wav"), read("Loop - Kick.wav"));
+    assert_eq!(read("Plain - Bass.wav"), read("Loop - Bass.wav"));
+}
+
 /// Spec: export R10, WP-2.26. Multi-track export cancel and failure leave no partial files.
 #[test]
 fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
@@ -658,6 +729,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let job2 = bl_shell::export::Job {
@@ -671,6 +743,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let mut solo1 = doc.clone();
@@ -683,12 +756,17 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         .unwrap();
 
     let renders = [(&solo1, &job1), (&solo2, &job2)];
-    let result =
-        bl_shell::export::export_multi(&renders, media.clone(), None, &cancel, &mut |share| {
+    let result = bl_shell::export::export_multi(
+        &renders,
+        media.clone(),
+        Default::default(),
+        &cancel,
+        &mut |share| {
             if share >= 0.6 {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-        });
+        },
+    );
     assert_eq!(result, Err(bl_shell::export::ExportError::Cancelled));
     for name in scratch.names() {
         assert!(!name.starts_with("Cancel"), "found unexpected file: {name}");
@@ -714,13 +792,14 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let fail_renders = [(&solo1, &job1), (&solo2, &job_fail)];
     let fail_result = bl_shell::export::export_multi(
         &fail_renders,
         media,
-        None,
+        bl_shell::export::Hosts::default(),
         &std::sync::atomic::AtomicBool::new(false),
         &mut |_| {},
     );
@@ -1219,4 +1298,63 @@ fn midi_track_with_audio_effect_and_no_instrument_renders_silence() {
     assert!(decoded.frames() > 0);
     assert!(decoded.channel(0).unwrap().iter().all(|&s| s == 0.0));
     assert!(decoded.channel(1).unwrap().iter().all(|&s| s == 0.0));
+}
+
+/// Spec: external-devices R8.
+#[test]
+fn an_offline_render_sends_nothing_to_midi_ports() {
+    use bl_core::time::Ticks;
+    use bl_midi_io::{Direction, TestBackend};
+    use bl_model::{MidiData, Note};
+
+    let scratch = Scratch::new("midi-out");
+    let mut shell = shell_with_a_clip(&scratch);
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Synth");
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "track": true }),
+        )
+        .unwrap();
+    // An engine is attached, as a running one is, so anything an export
+    // sent would arrive.
+    let _engine = shell.midi().output().attach(1024);
+
+    // A MIDI track sending to the port, playing a note.
+    let track = shell.editor().document().top_level().next().unwrap();
+    let id: bl_model::ClipId = shell.new_id();
+    let clip = bl_model::Clip::new(
+        id,
+        Ticks::ZERO,
+        Ticks(BAR),
+        bl_model::ClipData::Midi(MidiData::new([Note::new(
+            60,
+            Ticks::ZERO,
+            Ticks(BAR / 4),
+            100,
+        )])),
+    );
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": serde_json::to_value(&clip).unwrap() }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "routing.set_midi_output",
+            json!({ "track": track, "to": { "name": "Synth", "channel": 1 } }),
+        )
+        .unwrap();
+
+    let result = export(
+        &mut shell,
+        json!({ "path": text(&scratch.path("out.wav")), "bit_depth": 24, "sample_rate": 48000 }),
+    );
+    assert!(result.frames > 0);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(test.sent("Synth").is_empty());
+    assert_eq!(shell.midi().output().stats().snapshot().sent, 0);
 }

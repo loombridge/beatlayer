@@ -33,18 +33,110 @@ clack-extensions = { version = "=0.2.0", features = [
 ] }
 # A node's queues to the main thread: the version bl-engine uses.
 rtrb = "0.4.0"
+# Loading a VST3 module: dlopen/LoadLibrary and its symbols.
+libloading = "0.8"
+# VST3 hosting (WP-2.7), pinned like CLAP's bindings: pure-Rust bindings
+# generated from the VST3 SDK's headers (MIT OR Apache-2.0); the C++ SDK
+# itself isn't compiled.
+vst3 = "0.3.0"
 # The host side of the plug-in kit's agent-commands extension: a plug-in's
 # commands, listed and run.
 lspk-plugin = { workspace = true, features = ["clap-host"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 
+# A plug-in editor's host window (WP-2.10): an HWND on Windows, and an X11
+# window on Linux and the other X11 Unixes (a Wayland session serves it
+# through XWayland); on macOS an AppKit panel, from the dependencies below.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
 [dev-dependencies]
-# The test plug-in, built from source; its cdylib is what the tests load.
+# The test plug-ins, built from source; their cdylibs are what the tests
+# load.
 bl-test-clap = { path = "../test-clap" }
+bl-test-vst3 = { path = "../test-vst3" }
 # Every block in the tests runs as a real-time section under the
 # allocation trap.
 bl-rt.workspace = true
+
+# Audio Unit hosting on macOS only (WP-2.8); on Windows and Linux the
+# `au` module is a stub and none of this is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+# The AudioToolbox bindings cpal already brings in (objc2-audio-toolbox),
+# so nothing new enters the build: `AUAudioUnit` hosts v2 and v3 units,
+# `AUParameter` is their parameter tree, `AudioComponentFindNext` finds one
+# by description, and `block2` is how its render block is called.
+objc2 = "0.6.5"
+objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AUAudioUnit",
+    "AUComponent",
+    "AUParameters",
+    "AudioComponent",
+    "AudioUnit",
+    "AudioUnitParameters",
+    "AudioUnitProperties",
+    "block2",
+    "objc2-core-audio-types",
+] }
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CoreAudioBaseTypes",
+    "bitflags",
+] }
+# A bus's format, and so its channel count.
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AVAudioFormat",
+    "AVAudioTypes",
+] }
+# A unit's own editor is a view controller in an AppKit window of its own
+# (WP-2.8's second part), and a CLAP editor that only embeds is a view in a
+# utility panel of Beatlayer's own (WP-2.10). AppKit is already built for
+# this app's windows.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSGraphics",
+    "NSPanel",
+    "NSResponder",
+    "NSView",
+    "NSViewController",
+    "NSWindow",
+] }
+# A unit's state is a property list before it becomes the set's bytes, and
+# its editor's view controller arrives from a run loop source.
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSBundle",
+    "NSData",
+    "NSDate",
+    "NSDictionary",
+    "NSError",
+    "NSGeometry",
+    "NSRunLoop",
+    "NSString",
+    "NSPropertyList",
+] }
+block2 = "0.6.2"
+
+# `mac_editor` opens host windows, which AppKit makes only on the main
+# thread; the test harness runs a `#[test]` on a worker thread, so it is a
+# binary with the harness off instead.
+[[test]]
+name = "mac_editor"
+harness = false
 
 [lints]
 workspace = true

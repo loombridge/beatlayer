@@ -12,6 +12,7 @@
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
+use bl_model::{MetronomeSettings, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,24 @@ pub const RETURN_TO_START: &str = "transport.return_to_start";
 pub const SET_LOOP: &str = "transport.set_loop";
 /// `transport.set_loop_enabled` (`bl-model`): the Arrangement Loop switch.
 pub const SET_LOOP_ENABLED: &str = "transport.set_loop_enabled";
+/// `transport.set_punch_in` (`bl-model`): the Punch-In switch.
+pub const SET_PUNCH_IN: &str = "transport.set_punch_in";
+/// `transport.set_punch_out` (`bl-model`): the Punch-Out switch.
+pub const SET_PUNCH_OUT: &str = "transport.set_punch_out";
+/// `transport.set_metronome_enabled` (`bl-model`): the Metronome switch.
+pub const SET_METRONOME_ENABLED: &str = "transport.set_metronome_enabled";
+/// `transport.set_metronome_count_in` (`bl-model`): Count-In in Metronome Settings.
+pub const SET_METRONOME_COUNT_IN: &str = "transport.set_metronome_count_in";
+/// `transport.set_metronome_sound` (`bl-model`): Sound in Metronome Settings.
+pub const SET_METRONOME_SOUND: &str = "transport.set_metronome_sound";
+/// `transport.set_metronome_rhythm` (`bl-model`): Rhythm in Metronome Settings.
+pub const SET_METRONOME_RHYTHM: &str = "transport.set_metronome_rhythm";
+/// `transport.set_metronome_only_while_recording` (`bl-model`): Hear Metronome Only While Recording.
+pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_only_while_recording";
+/// `transport.set_midi_overdub` (`bl-model`): Options ▸ MIDI Arrangement Overdub.
+pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
+/// `transport.set_recording` (`bl-engine`): whether transport is recording.
+pub const SET_RECORDING: &str = "transport.set_recording";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
 pub const SET_TEMPO: &str = "song.set_tempo";
 /// `song.set_time_signatures` (`bl-model`): the time-signature fields.
@@ -94,6 +113,85 @@ pub struct TransportState {
     /// Whether the song has one time signature throughout, so the
     /// time-signature fields can set it.
     pub time_signature_editable: bool,
+    /// The metronome settings: enabled, count-in, sound, rhythm, and only
+    /// while recording (WP-2.15).
+    pub metronome: MetronomeSettings,
+    /// Whether Arrangement Record is on, as the Control Bar's record button
+    /// shows it. While it is on and the song plays, armed tracks record.
+    pub arrangement_record: bool,
+    /// Whether a take is running: Arrangement Record is on and the armed
+    /// tracks' input is being written, so playback is past the count-in
+    /// and any punch-in point. It ends at the punch-out point or when
+    /// recording does.
+    pub take_running: bool,
+    /// Whether the count-in is sounding, before playback and recording
+    /// start.
+    pub counting_in: bool,
+    /// Whether Punch-In is on.
+    pub punch_in: bool,
+    /// Whether Punch-Out is on.
+    pub punch_out: bool,
+    /// Whether MIDI Arrangement Overdub is on.
+    pub midi_overdub: bool,
+    /// Whether Automation Arm is on (view state, not saved with the set).
+    pub automation_arm: bool,
+    /// The recording under way, from the moment recording starts until its
+    /// clips are made; null when none is.
+    pub recording: Option<RunningRecording>,
+    /// What the last recording that ended came to; null until one has
+    /// ended in this session.
+    pub last_recording: Option<RecordingReport>,
+    /// Whether Capture MIDI has notes to bring back: a monitoring MIDI
+    /// track was played since the last capture or recording, so `midi.capture`
+    /// runs and the Control Bar's button and Create menu item are enabled.
+    #[serde(default)]
+    pub capture_midi_ready: bool,
+}
+
+/// The recording under way, in `transport.state`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RunningRecording {
+    /// The armed tracks it records, audio and MIDI.
+    pub armed_tracks: Vec<TrackId>,
+    /// Frames and MIDI messages dropped so far because the disk or the main
+    /// thread fell behind.
+    pub dropped_frames: u64,
+    /// The Session slots it records into (WP-3.11); empty for an
+    /// Arrangement recording.
+    #[serde(default)]
+    pub session_slots: Vec<crate::session_record::RecordingSlot>,
+}
+
+/// A file a recording wrote.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RecordedFileReport {
+    /// The track it holds.
+    pub track: TrackId,
+    /// The file's path.
+    pub path: String,
+    /// The frames written.
+    pub frames: u64,
+    /// Its channels.
+    pub channels: usize,
+}
+
+/// What the last recording that ended came to, in `transport.state`: the
+/// same facts the Status Bar showed when it ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RecordingReport {
+    /// Why it failed, if it did: it made no clips. Null when it made its
+    /// clips, or when nothing was played.
+    pub error: Option<String>,
+    /// Whether it made clips in the set.
+    pub clips_made: bool,
+    /// The audio files it wrote, one per armed audio track that was played.
+    pub files: Vec<RecordedFileReport>,
+    /// The MIDI tracks that received notes or controllers.
+    pub midi_tracks: Vec<TrackId>,
+    /// Frames and MIDI messages dropped: the recording ended early.
+    pub dropped_frames: u64,
+    /// Frames the audio was moved earlier to line up with what was played.
+    pub delay_frames: i64,
 }
 
 /// Adds the transport query to a registry.
@@ -108,8 +206,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Reports what the Control Bar's transport section shows: whether the song \
                  plays, the play position and the insert marker (in ticks from 1.1.1, and the \
                  Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, \
-                 length, and switch, the tempo, and the time signature, and whether the audio \
-                 engine runs so the transport can play. Changes nothing. Use it to check where \
+                 length, and switch, the tempo, and the time signature, the metronome, \
+                 Arrangement Record and whether a take is running or the count-in is \
+                 sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm, \
+                 the recording under way (its armed tracks and dropped frames) and what the \
+                 last recording came to, and whether the audio engine runs so the transport \
+                 can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \
                  the song is before and after `transport.play`, `transport.stop`, \
                  `transport.locate`, or `transport.set_loop`.",
             )

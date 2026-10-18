@@ -6,8 +6,9 @@
 //! plug-in may call it from its audio thread.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 
+use bl_engine::ParamValue;
 use clack_extensions::audio_ports::{AudioPortRescanFlags, HostAudioPorts, HostAudioPortsImpl};
 use clack_extensions::gui::{GuiSize, HostGui, HostGuiImpl};
 use clack_extensions::latency::{HostLatency, HostLatencyImpl};
@@ -18,6 +19,8 @@ use clack_extensions::params::{
 };
 use clack_extensions::state::{HostState, HostStateImpl};
 use clack_host::prelude::*;
+
+use crate::drive::Driver;
 
 /// Beatlayer as a CLAP host.
 pub(crate) struct Host;
@@ -49,6 +52,23 @@ pub(crate) struct Shared {
     pub(crate) flush: AtomicBool,
     /// Its editor's window closed itself.
     pub(crate) editor_closed: AtomicBool,
+    /// It asked its editor's window to become a size (CLAP's
+    /// `request_resize`): the width in the high 32 bits and the height in
+    /// the low 32; 0 is nothing asked (WP-2.10).
+    pub(crate) resize_request: AtomicU64,
+}
+
+impl Shared {
+    /// The editor size the plug-in asked for, taking the ask (WP-2.10);
+    /// `None` when it asked for nothing.
+    pub(crate) fn take_resize_request(&self) -> Option<(u32, u32)> {
+        let packed = self.resize_request.swap(0, Relaxed);
+        if packed == 0 {
+            return None;
+        }
+        let axis = |half: u64| u32::try_from(half).unwrap_or(u32::MAX);
+        Some((axis(packed >> 32), axis(packed & u64::from(u32::MAX))))
+    }
 }
 
 impl SharedHandler<'_> for Shared {
@@ -82,8 +102,17 @@ impl HostParamsImplShared for Shared {
 impl HostGuiImpl for Shared {
     fn resize_hints_changed(&self) {}
 
-    fn request_resize(&self, _new_size: GuiSize) -> Result<(), HostError> {
-        // A floating window resizes itself; embedded windows are WP-2.10's.
+    fn request_resize(&self, new_size: GuiSize) -> Result<(), HostError> {
+        // A floating window resizes itself; an embedded one asks the host,
+        // which resizes its window on the main thread's next look
+        // (WP-2.10). A window with no size is refused.
+        if new_size.width == 0 || new_size.height == 0 {
+            return Err(HostError::Message("a window must have a size"));
+        }
+        self.resize_request.store(
+            (u64::from(new_size.width) << 32) | u64::from(new_size.height),
+            Relaxed,
+        );
         Ok(())
     }
 
@@ -150,6 +179,9 @@ pub(crate) struct ProcessorData {
     pub(crate) defaults: Vec<(u32, f64)>,
     /// The plug-in's parameters extension, for flushing while switched off.
     pub(crate) params: Option<PluginParams>,
+    /// Its parameters' automation and modulation, played into it (the
+    /// modulation spec, R10).
+    pub(crate) drive: Driver,
 }
 
 impl ProcessorData {
@@ -159,6 +191,24 @@ impl ProcessorData {
             .binary_search_by_key(&id, |(id, _)| *id)
             .ok()
             .map(|i| self.defaults[i].1)
+    }
+
+    /// Takes a change into the controls the drive follows, and returns the
+    /// value to send the plug-in.
+    pub(crate) fn resolve(&mut self, id: u32, value: ParamValue) -> Option<f64> {
+        let value = match value {
+            ParamValue::Set(value) => value,
+            ParamValue::Default => self.default_of(id)?,
+        };
+        self.drive.set_control(id, value);
+        Some(value)
+    }
+
+    /// The same, but nothing for a parameter the block drives: its values
+    /// come from automation and modulation, on top of the control.
+    pub(crate) fn resolve_undriven(&mut self, id: u32, value: ParamValue) -> Option<f64> {
+        let value = self.resolve(id, value)?;
+        (!self.drive.is_driven(id)).then_some(value)
     }
 }
 

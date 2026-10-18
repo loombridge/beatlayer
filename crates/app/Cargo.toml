@@ -33,11 +33,13 @@ bl-ui.workspace = true
 # with the features the egui spike (WP-0.8b) proved against deny.toml:
 # no egui default fonts (the UI bundles its own), and winit's Wayland
 # decorations without title text (the titled variant pulls in an
-# unmaintained crate).
+# unmaintained crate). `links` opens a link in the system's browser, such
+# as the stem separation packages' project pages (WP-9.1).
 egui = { version = "=0.36.2", default-features = false }
 egui-winit = { version = "=0.36.2", default-features = false, features = [
     "accesskit",
     "clipboard",
+    "links",
     "wayland",
     "x11",
 ] }
@@ -117,7 +119,13 @@ publisher = "Loombridge"
 description = "An open-source digital audio workstation."
 copyright = "Copyright © 2026 the Beatlayer contributors. Licensed under GPL-3.0-or-later."
 category = "Music"
-binaries = [{ path = "beatlayer", main = true }, { path = "bl-cli" }]
+# beatlayer-scan is the plug-in scanner's child process (crates/plugin-host),
+# which the app looks for beside its own executable.
+binaries = [
+    { path = "beatlayer", main = true },
+    { path = "bl-cli" },
+    { path = "beatlayer-scan" },
+]
 icons = [
     "packaging/icons/icon.icns",
     "packaging/icons/icon.ico",

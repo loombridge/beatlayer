@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/beatlayer.png" alt="Beatlayer's icon" width="160" height="160">
-</p>
-
-<h1 align="center">Beatlayer</h1>
+<img src="assets/beatlayer.png" alt="Beatlayer" width="100%">
 
 <p align="center">An open-source, clean-room reimplementation of Ableton Live, rebuilt in pure Rust. If you know Ableton, you know Beatlayer.</p>
 
@@ -12,7 +8,14 @@ Beatlayer is in early development: the playback core (Phase 1 of 10) is being bu
 
 ## Documents
 
-The roadmap, the architecture, the build plan, and the parity plan with Ableton Live 12 will be published here before the first public release. How Beatlayer learns from Live without using its code or content is in [CONTRIBUTING.md](CONTRIBUTING.md#building-without-abletons-code).
+- [Roadmap](docs/01-roadmap.md): the phases and milestones, from alpha 0.1 to 1.0.
+- [Architecture](docs/02-architecture.md): the engine, the document model, plug-in hosting and the UI.
+- [Build plan](docs/03-build-plan.md): every work package, with its acceptance criteria and status.
+- [Parity matrix](docs/04-parity-matrix.md): Live 12's features and the milestone that brings each one.
+- [Improvements over Live](docs/05-improvements.md).
+- [Behaviour specs](docs/specs) and the [UI parity reference](docs/ui-parity).
+
+How Beatlayer learns from Live without using its code or content is in [CONTRIBUTING.md](CONTRIBUTING.md#building-without-abletons-code).
 
 ## Develop
 

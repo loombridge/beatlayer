@@ -8,7 +8,15 @@
 all-features = true
 
 [advisories]
-ignore = []
+ignore = [
+    # zvariant, zbus_names and zvariant_derive are unmaintained: they were
+    # merged into zbus 6. They aren't vulnerabilities. They reach us on Linux
+    # through egui-winit's accesskit (accesskit_unix needs zbus 5). Remove
+    # these when accesskit moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+]
 
 [licenses]
 confidence-threshold = 0.93
@@ -33,6 +41,10 @@ allow = [
     # Weak copyleft that can be combined with GPL-3.0.
     "MPL-2.0",
     "LGPL-2.1-or-later",
+    # The mp3lame crates (WP-2.26) declare the deprecated SPDX id
+    # "LGPL-3.0"; cargo-deny matches GNU licences pedantically, so the
+    # deprecated form needs its own entry and doesn't match the two below.
+    "LGPL-3.0",
     "LGPL-3.0-only",
     "LGPL-3.0-or-later",
     # Strong copyleft that can be combined with GPL-3.0-or-later.

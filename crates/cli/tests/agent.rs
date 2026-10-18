@@ -805,7 +805,7 @@ impl EngineHost {
     }
 }
 
-/// An agent reads the Contour's spectrum and the Squeeze's gain reduction
+/// An agent reads the EQ Eight's spectrum and the Compressor's gain reduction
 /// by their device IDs, as the engine published them after the last block,
 /// at any block size (the device framework spec, R26 and R28).
 #[test]
@@ -827,14 +827,14 @@ fn an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id
                 { "command": "track.create",
                   "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
                 device(0, "Tone", bl_engine::nodes::TEST_TONE),
-                device(1, "Contour", bl_devices::eq::EQ),
-                device(2, "Squeeze", bl_devices::compressor::COMPRESSOR),
+                device(1, "EQ Eight", bl_devices::eq::EQ),
+                device(2, "Compressor", bl_devices::compressor::COMPRESSOR),
                 { "command": "device.set_param",
                   "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
                 { "command": "device.set_param",
                   "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
                 { "command": "device.set_param",
-                  "args": { "device": {"$ref": "Squeeze"}, "param": 0, "value": -30.0 } },
+                  "args": { "device": {"$ref": "Compressor"}, "param": 0, "value": -30.0 } },
             ] }),
         );
         let ids: Vec<_> = {
@@ -1686,7 +1686,7 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
         json!({ "commands": [
             { "command": "device.add", "args": { "device": {
                 "kind": { "native": { "device_type": "beatlayer.mosaic" } },
-                "name": "Mosaic", "role": "instrument" } } },
+                "name": "Sampler", "role": "instrument" } } },
         ] }),
     );
     let device = {
@@ -2354,7 +2354,7 @@ fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
 }
 
 // Spec: auto-filter R15, device-framework R14 (WP-5.20): an agent inserts
-// Sweep by its type, sets its parameters by ID, including the two menu
+// Auto Filter by its type, sets its parameters by ID, including the two menu
 // options, and reads every one back with its descriptor.
 #[test]
 fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -2369,15 +2369,15 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Sweep"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Auto Filter"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Sweep", "commands": [
+        json!({ "label": "Add Auto Filter", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Sweep"}, "name": "Sweep",
+                        "device": { "id": {"$new": "Auto Filter"}, "name": "Auto Filter",
                                     "kind": { "native": { "device_type": AUTO_FILTER } },
                                     "enabled": true, "params": [] } } },
             set(TYPE, 9.0),
@@ -2387,7 +2387,7 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
             set(HI_QUALITY, 1.0),
         ] }),
     );
-    let device = reply["ids"]["Sweep"].clone();
+    let device = reply["ids"]["Auto Filter"].clone();
     let read = call(
         &mut client,
         "run",
@@ -2424,7 +2424,7 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
 }
 
 // Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
-// agent inserts Veer by its type with its MIDI sidechain, sets its
+// agent inserts Shifter by its type with its MIDI sidechain, sets its
 // parameters by ID, points its MIDI source at a MIDI track and reads both
 // back; the source goes when that track does.
 #[test]
@@ -2440,11 +2440,11 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Veer", "commands": [
+        json!({ "label": "Add Shifter", "commands": [
             { "command": "device.add",
               "args": { "track": audio,
                         "device": { "kind": { "native": { "device_type": SHIFTER } },
-                                    "name": "Veer", "role": "audio_effect",
+                                    "name": "Shifter", "role": "audio_effect",
                                     "midi_sidechain": true } } },
         ] }),
     );
@@ -2456,7 +2456,7 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
     call(
         &mut client,
         "run",
-        json!({ "label": "Set Veer", "commands": [
+        json!({ "label": "Set Shifter", "commands": [
             set(MODE, 1.0),
             set(SHIFT, 123.0),
             set(COARSE, -7.0),
@@ -2517,9 +2517,9 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
     assert!(refused.ok().is_err());
 }
 
-// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
+// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Drum Sampler,
 // reads its parameters with its two menu options, switches one by ID, and
-// swaps it to Snapshot, by command ID.
+// swaps it to Simpler, by command ID.
 #[test]
 fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id() {
     use bl_devices::drum_sampler::{ENV_FOLLOWS_PITCH, PER_NOTE_BEND, drum_sampler_type};
@@ -2608,11 +2608,11 @@ fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id
         .iter()
         .find(|p| p["name"] == "Mode")
         .unwrap();
-    assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
+    assert_eq!(mode["value"], json!(1.0), "Simpler in One-Shot mode");
 }
 
 // Spec: beat-repeat R14, device-framework R14 (WP-5.26): an agent inserts
-// Stutter by its type, sets its parameters by ID and reads every one back
+// Beat Repeat by its type, sets its parameters by ID and reads every one back
 // with its descriptor.
 #[test]
 fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -2625,15 +2625,15 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Stutter"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Beat Repeat"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Stutter", "commands": [
+        json!({ "label": "Add Beat Repeat", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Stutter"}, "name": "Stutter",
+                        "device": { "id": {"$new": "Beat Repeat"}, "name": "Beat Repeat",
                                     "kind": { "native": { "device_type": BEAT_REPEAT } },
                                     "enabled": true, "params": [] } } },
             set(INTERVAL, 3.0),
@@ -2643,7 +2643,7 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
             set(REPEAT, 1.0),
         ] }),
     );
-    let device = reply["ids"]["Stutter"].clone();
+    let device = reply["ids"]["Beat Repeat"].clone();
     let read = call(
         &mut client,
         "run",
@@ -2672,7 +2672,7 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
 // Spec: filter-delay R9, grain-delay R8, alignment-delay R8 (WP-5.25): an
 // agent inserts the three delays by command ID, sets parameters by ID,
 // reads them back with their descriptors, saves the set and reopens it
-// with every value, and moves Scatter's X–Y axis as one undo step.
+// with every value, and moves Grain Delay's X–Y axis as one undo step.
 #[test]
 fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
     use bl_devices::alignment_delay::{self, ALIGNMENT_DELAY};
@@ -2804,7 +2804,7 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
 }
 
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
-// (WP-5.24): an agent adds Degrade, Crush and Wax, sets a parameter of each
+// (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved
 // and reopened.
 #[test]
@@ -3274,7 +3274,7 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
     );
 }
 
-// Spec: multisampler R63. An agent edits the samples of Snapshot and of a
+// Spec: multisampler R63. An agent edits the samples of Simpler and of a
 // multisampler by command ID, reverts and converts them, and reads each
 // result back through the query tool's `device` object.
 #[test]
@@ -3328,7 +3328,7 @@ fn an_agent_edits_a_sample_and_reads_the_edits_back() {
         document.track(track).unwrap().devices().next().unwrap().id
     };
     let snapshot = add(&mut client, "Snap", "beatlayer.snapshot");
-    let mosaic = add(&mut client, "Mosaic", "beatlayer.mosaic");
+    let mosaic = add(&mut client, "Sampler", "beatlayer.mosaic");
     one(
         &mut client,
         "device.load_sample",
@@ -3357,7 +3357,7 @@ fn an_agent_edits_a_sample_and_reads_the_edits_back() {
         .list[0]
         .id;
 
-    // Edits by ID: Snapshot's list reads back under `saved.sample_edits`, the
+    // Edits by ID: Simpler's list reads back under `saved.sample_edits`, the
     // layer's under its own `edits`.
     let cut = one(
         &mut client,
@@ -3454,7 +3454,7 @@ fn an_agent_edits_a_sample_and_reads_the_edits_back() {
     );
     assert_eq!(
         read["layers"]["count"], 1,
-        "Snapshot is a multisampler of one layer now"
+        "Simpler is a multisampler of one layer now"
     );
 }
 
@@ -3609,8 +3609,8 @@ fn an_agent_auto_warps_and_fixes_a_downbeat_by_command_id() {
 }
 
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
-// R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
-// parameters, sets some by ID, shows Singe's expanded part, reads each
+// R1, R10 and R12 (WP-5.23): an agent adds Saturator, Overdrive and Dynamic Tube, reads their
+// parameters, sets some by ID, shows Saturator's expanded part, reads each
 // display's curve, and finds the devices and values again when the saved
 // set is opened.
 #[test]
@@ -3698,7 +3698,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
         json!(80.0)
     );
 
-    // Singe has an expanded part; Grit and Valve have none.
+    // Saturator has an expanded part; Overdrive and Dynamic Tube have none.
     let expand = |client: &mut Client<InProcess>, device: &Value| {
         call(
             client,
@@ -3766,7 +3766,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
 }
 
 // Spec: multiband-dynamics R18, device-framework R14 (WP-5.22): an agent
-// inserts Triband by its type, sets its parameters by ID, a band's among
+// inserts Multiband Dynamics by its type, sets its parameters by ID, a band's among
 // them, and reads every one back with its descriptor.
 #[test]
 fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -3781,15 +3781,15 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Triband"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Multiband Dynamics"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Triband", "commands": [
+        json!({ "label": "Add Multiband Dynamics", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Triband"}, "name": "Triband",
+                        "device": { "id": {"$new": "Multiband Dynamics"}, "name": "Multiband Dynamics",
                                     "kind": { "native": { "device_type": MULTIBAND_DYNAMICS } },
                                     "enabled": true, "params": [] } } },
             set(LOW_ON, 0.0),
@@ -3798,7 +3798,7 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
             set(band_param(HIGH, SOLO), 1.0),
         ] }),
     );
-    let device = reply["ids"]["Triband"].clone();
+    let device = reply["ids"]["Multiband Dynamics"].clone();
     let read = call(
         &mut client,
         "run",

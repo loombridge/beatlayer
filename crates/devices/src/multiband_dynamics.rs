@@ -1,4 +1,4 @@
-//! Triband, the native multiband dynamics device (WP-5.22; the
+//! Multiband Dynamics, the native multiband dynamics device (WP-5.22; the
 //! multiband-dynamics spec): up to three bands split by Linkwitz-Riley
 //! crossovers, each with an Above and a Below threshold and ratio, so a band
 //! compresses or expands, downward or upward, on each side of its level.
@@ -28,7 +28,7 @@ use bl_model::{
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Triband's device type.
+/// Multiband Dynamics's device type.
 pub const MULTIBAND_DYNAMICS: &str = "beatlayer.triband";
 
 /// Low: whether the low band exists. With High off too, one band remains.
@@ -96,7 +96,7 @@ const FLOOR_DB: f64 = -120.0;
 const MIN_GAIN_DB: f64 = -120.0;
 const MAX_BOOST_DB: f64 = 24.0;
 
-/// The RMS detector's averaging time, in milliseconds (as Squeeze's).
+/// The RMS detector's averaging time, in milliseconds (as Compressor's).
 const RMS_MS: f64 = 10.0;
 
 /// The thresholds' range, in dB.
@@ -153,13 +153,17 @@ pub fn multiband_dynamics_type() -> DeviceType {
     for band in 0..BANDS {
         params.extend(band_descriptors(band));
     }
-    DeviceType::native(MULTIBAND_DYNAMICS, "Triband", DeviceRole::AudioEffect)
-        .with_sidechain()
-        .with_description(
-            DeviceDescription::new(params)
-                .with_layout(layout())
-                .with_views(&VIEWS),
-        )
+    DeviceType::native(
+        MULTIBAND_DYNAMICS,
+        "Multiband Dynamics",
+        DeviceRole::AudioEffect,
+    )
+    .with_sidechain()
+    .with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_views(&VIEWS),
+    )
 }
 
 /// One band's descriptors, in [`ACTIVE`] to [`BELOW_RELEASE`] order.
@@ -277,7 +281,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Triband to `registry`.
+/// Adds Multiband Dynamics to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, multiband_dynamics_type(), |_, config| {
         Triband::new(config)
@@ -448,7 +452,7 @@ struct Plan {
     below: Side,
 }
 
-/// Triband's audio-thread half.
+/// Multiband Dynamics's audio-thread half.
 pub struct Triband {
     rate: f64,
     /// The crossovers' frequencies now, so they're redesigned only when

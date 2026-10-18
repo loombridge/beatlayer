@@ -1,4 +1,4 @@
-//! Trident, the filter delay (WP-5.25; the filter delay spec): three lines
+//! Filter Delay, the filter delay (WP-5.25; the filter delay spec): three lines
 //! with their inputs, On switches, bands, times, Pan and Volume, one
 //! Feedback and one Dry. Every block runs as a real-time section under the
 //! allocation trap.

@@ -1,6 +1,6 @@
 //! What the dynamics devices share: the time-constant step, the level in
 //! dB, the static curve with its knee, look-ahead, and the sidechain's
-//! filter. Squeeze's gain computer and SC Filter, used by Shutter and Bond
+//! filter. Compressor's gain computer and SC Filter, used by Gate and Glue Compressor
 //! too.
 
 use bl_model::param::db_to_gain;

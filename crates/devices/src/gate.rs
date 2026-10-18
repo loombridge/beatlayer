@@ -1,4 +1,4 @@
-//! Shutter, the native gate (WP-5.21; the gate spec): Threshold and Return
+//! Gate, the native gate (WP-5.21; the gate spec): Threshold and Return
 //! (the hysteresis between opening and closing), Attack, Hold, Release,
 //! Floor, Flip, Lookahead, and the sidechain section: the framework's
 //! External, Source, Mix, SC Gain and Sidechain Listen, and the device's own
@@ -30,7 +30,7 @@ use crate::dynamics::{LOOKAHEAD_SECONDS, SC_TYPES, ScFilter, level_db, lookahead
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 use crate::sections::REFRESH_FRAMES;
 
-/// Shutter's device type.
+/// Gate's device type.
 pub const GATE: &str = "beatlayer.shutter";
 
 /// Threshold: the level that opens the gate, in dB.
@@ -62,7 +62,7 @@ pub const SC_RES: ParamId = ParamId(11);
 /// peaks since the last block, all in dB.
 const DISPLAY_VALUES: usize = 3;
 
-/// Shutter's device type.
+/// Gate's device type.
 #[must_use]
 pub fn gate_type() -> DeviceType {
     let params = vec![
@@ -112,7 +112,7 @@ pub fn gate_type() -> DeviceType {
             .logarithmic()
             .describe("The sidechain EQ's resonance."),
     ];
-    DeviceType::native(GATE, "Shutter", DeviceRole::AudioEffect)
+    DeviceType::native(GATE, "Gate", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
@@ -153,14 +153,14 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Shutter to `registry`.
+/// Adds Gate to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, gate_type(), |device, config| {
         Shutter::new(device, config)
     });
 }
 
-/// Shutter's audio-thread half.
+/// Gate's audio-thread half.
 pub struct Shutter {
     rate: f64,
     /// The most samples of lookahead any choice asks for.

@@ -1,4 +1,4 @@
-//! Plumb, the alignment delay (WP-5.25; the alignment delay spec): a
+//! Align Delay, the alignment delay (WP-5.25; the alignment delay spec): a
 //! whole-sample delay for each side, set in milliseconds, in samples, or as
 //! the distance sound travels, with no latency reported.
 
@@ -10,7 +10,7 @@ use bl_model::{
 
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
-/// Plumb's device type.
+/// Align Delay's device type.
 pub const ALIGNMENT_DELAY: &str = "bl.device.plumb";
 
 /// Delay Mode: Time, Samples, or Distance.
@@ -63,7 +63,7 @@ pub fn speed_of_sound(celsius: f64) -> f64 {
     SOUND_AT_ZERO + SOUND_PER_DEGREE * celsius
 }
 
-/// Plumb's type: Beatlayer's own name and look, Live's modes (the alignment
+/// Align Delay's type: Beatlayer's own look, Live's modes (the alignment
 /// delay spec).
 #[must_use]
 pub fn alignment_delay_type() -> DeviceType {
@@ -129,7 +129,7 @@ pub fn alignment_delay_type() -> DeviceType {
             .describe("The side's delay as the distance in feet sound covers in that time."),
         ]);
     }
-    DeviceType::native(ALIGNMENT_DELAY, "Plumb", DeviceRole::AudioEffect)
+    DeviceType::native(ALIGNMENT_DELAY, "Align Delay", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -162,12 +162,12 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Plumb to `registry`.
+/// Adds Align Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, alignment_delay_type(), Plumb::new);
 }
 
-/// Plumb: one delay line a channel.
+/// Align Delay: one delay line a channel.
 struct Plumb {
     lines: Vec<DelayLine>,
     max: usize,

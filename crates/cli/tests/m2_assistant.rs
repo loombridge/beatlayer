@@ -630,7 +630,7 @@ fn bass() -> Notes {
 }
 
 fn chords() -> Notes {
-    // Am, F, C and G, a bar each, over and over: Cascade's default patch
+    // Am, F, C and G, a bar each, over and over: Drift's default patch
     // dies away within a few seconds, so a held chord would fall silent.
     let chords: [[u8; 3]; 4] = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
     (0..BARS)
@@ -695,7 +695,7 @@ fn scripted_replies() -> Vec<Reply> {
             json!({
                 "device": {
                     "kind": { "native": { "device_type": POLYSYNTH } },
-                    "name": "Cascade",
+                    "name": "Drift",
                     "role": "instrument",
                 },
                 "track": { "$ref": key },
@@ -713,7 +713,7 @@ fn scripted_replies() -> Vec<Reply> {
         calls(clips),
         answer(
             "I set the tempo to 96 BPM and made four MIDI tracks, Drums, Bass, Chords and Lead, \
-             each with a Cascade and a 16-bar clip. It is all one undo step.",
+             each with a Drift and a 16-bar clip. It is all one undo step.",
         ),
     ]
 }

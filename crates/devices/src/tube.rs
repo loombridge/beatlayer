@@ -1,4 +1,4 @@
-//! Valve, the native tube distortion (WP-5.23; the tube distortion spec):
+//! Dynamic Tube, the native tube distortion (WP-5.23; the tube distortion spec):
 //! three tube models, a Tone control that steers where the distortion falls,
 //! a Bias that pushes the signal into the curve, and an envelope that moves
 //! the Bias with the input's level.
@@ -28,7 +28,7 @@ use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::saturator::soft_knee;
 use crate::sections::Biquad;
 
-/// Valve's device type.
+/// Dynamic Tube's device type.
 pub const TUBE: &str = "beatlayer.valve";
 
 /// Model: A, B or C.
@@ -81,7 +81,7 @@ fn operating_point(model: usize, bias: f32) -> f32 {
     OFFSETS[model] + bias.clamp(0.0, 1.0)
 }
 
-/// The Valve device type.
+/// The Dynamic Tube device type.
 #[must_use]
 pub fn tube_type() -> DeviceType {
     let params = vec![
@@ -131,19 +131,19 @@ pub fn tube_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(TUBE, "Valve", DeviceRole::AudioEffect).with_description(
+    DeviceType::native(TUBE, "Dynamic Tube", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
             .with_menu_options(&[HI_QUALITY]),
     )
 }
 
-/// Adds Valve to `registry`.
+/// Adds Dynamic Tube to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, tube_type(), make);
 }
 
-/// Makes a Valve for `device`'s values and `config`'s rate, channels and
+/// Makes a Dynamic Tube for `device`'s values and `config`'s rate, channels and
 /// block size. Every buffer is made here, off the audio thread, and its
 /// latency comes from the set's Hi-Quality value, so it is reported before
 /// the device first runs.
@@ -152,7 +152,7 @@ pub fn make(device: &Device, config: &NodeConfig) -> Valve {
     Valve::new(device, config)
 }
 
-/// Valve's audio-thread half.
+/// Dynamic Tube's audio-thread half.
 pub struct Valve {
     rate: f64,
     /// The input's level, one follower per channel.

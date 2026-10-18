@@ -1,4 +1,4 @@
-//! Cascade's LFO, modulation routes and MPE settings through the agent API
+//! Drift's LFO, modulation routes and MPE settings through the agent API
 //! (WP-2.17, part 2): an agent adds the instrument to a track and reaches
 //! every LFO control, every modulation source, destination and amount, and
 //! the MPE settings by command.
@@ -66,7 +66,7 @@ fn every_lfo_route_and_mpe_setting_is_reachable_by_command() {
         json!({
             "device": {
                 "kind": { "native": { "device_type": POLYSYNTH } },
-                "name": "Cascade",
+                "name": "Drift",
                 "role": "instrument",
             },
             "track": track,

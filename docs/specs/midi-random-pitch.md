@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Dice moves some of the notes that reach it by a random number of steps. Chance says how often a note moves, as a dry/wet balance for the randomness. Choices is how many different distances a note may move by and Interval is the step between them, so together they set how far a note can go. Mode Random picks a distance with no fixed order; Mode Alt goes through the distances in turn. Sign says whether notes move up (Add), down (Sub), or either way (Bi). Each note ends on the key it was started on, and its expressions follow it.
+Random moves some of the notes that reach it by a random number of steps. Chance says how often a note moves, as a dry/wet balance for the randomness. Choices is how many different distances a note may move by and Interval is the step between them, so together they set how far a note can go. Mode Random picks a distance with no fixed order; Mode Alt goes through the distances in turn. Sign says whether notes move up (Add), down (Sub), or either way (Bi). Each note ends on the key it was started on, and its expressions follow it.
 
-Beatlayer's own name for the device is Dice; its look is the device framework's generic controls. Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch, which would keep moved notes in the clip's scale, is carried and does nothing until Phase 6's scales. This spec covers the device only.
+The device takes Live's name, Random; its look is the device framework's generic controls. Random choices come from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch, which would keep moved notes in the clip's scale, is carried and does nothing until Phase 6's scales. This spec covers the device only.
 
 ## Sources
 
@@ -29,8 +29,8 @@ Beatlayer's own name for the device is Dice; its look is the device framework's 
 - **R5.** Chance is the share of notes that move, from 0 to 100 per cent; each note moves or not by its own draw. (S1)
 - **R6.** The draws come from a generator seeded from the device, so two renders of one set are bit for bit the same. (S1, S4)
 - **R7.** Each note's note-off, and each of its expressions, goes to the key its note-on went to; a moved note that would leave the keyboard is folded by octaves back onto it. (S2)
-- **R8.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Dice/`. (S3)
-- **R9.** Every parameter is automatable and has a description, and nothing Dice does on the audio thread allocates, locks, or blocks. (S3, S4)
+- **R8.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Random/`. (S3)
+- **R9.** Every parameter is automatable and has a description, and nothing Random does on the audio thread allocates, locks, or blocks. (S3, S4)
 
 ## Tests
 
@@ -48,7 +48,7 @@ Beatlayer's own name for the device is Dice; its look is the device framework's 
 
 ## Defaults, ranges and details
 
-- A new Dice starts at Chance 100 %, Choices 24, Interval 1 semitone, Mode Random, Sign Add and Use Current Scale off. The manual states only the Mode and Sign defaults; the rest are Beatlayer's.
+- A new Random starts at Chance 100 %, Choices 24, Interval 1 semitone, Mode Random, Sign Add and Use Current Scale off. The manual states only the Mode and Sign defaults; the rest are Beatlayer's.
 - Interval runs from 1 to 24 semitones. The manual doesn't give its range.
 - Whether a distance of 0 is among the choices is not stated; here the distances are 1 to Choices times Interval, and "0" is a note Chance left alone.
 - The three direction lights are not drawn: they need the engine to publish a device's display state.

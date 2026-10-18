@@ -1,13 +1,13 @@
 # The bit-crusher
 
 - **Status:** implemented
-- **Work packages:** WP-5.24 (part 2; the equivalent of Redux)
+- **Work packages:** WP-5.24 (part 2; Redux)
 - **Parity-matrix row:** Audio effects: Redux, to Live's current version
 - **Checked against:** Live 12's reference manual, sections 29.30 to 29.30.2
 
 ## The behaviour
 
-Crush is Beatlayer's equivalent of Live's Redux. It lowers the sample rate and the bit depth of the signal. The rate reduction holds the signal at a lower rate, so its images appear around multiples of that rate; a jitter on its clock roughens it and widens the stereo image, and a low-pass filter before and one after can narrow the signal that is held and soften the images. The bit reduction rounds the signal to a number of levels, with a shape that makes the steps finer for quiet parts and a DC shift that moves where the rounding falls. Dry/Wet mixes the result with the input.
+Redux is Beatlayer's version of Live's Redux. It lowers the sample rate and the bit depth of the signal. The rate reduction holds the signal at a lower rate, so its images appear around multiples of that rate; a jitter on its clock roughens it and widens the stereo image, and a low-pass filter before and one after can narrow the signal that is held and soften the images. The bit reduction rounds the signal to a number of levels, with a shape that makes the steps finer for quiet parts and a DC shift that moves where the rounding falls. Dry/Wet mixes the result with the input.
 
 This spec covers the device's behaviour. The device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md).
 

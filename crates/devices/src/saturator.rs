@@ -1,4 +1,4 @@
-//! Singe, the native saturator (WP-5.23; the saturator spec): a waveshaper
+//! Saturator, the native saturator (WP-5.23; the saturator spec): a waveshaper
 //! with eight curves, a Color section that tilts what the shaper hears and
 //! undoes it afterwards, a post-clip stage, and an optional oversampled
 //! path.
@@ -26,7 +26,7 @@ use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 use crate::sections::Biquad;
 
-/// Singe's device type.
+/// Saturator's device type.
 pub const SATURATOR: &str = "beatlayer.singe";
 
 /// Curve: one of [`CURVES`].
@@ -237,7 +237,7 @@ impl Shaper {
     }
 }
 
-/// The Singe device type.
+/// The Saturator device type.
 #[must_use]
 pub fn saturator_type() -> DeviceType {
     let percent = |id, name: &str, default| {
@@ -350,19 +350,19 @@ pub fn saturator_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(SATURATOR, "Singe", DeviceRole::AudioEffect).with_description(
+    DeviceType::native(SATURATOR, "Saturator", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
             .with_menu_options(&[HI_QUALITY, PRE_DC]),
     )
 }
 
-/// Adds Singe to `registry`.
+/// Adds Saturator to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, saturator_type(), make);
 }
 
-/// Makes a Singe for `device`'s values and `config`'s rate, channels and
+/// Makes a Saturator for `device`'s values and `config`'s rate, channels and
 /// block size. Every buffer is made here, off the audio thread, and its
 /// latency comes from the set's Hi-Quality value, so it is reported before
 /// the device first runs.
@@ -393,7 +393,7 @@ fn set_color(filters: &mut [Biquad; 2], params: &ParamBank, i: usize, sign: f64,
     filters[1].c = coeffs(Type::Peak, ramp(FREQUENCY), high, q, rate);
 }
 
-/// Singe's audio-thread half.
+/// Saturator's audio-thread half.
 pub struct Singe {
     rate: f64,
     channels: [Channel; 2],

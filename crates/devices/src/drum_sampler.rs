@@ -1,4 +1,4 @@
-//! Strike, the one-shot drum sampler (WP-5.18; the one-shot drum sampler
+//! Drum Sampler, the one-shot drum sampler (WP-5.18; the one-shot drum sampler
 //! spec): one sample played from a start and a length through an
 //! attack-hold-decay envelope, with a playback-effect section of nine
 //! effects, a filter, and a global section whose one modulation route moves
@@ -202,7 +202,7 @@ const NOISE_MIN_HZ: f64 = 200.0;
 const NOISE_RATIO: f64 = 100.0;
 const NOISE_PEAK: f32 = 0.5;
 
-/// The Strike device type.
+/// The Drum Sampler device type.
 #[must_use]
 pub fn drum_sampler_type() -> DeviceType {
     let time = |id, name: &str, default: f64| {
@@ -318,7 +318,7 @@ pub fn drum_sampler_type() -> DeviceType {
              shaped over the same part of it.",
         ),
     ];
-    DeviceType::native(DRUM_SAMPLER, "Strike", DeviceRole::Instrument).with_description(
+    DeviceType::native(DRUM_SAMPLER, "Drum Sampler", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
             .with_menu_options(&[PER_NOTE_BEND, ENV_FOLLOWS_PITCH]),
@@ -390,7 +390,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Strike to `registry`.
+/// Adds Drum Sampler to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, drum_sampler_type(), |_, config| {
         DrumSampler::new(config)
@@ -764,7 +764,7 @@ fn one_pole(hz: f64, rate: f64) -> f32 {
     (1.0 - (-TAU * (hz / rate).min(0.49)).exp()) as f32
 }
 
-/// Strike's state between blocks: the sample and its voices.
+/// Drum Sampler's state between blocks: the sample and its voices.
 pub struct DrumSampler {
     data: Option<NodeData>,
     voices: [Voice; SLOTS],
@@ -810,7 +810,7 @@ impl DrumSampler {
                     }
                 }
             }
-            // It doesn't answer a channel message yet, as Snapshot doesn't.
+            // It doesn't answer a channel message yet, as Simpler doesn't.
             NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }
             | NoteKind::ChannelPressure { .. } => {}
@@ -1260,7 +1260,7 @@ impl NativeDevice for DrumSampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
-        // Strike has one sample slot.
+        // Drum Sampler has one sample slot.
         if data
             .downcast_ref::<SlotSample>()
             .is_some_and(|slot| slot.slot == 0)

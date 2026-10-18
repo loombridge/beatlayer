@@ -56,7 +56,7 @@ pub struct Preset {
     pub device_name: String,
     /// The parameter values set, each finite.
     pub params: OrdMap<ParamId, f64>,
-    /// A Curve Mod's breakpoint shape (the modulation spec, R12, R23);
+    /// A Shaper's breakpoint shape (the modulation spec, R12, R23);
     /// `None` for the default shape and for any other device. A preset
     /// holds no mappings.
     pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
@@ -227,10 +227,17 @@ impl Preset {
                 )));
             }
         }
+        // A preset saved before T197 names the device as Beatlayer then did.
+        let mut device_name = file.device.name;
+        if let DeviceKind::Native { device_type } = &file.device.kind
+            && let Some(now) = crate::migrate::renamed_device(device_type, &device_name)
+        {
+            device_name = now.to_owned();
+        }
         Ok(Self {
             kind: file.device.kind,
             role: file.device.role,
-            device_name: file.device.name,
+            device_name,
             params,
             shape: file.shape,
         })
@@ -411,6 +418,21 @@ mod tests {
         assert_eq!(Preset::decode(&bytes).unwrap(), preset);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("\"format\": \"beatlayer-preset\""), "{text}");
+    }
+
+    // Spec: device-chains R16
+    #[test]
+    fn a_preset_saved_under_a_devices_old_name_loads_under_its_new_one() {
+        let old = Device::new(
+            DeviceId(Id::new(8).unwrap()),
+            "Squeeze",
+            DeviceKind::Native {
+                device_type: "beatlayer.squeeze".to_owned(),
+            },
+        );
+        let loaded = Preset::decode(&Preset::of(&old).encode()).unwrap();
+        assert_eq!(loaded.device_name, "Compressor");
+        assert_eq!(loaded.kind, old.kind);
     }
 
     #[test]

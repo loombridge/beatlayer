@@ -1,4 +1,4 @@
-//! The Play Mod (WP-5.11; the modulation spec, R27): each of its five tabs
+//! The Expression Control (WP-5.11; the modulation spec, R27): each of its five tabs
 //! follows one source of the notes and MIDI it hears, through a curve and
 //! smoothing, to its own slot; Increment goes round its steps and starts
 //! again when the transport stops; Random draws at each note from a
@@ -42,7 +42,7 @@ fn playing(at: usize) -> TransportInfo {
     }
 }
 
-/// A Play Mod whose first tab follows `source` and gives it itself in
+/// An Expression Control whose first tab follows `source` and gives it itself in
 /// slot 1 (unipolar, full amount); `params` over those.
 fn play(source: f64, params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let mut all = vec![

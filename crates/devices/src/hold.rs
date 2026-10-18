@@ -1,4 +1,4 @@
-//! Hold, the note-length MIDI effect (WP-5.30; the MIDI note length spec): sets
+//! Note Length, the note-length MIDI effect (WP-5.30; the MIDI note length spec): sets
 //! how long each note sounds, in milliseconds or beat divisions, or starts
 //! notes when keys are released instead of when they are pressed, or
 //! latches them.
@@ -11,7 +11,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, value};
 
-/// The Hold device type's id.
+/// The Note Length device type's id.
 pub const HOLD: &str = "beatlayer.hold";
 
 /// Whether notes start when keys go down or when they come up.
@@ -51,11 +51,11 @@ const DEFAULT_RELEASE: f32 = 64.0 / 127.0;
 /// How many held keys Note Off mode follows.
 const HELD_ROOM: usize = 128;
 
-/// Hold's device type.
+/// Note Length's device type.
 #[must_use]
 pub fn hold_type() -> DeviceType {
     let names: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
-    DeviceType::native(HOLD, "Hold", DeviceRole::MidiEffect).with_description(
+    DeviceType::native(HOLD, "Note Length", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
             ParamDescriptor::choice(TRIGGER, "Trigger", &TRIGGERS, 0).describe(
                 "Starts notes when a key goes down (Note On) or when it comes up (Note Off).",
@@ -121,7 +121,7 @@ pub fn hold_type() -> DeviceType {
     )
 }
 
-/// Adds Hold to `registry`.
+/// Adds Note Length to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, hold_type(), |_, _| Hold {
         router: Router::new(),
@@ -168,7 +168,7 @@ impl Settings {
 }
 
 impl Hold {
-    /// Takes the key `note` lifts off the keys held down. A key Hold never
+    /// Takes the key `note` lifts off the keys held down. A key Note Length never
     /// saw go down, such as one that went down while it was switched off,
     /// passes its note-off through, so the instrument doesn't hang on it
     /// (spec: device-framework R31).

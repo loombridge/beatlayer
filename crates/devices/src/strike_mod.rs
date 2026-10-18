@@ -1,6 +1,6 @@
-//! The Strike Mod (WP-5.11; the modulation spec, R26): Beatlayer's equivalent
+//! The Shaper MIDI (WP-5.11; the modulation spec, R26): Beatlayer's equivalent
 //! of a Shaper MIDI device. A MIDI effect that passes its notes through
-//! untouched and plays a breakpoint shape, edited as the Curve Mod's, each
+//! untouched and plays a breakpoint shape, edited as the Shaper's, each
 //! time a note starts.
 //!
 //! The laws are Beatlayer's own. A note starts the shape from its start and
@@ -49,7 +49,7 @@ pub const ECHO: ParamId = ParamId(16);
 /// The peak under which echoes stop.
 const ECHO_FLOOR: f64 = 1.0 / 256.0;
 
-/// The Strike Mod's type.
+/// The Shaper MIDI's type.
 #[must_use]
 pub fn strike_mod_type() -> DeviceType {
     let mut params = vec![
@@ -106,7 +106,7 @@ pub fn strike_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(STRIKE_MOD, "Strike Mod", DeviceRole::MidiEffect)
+    DeviceType::native(STRIKE_MOD, "Shaper MIDI", DeviceRole::MidiEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -156,7 +156,7 @@ fn layout() -> DeviceLayout {
     .with_expanded(rest)
 }
 
-/// Adds the Strike Mod to `registry`.
+/// Adds the Shaper MIDI to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, strike_mod_type(), |device, config| {
         StrikeMod::new(
@@ -377,7 +377,7 @@ impl StrikeMod {
     }
 }
 
-/// The Strike Mod's display (R26): its level now and its trigger LED, from
+/// The Shaper MIDI's display (R26): its level now and its trigger LED, from
 /// what its node published; the shape itself is drawn by the panel.
 #[must_use]
 pub fn display(

@@ -1,6 +1,6 @@
 //! The first two modulators (WP-5.10; the modulation spec, R12 to R23): the
-//! Wave Mod, Beatlayer's equivalent of an LFO device, and the Curve Mod, its
-//! equivalent of a Shaper device. Both are audio effects that leave their
+//! LFO and the Shaper, named and behaving as Live's devices of those names.
+//! Both are audio effects that leave their
 //! audio alone: the engine works their output out before any track runs
 //! ([`NativeDevice::control`]) and writes, for each of the eight slots, what
 //! the slot contributes to its target (R14) or holds it at (R16).
@@ -51,7 +51,7 @@ pub const PHASE: ParamId = ParamId(7);
 /// R: turning it on restarts the cycle from its Phase.
 pub const RESTART: ParamId = ParamId(8);
 
-// The Wave Mod's own.
+// The LFO's own.
 /// The waveform.
 pub const WAVE: ParamId = ParamId(10);
 /// Shape: bends the waveform.
@@ -61,7 +61,7 @@ pub const STEPS: ParamId = ParamId(12);
 /// Hold: freezes the output.
 pub const HOLD: ParamId = ParamId(13);
 
-// The Curve Mod's own.
+// The Shaper's own.
 /// The trigger mode: Loop, 1-Shot or Manual.
 pub const TRIGGER_MODE: ParamId = ParamId(10);
 /// T: turning it on plays the shape once, in 1-Shot mode.
@@ -70,7 +70,7 @@ pub const TRIGGER: ParamId = ParamId(11);
 pub const MANUAL: ParamId = ParamId(12);
 pub use bl_model::modulator::{GRID_DIVISIONS, GRIDS, SNAP};
 
-/// The Wave Mod's waveforms, in the order of its chooser (R22).
+/// The LFO's waveforms, in the order of its chooser (R22).
 pub const WAVES: [&str; 9] = [
     "Sine", "Up", "Down", "Triangle", "Square", "Random", "Bin", "Stray", "Glider",
 ];
@@ -89,10 +89,10 @@ pub const DIVISIONS: [(&str, f64); 9] = [
     ("8 bars", 32.0),
 ];
 
-/// The Curve Mod's trigger modes.
+/// The Shaper's trigger modes.
 pub const TRIGGER_MODES: [&str; 3] = ["Loop", "1-Shot", "Manual"];
 
-/// The Wave Mod's type.
+/// The LFO's type.
 #[must_use]
 pub fn wave_mod_type() -> DeviceType {
     let mut params = vec![
@@ -114,11 +114,11 @@ pub fn wave_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(WAVE_MOD, "Wave Mod", DeviceRole::AudioEffect)
+    DeviceType::native(WAVE_MOD, "LFO", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(wave_layout()))
 }
 
-/// The Curve Mod's type.
+/// The Shaper's type.
 #[must_use]
 pub fn curve_mod_type() -> DeviceType {
     let mut params = vec![
@@ -148,7 +148,7 @@ pub fn curve_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(CURVE_MOD, "Curve Mod", DeviceRole::AudioEffect)
+    DeviceType::native(CURVE_MOD, "Shaper", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(curve_layout()))
 }
 
@@ -410,9 +410,9 @@ trait Source: Send + 'static {
     /// Starts again: the transport started.
     fn restart(&mut self, seed: u64);
     /// The output at the instant `e`, from 0 to 1, before Jitter, Smooth and
-    /// Offset; `None` to keep the last output (the Wave Mod's Hold).
+    /// Offset; `None` to keep the last output (the LFO's Hold).
     fn eval(&mut self, e: &Eval<'_>, c: Common, params: &ParamBank) -> Option<f64>;
-    /// Takes new data (the Curve Mod's shape).
+    /// Takes new data (the Shaper's shape).
     fn receive(&mut self, data: &NodeData);
 }
 
@@ -648,7 +648,7 @@ impl Phasor {
     }
 }
 
-/// The Wave Mod's source: nine waveforms.
+/// The LFO's source: nine waveforms.
 struct WaveSource {
     phasor: Phasor,
     /// The cycle the random draws are for.
@@ -756,7 +756,7 @@ impl Source for WaveSource {
     fn receive(&mut self, _: &NodeData) {}
 }
 
-/// The Curve Mod's source: a breakpoint shape.
+/// The Shaper's source: a breakpoint shape.
 struct CurveSource {
     points: Vec<ShapePoint>,
     phasor: Phasor,
@@ -833,7 +833,7 @@ impl Source for CurveSource {
     }
 }
 
-/// The Wave Mod's display (R22): one cycle of its waveform as the controls
+/// The LFO's display (R22): one cycle of its waveform as the controls
 /// set it, or four of a random one, from its seed's first draws, with
 /// Offset applied.
 #[must_use]

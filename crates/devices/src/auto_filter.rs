@@ -1,4 +1,4 @@
-//! Sweep, the native Auto Filter (WP-5.20; the auto-filter spec): the filter
+//! Auto Filter, the native Auto Filter (WP-5.20; the auto-filter spec): the filter
 //! types and their slopes, each type's own control, the four circuits, Drive,
 //! an LFO and an envelope follower moving the cutoff, Clip, Output and
 //! Dry/Wet, and a sidechain feeding the envelope follower through the
@@ -29,7 +29,7 @@ use bl_model::{
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
-/// Sweep's device type.
+/// Auto Filter's device type.
 pub const AUTO_FILTER: &str = "beatlayer.sweep";
 
 /// Type: the filter's response, one of [`TYPES`].
@@ -260,7 +260,7 @@ const FORMANTS: [[(f64, f64); 3]; 5] = [
 /// The rate Hi-Quality runs the filter at, as a power of two: twice.
 const HI_QUALITY_STAGES: u32 = 1;
 
-/// Sweep's device type.
+/// Auto Filter's device type.
 #[must_use]
 pub fn auto_filter_type() -> DeviceType {
     let divisions: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
@@ -426,7 +426,7 @@ pub fn auto_filter_type() -> DeviceType {
         ParamDescriptor::toggle(HI_QUALITY, "Hi-Quality", false)
             .describe("Runs the filter at twice the sample rate, at the price of some latency."),
     ];
-    DeviceType::native(AUTO_FILTER, "Sweep", DeviceRole::AudioEffect)
+    DeviceType::native(AUTO_FILTER, "Auto Filter", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(
             DeviceDescription::new(params)
@@ -496,7 +496,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds the Sweep device to `registry`.
+/// Adds the Auto Filter device to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, auto_filter_type(), AutoFilter::new);
 }
@@ -1204,7 +1204,7 @@ impl Run<'_> {
     }
 }
 
-/// Sweep's audio-thread half.
+/// Auto Filter's audio-thread half.
 pub struct AutoFilter {
     rate: f64,
     sample_rate: SampleRate,

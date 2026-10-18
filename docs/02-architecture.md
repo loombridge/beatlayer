@@ -175,7 +175,7 @@ How WP-5.10 added modulators ([the modulation spec](specs/modulation.md), R12 to
 
 How WP-5.11 added modulators driven by audio, notes and MIDI (the modulation spec, R24 to R29):
 
-- **They work their output out in their track.** The Level Mod hears the audio at its place in a chain, the Gate, Strike and Play Mods the notes and MIDI; so they run as nodes in the chain (`ModKind::Signal`), not in the pre-pass, and write their rows into the program's bus through the block (`Block::row_mut`) as they go. The pre-pass idles their rows each part. Their output follows the same 32-frame grid, one step behind its level, so it doesn't depend on the block size.
+- **They work their output out in their track.** The Envelope Follower hears the audio at its place in a chain, the Gate, Strike and Play Mods the notes and MIDI; so they run as nodes in the chain (`ModKind::Signal`), not in the pre-pass, and write their rows into the program's bus through the block (`Block::row_mut`) as they go. The pre-pass idles their rows each part. Their output follows the same 32-frame grid, one step behind its level, so it doesn't depend on the block size.
 - **Waits and the lag.** `Graph::modulator_edges` (the routing graph now lives in `bl-model`, so `modulator.map` can refuse a loop) lists the tracks that wait for a signal modulator's, after every route and with a loop left out; the compiler adds them to the task graph (`run_order`). A target earlier in its modulator's own chain reads a second set of rows (`ModRows::late`) that the modulator fills before each part from what it wrote 32 frames before, and a program that has one runs in parts of at most 32 frames (`Processor::until_next_event`), so the lag is the same at any block size.
 
 ### The mixer

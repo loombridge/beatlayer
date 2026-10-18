@@ -175,7 +175,7 @@ pub fn show(
         }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
-        // mappings and, for the Curve Mod, its shape.
+        // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {
             let slot = name
                 .strip_prefix("Mapping ")
@@ -201,7 +201,7 @@ pub fn show(
         // Spec: device-framework R36. The device's own drawing fills its
         // first cell, and a screen reader hears its readings.
         // A cell named like one of the display's series draws only that
-        // series (the Play Mod's tabs); otherwise the first cell draws it all.
+        // series (the Expression Control's tabs); otherwise the first cell draws it all.
         let own;
         let shown = match display {
             Some(d) if d.series.iter().any(|s| s.name == name) => {

@@ -256,7 +256,7 @@ fn in_parallel_chains(track: &Track, a: DeviceId, b: DeviceId) -> bool {
         .is_some_and(|(x, y)| x.0 == y.0)
 }
 
-/// A Curve Mod's shape as node data (R23): sent to the device when it
+/// A Shaper's shape as node data (R23): sent to the device when it
 /// changes, as its breakpoints aren't parameters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shape(pub Vec<bl_model::modulator::ShapePoint>);

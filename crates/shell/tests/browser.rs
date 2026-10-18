@@ -212,12 +212,12 @@ fn the_modulators_label_lists_the_six_modulators() {
     assert_eq!(
         names,
         [
-            "Wave Mod",
-            "Curve Mod",
-            "Level Mod",
-            "Gate Mod",
-            "Strike Mod",
-            "Play Mod"
+            "LFO",
+            "Shaper",
+            "Envelope Follower",
+            "Envelope MIDI",
+            "Shaper MIDI",
+            "Expression Control"
         ]
     );
     assert!(
@@ -228,7 +228,7 @@ fn the_modulators_label_lists_the_six_modulators() {
     );
     assert!(state.note.is_none());
     // The search narrows the list by name.
-    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "curve" }));
+    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "follower" }));
     assert_eq!(found.rows.len(), 1);
     // Loading the selected device adds it to the selected track's chain.
     let path = found.rows[0].path.clone();

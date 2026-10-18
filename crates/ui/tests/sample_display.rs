@@ -1,5 +1,5 @@
 //! The sampler devices' sample displays (WP-5.15, IMP-28; the multisampler
-//! spec, R54, R55 and R61), headless: Snapshot's display with its flags,
+//! spec, R54, R55 and R61), headless: Simpler's display with its flags,
 //! loop brace and slices; Shift-drag to select; a click that auditions and
 //! changes nothing; Esc; the context menu's edits; and a sample dropped on
 //! the multisampler's Sample tab.

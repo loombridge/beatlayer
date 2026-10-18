@@ -215,7 +215,7 @@ fn an_agent_maps_each_signal_modulator_and_reads_them_back() {
         assert_eq!(mappings[0]["slot"], slot, "{name}");
         assert_eq!(mappings[0]["target"]["type"], "device");
     }
-    // The Strike Mod's shape, with its sustain breakpoint, reads back too.
+    // The Shaper MIDI's shape, with its sustain breakpoint, reads back too.
     let strike = call(&mut client, "query", json!({ "path": "device \"Strike\"" }));
     let result = client
         .call(
@@ -229,13 +229,16 @@ fn an_agent_maps_each_signal_modulator_and_reads_them_back() {
             ] }),
         )
         .expect("the call reaches the server");
-    assert!(result.ok().is_ok(), "set_shape on a Strike Mod: {strike}");
+    assert!(result.ok().is_ok(), "set_shape on a Shaper MIDI: {strike}");
     let strike = call(&mut client, "query", json!({ "path": "device \"Strike\"" }));
     assert_eq!(strike["shape"][1]["sustain"], true, "{strike}");
-    // The Play Mod has five slots, not six.
+    // The Expression Control has five slots, not six.
     let refused = client
         .call("run", json!({ "commands": [ map("Play", 5, 5) ] }))
         .expect("the call reaches the server");
-    assert!(refused.ok().is_err(), "a sixth slot on the Play Mod");
+    assert!(
+        refused.ok().is_err(),
+        "a sixth slot on the Expression Control"
+    );
     assert!(client.into_transport().finish().unwrap().success());
 }

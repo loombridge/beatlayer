@@ -56,7 +56,7 @@ pub const REPLACE: &str = "device.replace";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
-/// `device.swap_to_snapshot`: replace a Strike drum sampler with the Snapshot
+/// `device.swap_to_snapshot`: replace a Drum Sampler with the Simpler
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
 pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
@@ -488,7 +488,7 @@ pub struct DeviceFrame {
     #[serde(default)]
     pub takes_sample: bool,
     /// Whether its type is the drum sampler, whose context menu offers the
-    /// swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`,
+    /// swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`,
     /// one-shot drum sampler R23).
     #[serde(default)]
     pub swaps_to_snapshot: bool,
@@ -624,7 +624,7 @@ pub struct ModulatorFrame {
     /// it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub armed: Option<u8>,
-    /// A Curve Mod's breakpoint shape (the default one until it is edited);
+    /// A Shaper's breakpoint shape (the default one until it is edited);
     /// left out for a modulator that has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
@@ -1532,13 +1532,13 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
-        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Snapshot")
+        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Simpler")
             .description(
-                "Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as \
-                 Strike's context menu does: the new device takes the old one's place, sample, \
+                "Replaces a Drum Sampler with Simpler in One-Shot mode, as \
+                 Drum Sampler's context menu does: the new device takes the old one's place, sample, \
                  and on or off state, and keeps its sample's Start and Length; every other \
-                 setting is Snapshot's default. One undo step, named Swap to Snapshot, and the \
-                 new device is selected. A device that isn't a Strike drum sampler is refused.",
+                 setting is Simpler's default. One undo step, named Swap to Simpler, and the \
+                 new device is selected. A device that isn't a Drum Sampler is refused.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)

@@ -93,11 +93,13 @@ impl WarpMap {
         self.segment_bpm(0)
     }
 
-    /// The beat, in ticks, that `time` seconds into the file plays on.
+    /// The beat, in ticks, that `time` seconds into the file plays on. A NaN
+    /// time gives NaN.
     #[must_use]
     pub fn time_to_beat(&self, time: f64) -> f64 {
         let (first, last) = (self.markers[0], self.markers[self.markers.len() - 1]);
-        if time <= first.time {
+        // NaN takes this branch: the search below has no place for it.
+        if time.is_nan() || time <= first.time {
             return first.beat as f64
                 + (time - first.time) * self.first_bpm() * TICKS_PER_SECOND_PER_BPM;
         }
@@ -109,11 +111,13 @@ impl WarpMap {
         a.beat as f64 + (time - a.time) * (b.beat - a.beat) as f64 / (b.time - a.time)
     }
 
-    /// The time in the file, in seconds, that plays on `beat` ticks.
+    /// The time in the file, in seconds, that plays on `beat` ticks. A NaN
+    /// beat gives NaN.
     #[must_use]
     pub fn beat_to_time(&self, beat: f64) -> f64 {
         let (first, last) = (self.markers[0], self.markers[self.markers.len() - 1]);
-        if beat <= first.beat as f64 {
+        // NaN takes this branch: the search below has no place for it.
+        if beat.is_nan() || beat <= first.beat as f64 {
             return first.time
                 + (beat - first.beat as f64) / (self.first_bpm() * TICKS_PER_SECOND_PER_BPM);
         }
@@ -149,6 +153,13 @@ mod tests {
             .map(|&(time, beat)| Marker { time, beat })
             .collect();
         WarpMap::new(markers, bpm).unwrap()
+    }
+
+    #[test]
+    fn nan_maps_to_nan() {
+        let m = map(&[(1.0, 0), (2.0, 705_600), (3.0, 1_411_200)], 60.0);
+        assert!(m.time_to_beat(f64::NAN).is_nan());
+        assert!(m.beat_to_time(f64::NAN).is_nan());
     }
 
     // Spec: warping R2

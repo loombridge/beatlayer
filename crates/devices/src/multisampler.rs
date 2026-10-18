@@ -16,8 +16,8 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_engine::{
-    DeviceLayers, DeviceType, LayerSample, NodeConfig, NodeData, NoteEvent, NoteExpression,
-    NoteKind, Registry,
+    Audition, DeviceLayers, DeviceType, LayerSample, NodeConfig, NodeData, NoteEvent,
+    NoteExpression, NoteKind, Registry,
 };
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
@@ -762,6 +762,8 @@ struct Voice {
     /// Plays on to Sample End whatever the note does (R50's `one_shot`).
     one_shot: bool,
     released: bool,
+    /// Whether a click in the Sample tab started it (R54).
+    audition: bool,
     /// Whether the voice has entered its sustain loop.
     in_loop: bool,
     /// The level the note gives it: its zones' gains, the layer's volume and
@@ -797,6 +799,7 @@ impl Voice {
             reverse: false,
             one_shot: false,
             released: false,
+            audition: false,
             in_loop: false,
             gain: 0.0,
             pan: 0.0,
@@ -1582,6 +1585,8 @@ struct Lanes {
 pub struct Multisampler {
     /// The layers and their decoded samples, as the compiler sent them.
     data: Option<NodeData>,
+    /// A click in the Sample tab waiting for the next block (WP-5.15, R54).
+    audition: Option<Audition>,
     voices: Vec<Voice>,
     /// How many notes have started: voices are stolen oldest note first.
     counter: u64,
@@ -1644,6 +1649,7 @@ impl Multisampler {
         }
         Self {
             data: None,
+            audition: None,
             voices: vec![Voice::idle(); SLOTS],
             counter: 0,
             rng: (seed as u32 ^ (seed >> 32) as u32).wrapping_mul(0x9E37_79B9) | 1,
@@ -1931,7 +1937,7 @@ impl Multisampler {
     /// channel message (R43).
     fn play(&mut self, layers: &DeviceLayers, note: NoteEvent, s: &Settings, frame: usize) {
         match note.kind {
-            NoteKind::On => self.note_on(layers, note, s, frame),
+            NoteKind::On => self.note_on(layers, note, s, frame, None),
             NoteKind::Off => {
                 for voice in &mut self.voices {
                     if voice.active && !voice.fading && !voice.released && voice.key == note.key {
@@ -1981,7 +1987,17 @@ impl Multisampler {
         }
     }
 
-    fn note_on(&mut self, layers: &DeviceLayers, note: NoteEvent, s: &Settings, frame: usize) {
+    /// Starts the voices a note plays. An audition (R54) names the one layer
+    /// to play and the share of its sample to start from: it plays that
+    /// layer alone, through its zones' full level, at its root key.
+    fn note_on(
+        &mut self,
+        layers: &DeviceLayers,
+        note: NoteEvent,
+        s: &Settings,
+        frame: usize,
+        audition: Option<(usize, f64)>,
+    ) {
         let velocity = note.velocity.clamp(0.0, 1.0);
         let vel7 = ((velocity * 127.0).round() as u8).clamp(1, 127);
         let key = note.key;
@@ -2049,7 +2065,10 @@ impl Multisampler {
         let mut chosen = [0u32; NOTE_LAYERS];
         let mut count = 0;
         let ticks = s.ticks + frame as f64 * s.ticks_per_frame;
-        if s.round_robin {
+        if let Some((layer, _)) = audition {
+            chosen[0] = layer as u32;
+            count = 1;
+        } else if s.round_robin {
             for group in 0..layers.groups.len() {
                 if count == NOTE_LAYERS {
                     break;
@@ -2135,11 +2154,15 @@ impl Multisampler {
             let (layer, Some(sample)) = (&entry.layer, entry.sample.as_ref()) else {
                 continue;
             };
-            let gain = layer.key.gain(zone_key, s.fade_mode)
-                * layer.velocity.gain(vel7, s.fade_mode)
-                * layer.select.gain(selector, s.fade_mode)
-                * layer.volume as f32
-                * level;
+            let gain = if audition.is_some() {
+                layer.volume as f32
+            } else {
+                layer.key.gain(zone_key, s.fade_mode)
+                    * layer.velocity.gain(vel7, s.fade_mode)
+                    * layer.select.gain(selector, s.fade_mode)
+                    * layer.volume as f32
+                    * level
+            };
             if gain <= 0.0 || sample.frames() == 0 {
                 continue;
             }
@@ -2191,7 +2214,10 @@ impl Multisampler {
                 voice.reverse = s.reverse;
                 voice.one_shot = layer.one_shot;
                 voice.forward = !s.reverse;
-                voice.position = if s.reverse {
+                voice.audition = audition.is_some();
+                voice.position = if let Some((_, from)) = audition {
+                    (from.clamp(0.0, 1.0) * sample.frames() as f64).min((end - 1.0).max(0.0))
+                } else if s.reverse {
                     (end - 1.0).max(start)
                 } else {
                     start
@@ -2223,6 +2249,36 @@ impl Multisampler {
         self.notes[usize::from(lane)] = proto;
         self.live_notes.push(lane);
         self.fresh.push(lane);
+    }
+
+    /// A click in the Sample tab (R54): the button going down plays the
+    /// layer alone from the clicked point at its root key; going up fades
+    /// that voice out.
+    fn audition(&mut self, layers: &DeviceLayers, audition: Audition, s: &Settings) {
+        let Some(id) = audition.layer else {
+            return;
+        };
+        let Some(index) = layers.layers.iter().position(|entry| entry.layer.id == id) else {
+            return;
+        };
+        if audition.down {
+            let note = NoteEvent {
+                offset: 0,
+                kind: NoteKind::On,
+                channel: 0,
+                key: layers.layers[index].layer.root_key,
+                velocity: 1.0,
+                note_id: None,
+            };
+            self.note_on(layers, note, s, 0, Some((index, audition.from)));
+        } else {
+            for voice in &mut self.voices {
+                if voice.active && voice.audition && !voice.fading {
+                    voice.fading = true;
+                    voice.env.fade(s.steal_frames);
+                }
+            }
+        }
     }
 
     /// Chooses one of a group's layers for a note under Round Robin (R8,
@@ -2463,6 +2519,9 @@ impl NativeDevice for Multisampler {
         s.power_loops = !layers.linear_loop_fades;
         let volume = params.ramp(at(VOLUME));
         let pan = params.ramp(at(PAN));
+        if let Some(audition) = self.audition.take() {
+            self.audition(layers, audition, &s);
+        }
         let mut notes = audio.notes().peekable();
         let idle = self.live.is_empty() && notes.peek().is_none();
         let mut channels = audio.channels_mut();
@@ -2633,6 +2692,10 @@ impl NativeDevice for Multisampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
+        if let Some(audition) = data.downcast_ref::<Audition>() {
+            self.audition = Some(*audition);
+            return;
+        }
         // A voice names its layer by place in the list, and the new list may
         // order its layers otherwise or hold other samples: a voice follows
         // its layer to its new place, and one whose layer isn't kept as it

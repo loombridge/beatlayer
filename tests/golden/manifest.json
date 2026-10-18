@@ -184,6 +184,22 @@
       "frames": 204000,
       "bits": 24,
       "render_hash": "fnv1a64:bccff9f00f3060c9"
+    },
+    "warped-loop-120": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 156000,
+      "bits": 24,
+      "render_hash": "fnv1a64:039e665ec62c6374"
+    },
+    "warped-loop-140": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:a47dbbb60c5813b7"
     }
   }
 }

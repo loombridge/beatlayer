@@ -79,6 +79,12 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 9. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
 10. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
 
+**Gaps in sample editing** ([multisampler](multisampler.md), WP-5.15):
+
+11. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
+12. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
+13. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
+
 ## Tests
 
 | Rule | Test | Kind |

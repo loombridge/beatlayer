@@ -1,16 +1,17 @@
 //! What Capture MIDI can bring back, and the clip it makes (WP-3.14).
 //!
 //! The ring: while the engine runs, the audio thread copies every note-on and
-//! note-off a monitoring MIDI track's input receives into a lock-free ring
-//! of [`CapturedMidi`], whether or not the transport runs and whether or not
+//! note-off, and every controller message ([`is_controller`]), a monitoring
+//! MIDI track's input receives into a lock-free ring of [`CapturedMidi`], whether or not the transport runs and whether or not
 //! anything records. The main thread drains the ring
 //! ([`Engine::captured`](crate::Engine::captured)) into a bounded buffer per
 //! track, so nothing on the audio thread allocates, locks, or waits. A full
 //! ring drops the message and counts it
 //! ([`MidiCounters::capture_dropped`](crate::MidiCounters)).
 //!
-//! The rules: [`Buffer`] keeps the latest notes per track, and [`pair`]
-//! turns a track's messages into notes. [`fit`] decides the tempo a capture
+//! The rules: [`Buffer`] keeps the latest messages per track, [`pair`]
+//! turns a track's messages into notes, and [`controllers`] picks the
+//! controller messages that go with them. [`fit`] decides the tempo a capture
 //! with the transport stopped sets, [`place`] puts the notes in a new clip
 //! and picks its loop, and [`merge`] adds them to a clip that plays. All of
 //! it is arithmetic on frames and ticks, so the rules are tested without an
@@ -20,12 +21,15 @@ use std::collections::{BTreeMap, VecDeque};
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Frames, SampleRate, TICKS_PER_QUARTER, Ticks};
-use bl_model::{MidiData, Note, TrackId};
+use bl_model::{Breakpoint, MidiData, Note, TrackId};
+
+use crate::controller_take::is_controller;
 
 /// How many messages the ring holds between two drains.
 pub const CAPTURE_RING: usize = 4096;
 
-/// A note message a monitoring MIDI track's input received, and when.
+/// A note or controller message a monitoring MIDI track's input received,
+/// and when.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CapturedMidi {
     /// The track whose input received it.
@@ -37,7 +41,7 @@ pub struct CapturedMidi {
     /// The song frame it landed on, to the sample, if the song was playing;
     /// `None` while the transport was stopped or counting in.
     pub song: Option<Frames>,
-    /// A note-on or a note-off.
+    /// A note-on or a note-off, or a controller message.
     pub message: MidiMessage,
 }
 
@@ -69,11 +73,16 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// Keeps `message`, letting go of the track's oldest when it is full.
+    /// Keeps `message`, letting go of the track's oldest when it is full:
+    /// the oldest controller message first, so a long sweep of a knob never
+    /// pushes the notes out.
     pub fn push(&mut self, message: CapturedMidi) {
         let kept = self.tracks.entry(message.track).or_default();
         if kept.len() == MAX_MESSAGES {
-            kept.pop_front();
+            match kept.iter().position(|m| !is_note(m)) {
+                Some(controller) => kept.remove(controller),
+                None => kept.pop_front(),
+            };
         }
         kept.push_back(message);
     }
@@ -128,13 +137,11 @@ pub struct Played {
 /// less the clock frames between them.
 #[must_use]
 pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
-    let anchor = messages.iter().find_map(|m| m.song.map(|s| (m.clock, s)));
-    let song = |m: &CapturedMidi| {
-        m.song
-            .or_else(|| anchor.map(|(clock, at)| at + Frames(m.clock as i64 - clock as i64)))
-    };
-    let end = messages.last().map_or(0, |m| m.clock);
-    let end_song = messages.last().and_then(song);
+    let song = song_of(messages);
+    let notes_only = messages.iter().filter(|m| is_note(m));
+    let last = messages.iter().rev().find(|m| is_note(m));
+    let end = last.map_or(0, |m| m.clock);
+    let end_song = last.and_then(&song);
     let mut held: [Option<&CapturedMidi>; 128] = [None; 128];
     let mut notes = Vec::new();
     let mut finish = |on: &CapturedMidi, off_clock: u64, off_song, release: u8| {
@@ -148,7 +155,7 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
             song_off: off_song,
         });
     };
-    for m in messages {
+    for m in notes_only {
         let key = usize::from(m.message.data1());
         let on = m.message.is_note_on();
         if let Some(started) = held[key].take() {
@@ -168,6 +175,40 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
     }
     notes.sort_by_key(|note| note.on);
     notes
+}
+
+/// Whether a message is a note-on or a note-off.
+fn is_note(m: &CapturedMidi) -> bool {
+    m.message.is_note_on() || m.message.is_note_off()
+}
+
+/// The song frame of a message: the one the engine stamped, or, before the
+/// first stamp, the first stamp's less the clock frames between them.
+fn song_of(messages: &[CapturedMidi]) -> impl Fn(&CapturedMidi) -> Option<Frames> {
+    let anchor = messages.iter().find_map(|m| m.song.map(|s| (m.clock, s)));
+    move |m| {
+        m.song
+            .or_else(|| anchor.map(|(clock, at)| at + Frames(m.clock as i64 - clock as i64)))
+    }
+}
+
+/// The controller messages a capture keeps: those up to its last note
+/// message, with their song frames worked out as [`pair`] does (the MIDI
+/// controller data spec, R15). None when no note was played.
+#[must_use]
+pub fn controllers(messages: &[CapturedMidi]) -> Vec<CapturedMidi> {
+    let song = song_of(messages);
+    let Some(until) = messages.iter().rev().find(|m| is_note(m)).map(|m| m.clock) else {
+        return Vec::new();
+    };
+    messages
+        .iter()
+        .filter(|m| m.clock <= until && is_controller(&m.message))
+        .map(|m| CapturedMidi {
+            song: song(m),
+            ..*m
+        })
+        .collect()
 }
 
 /// The tempo a capture with the transport stopped puts the notes at.
@@ -283,6 +324,37 @@ pub enum Timing {
     },
 }
 
+/// Where a message heard at engine-clock frame `clock` (song frame `song`)
+/// stands in the clip: never before its start.
+fn position(
+    timing: Timing,
+    ticks: &impl Fn(Frames) -> Ticks,
+    clock: u64,
+    song: Option<Frames>,
+) -> Ticks {
+    match timing {
+        Timing::Stopped { from, bpm, rate } => {
+            let seconds = clock.saturating_sub(from) as f64 / rate.as_f64();
+            Ticks((seconds * bpm / 60.0 * TICKS_PER_QUARTER as f64).round() as i64)
+        }
+        Timing::Running { origin } => (song.map_or(Ticks::ZERO, ticks) - origin).max(Ticks::ZERO),
+    }
+}
+
+/// Where a capture's `controllers` ([`controllers`]) stand in a new clip
+/// placed by [`place`] with the same `timing`.
+#[must_use]
+pub fn place_controllers(
+    controllers: &[CapturedMidi],
+    timing: Timing,
+    ticks: impl Fn(Frames) -> Ticks,
+) -> Vec<(Ticks, MidiMessage)> {
+    controllers
+        .iter()
+        .map(|c| (position(timing, &ticks, c.clock, c.song), c.message))
+        .collect()
+}
+
 /// Puts one track's `notes` in a new clip: each at its time (`ticks` gives a
 /// song frame's tick), the loop on the last phrase's bars. The loop is as
 /// many whole bars of length `bar` as cover the phrase from its first
@@ -296,13 +368,7 @@ pub fn place(
     phrase: usize,
     bar: Ticks,
 ) -> Placed {
-    let at = |clock: u64, song: Option<Frames>| match timing {
-        Timing::Stopped { from, bpm, rate } => {
-            let seconds = (clock - from) as f64 / rate.as_f64();
-            Ticks((seconds * bpm / 60.0 * TICKS_PER_QUARTER as f64).round() as i64)
-        }
-        Timing::Running { origin } => (song.map_or(Ticks::ZERO, &ticks) - origin).max(Ticks::ZERO),
-    };
+    let at = |clock, song| position(timing, &ticks, clock, song);
     let placed: Vec<(Ticks, Ticks, &Played)> = notes
         .iter()
         .map(|n| (at(n.on, n.song_on), at(n.off, n.song_off), n))
@@ -329,6 +395,33 @@ pub fn place(
     }
 }
 
+/// A clip's loop brace as it plays: where it starts and ends.
+#[must_use]
+pub fn loop_span(data: &MidiData, length: Ticks) -> (Ticks, Ticks) {
+    let loop_end = data
+        .loop_end
+        .unwrap_or_else(|| (data.loop_start + length).max(data.loop_start + Ticks::SIXTEENTH));
+    (data.loop_start, loop_end)
+}
+
+/// The breakpoints of the loop `span` that fall inside it, copied into each
+/// of the `copies` passes after it, as [`merge`] copies the notes.
+#[must_use]
+pub fn repeat_points(points: &[Breakpoint], span: (Ticks, Ticks), copies: i64) -> Vec<Breakpoint> {
+    let pass = span.1 - span.0;
+    (1..=copies)
+        .flat_map(|copy| {
+            points
+                .iter()
+                .filter(|point| point.at >= span.0 && point.at < span.1)
+                .map(move |point| Breakpoint {
+                    at: point.at + Ticks(copy * pass.get()),
+                    ..*point
+                })
+        })
+        .collect()
+}
+
 /// A playing clip with the notes played into it: `played` starts are counted
 /// from the frame the clip launched on. A looping clip is unrolled to the
 /// pass the last note falls in, each pass a copy of the loop, with the notes
@@ -336,14 +429,14 @@ pub fn place(
 /// loop keeps its length. Notes in the first pass leave the markers alone. A
 /// clip that does not loop takes the notes that fall before its end.
 ///
+/// `reach` is where the last controller message was played, counted as the
+/// notes' starts are: the loop moves far enough to hold it too.
+///
 /// Returns the data and the clip's new length.
 #[must_use]
-pub fn merge(data: &MidiData, length: Ticks, played: Vec<Note>) -> (MidiData, Ticks) {
+pub fn merge(data: &MidiData, length: Ticks, played: Vec<Note>, reach: Ticks) -> (MidiData, Ticks) {
     let marker = data.start;
-    let loop_start = data.loop_start;
-    let loop_end = data
-        .loop_end
-        .unwrap_or_else(|| (loop_start + length).max(loop_start + Ticks::SIXTEENTH));
+    let (loop_start, loop_end) = loop_span(data, length);
     let mut merged = data.clone();
     if !data.looping {
         let end = data.end.unwrap_or(marker + length).min(marker + length);
@@ -370,7 +463,8 @@ pub fn merge(data: &MidiData, length: Ticks, played: Vec<Note>) -> (MidiData, Ti
         .iter()
         .map(|note| note.start)
         .max()
-        .unwrap_or(Ticks::ZERO);
+        .unwrap_or(Ticks::ZERO)
+        .max(marker + reach);
     let end = if last <= loop_end {
         loop_end
     } else {
@@ -593,7 +687,7 @@ mod tests {
     #[test]
     fn notes_in_a_later_pass_unroll_the_clip_and_move_the_loop() {
         let clip = data(&[(60, 0)], 1_000);
-        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 1_400)]);
+        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 1_400)], Ticks::ZERO);
         assert_eq!(length, Ticks(2_000));
         assert_eq!(
             (merged.loop_start, merged.loop_end),
@@ -613,7 +707,7 @@ mod tests {
     #[test]
     fn notes_in_the_first_pass_leave_the_loop_alone() {
         let clip = data(&[(60, 0)], 1_000);
-        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 400)]);
+        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 400)], Ticks::ZERO);
         assert_eq!(length, Ticks(1_000));
         assert_eq!(
             (merged.loop_start, merged.loop_end),
@@ -627,7 +721,7 @@ mod tests {
     #[test]
     fn a_note_on_a_pass_boundary_stays_after_the_loop() {
         let clip = data(&[(60, 0)], 1_000);
-        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 2_000)]);
+        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 2_000)], Ticks::ZERO);
         assert_eq!(length, Ticks(2_000));
         assert_eq!(merged.loop_end, Some(Ticks(2_000)));
         assert!(merged.notes.iter().any(|n| n.start == Ticks(2_000)));
@@ -679,6 +773,125 @@ mod tests {
         ];
         let notes = pair(&messages);
         assert_eq!(notes[0].song_off, Some(Frames(1_400)));
+    }
+
+    fn heard(clock: u64, message: MidiMessage) -> CapturedMidi {
+        CapturedMidi {
+            track: TrackId(bl_core::id::Id::new(1).unwrap()),
+            clock,
+            song: None,
+            message,
+        }
+    }
+
+    // Spec: midi-controller-data R15. Controllers are kept up to the last
+    // note message and no further; they never pair as notes; and with no
+    // notes there is nothing to keep.
+    #[test]
+    fn controllers_are_kept_up_to_the_last_note_off_and_never_pair_as_notes() {
+        let cc = |value| MidiMessage::from_bytes(&[0xB0, 1, value]).unwrap();
+        let messages = [
+            heard(50, cc(5)),
+            heard(100, MidiMessage::note_on(0, 60, 90)),
+            heard(150, cc(6)),
+            heard(200, MidiMessage::note_off(0, 60)),
+            heard(250, cc(0)),
+        ];
+        let notes = pair(&messages);
+        assert_eq!(
+            notes
+                .iter()
+                .map(|n| (n.key, n.on, n.off))
+                .collect::<Vec<_>>(),
+            [(60, 100, 200)]
+        );
+        let kept = controllers(&messages);
+        assert_eq!(
+            kept.iter()
+                .map(|m| (m.clock, m.message.data2()))
+                .collect::<Vec<_>>(),
+            [(50, 5), (150, 6)],
+            "the 0 sent after the last note-off is not in the clip"
+        );
+        assert!(controllers(&[heard(1, cc(9))]).is_empty());
+    }
+
+    // Spec: midi-controller-data R15. A controller stands where its time
+    // puts it, as the notes do, and one before the first note is at the start.
+    #[test]
+    fn a_stopped_capture_places_controllers_by_their_time() {
+        let cc = MidiMessage::from_bytes(&[0xB0, 1, 7]).unwrap();
+        let timing = Timing::Stopped {
+            from: 10_000,
+            bpm: 120.0,
+            rate: rate(),
+        };
+        let moves = place_controllers(
+            &[heard(5_000, cc), heard(10_000 + 24_000, cc)],
+            timing,
+            |_| Ticks::ZERO,
+        );
+        assert_eq!(
+            moves.iter().map(|m| m.0).collect::<Vec<_>>(),
+            [Ticks::ZERO, Ticks::QUARTER]
+        );
+    }
+
+    // Spec: midi-controller-data R15. A controller envelope's loop is
+    // unrolled with the notes' when a capture moves the loop on.
+    #[test]
+    fn the_loops_breakpoints_are_copied_into_the_passes_added() {
+        let point = |at, value| Breakpoint {
+            at: Ticks(at),
+            value,
+            bend: 0.0,
+        };
+        let points = [point(100, 1.0), point(900, 2.0), point(1_000, 3.0)];
+        let copied = repeat_points(&points, (Ticks::ZERO, Ticks(1_000)), 2);
+        assert_eq!(
+            copied
+                .iter()
+                .map(|p| (p.at.get(), p.value))
+                .collect::<Vec<_>>(),
+            [(1_100, 1.0), (1_900, 2.0), (2_100, 1.0), (2_900, 2.0)]
+        );
+        // A controller message played after the last note still moves the loop.
+        let clip = data(&[(60, 0)], 1_000);
+        let (merged, length) = merge(&clip, Ticks(1_000), vec![at(72, 400)], Ticks(1_400));
+        assert_eq!(
+            (length, merged.loop_end),
+            (Ticks(2_000), Some(Ticks(2_000)))
+        );
+    }
+
+    // Spec: midi-controller-data R15. A sweep of a controller fills the
+    // buffer with controller messages, which go before any note does.
+    #[test]
+    fn a_sweep_of_a_controller_never_pushes_a_note_out_of_the_buffer() {
+        let mut buffer = Buffer::default();
+        let track = TrackId(bl_core::id::Id::new(1).unwrap());
+        let push = |buffer: &mut Buffer, clock, message| {
+            buffer.push(CapturedMidi {
+                track,
+                clock,
+                song: None,
+                message,
+            });
+        };
+        push(&mut buffer, 0, MidiMessage::note_on(0, 60, 100));
+        for clock in 1..=MAX_MESSAGES as u64 + 10 {
+            let value = (clock % 128) as u8;
+            push(
+                &mut buffer,
+                clock,
+                MidiMessage::from_bytes(&[0xB0, 1, value]).unwrap(),
+            );
+        }
+        assert!(buffer.has_notes());
+        let taken = buffer.take();
+        assert_eq!(taken[&track].len(), MAX_MESSAGES);
+        assert_eq!(taken[&track][0].clock, 0, "the note stayed");
+        assert_eq!(taken[&track][1].clock, 12, "the oldest controllers went");
     }
 
     #[test]

@@ -363,6 +363,16 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
+            // A sampler whose sample's edits changed gets the edited sample
+            // again as node data, with no new program (R57).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.sample_edits != after.sample_edits
+                && before.media == after.media
+                && let Some(media) = after.media_at(0)
+            {
+                self.send_slot_sample(id, 0, media, &after.sample_edits, &mut update);
+            }
         }
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
@@ -449,6 +459,33 @@ impl Compiler {
         self.compile_with(&document, &Resend::default())
     }
 
+    /// Sends a sampler's node the audio of one of its sample slots, with
+    /// `edits` applied (WP-2.16, R57): the media library decodes and renders
+    /// here, on the compiler's thread, and shares the result with every
+    /// other reader of the same source and list; media it can't supply is
+    /// reported missing and plays silence.
+    fn send_slot_sample(
+        &mut self,
+        device: DeviceId,
+        slot: usize,
+        media: ContentHash,
+        edits: &[bl_model::SampleEdit],
+        update: &mut Update,
+    ) {
+        let rate = self.config.sample_rate;
+        match self
+            .registry
+            .media()
+            .and_then(|library| library.edited_sample(media, rate, edits))
+        {
+            Some(sample) => update.data.push((
+                NodeKey::Device(device),
+                self.gc.data(SlotSample { slot, sample }),
+            )),
+            None => update.missing.push(media),
+        }
+    }
+
     /// Sends a multisampler's node its layers, each with its decoded audio
     /// (WP-5.13, R31): the media library decodes here, on the compiler's
     /// thread, and shares each file with every other reader; a layer whose
@@ -469,7 +506,10 @@ impl Compiler {
                 // R23: with RAM Mode off, a layer over ten seconds is read
                 // in the background behind its held start; the rest decode
                 // whole.
+                // The edits are applied to the whole decoded sample (R57), so
+                // a layer that has some is read whole.
                 let long = !device.layers.ram_mode
+                    && layer.edits.is_empty()
                     && layer.length > u64::from(layer.sample_rate) * LONG_LAYER_SECONDS;
                 let held = self
                     .progressive
@@ -487,7 +527,7 @@ impl Compiler {
                 let sample = match progressive {
                     Some(sample) => Some(LayerSample::Progressive(sample)),
                     None => library
-                        .and_then(|library| library.sample(layer.media, rate))
+                        .and_then(|library| library.edited_sample(layer.media, rate, &layer.edits))
                         .map(LayerSample::Whole),
                 };
                 if sample.is_none() {
@@ -793,19 +833,8 @@ impl Compiler {
         // (WP-2.16). The update reaches the node after the program that
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
-        let rate = self.config.sample_rate;
-        for &(device, slot, media) in &build.media {
-            match self
-                .registry
-                .media()
-                .and_then(|library| library.sample(media, rate))
-            {
-                Some(sample) => update.data.push((
-                    NodeKey::Device(device),
-                    self.gc.data(SlotSample { slot, sample }),
-                )),
-                None => update.missing.push(media),
-            }
+        for (device, slot, media, edits) in &build.media {
+            self.send_slot_sample(*device, *slot, *media, edits, &mut update);
         }
         for &device in &build.layered {
             self.send_layers(document, device, &mut update);
@@ -1118,7 +1147,14 @@ impl Compiler {
                         // with this compile's update (WP-2.16).
                         for (slot, media) in device.media.iter().enumerate() {
                             if let Some(media) = *media {
-                                build.media.push((device.id, slot, media));
+                                // Only slot 0 has edits (the sampler's one
+                                // sample).
+                                let edits = if slot == 0 {
+                                    device.sample_edits.clone()
+                                } else {
+                                    Vec::new()
+                                };
+                                build.media.push((device.id, slot, media, edits));
                             }
                         }
                         if !device.layers.is_default() {
@@ -1367,7 +1403,7 @@ struct Build {
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, usize, ContentHash)>,
+    media: Vec<(DeviceId, usize, ContentHash, Vec<bl_model::SampleEdit>)>,
     /// Devices new in this program that hold layers (WP-5.13): their layers,
     /// with each one's decoded audio, go with this compile's update.
     layered: Vec<DeviceId>,
@@ -2507,6 +2543,90 @@ mod tests {
         assert_eq!(clips_in(&update, other), Some(1));
         // 2 audio track players and 2 MIDI track players.
         assert_eq!(update.data.len(), 4);
+    }
+
+    // Spec: warping R17. A warp edit, and the warp mode's settings, send the
+    // track's player its clips with their tables, and never a program.
+    #[test]
+    fn warp_edits_send_node_data_and_never_a_program() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, BeatsUpdate, Clip, ClipData, ContentHash, WarpMarker, WarpMode};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 96_000]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        f.sync();
+        let id = f.editor.new_id();
+        let data = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(100.0),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let update = f.apply(Command::CreateClip {
+            track: audio,
+            clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+        for command in [
+            Command::InsertWarpMarker {
+                clips: vec![id],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+                pin_neighbours: false,
+                transients: None,
+            },
+            Command::SetSegmentBpm {
+                clip: id,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+            Command::SetClipWarpMode {
+                clip: id,
+                mode: WarpMode::RePitch,
+            },
+            Command::SetClipWarpSettings {
+                clip: id,
+                beats: Some(BeatsUpdate {
+                    transient_envelope: Some(50),
+                    ..BeatsUpdate::default()
+                }),
+                tones: None,
+                texture: None,
+                complex_pro: None,
+            },
+            Command::SetClipHighQuality {
+                clip: id,
+                high_quality: false,
+            },
+            Command::SetClipRamMode {
+                clip: id,
+                ram: true,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: false,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: true,
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.program.is_none(), "{command:?} built a program");
+            assert_eq!(clips_in(&update, audio), Some(1), "{command:?}");
+        }
+        // A tempo change recompiles, and sends the tables under the new map.
+        let update = f.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(90.0).unwrap()),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
     }
 
     // Spec: audio-clips R18, R19

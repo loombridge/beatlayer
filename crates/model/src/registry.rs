@@ -1105,7 +1105,9 @@ const ENTRIES: &[Entry] = &[
         description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
             where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
             for as long as it lasts in the arrangement; off, it plays from its Start marker to its \
-            End marker once. The Start marker must be before the brace's end to switch it on.",
+            End marker once. The Start marker must be before the brace's end to switch it on. \
+            An audio clip can only loop while Warp is on (`clip.set_warp`): switching the loop on \
+            for an unwarped audio clip is refused.",
     },
     Entry {
         id: "clip.set_gain",
@@ -1150,8 +1152,10 @@ const ENTRIES: &[Entry] = &[
             clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's \
             tempo there, so it goes on playing at the speed it did; switching off keeps the \
             map. Either way the markers and brace convert, so each keeps its place in the \
-            audio, and the clip keeps its place and length in the arrangement. Until warped \
-            playback arrives (Phase 4), a warped clip still plays at its file's own speed.",
+            audio, and the clip keeps its place and length in the arrangement. A warped clip \
+            plays through its warp map at the set's tempo, in its warp mode \
+            (`clip.set_warp_mode`); only a warped clip can loop, so switching Warp off also \
+            switches the clip's loop off in the same undo step.",
     },
     Entry {
         id: "clip.insert_warp_marker",
@@ -1304,6 +1308,62 @@ const ENTRIES: &[Entry] = &[
             about the first marker, so each keeps its place in the audio. The clip's place \
             and length in the arrangement don't change. Refused if the clip's tempo would \
             leave 1 to 1,000 BPM.",
+    },
+    Entry {
+        id: "clip.set_warp_mode",
+        action: Action::Apply("set_clip_warp_mode"),
+        label: "Set Warp Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets how a warped audio clip's audio is fitted to the speed its warp map \
+            sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` \
+            (`data.audio.warp_mode`; a new clip is `beats`). `re_pitch` plays the file faster \
+            or slower, so its pitch moves with the speed. An unwarped clip keeps its mode for \
+            when Warp goes back on, and every mode's controls stay with the clip. Until the \
+            other modes are built, they play as `re_pitch` does.",
+    },
+    Entry {
+        id: "clip.set_warp_settings",
+        action: Action::Apply("set_clip_warp_settings"),
+        label: "Set Warp Settings",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets controls of an audio clip's warp modes, named by mode, any of them in \
+            one undo step (`data.audio.warp_settings`; a control at its default isn't listed \
+            there). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, \
+            `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, \
+            `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: \
+            `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, \
+            default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 \
+            %, default 100), `envelope` (8 to 512, default 128). Give at least one control; a \
+            value out of range refuses the whole command.",
+    },
+    Entry {
+        id: "clip.set_ram_mode",
+        action: Action::Apply("set_clip_ram_mode"),
+        label: "Set Clip RAM Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's RAM mode (`data.audio.ram`, off for a new clip). \
+            On, the clip's whole file is held in memory instead of streamed from disk, so it \
+            never underruns; the audio it plays is the same. Switching it while the clip plays \
+            leaves no gap.",
+    },
+    Entry {
+        id: "clip.set_high_quality",
+        action: Action::Apply("set_clip_high_quality"),
+        label: "Set Clip High Quality",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's high-quality interpolation (`data.audio.high_quality`, \
+            on for a new clip). On, the clip is resampled by a band-limited interpolator wherever \
+            it is read at a rate other than 1, as Re-Pitch does at any speed but 1, at more CPU \
+            and with less distortion; off, by a cheaper one. Where no resampling happens it \
+            changes nothing.",
     },
     Entry {
         id: "clip.set_legato",
@@ -1907,6 +1967,33 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.",
+    },
+    Entry {
+        id: "device.add_sample_edit",
+        action: Action::Apply("add_sample_edit"),
+        label: "Edit Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds one edit to the end of a sample's edit list without looking at the audio: `edit.kind` is `trim`, `cut`, `reverse`, `fade_in`, `fade_out` or `normalize`, and `edit.range` (`from` to `to`, in frames of the sample as the earlier edits left it) is its selection, left out for the whole sample (Trim and Cut need one). With a `layer` the edit joins that layer's list and its length and markers follow the audio; with none it joins the sample of the device itself, which this command doesn't check against the sample's length. The source file is never written. One undo step named for the edit. `device.edit_sample` checks the selection against the sample.",
+    },
+    Entry {
+        id: "device.clear_sample_edits",
+        action: Action::Apply("clear_sample_edits"),
+        label: "Revert Edits",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties a sample's edit list, a layer's (`layer`) or the device's own (none given). A layer's sample is `length` frames long again, the unedited sample's length at its own rate, and its markers keep their share of it. One undo step. `device.edit_sample` with `revert` reads the length itself.",
+    },
+    Entry {
+        id: "device.set_processed_layer_sample",
+        action: Action::Apply("set_processed_layer_sample"),
+        label: "Replace With Processed Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a layer's sample with a processed copy of its edited sample that is already in the media store (`media`, `length` frames at its own rate): the copy holds the edits, so the layer's list empties. `crop` is the span of the edited sample the copy keeps, which moves the markers as a Trim does; with none the markers stay where they are. One undo step, named Crop with a `crop` and Reverse without. `device.crop_sample` and `device.reverse_sample` write the copy.",
     },
     Entry {
         id: "device.distribute_layers",

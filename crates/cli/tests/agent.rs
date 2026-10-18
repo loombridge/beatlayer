@@ -2890,6 +2890,349 @@ fn an_agent_imports_an_sfz_by_path() {
     assert_eq!(value("Env Release"), 50.0);
 }
 
+/// Spec: warp-modes R1 to R3, R12; warping R14. An agent sets a clip's warp
+/// mode and controls and its RAM and HiQ switches by ID and reads each back
+/// in the query tool's `clip`; a loop can't be switched on for an unwarped
+/// clip, and unwarping a looped one switches the loop off.
+#[test]
+fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Loop"}, "kind": "audio", "name": "Loop", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Loop")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Break"}, "name": "Break", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "audio": { "media": "ab".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(steps(client), before + 1, "{command} is one undo step");
+        audio(client)
+    };
+    let refused = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap();
+        assert!(result.ok().is_err(), "{command} {args}");
+        assert_eq!(steps(client), before, "a refused {command} changes nothing");
+    };
+
+    // A new clip has the table's defaults, which are not saved.
+    let new = audio(&mut client);
+    for key in ["warp_mode", "warp_settings", "ram", "high_quality"] {
+        assert!(new.get(key).is_none(), "{key} in a new clip: {new}");
+    }
+    let mode = run(
+        &mut client,
+        "clip.set_warp_mode",
+        json!({ "clip": clip, "mode": "re_pitch" }),
+    );
+    assert_eq!(mode["warp_mode"], "re_pitch");
+    let settings = run(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip,
+                "beats": { "preserve": "eighth", "transient_loop_mode": "loop_off",
+                           "transient_envelope": 40 },
+                "texture": { "flux": 10.0 },
+                "complex_pro": { "formants": 20.0, "envelope": 200 } }),
+    );
+    assert_eq!(
+        settings["warp_settings"],
+        json!({
+            "beats": { "preserve": "eighth", "transient_loop_mode": "loop_off",
+                       "transient_envelope": 40 },
+            "texture": { "flux": 10.0 },
+            "complex_pro": { "formants": 20.0, "envelope": 200 },
+        })
+    );
+    // A setting out of range changes nothing, and so does naming none.
+    refused(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip, "tones": { "grain_size": 101.0 } }),
+    );
+    refused(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip }),
+    );
+    let ram = run(
+        &mut client,
+        "clip.set_ram_mode",
+        json!({ "clip": clip, "ram": true }),
+    );
+    assert_eq!(ram["ram"], true);
+    let hiq = run(
+        &mut client,
+        "clip.set_high_quality",
+        json!({ "clip": clip, "high_quality": false }),
+    );
+    assert_eq!(hiq["high_quality"], false);
+    // Each reads back as it was set after the others.
+    let all = audio(&mut client);
+    assert_eq!(all["warp_mode"], "re_pitch");
+    assert_eq!(all["ram"], true);
+
+    // Only a warped clip loops.
+    refused(
+        &mut client,
+        "clip.set_loop_enabled",
+        json!({ "clip": clip, "enabled": true }),
+    );
+    run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    let looped = run(
+        &mut client,
+        "clip.set_loop_enabled",
+        json!({ "clip": clip, "enabled": true }),
+    );
+    assert_eq!(looped["looping"], true);
+    let unwarped = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": false }),
+    );
+    assert!(
+        unwarped.get("looping").is_none(),
+        "unwarping switches the loop off"
+    );
+}
+
+// Spec: multisampler R63. An agent edits the samples of Snapshot and of a
+// multisampler by command ID, reverts and converts them, and reads each
+// result back through the query tool's `device` object.
+#[test]
+fn an_agent_edits_a_sample_and_reads_the_edits_back() {
+    let dir = TempDir::new("sample-edits");
+    let file = dir.0.join("Stem.wav");
+    write_stem(&file, 220.0);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    // Commands that need the shell run one to a call.
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let refused = |client: &mut Client<InProcess>, command: &str, args: Value| -> bool {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .is_err()
+    };
+    let add = |client: &mut Client<InProcess>, name: &str, device_type: &str| {
+        one(
+            client,
+            "track.create",
+            json!({ "id": {"$new": name}, "kind": "midi", "name": name, "index": 0 }),
+        );
+        let track = {
+            let document = client.transport().shell.editor().document();
+            document.tracks().find(|t| t.name() == name).unwrap().id()
+        };
+        one(
+            client,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
+        one(
+            client,
+            "device.add",
+            json!({ "device": {
+                "kind": { "native": { "device_type": device_type } },
+                "name": name, "role": "instrument" } }),
+        );
+        let document = client.transport().shell.editor().document();
+        document.track(track).unwrap().devices().next().unwrap().id
+    };
+    let snapshot = add(&mut client, "Snap", "beatlayer.snapshot");
+    let mosaic = add(&mut client, "Mosaic", "beatlayer.mosaic");
+    one(
+        &mut client,
+        "device.load_sample",
+        json!({ "device": snapshot, "path": file.to_string_lossy() }),
+    );
+    one(
+        &mut client,
+        "device.add_layers",
+        json!({ "device": mosaic, "paths": [file.to_string_lossy()] }),
+    );
+    let device = |client: &mut Client<InProcess>, id: bl_model::DeviceId| -> Value {
+        call(
+            client,
+            "query",
+            json!({ "path": format!("device {}", id.0.get()), "detail": "full" }),
+        )
+    };
+    let layer = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .device(mosaic)
+        .unwrap()
+        .layers
+        .list[0]
+        .id;
+
+    // Edits by ID: Snapshot's list reads back under `saved.sample_edits`, the
+    // layer's under its own `edits`.
+    let cut = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "cut", "range": { "from": 0, "to": 12_000 } }),
+    );
+    assert_eq!(cut["length"], 36_000);
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "fade_out" }),
+    );
+    let trim = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "kind": "trim",
+                "range": { "from": 6_000, "to": 30_000 } }),
+    );
+    assert_eq!(trim["length"], 24_000);
+    let read = device(&mut client, snapshot);
+    let edits = read["saved"]["sample_edits"]["items"].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[0]["kind"], "cut");
+    let read = device(&mut client, mosaic);
+    let item = &read["layers"]["list"]["items"][0];
+    assert_eq!(item["edits"][0]["kind"], "trim");
+    assert_eq!(item["length"], 24_000);
+    assert_eq!(item["end"], 24_000, "the layer's markers followed the trim");
+
+    // A selection past the sample is refused and changes nothing; so does
+    // Crop in a set that has never been saved.
+    assert!(refused(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "trim", "range": { "from": 0, "to": 90_000 } }),
+    ));
+    assert!(refused(
+        &mut client,
+        "device.crop_sample",
+        json!({ "device": snapshot })
+    ));
+    assert_eq!(
+        device(&mut client, snapshot)["saved"]["sample_edits"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Auditioning is a read and changes nothing.
+    let before = client.transport().shell.editor().document().clone();
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "from": 0.5 }),
+    );
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "down": false }),
+    );
+    assert_eq!(*client.transport().shell.editor().document(), before);
+
+    // Revert clears both lists; the conversion keeps the sample.
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "revert": true }),
+    );
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "revert": true }),
+    );
+    assert!(
+        device(&mut client, snapshot)["saved"]
+            .get("sample_edits")
+            .is_none()
+    );
+    assert_eq!(
+        device(&mut client, mosaic)["layers"]["list"]["items"][0]["length"],
+        48_000
+    );
+    let converted = one(
+        &mut client,
+        "device.convert",
+        json!({ "device": snapshot, "to": "multisampler" }),
+    );
+    let new: u64 = converted["device"].as_u64().unwrap();
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {new}") }),
+    );
+    assert_eq!(
+        read["layers"]["count"], 1,
+        "Snapshot is a multisampler of one layer now"
+    );
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
 // parameters, sets some by ID, shows Singe's expanded part, reads each

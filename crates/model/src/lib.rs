@@ -81,10 +81,12 @@ pub mod rack;
 pub mod registry;
 mod repr;
 mod routing;
+mod sample_edits;
 mod scene;
 mod shared;
 mod track;
 mod warp;
+mod warp_settings;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -126,9 +128,14 @@ pub use rack::{
     CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
 };
 pub use repr::{SavedSong, saved_schema};
+pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
+pub use warp_settings::{
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
+    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+};

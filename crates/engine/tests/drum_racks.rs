@@ -418,3 +418,52 @@ fn a_kit_renders_the_same_at_every_block_size() {
         assert_eq!(render(size), golden, "block size {size}");
     }
 }
+
+// Spec: drum-racks R10. A return chain's taps carry its signal at their
+// point, and a drum chain offers none.
+#[test]
+fn a_return_chains_taps_carry_its_signal() {
+    use serde_json::{Value, json};
+    let run = |rig: &mut Rig, id: &str, args: Value| {
+        bl_model::registry::run(&mut rig.editor, id, args).unwrap_or_else(|e| panic!("{id}: {e}"));
+    };
+    for size in [1, 64, 512] {
+        let (mut rig, source, chains, returns) = audio_kit(1, 1);
+        let tapper = track(&mut rig.editor, TrackKind::Audio, None);
+        effect_in(&mut rig.editor, returns[0], GAIN, &[(GAIN_PARAM, 0.5)]);
+        for command in [
+            Command::SetChainSend {
+                chain: chains[0],
+                to: returns[0],
+                level: 1.0,
+            },
+            Command::SetChainVolume {
+                chain: returns[0],
+                volume: 0.5,
+            },
+        ] {
+            rig.editor.apply(command).unwrap();
+        }
+        run(
+            &mut rig,
+            "routing.set_monitor",
+            json!({ "track": tapper, "monitor": "in" }),
+        );
+        rig.sync();
+        assert_eq!(settled(&mut rig, size), 1.25, "the rack's sum, untapped");
+        for (tap, heard) in [("pre_fx", 1.0), ("post_fx", 0.5), ("post_mixer", 0.25)] {
+            run(
+                &mut rig,
+                "routing.set_input",
+                json!({ "track": tapper, "input":
+                    { "type": "track", "track": source, "tap": tap, "chain": returns[0] } }),
+            );
+            rig.sync();
+            assert_eq!(
+                settled(&mut rig, size),
+                1.25 + heard,
+                "{tap}, block size {size}"
+            );
+        }
+    }
+}

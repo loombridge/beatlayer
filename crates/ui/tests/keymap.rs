@@ -605,3 +605,27 @@ fn s_solos_the_selected_chain() {
         }
     }
 }
+
+// Spec: drum-racks R18. D switches between a Drum Rack and its last
+// selected pad (S-VIEW-007), wherever the keys are read, on both platforms.
+#[test]
+fn d_switches_hot_swap_between_the_rack_and_its_pad() {
+    let keymap = Keymap::live12();
+    for platform in [Platform::Mac, Platform::Other] {
+        for contexts in [
+            vec![Context::Global],
+            vec![Context::DeviceView, Context::Global],
+        ] {
+            let hit = keymap
+                .resolve(platform, Key::D, mods(false, false, false, false), &contexts)
+                .map(|hit| hit.command.id.clone());
+            assert_eq!(
+                hit.as_deref(),
+                Some("rack.switch_hot_swap_target"),
+                "{platform:?} {contexts:?}"
+            );
+        }
+    }
+    let entry = keymap.entry_for("S-VIEW-007").unwrap();
+    assert_eq!(entry.status, Status::Bound);
+}

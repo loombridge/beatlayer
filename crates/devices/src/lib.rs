@@ -25,11 +25,14 @@
 //! adds them to the engine. The instruments are the polysynth
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
 //! eight-slot drum sampler ([`kitbag`], WP-5.17). The
-//! rest of the core effects ship with WP-2.18. [`testing`] has the devices
+//! rest of the core effects ship with WP-2.18; the lo-fi effects are in
+//! [`degrade`], [`crusher`] and [`wax`] (WP-5.24). [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
 pub mod compressor;
+pub mod crusher;
+pub mod degrade;
 pub mod delay;
 pub mod dice;
 pub mod drum_sampler;
@@ -51,8 +54,11 @@ pub mod stack;
 pub mod testing;
 pub mod touch;
 pub mod utility;
+pub mod wax;
 
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
+pub use crusher::{CRUSHER, crusher_type};
+pub use degrade::{DEGRADE, degrade_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
@@ -70,6 +76,7 @@ pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
 pub use stack::{STACK, stack_type};
 pub use touch::{TOUCH, touch_type};
+pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
@@ -89,6 +96,7 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        DEGRADE => Some(degrade::display(device, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
@@ -115,6 +123,9 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    degrade::register(registry);
+    crusher::register(registry);
+    wax::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

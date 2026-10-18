@@ -485,7 +485,7 @@ impl Band {
 /// The spectrum of the output, for the display: a window of samples at a
 /// time, at [`ANALYSER_BANDS`] logarithmic bands, in dB. Everything it
 /// writes it made with, so it doesn't allocate on the audio thread.
-struct Analyser {
+pub(crate) struct Analyser {
     /// The samples of the window being filled.
     samples: Vec<f32>,
     filled: usize,
@@ -502,7 +502,7 @@ struct Analyser {
 }
 
 impl Analyser {
-    fn new(rate: f64) -> Self {
+    pub(crate) fn new(rate: f64) -> Self {
         let half = ANALYSER_WINDOW / 2;
         let mut edges = [0usize; ANALYSER_BANDS + 1];
         for (band, edge) in edges.iter_mut().enumerate() {
@@ -534,7 +534,7 @@ impl Analyser {
     }
 
     /// Adds one output sample; a full window is measured and starts again.
-    fn push(&mut self, sample: f32) {
+    pub(crate) fn push(&mut self, sample: f32) {
         self.samples[self.filled] = sample;
         self.filled += 1;
         if self.filled == ANALYSER_WINDOW {
@@ -573,7 +573,7 @@ impl Analyser {
 
     /// The last window's bands, in dB, [`ANALYSER_MIN_HZ`] to
     /// [`ANALYSER_MAX_HZ`], lowest first.
-    fn bands(&self) -> &[f32; ANALYSER_BANDS] {
+    pub(crate) fn bands(&self) -> &[f32; ANALYSER_BANDS] {
         &self.bands
     }
 }
@@ -940,6 +940,26 @@ fn response_db(c: Coeffs, hz: f64, rate: f64) -> f64 {
     10.0 * (num / den.max(1e-30)).max(1e-30).log10()
 }
 
+/// The display's spectrum series for the analyser's `data` (its bands, in
+/// dB): the Contour's, and any device that shows its signal's spectrum.
+pub(crate) fn spectrum_series(data: &[f32]) -> DisplaySeries {
+    // Each band is read at its centre.
+    let centre = |band: f64| {
+        (ANALYSER_MIN_HZ * (ANALYSER_MAX_HZ / ANALYSER_MIN_HZ).powf(band / ANALYSER_BANDS as f64))
+            as f32
+    };
+    DisplaySeries {
+        name: "Spectrum".to_owned(),
+        unit: "dB".to_owned(),
+        x_unit: "Hz".to_owned(),
+        x_range: [centre(0.5), centre(ANALYSER_BANDS as f64 - 0.5)],
+        log_x: true,
+        y_range: SPECTRUM_RANGE_DB,
+        detail: false,
+        values: data.to_vec(),
+    }
+}
+
 /// The device's display (the eq spec, R10 to R12): the spectrum while
 /// Analyze is on, each switched-on band's response and their sum on each
 /// curve, and a dot for each such band. `data` is what the node published,
@@ -988,20 +1008,7 @@ pub fn display(
         readings: Vec::new(),
     };
     if let (Some(data), true) = (data, value(ANALYZE) >= 0.5) {
-        let mut spectrum = series(
-            "Spectrum".to_owned(),
-            SPECTRUM_RANGE_DB,
-            false,
-            data.to_vec(),
-        );
-        // Each band is read at its centre.
-        let centre = |band: f64| {
-            (ANALYSER_MIN_HZ
-                * (ANALYSER_MAX_HZ / ANALYSER_MIN_HZ).powf(band / ANALYSER_BANDS as f64))
-                as f32
-        };
-        spectrum.x_range = [centre(0.5), centre(ANALYSER_BANDS as f64 - 0.5)];
-        out.series.push(spectrum);
+        out.series.push(spectrum_series(data));
     }
     let freqs: Vec<f64> = (0..CURVE_POINTS)
         .map(|i| EQ_MIN_HZ * (EQ_MAX_HZ / EQ_MIN_HZ).powf(i as f64 / (CURVE_POINTS - 1) as f64))

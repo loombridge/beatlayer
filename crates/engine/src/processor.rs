@@ -1478,6 +1478,13 @@ impl Processor {
             .filter(|&ahead| ahead > 0 && ahead < remaining as u64)
             .min()
             .map_or(remaining, |ahead| ahead as usize);
+        // Spec: modulation R28. A target that runs before the modulator
+        // driven by its signal takes the modulator's output from 32 frames
+        // before, which the modulator has written by the part's start only
+        // if the part is no longer than that.
+        if self.program.as_ref().is_some_and(|p| p.get().lagged) {
+            next = next.min(crate::program::LAG_FRAMES);
+        }
         if !self.playing {
             return next;
         }
@@ -1720,8 +1727,8 @@ impl Processor {
         }
     }
 
-    /// Copies the notes the monitoring MIDI tracks received in the frames
-    /// `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// Copies the notes and controllers the monitoring MIDI tracks received in
+    /// the frames `offset..offset + frames` of the block into Capture MIDI's ring,
     /// stamped with the engine clock and, while the song plays, the song
     /// frame (WP-3.14).
     fn log_captured(&mut self, offset: usize, frames: usize) {
@@ -1732,8 +1739,10 @@ impl Processor {
         for (track, events) in program.get().midi.monitored_inputs() {
             for event in events {
                 let at = event.offset as usize;
-                let note = event.message.is_note_on() || event.message.is_note_off();
-                if !note || at < offset || at >= offset + frames {
+                if !crate::recording::is_recorded(&event.message)
+                    || at < offset
+                    || at >= offset + frames
+                {
                     continue;
                 }
                 let into = (at - offset) as i64;

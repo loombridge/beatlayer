@@ -179,6 +179,21 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 step.command
             ));
         }
+        // Spec: warping R7, R11, R23 to R27, R39 to R41. An edit is checked
+        // against the media and filled in from them, as the shell does when
+        // it runs one.
+        if is_edit(&step.command) {
+            match ctx.shell.prepare_edit(&step.command, args) {
+                Ok(prepared) => args = prepared,
+                Err(error) => {
+                    return failed(format!(
+                        "command {} (`{}`): {error}",
+                        index + 1,
+                        step.command
+                    ));
+                }
+            }
+        }
         // Spec: agent-permissions R1 to R3. Each call's class is decided
         // from its arguments against the set as it is now.
         let call = if raised_by_arguments(&step.command) {

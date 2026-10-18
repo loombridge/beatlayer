@@ -84,8 +84,10 @@ bl_rt::install_trap!();
 
 mod automation;
 pub mod capture;
+mod clip_source;
 pub mod clips;
 mod compiler;
+pub mod controller_take;
 mod disjoint;
 pub mod display;
 mod engine;
@@ -114,6 +116,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 pub mod transport;
+mod warped;
 mod zones;
 
 #[doc(hidden)]

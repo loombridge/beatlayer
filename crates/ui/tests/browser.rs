@@ -647,3 +647,54 @@ fn only_visible_rows_are_built() {
     assert!(nodes.iter().any(|n| n.label == "Loop.wav"), "the last row");
     let _ = list_id();
 }
+
+// Spec: multisampler R47.
+#[test]
+fn dragging_an_sfz_instrument_makes_a_multisampler_on_a_midi_track_or_a_new_one() {
+    let scratch = Scratch::new("drag-sfz");
+    let (mut h, root) = harness(&scratch);
+    h.shell
+        .run(ids::SET_PREVIEW, json!({ "on": false }))
+        .unwrap();
+    std::fs::write(
+        root.join("Zz Bank.sfz"),
+        "<region> sample=Samples/Drums/Kick.wav key=36\n<region> sample=Samples/Drums/Snare.wav key=38\n",
+    )
+    .unwrap();
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "user_library" }))
+        .unwrap();
+    h.settle();
+    let at = names(&h).iter().position(|n| n == "Zz Bank.sfz").unwrap();
+    let multisamplers = |h: &Harness| -> Vec<(bl_model::TrackId, usize)> {
+        let doc = h.shell.editor().document();
+        doc.tracks()
+            .flat_map(|track| {
+                track
+                    .devices()
+                    .filter(|d| !d.layers.list.is_empty())
+                    .map(|d| (track.id(), d.layers.list.len()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    assert!(multisamplers(&h).is_empty());
+    // Below the last track: a new MIDI track holding the instrument.
+    let tracks = top_level(&h).len();
+    drag(&mut h, row(at), lanes_point(2.3, 520.0), Modifiers::NONE);
+    assert_eq!(top_level(&h).len(), tracks + 1, "a new track");
+    let doc = h.shell.editor().document();
+    let new = doc.track(*top_level(&h).last().unwrap()).unwrap();
+    assert_eq!((new.kind(), new.name()), (TrackKind::Midi, "Zz Bank"));
+    assert_eq!(multisamplers(&h), [(new.id(), 2)]);
+    assert_eq!(h.shell.editor().undo_history().len(), 1, "one undo step");
+    // Onto a MIDI track's lane: the multisampler goes on that track.
+    let midi = top_level(&h)[0];
+    drag(&mut h, row(at), lanes_point(1.0, 160.0), Modifiers::NONE);
+    assert_eq!(top_level(&h).len(), tracks + 1, "no further track");
+    assert!(multisamplers(&h).contains(&(midi, 2)));
+    // Onto an audio track's lane: refused.
+    let before = multisamplers(&h).len();
+    drag(&mut h, row(at), lanes_point(4.3, 340.0), Modifiers::NONE);
+    assert_eq!(multisamplers(&h).len(), before);
+}

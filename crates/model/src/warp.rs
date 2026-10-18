@@ -154,8 +154,9 @@ impl AudioData {
     }
 
     /// The clip's Start and End markers and loop brace in seconds in the
-    /// file: what the engine plays until warped playback (WP-4.2) follows the
-    /// map. An unwarped clip's are its own.
+    /// file: what the engine falls back on for a warped clip whose map is
+    /// damaged, which the commands never leave. An unwarped clip's are its
+    /// own.
     #[must_use]
     pub fn in_seconds(&self) -> Cow<'_, Self> {
         let Some(map) = self.warp.then(|| self.warp_map().ok()).flatten() else {
@@ -166,7 +167,7 @@ impl AudioData {
 
     /// The data with its Start and End markers and loop brace passed through
     /// `convert`, rounded to whole ticks if `whole`, and `warp` left as it is.
-    fn converted(&self, convert: impl Fn(f64) -> f64, whole: bool) -> Self {
+    pub(crate) fn converted(&self, convert: impl Fn(f64) -> f64, whole: bool) -> Self {
         let convert = |value: f64| {
             let converted = convert(value);
             if whole { converted.round() } else { converted }
@@ -180,7 +181,7 @@ impl AudioData {
         }
     }
 
-    fn require_warp(&self) -> Result<(), ModelError> {
+    pub(crate) fn require_warp(&self) -> Result<(), ModelError> {
         if self.warp {
             Ok(())
         } else {
@@ -192,7 +193,11 @@ impl AudioData {
 
     /// The clip with the same markers replaced by `markers` and its tempo by
     /// `tempo`, if they make a map (increasing order, a tempo in range).
-    fn with_map(&self, markers: Vec<WarpMarker>, tempo: f64) -> Result<Self, ModelError> {
+    pub(crate) fn with_map(
+        &self,
+        markers: Vec<WarpMarker>,
+        tempo: f64,
+    ) -> Result<Self, ModelError> {
         let next = Self {
             warp_markers: markers,
             tempo: Some(tempo),
@@ -229,6 +234,8 @@ impl AudioData {
         } else {
             let map = self.warp_map()?;
             next = self.converted(|beat| map.beat_to_time(beat).max(0.0), false);
+            // Spec: warping R14. Only a warped clip loops.
+            next.looping = false;
         }
         next.warp = on;
         Ok(next)
@@ -521,7 +528,7 @@ impl AudioData {
     }
 
     /// Checks that `indices` name markers of the clip.
-    fn check_indices(&self, indices: &[usize]) -> Result<(), ModelError> {
+    pub(crate) fn check_indices(&self, indices: &[usize]) -> Result<(), ModelError> {
         if indices.is_empty() || indices.iter().any(|&i| i >= self.warp_markers.len()) {
             return Err(ModelError::InvalidInput(
                 "name warp markers by their place in the map, the first being 0",

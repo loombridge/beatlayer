@@ -6,11 +6,11 @@
 //! it (`modulator.map`). Esc, or the button again, puts the button out.
 //! Everything here runs a registered command.
 
-use bl_model::DeviceId;
 use bl_model::modulator::{
-    ModTarget, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
-    with_point_moved, without_point,
+    ModTarget, STRIKE_MOD, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
+    with_point_moved, with_sustain, without_point,
 };
+use bl_model::{DeviceId, DeviceKind};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{ArmedMap, DeviceFrame, MappingRow, ModulatorFrame};
 use egui::accesskit::Role;
@@ -401,7 +401,9 @@ pub fn curve_cell(
         .collect();
     painter.add(Shape::line(line, Stroke::new(1.5, ink)));
     for point in points {
-        painter.circle(to_screen(point), 3.0, ink, Stroke::new(1.0, c.text.0));
+        // The sustain breakpoint is drawn larger (R26).
+        let radius = if point.sustain { 5.0 } else { 3.0 };
+        painter.circle(to_screen(point), radius, ink, Stroke::new(1.0, c.text.0));
     }
 
     let id = curve_id(device);
@@ -413,7 +415,11 @@ pub fn curve_cell(
             .iter()
             .position(|p| (to_screen(p) - at).length() <= GRAB)
     };
-    let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
+    let (alt, shift, command) =
+        ui.input(|i| (i.modifiers.alt, i.modifiers.shift, i.modifiers.command));
+    // Spec: modulation R26. Only a Strike Mod has a sustain breakpoint.
+    let sustains =
+        matches!(&frame.kind, DeviceKind::Native { device_type } if device_type == STRIKE_MOD);
     if response.drag_started() {
         let origin = ui
             .input(|i| i.pointer.press_origin())
@@ -462,6 +468,13 @@ pub fn curve_cell(
         && let Some(at) = response.interact_pointer_pos()
     {
         match near(at) {
+            // Cmd/Ctrl-click makes a breakpoint the sustain breakpoint, or
+            // takes the mark away (R26).
+            Some(index) if command && sustains => {
+                events.push(UiEvent::BeginNamedGesture("Edit Shape".to_owned()));
+                set(with_sustain(points, index), events);
+                events.push(UiEvent::EndGesture);
+            }
             Some(index) if shift => {
                 events.push(UiEvent::BeginNamedGesture("Edit Shape".to_owned()));
                 set(without_point(points, index), events);

@@ -1,20 +1,27 @@
 //! Transients as an agent reads them (WP-4.3): the `clip.transients` query,
 //! its arguments and its result. The warping spec, R23 and R24, holds the
 //! behaviour; the edits themselves are `bl-model`'s `clip.insert_transient`
-//! and its siblings.
+//! and its siblings. Also a file's saved default clip settings (WP-4.9, R42):
+//! `clip.save_default` and `clip.defaults`.
 
 use bl_commands::Context::ClipView;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::ClipId;
+use bl_model::{ClipDefaults, ClipId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// `clip.transients`: a clip's transients, with its edits applied.
 pub const TRANSIENTS: &str = "clip.transients";
 
+/// `clip.save_default`: save an audio clip's settings as its file's defaults.
+pub const SAVE_DEFAULT: &str = "clip.save_default";
+
+/// `clip.defaults`: read back the defaults saved for an audio clip's file.
+pub const DEFAULTS: &str = "clip.defaults";
+
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[TRANSIENTS];
+pub const IDS: &[&str] = &[TRANSIENTS, SAVE_DEFAULT, DEFAULTS];
 
 /// Whether `id` is one of the warping query commands.
 #[must_use]
@@ -28,6 +35,28 @@ pub fn handles(id: &str) -> bool {
 pub struct ClipTransientsArgs {
     /// The audio clip.
     pub clip: ClipId,
+}
+
+/// Which clip's file `clip.save_default` and `clip.defaults` act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "The audio clip whose file's saved defaults to write or read.")]
+pub struct ClipDefaultsArgs {
+    /// The audio clip.
+    pub clip: ClipId,
+}
+
+/// What `clip.save_default` and `clip.defaults` return.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SavedDefaults {
+    /// The clip.
+    pub clip: ClipId,
+    /// The defaults file beside the clip's sample, where the defaults are or
+    /// would be kept.
+    pub file: String,
+    /// The file's saved defaults; `null` when none are saved, or the file
+    /// beside the sample is not whole, not of the current format, or was
+    /// saved for other content.
+    pub defaults: Option<ClipDefaults>,
 }
 
 /// One transient of a clip.
@@ -81,5 +110,37 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(ClipView)
             .args::<ClipTransientsArgs>()
             .result::<ClipTransients>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SAVE_DEFAULT, "Save Default Clip")
+            .description(
+                "Saves an audio clip's Warp switch, warp markers and tempo, warp mode and mode \
+                 controls (which hold its Transpose and Detune), and gain as its file's \
+                 defaults, as the Save button in the clip's title bar does: into a small file \
+                 of Beatlayer's own, `<sample file name>.beatlayer-clip`, beside the sample, so \
+                 the defaults travel with it, replacing any saved before. A clip made from the \
+                 file afterwards (dropped from the browser, loaded with Enter or imported) \
+                 starts with them and is not auto-warped; clips already in the set don't \
+                 change. Fails with the reason, and writes nothing, if the folder can't be \
+                 written or the clip's file isn't known. Changes nothing in the set and is no \
+                 undo step; writes a file outside the project.",
+            )
+            .permission(Permission::External)
+            .context(ClipView)
+            .args::<ClipDefaultsArgs>()
+            .result::<SavedDefaults>(),
+    )?;
+    registry.register(
+        CommandSpec::new(DEFAULTS, "Clip Defaults")
+            .description(
+                "Reads the defaults saved for an audio clip's file by `clip.save_default`: its \
+                 `file`, the `<sample file name>.beatlayer-clip` beside the sample, and the \
+                 `defaults` in it, or `null` when none are saved or the file does not hold \
+                 settings for this content. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(ClipView)
+            .args::<ClipDefaultsArgs>()
+            .result::<SavedDefaults>(),
     )
 }

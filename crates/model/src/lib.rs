@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+mod auto_warp;
 pub mod automation;
 mod base64;
 mod changes;
@@ -70,6 +71,7 @@ mod editor;
 mod error;
 pub mod fader;
 mod follow;
+pub mod graph;
 mod ids;
 mod launch;
 mod layers;
@@ -86,7 +88,11 @@ mod scene;
 mod shared;
 mod track;
 mod warp;
+mod warp_settings;
 
+pub use auto_warp::{
+    ClipDefaults, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm, nearest_bars,
+};
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
     envelope_value,
@@ -98,8 +104,8 @@ pub use clip::{
 };
 pub use command::Command;
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, PluginFormat, PluginState,
-    Sidechain, WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain, PluginFormat,
+    PluginState, Sidechain, WindowFrame,
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
@@ -135,3 +141,7 @@ pub use track::{
     TrackKind,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
+pub use warp_settings::{
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
+    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+};

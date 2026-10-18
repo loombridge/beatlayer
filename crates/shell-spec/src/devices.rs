@@ -298,17 +298,17 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
 }
 
 /// The width at 100% of what sits left of a device's body: its sidechain
-/// strip and, while shown, its sidechain section (WP-2.19b); 0 without a
-/// sidechain input.
+/// strip and, while shown, its sidechain section (WP-2.19b, and a MIDI
+/// sidechain's, WP-5.27); 0 without a sidechain input.
 #[must_use]
 pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
-    frame.sidechain.as_ref().map_or(0.0, |s| {
-        SIDECHAIN_STRIP_WIDTH
-            + if s.shown {
-                SIDECHAIN_SECTION_WIDTH
-            } else {
-                0.0
-            }
+    let shown = frame
+        .sidechain
+        .as_ref()
+        .map(|s| s.shown)
+        .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
+    shown.map_or(0.0, |shown| {
+        SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
     })
 }
 
@@ -534,6 +534,10 @@ pub struct DeviceFrame {
     pub panel: Option<DevicePanel>,
     /// Its sidechain section, if it has a sidechain input (WP-2.19b).
     pub sidechain: Option<SidechainSection>,
+    /// Its MIDI sidechain section, if it has a MIDI sidechain input
+    /// (WP-5.27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_sidechain: Option<MidiSidechainSection>,
     /// The view its display shows, if its display has views (WP-5.43): one
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -703,6 +707,19 @@ pub struct SidechainSection {
     pub listen: bool,
 }
 
+/// A device's MIDI sidechain section, in the same left strip as a
+/// sidechain's (WP-5.27; the routing spec, R34): the toggle shows the
+/// section, which holds the MIDI source chooser.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MidiSidechainSection {
+    /// Whether the section is shown, by the toggle at the top of the
+    /// device's left strip. It changes only the view.
+    pub shown: bool,
+    /// What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`)
+    /// or `No Input`.
+    pub source: String,
+}
+
 /// A floating device's window, as `device.windows` reports it (WP-2.5b).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FloatingWindow {
@@ -859,6 +876,10 @@ pub struct NewDevice {
     /// Whether it has a sidechain input, as its type declares (WP-2.19b).
     #[serde(default, skip_serializing_if = "is_false")]
     pub sidechain: bool,
+    /// Whether it has a MIDI sidechain input, as its type declares
+    /// (WP-5.27).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub midi_sidechain: bool,
 }
 
 #[expect(
@@ -1486,10 +1507,11 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Shows or hides a device's sidechain section, as the toggle at the top of the \
                  device's left strip does; switches unless `shown` says which. Only devices \
-                 with a sidechain input have one. It changes only the view: it isn't an undo \
+                 with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo \
                  step. The section's settings are the set's: `device.set_sidechain_input`, \
                  `device.set_sidechain_enabled`, `device.set_sidechain_mix`, \
-                 `device.set_sidechain_gain`, and `device.set_sidechain_listen`.",
+                 `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI \
+                 sidechain's, `device.set_midi_sidechain_source`.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

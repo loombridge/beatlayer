@@ -720,6 +720,26 @@ fn smoke_test_dmg(
     }
     eprintln!("architecture: {archs}");
 
+    // Every binary the table lists ships beside the main one (the plug-in
+    // scanner is found there, WP-2.9b), and with a signing identity
+    // cargo-packager signs each of them with the bundle.
+    let signed = Signing::from_env().macos_identity.is_some();
+    for name in binaries(table)? {
+        let path = app.join("Contents/MacOS").join(&name);
+        if !path.is_file() {
+            return Err(format!("{} isn't in the app", path.display()));
+        }
+        if !signed {
+            continue;
+        }
+        run(
+            Command::new("codesign")
+                .args(["--verify", "--strict"])
+                .arg(&path),
+            &format!("codesign --verify {name}"),
+        )?;
+    }
+
     check_binary(|| Command::new(&binary), expected_version)
 }
 
@@ -1139,7 +1159,11 @@ mod tests {
         json!({
             "product-name": "Beatlayer",
             "identifier": "io.loombridge.beatlayer",
-            "binaries": [{ "path": "beatlayer", "main": true }, { "path": "bl-cli" }],
+            "binaries": [
+                { "path": "beatlayer", "main": true },
+                { "path": "bl-cli" },
+                { "path": "beatlayer-scan" },
+            ],
             "macos": { "minimum-system-version": "13.0" },
         })
     }
@@ -1225,10 +1249,24 @@ mod tests {
     }
 
     #[test]
+    fn the_app_ships_the_plug_in_scanner() {
+        // The scanner's child process is found beside the app's executable
+        // (bl-plugin-host's `scan_program`), so the bundle must carry it.
+        let manifest = include_str!("../../crates/app/Cargo.toml");
+        assert!(manifest.contains(r#"{ path = "beatlayer-scan" }"#));
+    }
+
+    #[test]
     fn binaries_put_the_main_one_first() {
-        let table =
-            json!({ "binaries": [{ "path": "bl-cli" }, { "path": "beatlayer", "main": true }] });
-        assert_eq!(binaries(&table).unwrap(), ["beatlayer", "bl-cli"]);
+        let table = json!({ "binaries": [
+            { "path": "bl-cli" },
+            { "path": "beatlayer", "main": true },
+            { "path": "beatlayer-scan" },
+        ] });
+        assert_eq!(
+            binaries(&table).unwrap(),
+            ["beatlayer", "bl-cli", "beatlayer-scan"]
+        );
         let no_main = json!({ "binaries": [{ "path": "bl-cli" }] });
         assert!(binaries(&no_main).is_err());
     }

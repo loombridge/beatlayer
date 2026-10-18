@@ -222,6 +222,126 @@ fn sweep_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn veer_passes_under_rtsan() {
+    use bl_devices::shifter::{
+        BEND_RANGE, COARSE, DELAY_DIVISION, DELAY_MODE, DELAY_ON, DRIVE, ENV_ON, FEEDBACK, GLIDE,
+        LFO_AMOUNT, LFO_MODE, LFO_WAVE, MODE, PITCH_SOURCE, SHIFT, SHIFTER, SPREAD, TONE, WIDE,
+        WINDOW,
+    };
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut veer = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: SHIFTER.to_owned(),
+        },
+    )
+    .with_midi_sidechain();
+    for (param, value) in [
+        (COARSE, 7.0),
+        (SPREAD, 50.0),
+        (DELAY_ON, 1.0),
+        (FEEDBACK, 60.0),
+        (TONE, 40.0),
+        (LFO_AMOUNT, 40.0),
+        (ENV_ON, 1.0),
+    ] {
+        veer.params.insert(param, value);
+    }
+    let veer_id = veer.id;
+    for (index, device) in [tone, veer].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: veer_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // mode (Pitch, Freq and Ring), the shift, the window, Spread and
+        // Wide, the delay and its modes, the LFO's wave and rate mode, Drive,
+        // and the MIDI sidechain's source, glide and range.
+        let step = round / 14;
+        let command = match round % 14 {
+            0 => Some(set(MODE, (step % 3) as f64)),
+            1 => Some(set(COARSE, (step % 25) as f64 - 12.0)),
+            2 => Some(set(SHIFT, (step % 9) as f64 * 150.0 - 600.0)),
+            3 => Some(set(WINDOW, 2.0 + (step % 10) as f64 * 2.0)),
+            4 => Some(set(WIDE, (step % 2) as f64)),
+            5 => Some(set(DELAY_MODE, (step % 2) as f64)),
+            6 => Some(set(DELAY_DIVISION, (step % 14) as f64)),
+            7 => Some(set(DELAY_ON, (step % 3 != 0) as u8 as f64)),
+            8 => Some(set(LFO_WAVE, (step % 10) as f64)),
+            9 => Some(set(LFO_MODE, (step % 2) as f64)),
+            10 => Some(set(DRIVE, (step % 5) as f64 * 25.0)),
+            11 => Some(set(PITCH_SOURCE, (step % 2) as f64)),
+            12 => Some(set(GLIDE, (step % 4) as f64 * 100.0)),
+            13 => Some(set(BEND_RANGE, (step % 25) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Veer under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
 /// The channel EQ, the three-band EQ, the gate and the bus compressor on a
 /// track of a test tone, with the gate's and the compressor's sidechain
 /// keyed from a second track, while their parameters move between two

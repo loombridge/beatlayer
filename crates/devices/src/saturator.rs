@@ -22,8 +22,9 @@ use bl_model::{
     DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
 };
 
-use crate::eq::{Biquad, Type, coeffs};
+use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
+use crate::sections::Biquad;
 
 /// Singe's device type.
 pub const SATURATOR: &str = "beatlayer.singe";

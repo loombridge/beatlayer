@@ -19,8 +19,9 @@ use bl_model::{
     DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
 };
 
-use crate::eq::{Biquad, Type, coeffs};
+use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::sections::Biquad;
 
 /// Grit's device type.
 pub const OVERDRIVE: &str = "beatlayer.grit";

@@ -23,9 +23,10 @@ use bl_model::{
     DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
 };
 
-use crate::eq::{Biquad, Type, coeffs};
+use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::saturator::soft_knee;
+use crate::sections::Biquad;
 
 /// Valve's device type.
 pub const TUBE: &str = "beatlayer.valve";

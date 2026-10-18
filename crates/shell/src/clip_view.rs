@@ -375,7 +375,7 @@ impl ClipView {
         doc: &Document,
         arrangement: &ArrangementView,
     ) -> Option<ClipId> {
-        self.shown_clip(doc, arrangement)
+        self.shown_any_clip(doc, arrangement)
             .filter(|clip| self.session_clip == Some(*clip))
     }
 

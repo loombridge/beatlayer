@@ -246,10 +246,23 @@ impl Shell {
                 id
             }
             _ => {
-                let times: Vec<f64> = if own && !sample.transients().is_empty() {
-                    sample.transients().to_vec()
+                // A selected transient an edit has since moved or deleted is
+                // no longer there to act on.
+                let current = self.clip_transients(shown);
+                let selected: Vec<f64> = if own {
+                    sample
+                        .transients()
+                        .iter()
+                        .copied()
+                        .filter(|t| current.contains(t))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let times: Vec<f64> = if !selected.is_empty() {
+                    selected
                 } else if let Some((from, to)) = selection {
-                    self.clip_transients(shown)
+                    current
                         .iter()
                         .copied()
                         .filter(|&t| t >= from && t <= to)

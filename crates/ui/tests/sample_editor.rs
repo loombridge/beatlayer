@@ -1133,6 +1133,25 @@ fn the_start_and_end_markers_and_the_loop_brace_drag_in_one_step() {
 }
 
 #[test]
+fn the_end_marker_drags_when_the_start_lies_past_the_file() {
+    // Spec: sample-editor R5: a Start past the file's end, which an agent
+    // can set, leaves the End marker draggable rather than crashing.
+    let mut s = sample("past-end", false);
+    let clip = s.clip;
+    let past = f64::from(SECONDS) + 1.0;
+    s.run(
+        "clip.set_region",
+        json!({ "clip": clip, "start": past, "end": null, "ticks": false }),
+    );
+    let g = s.geometry();
+    let marker_y = g.strip.top() + 3.0;
+    let from = pos2(g.axis.x_of(f64::from(SECONDS)) - 1.0, marker_y);
+    let to = pos2(g.axis.x_of(f64::from(SECONDS) / 2.0), marker_y);
+    s.drag(from, &Sample::path(from, to, 4), Modifiers::NONE);
+    assert_eq!(s.audio().start, past);
+}
+
+#[test]
 fn shift_dragging_a_pseudo_warp_marker_moves_its_transient() {
     // Spec: sample-editor R8.
     let mut s = sample("transient", true);

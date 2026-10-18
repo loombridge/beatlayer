@@ -1175,7 +1175,10 @@ impl SampleEditorUi {
         let g = frame.g();
         let (whole_start, whole_end) = g.whole();
         // The view may not leave the file's span by more than its own width.
-        let length = (end - start).clamp(g.min_span(), 16.0 * (whole_end - whole_start));
+        let length = (end - start).clamp(
+            g.min_span(),
+            (16.0 * (whole_end - whole_start)).max(g.min_span()),
+        );
         let start = start.clamp(whole_start - length, whole_end);
         invoke(
             events,
@@ -1374,7 +1377,7 @@ impl SampleEditorUi {
                         )
                     }
                     Part::End => {
-                        let end = (end_now + delta).clamp(*start + min, ceiling);
+                        let end = (end_now + delta).clamp(*start + min, ceiling.max(*start + min));
                         (
                             "clip.set_region",
                             json!({ "clip": clip, "start": start, "end": end, "ticks": ticks }),
@@ -1389,7 +1392,8 @@ impl SampleEditorUi {
                         )
                     }
                     Part::LoopEnd => {
-                        let to = (loop_end_now + delta).clamp(*loop_start + min, ceiling);
+                        let to = (loop_end_now + delta)
+                            .clamp(*loop_start + min, ceiling.max(*loop_start + min));
                         (
                             "clip.set_loop",
                             json!({ "clip": clip, "start": loop_start, "end": to, "ticks": ticks }),
@@ -1928,14 +1932,15 @@ impl SampleEditorUi {
             } else if modifiers.shift && !modifiers.command && !modifiers.alt {
                 if frame.start_selected {
                     // Shift with the Start marker selected moves the region.
-                    let end = frame.audio.end;
+                    // Stopping at the file's start keeps the region's length.
+                    let shift = (sign * step).max(g.axis_of(0.0) - frame.audio.start);
                     invoke(
                         events,
                         "clip.set_region",
                         json!({
                             "clip": clip,
-                            "start": (frame.audio.start + sign * step).max(g.axis_of(0.0)),
-                            "end": end.map(|e| e + sign * step),
+                            "start": frame.audio.start + shift,
+                            "end": frame.audio.end.map(|e| e + shift),
                             "ticks": g.warped,
                         }),
                     );

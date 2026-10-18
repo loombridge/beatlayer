@@ -14,6 +14,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bl_engine::DeviceType;
+use bl_media::MediaStore;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout,
@@ -21,15 +22,17 @@ use bl_model::{
     MultisamplerViews, ParamId, RackKind, RackViewMap, RackViews, TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
+use bl_project::rack_preset::Saved;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
-    self as ids, AddDeviceArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect, CreateChainArgs,
-    DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry, DevicePanel,
-    DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs, FloatingWindow,
-    FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, HotSwapChainArgs,
-    LoadPresetArgs, MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs,
-    PresetResult, RackFrame, SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs,
-    SetRackViewArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs, Ungrouped,
+    self as ids, AddDeviceArgs, AddPresetArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect,
+    CreateChainArgs, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry,
+    DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs,
+    FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs,
+    HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MidiSidechainSection, ParameterState,
+    PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame, SaveChainPresetArgs, SavePresetArgs,
+    SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetRackViewArgs, SetWindowArgs,
+    ShowSidechainArgs, SidechainSection, SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -38,6 +41,12 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::arrangement::ArrangementView;
+use crate::browser::arrange::MediaFile;
+
+mod rack_presets;
+
+use rack_presets::Ready;
+pub use rack_presets::is_chain_preset;
 
 /// What the Device View shows besides the set: the selected device, the
 /// folded devices, the clipboard, and hot-swapping; and the device types
@@ -127,6 +136,9 @@ pub struct Outcome {
     /// Folders for the browser to open, outermost first, with the User
     /// Library's label chosen: hot-swapping's way to the device's presets.
     pub browse: Option<Vec<PathBuf>>,
+    /// Files the samples of a rack or chain preset were written to or found
+    /// in, for the set's media table (WP-5.8).
+    pub media: Vec<MediaFile>,
 }
 
 /// What a device command needs from the rest of the shell.
@@ -138,6 +150,9 @@ pub struct Context<'a> {
     pub arrangement: &'a mut ArrangementView,
     /// The User Library, where presets go.
     pub user_library: Option<&'a Path>,
+    /// The media store, where the samples of rack presets are found and
+    /// registered.
+    pub media: &'a MediaStore,
     /// The interface zoom, as a factor: a floating window's smallest size
     /// in points on the screen is its size at 100% times this.
     pub zoom: f32,
@@ -239,6 +254,12 @@ impl DeviceView {
     #[must_use]
     pub fn hot_swap(&self) -> Option<DeviceId> {
         self.hot_swap
+    }
+
+    /// The chain armed by its Hot-Swap button, if one is.
+    #[must_use]
+    pub fn hot_swap_chain(&self) -> Option<ChainId> {
+        self.hot_swap_chain
     }
 
     /// Whether the clipboard holds a device.
@@ -1137,6 +1158,7 @@ impl DeviceView {
             editor,
             arrangement,
             user_library,
+            media,
             zoom,
             auto_hide,
             windows_shown,
@@ -1258,7 +1280,8 @@ impl DeviceView {
             }
             ids::ADD => {
                 let args: AddDeviceArgs = parse(args)?;
-                let added = self.add(&args, editor, arrangement, user_library, track)?;
+                let ready = self.default_rack(editor, &args, user_library, media, &mut outcome);
+                let added = self.add(&args, editor, arrangement, user_library, track, ready)?;
                 if let Some(name) = &added.default_preset {
                     // Spec: device-chains R13, as Live's "Using Default
                     // Preset Auto Filter.adv."
@@ -1495,7 +1518,13 @@ impl DeviceView {
             }
             ids::CHAIN_CREATE => {
                 let args: CreateChainArgs = parse(args)?;
-                outcome.value = to_value(&self.create_chain(editor, args)?);
+                outcome.value = to_value(&self.create_chain(
+                    editor,
+                    args,
+                    user_library,
+                    media,
+                    &mut outcome,
+                )?);
                 outcome.document_changed = true;
                 return Ok(outcome);
             }
@@ -1532,9 +1561,7 @@ impl DeviceView {
                         )
                     }
                 };
-                Preset::of(current)
-                    .save(&path)
-                    .map_err(|e| DeviceError::Failed(e.to_string()))?;
+                rack_presets::save_device(current, media, &path)?;
                 outcome.message = Some(format!("Saved preset {}.", path.display()));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
@@ -1545,9 +1572,7 @@ impl DeviceView {
                 let library = user_library.ok_or_else(no_library)?;
                 let current = editor.document().device(device).expect("the target exists");
                 let path = preset::default_preset_path(library, current);
-                Preset::of(current)
-                    .save(&path)
-                    .map_err(|e| DeviceError::Failed(e.to_string()))?;
+                rack_presets::save_device(current, media, &path)?;
                 outcome.message = Some(format!(
                     "Saved the default preset for {}: {}.",
                     current.own_name(),
@@ -1625,9 +1650,53 @@ impl DeviceView {
                 let LoadPresetArgs { device, path } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 let path = preset_path(&path)?;
-                load_preset(self, editor, device, &path)?;
+                let device =
+                    match rack_presets::open_preset(&path, media, user_library, &mut outcome)? {
+                        Saved::Device(_) => {
+                            load_preset(self, editor, device, &path)?;
+                            device
+                        }
+                        saved => self.load_rack_preset(
+                            editor,
+                            device,
+                            saved,
+                            &preset::preset_name(&path),
+                        )?,
+                    };
                 outcome.document_changed = true;
                 outcome.value = to_value(&preset_result(device, &path));
+                return Ok(outcome);
+            }
+            ids::ADD_PRESET => {
+                let args: AddPresetArgs = parse(args)?;
+                let (add, ready) =
+                    self.ready_to_add(&args, editor, user_library, media, &mut outcome)?;
+                let added =
+                    self.add(&add, editor, arrangement, user_library, track, Some(ready))?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
+            ids::REPLACE => {
+                let args: ids::ReplaceArgs = parse(args)?;
+                let added = self.replace(args, editor, user_library, media, &mut outcome)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
+            ids::CHAIN_SAVE_PRESET => {
+                let args: SaveChainPresetArgs = parse(args)?;
+                let (saved, path) = self.save_chain_preset(args, editor, user_library, media)?;
+                outcome.message = Some(format!("Saved preset {}.", path.display()));
+                outcome.value = to_value(&saved);
+                return Ok(outcome);
+            }
+            ids::CHAIN_LOAD_PRESET => {
+                let args: LoadChainPresetArgs = parse(args)?;
+                let added =
+                    self.load_chain_preset(args, editor, user_library, media, &mut outcome)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
                 return Ok(outcome);
             }
             ids::HOT_SWAP => {
@@ -1636,7 +1705,12 @@ impl DeviceView {
                     self.hot_swap.is_none() || device.is_some_and(|d| Some(d) != self.hot_swap),
                 );
                 if on {
-                    let device = self.target(editor.document(), device)?;
+                    // Spec: racks R44. With none named or selected, the
+                    // shown track's first audio effect or its instrument.
+                    let named = device
+                        .or(self.selected)
+                        .or_else(|| Self::first_hot_swap_target(editor.document(), track));
+                    let device = self.target(editor.document(), named)?;
                     self.hot_swap = Some(device);
                     self.hot_swap_chain = None;
                     if let Some(library) = user_library {
@@ -1718,7 +1792,8 @@ impl DeviceView {
         })
     }
 
-    /// Adds a device as a person does (`device.add`).
+    /// Adds a device as a person does (`device.add`): a new one of the type
+    /// `args` describe, or `ready`, a device a preset made.
     fn add(
         &mut self,
         args: &AddDeviceArgs,
@@ -1726,9 +1801,10 @@ impl DeviceView {
         arrangement: &mut ArrangementView,
         user_library: Option<&Path>,
         shown: Option<TrackId>,
+        ready: Option<Ready>,
     ) -> Result<DeviceAdded, DeviceError> {
         if let Some(chain) = args.chain {
-            return self.add_to_chain(args, chain, editor, user_library);
+            return self.add_to_chain(args, chain, editor, user_library, ready);
         }
         let role = args.device.role;
         let target = args
@@ -1743,17 +1819,16 @@ impl DeviceView {
         // Spec: device-chains R12. An instrument or MIDI effect for a
         // track that can't hold it goes on a new MIDI track at the end.
         let new_track = !role.fits(kind);
-        let id: DeviceId = editor.new_id();
-        let device = new_device(id, args);
-        let default = user_library
-            .map(|library| preset::default_preset_path(library, &device))
-            .filter(|path| path.is_file())
-            .and_then(|path| {
-                Preset::load(&path)
-                    .ok()
-                    .filter(|p| p.fits(&device))
-                    .map(|p| (path, p))
-            });
+        let Ready {
+            device,
+            state,
+            original,
+            default_name,
+        } = self.plan(editor, args, user_library, ready);
+        let id = device.id;
+        let copies: Vec<DeviceId> = device.walk().map(|d| d.id).collect();
+        let pairs: Vec<(&Device, DeviceId)> =
+            original.iter().flat_map(Device::walk).zip(copies).collect();
         let label = if new_track {
             "Insert Device and Track"
         } else {
@@ -1781,15 +1856,15 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((path, preset)) = &default {
+            if let Some((params, name, shape)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
-                    params: self.sanitize(&args.device.kind, preset.params.clone()),
-                    name: preset::preset_name(path),
-                    shape: preset.shape.clone(),
+                    params,
+                    name,
+                    shape,
                 })?;
             }
-            Ok::<_, bl_model::EditError>(())
+            map_inner_copies(editor, &pairs)
         });
         result.map_err(|e| DeviceError::Failed(e.to_string()))?;
         if new_track {
@@ -1800,8 +1875,47 @@ impl DeviceView {
             device: id,
             track: track_id,
             new_track,
-            default_preset: default.map(|(path, _)| preset::preset_name(&path)),
+            default_preset: default_name,
         })
+    }
+
+    /// The device `add` puts in: `ready`, or a new one of the type `args`
+    /// describe with its default preset's values, if the User Library has
+    /// one it fits (the device chains spec, R13).
+    fn plan(
+        &self,
+        editor: &mut Editor,
+        args: &AddDeviceArgs,
+        user_library: Option<&Path>,
+        ready: Option<Ready>,
+    ) -> Ready {
+        if let Some(ready) = ready {
+            return ready;
+        }
+        let device = new_device(editor.new_id(), args);
+        let default = user_library
+            .map(|library| preset::default_preset_path(library, &device))
+            .filter(|path| path.is_file())
+            .and_then(|path| {
+                Preset::load(&path)
+                    .ok()
+                    .filter(|p| p.fits(&device))
+                    .map(|p| (path, p))
+            });
+        let default_name = default.as_ref().map(|(path, _)| preset::preset_name(path));
+        let state = default.map(|(path, preset)| {
+            (
+                self.sanitize(&args.device.kind, preset.params),
+                preset::preset_name(&path),
+                preset.shape,
+            )
+        });
+        Ready {
+            device,
+            state,
+            original: None,
+            default_name,
+        }
     }
 
     /// Adds a device to a rack's chain (`device.add` with `chain`), after
@@ -1812,6 +1926,7 @@ impl DeviceView {
         chain: ChainId,
         editor: &mut Editor,
         user_library: Option<&Path>,
+        ready: Option<Ready>,
     ) -> Result<DeviceAdded, DeviceError> {
         let doc = editor.document();
         let track = doc
@@ -1829,17 +1944,16 @@ impl DeviceView {
         let index = args
             .index
             .unwrap_or_else(|| index_among(&roles, args.device.role, after));
-        let id: DeviceId = editor.new_id();
-        let device = new_device(id, args);
-        let default = user_library
-            .map(|library| preset::default_preset_path(library, &device))
-            .filter(|path| path.is_file())
-            .and_then(|path| {
-                Preset::load(&path)
-                    .ok()
-                    .filter(|p| p.fits(&device))
-                    .map(|p| (path, p))
-            });
+        let Ready {
+            device,
+            state,
+            original,
+            default_name,
+        } = self.plan(editor, args, user_library, ready);
+        let id = device.id;
+        let copies: Vec<DeviceId> = device.walk().map(|d| d.id).collect();
+        let pairs: Vec<(&Device, DeviceId)> =
+            original.iter().flat_map(Device::walk).zip(copies).collect();
         editor
             .transact("Insert Device", |editor| {
                 editor.apply(Command::InsertChainDevice {
@@ -1847,15 +1961,15 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((path, preset)) = &default {
+                if let Some((params, name, shape)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
-                        params: self.sanitize(&args.device.kind, preset.params.clone()),
-                        name: preset::preset_name(path),
-                        shape: preset.shape.clone(),
+                        params,
+                        name,
+                        shape,
                     })?;
                 }
-                Ok::<_, bl_model::EditError>(())
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         self.selected = Some(id);
@@ -1863,7 +1977,7 @@ impl DeviceView {
             device: id,
             track,
             new_track: false,
-            default_preset: default.map(|(path, _)| preset::preset_name(&path)),
+            default_preset: default_name,
         })
     }
 
@@ -2188,6 +2302,9 @@ impl DeviceView {
         &mut self,
         editor: &mut Editor,
         args: CreateChainArgs,
+        user_library: Option<&Path>,
+        media: &MediaStore,
+        outcome: &mut Outcome,
     ) -> Result<ChainAdded, DeviceError> {
         let CreateChainArgs {
             rack,
@@ -2222,42 +2339,57 @@ impl DeviceView {
             })
             .transpose()?;
         let chain_id: ChainId = editor.new_id();
-        let device_id: DeviceId = editor.new_id();
         let name = moved_title.unwrap_or_default();
         let mut made = None;
         if let Some(device) = device {
-            let new = new_device(
-                device_id,
-                &AddDeviceArgs {
-                    device,
-                    track: None,
-                    chain: None,
-                    index: None,
-                },
-            );
-            made = Some((new, None));
+            made = Some(Ready {
+                device: new_device(
+                    editor.new_id(),
+                    &AddDeviceArgs {
+                        device,
+                        track: None,
+                        chain: None,
+                        index: None,
+                    },
+                ),
+                state: None,
+                original: None,
+                default_name: None,
+            });
         } else if let Some(path) = preset {
             let path = preset_path(&path)?;
-            let loaded = Preset::load(&path).map_err(|e| DeviceError::Failed(e.to_string()))?;
-            let new = Device::new(device_id, loaded.device_name.clone(), loaded.kind.clone())
-                .with_role(loaded.role);
-            let params = self.sanitize(&loaded.kind, loaded.params);
-            made = Some((
-                new,
-                Some((params, preset::preset_name(&path), loaded.shape)),
-            ));
+            // Spec: racks R46. A chain preset dropped on the drop area is
+            // a chain of its own.
+            if rack_presets::is_chain_preset(&path) {
+                let args = LoadChainPresetArgs {
+                    path: path.to_string_lossy().into_owned(),
+                    rack: Some(rack),
+                    index: Some(index),
+                    chain: None,
+                };
+                return self.load_chain_preset(args, editor, user_library, media, outcome);
+            }
+            let saved = rack_presets::open_preset(&path, media, user_library, outcome)?;
+            made = Some(self.ready(editor, saved, &preset::preset_name(&path))?);
         }
+        let held = made.as_ref().map(|ready| ready.device.clone());
+        let device_id = held.as_ref().map(|device| device.id);
+        let (state, original) = made.map_or((None, None), |ready| (ready.state, ready.original));
+        let pairs: Vec<(&Device, DeviceId)> = original
+            .iter()
+            .flat_map(Device::walk)
+            .zip(held.iter().flat_map(Device::walk).map(|d| d.id))
+            .collect();
         editor
             .transact("Insert Chain", |editor| {
-                let held = made.as_ref().map(|(device, _)| device.clone());
                 editor.apply(Command::AddChain {
                     rack,
                     index,
                     chain: Chain::new(chain_id, name).with_devices(held.into_iter().collect()),
                 })?;
-                if let Some((_, Some((params, name, shape)))) = made {
+                if let (Some(device), Some((params, name, shape))) = (device_id, state) {
                     editor.apply(Command::SetDeviceState {
-                        device: device_id,
+                        device,
                         params,
                         name,
                         shape,
@@ -2270,7 +2402,7 @@ impl DeviceView {
                         index: 0,
                     })?;
                 }
-                Ok::<_, bl_model::EditError>(())
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         self.select_new_chains(&[chain_id]);
@@ -2552,25 +2684,6 @@ fn presets_route(library: &Path, device: &Device) -> Vec<PathBuf> {
         }
     }
     route
-}
-
-/// Loads the browser's selected preset into the device being hot-swapped,
-/// for the shell's `browser.load_selected` (the device chains spec, R19).
-///
-/// # Errors
-///
-/// [`DeviceError`] if nothing is being hot-swapped or the preset doesn't
-/// load.
-pub fn load_hot_swapped(
-    view: &DeviceView,
-    editor: &mut Editor,
-    path: &Path,
-) -> Result<PresetResult, DeviceError> {
-    let device = view
-        .hot_swap
-        .ok_or_else(|| DeviceError::Unavailable("no device is being hot-swapped".to_owned()))?;
-    load_preset(view, editor, device, path)?;
-    Ok(preset_result(device, path))
 }
 
 /// Maps the copies of the modulators in a copied rack or chain to the

@@ -182,14 +182,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Drums => Some("Drum kits arrive with the drum racks in milestone M5."),
-            Self::Instruments => {
-                Some("Beatlayer's instruments arrive in milestone M2 (WP-2.16 and WP-2.17).")
-            }
-            Self::AudioEffects => {
-                Some("Beatlayer's audio effects arrive in milestone M2 (WP-2.18a and WP-2.18b).")
-            }
-            Self::MidiEffects => Some("MIDI effects arrive in milestone M5."),
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
@@ -691,14 +683,20 @@ fn specs() -> Vec<CommandSpec> {
                  audio track, otherwise onto a new audio track below the last one, one after \
                  another, as one undo step. A clip placed over part of another replaces that \
                  part, so when a clip on that track ends after the insert marker it's \
-                 destructive as well as external. While a device is being hot-swapped \
-                 (`device.hot_swap`), a selected preset loads into it instead, and so does a \
-                 selected audio file, if the device plays samples (the sampler, or the \
-                 eight-slot drum sampler, into its selected slot: `device.load_sample`). \
-                 With one plug-in selected it loads that plug-in instead, as `plugin.load` \
-                 does: onto the selected track (a new track when none is), an instrument onto a \
-                 new MIDI track when the selected track holds audio, or in place of the device \
-                 being hot-swapped. Reads the files, outside the project.",
+                 destructive as well as external. A selected preset file, or a device or \
+                 rack listed under a label (Drums, Instruments, Audio Effects, MIDI Effects \
+                 or Modulators), is added to the shown track as `device.add_preset` and \
+                 `device.add` add it, and a chain preset to the chain list's rack \
+                 (`chain.load_preset`). While a device is being hot-swapped \
+                 (`device.hot_swap`), a selected preset or device replaces it instead \
+                 (`device.replace`), as does a chain preset the chain armed by its Hot-Swap \
+                 button (`chain.load_preset`); a selected audio file loads into it if the \
+                 device plays samples (the sampler, or the eight-slot drum sampler, into its \
+                 selected slot: `device.load_sample`). With one plug-in selected it loads \
+                 that plug-in instead, as `plugin.load` does: onto the selected track (a new \
+                 track when none is), an instrument onto a new MIDI track when the selected \
+                 track holds audio, or in place of the device being hot-swapped. Reads the \
+                 files, outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)

@@ -169,7 +169,7 @@ fn beats_at_its_own_tempo_plays_to_the_bit_for_every_setting() {
                 transient_envelope: 100,
             };
             let editor = song(120.0, length, settings, WarpMode::Beats);
-            for block in [1, 61, 4_096] {
+            for block in [1, 61, 512, 4_096] {
                 assert_eq!(
                     play(&editor, 96_000, block),
                     want,
@@ -178,6 +178,75 @@ fn beats_at_its_own_tempo_plays_to_the_bit_for_every_setting() {
             }
         }
     }
+}
+
+// Spec: warp-modes R14, R35 (Beats' timing row). A generated drum loop warped
+// at 120 BPM keeps every hit within 1 ms of its beat at 60, 90, 180 and
+// 240 BPM, at every block size. A hit is a segment's start, and the segment
+// starts on the frame its beat falls on through the warp map, so the file's
+// samples at each hit come out of the render at that frame: the test reads
+// them back there, which pins every hit to its beat to the sample.
+#[test]
+fn beats_keeps_every_hit_within_1_ms_of_its_beat() {
+    let length = Ticks::WHOLE;
+    let (sample, transients, hits) = drum_loop();
+    let file = sample.channel(0).unwrap();
+    // The clip is at 120 BPM, so a file second is two beats.
+    let beats_per_second = 120.0 / 60.0;
+    let rate = f64::from(RATE.hz());
+    for tempo in [60.0, 90.0, 180.0, 240.0] {
+        let editor = song(tempo, length, beats(), WarpMode::Beats);
+        let tempo_map = editor.document().settings().tempo.clone();
+        // Each hit's beat frame (where the target says its beginning lands),
+        // and the file frames the engine starts the segment on: the transient
+        // bl-analysis found, which its own test puts within 1 ms of the hit.
+        let want: Vec<(usize, usize)> = hits
+            .iter()
+            .zip(&transients)
+            .map(|(&hit, &transient)| {
+                let ticks =
+                    Ticks((hit * beats_per_second * Ticks::QUARTER.get() as f64).round() as i64);
+                let beat = tempo_map.ticks_to_frames(ticks, RATE).get() as usize;
+                (beat, (transient * rate).round() as usize)
+            })
+            .collect();
+        // The whole note at this tempo, and a second past it.
+        let frames = ((length_seconds(tempo) + 1.0) * rate) as u64;
+        for block in [1, 61, 512, 4_096] {
+            let out = play(&editor, frames, block);
+            for (i, &(frame, hit)) in want.iter().enumerate() {
+                // The file's audio at the hit plays out of the render at the
+                // frame its segment starts on. Search 10 ms either side of the
+                // beat for where it is (a wider window than the target, so
+                // the check isn't circular) and require the engine to have put
+                // it within 1 ms (48 frames at 48 kHz).
+                let lo = frame.saturating_sub(480);
+                let hi = (frame + 480).min(out.len() - 8);
+                let error = |f: usize| -> f64 {
+                    (0..8)
+                        .map(|k| {
+                            let d = f64::from(out[f + k]) - f64::from(file[hit + k]);
+                            d * d
+                        })
+                        .sum()
+                };
+                let best = (lo..=hi)
+                    .min_by(|&a, &b| error(a).total_cmp(&error(b)))
+                    .unwrap();
+                let off = (best as i64 - frame as i64).abs();
+                assert!(
+                    off <= 48,
+                    "hit {i} at {tempo} BPM, blocks of {block}: plays at {best}, {off} frames from \
+                     its beat {frame}"
+                );
+            }
+        }
+    }
+}
+
+/// The whole note's length in seconds at `tempo`.
+fn length_seconds(tempo: f64) -> f64 {
+    4.0 * 60.0 / tempo
 }
 
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from

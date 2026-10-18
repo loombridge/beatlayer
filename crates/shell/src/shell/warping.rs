@@ -363,7 +363,9 @@ impl Shell {
                 next.sort_by(|a, b| a.time.total_cmp(&b.time));
             }
             // A marker that would reach or pass a neighbour, such as a late
-            // first hit landing on the marker at 1.1.1, stays where it is.
+            // first hit landing on the marker at 1.1.1, keeps its place, and
+            // a transient that had no marker keeps none; the rest still
+            // quantise.
             if next
                 .windows(2)
                 .all(|pair| pair[0].time < pair[1].time && pair[0].beat < pair[1].beat)

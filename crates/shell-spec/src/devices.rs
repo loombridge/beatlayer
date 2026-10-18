@@ -48,6 +48,11 @@ pub const SAVE_PRESET: &str = "device.save_preset";
 pub const SAVE_DEFAULT_PRESET: &str = "device.save_default_preset";
 /// `device.load_preset`: load a preset into a device.
 pub const LOAD_PRESET: &str = "device.load_preset";
+/// `device.add_preset`: add the device or rack a preset file holds.
+pub const ADD_PRESET: &str = "device.add_preset";
+/// `device.replace`: replace a device or rack with another of its role, as
+/// hot-swapping does.
+pub const REPLACE: &str = "device.replace";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
@@ -98,6 +103,10 @@ pub const CHAIN_HOT_SWAP: &str = "chain.hot_swap";
 /// `chain.create`: make a chain at the end of a rack's list holding a
 /// device, as the chain list's drop area does.
 pub const CHAIN_CREATE: &str = "chain.create";
+/// `chain.save_preset`: save a chain as a preset file.
+pub const CHAIN_SAVE_PRESET: &str = "chain.save_preset";
+/// `chain.load_preset`: load a chain preset into a rack.
+pub const CHAIN_LOAD_PRESET: &str = "chain.load_preset";
 /// `chain.drop_on_track`: put a chain's devices in a track's own chain.
 pub const CHAIN_DROP_ON_TRACK: &str = "chain.drop_on_track";
 /// `rack.set_view`: show or hide a view of a rack (WP-5.2).
@@ -133,6 +142,8 @@ pub const IDS: &[&str] = &[
     SAVE_PRESET,
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
+    ADD_PRESET,
+    REPLACE,
     LOAD_SAMPLE,
     SWAP_TO_SNAPSHOT,
     SELECT_SLOT,
@@ -155,6 +166,8 @@ pub const IDS: &[&str] = &[
     CHAIN_SOLO,
     CHAIN_HOT_SWAP,
     CHAIN_CREATE,
+    CHAIN_SAVE_PRESET,
+    CHAIN_LOAD_PRESET,
     CHAIN_DROP_ON_TRACK,
     RACK_SET_VIEW,
 ];
@@ -1170,6 +1183,92 @@ pub struct PresetResult {
     pub name: String,
 }
 
+/// Arguments of `device.add_preset`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddPresetArgs {
+    /// The preset file: a device's or a rack's.
+    pub path: String,
+    /// The track, as `device.add` takes it; the shown track if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The rack chain that takes it, instead of a track's own chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// Where it goes in the chain; after the selected device, or at the end
+    /// of its role's place, if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `device.replace`: exactly one of `preset` and `new_device`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceArgs {
+    /// The device or rack to replace; the device being hot-swapped, or else
+    /// the selected one, if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A chain to give the new device to as its only one, instead of
+    /// replacing a device: the chain keeps its mixer and name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// A preset file: a device's or a rack's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// A new device, as `device.add` describes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_device: Option<NewDevice>,
+}
+
+/// Arguments of `chain.save_preset`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveChainPresetArgs {
+    /// The chain; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// The file to write, ending `.blpreset`; a new file named after the
+    /// chain in the User Library's folder for its rack's presets if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Instead of `path`, a folder to put a new file named after the chain
+    /// in, numbered if the name is taken: where dragging the row onto a
+    /// folder in the browser drops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// Arguments of `chain.load_preset`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadChainPresetArgs {
+    /// The chain preset file.
+    pub path: String,
+    /// The rack that takes it as a new chain; the chain list's rack, or the
+    /// rack being hot-swapped, if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// Where the new chain goes in the rack's list; the end if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    /// A chain to replace in its place, instead of adding one; the chain
+    /// armed by its Hot-Swap button, if there is one and no `rack` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+}
+
+/// What `chain.save_preset` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainPresetResult {
+    /// The chain saved.
+    pub chain: ChainId,
+    /// The preset file written.
+    pub path: String,
+    /// The preset's name: its file's name without the extension.
+    pub name: String,
+}
+
 /// Arguments of `device.load_sample`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1395,7 +1494,11 @@ fn specs() -> Vec<CommandSpec> {
                  new file named after the device's title in the User Library, under \
                  Presets/<Audio Effects, Instruments, or MIDI Effects>/<the device's own \
                  name>/, numbered if the name is taken. The device's title then shows the \
-                 preset's name. Writes a file outside the project.",
+                 preset's name. A rack is saved whole, as a rack preset: its chains in order \
+                 with their names, colours and mixers, every device in them (nested racks \
+                 too) with its state, a plug-in's own state included, and the samples its \
+                 devices play, so it loads in a set that lacks them. The file is written \
+                 whole or not at all. Writes a file outside the project.",
             )
             .permission(Permission::External)
             .context(DeviceView)
@@ -1407,7 +1510,9 @@ fn specs() -> Vec<CommandSpec> {
                  menu's Save as Default Preset does: to the User Library's Defaults/<Audio \
                  Effects, Instruments, or MIDI Effects>/<the device's own name>.blpreset, \
                  replacing any default saved before. Every device of that type added from then \
-                 on (`device.add`) starts with it. Writes a file outside the project.",
+                 on (`device.add`) starts with it; for a rack, every new rack of its kind \
+                 starts as the saved one is, chains and all. Writes a file outside the \
+                 project.",
             )
             .permission(Permission::External)
             .context(DeviceView)
@@ -1419,12 +1524,55 @@ fn specs() -> Vec<CommandSpec> {
                  saved from, as choosing it while hot-swapping does: every parameter takes the \
                  preset's value (or its default, if the preset doesn't set it), and the \
                  device's title shows the preset's name. One undo step. A preset for another \
-                 kind of device is refused. Reads a file outside the project.",
+                 kind of device is refused. A rack preset loads into a rack of the kind it was \
+                 saved from and replaces the rack with the preset's, as one undo step (the \
+                 rack's ID changes; `device.replace` loads a preset into a device of another \
+                 kind). A chain preset loads with `chain.load_preset`. Reads a file outside \
+                 the project.",
             )
             .permission(Permission::External)
             .context(DeviceView)
             .args::<LoadPresetArgs>()
             .result::<PresetResult>(),
+        CommandSpec::new(ADD_PRESET, "Add Preset")
+            .description(
+                "Adds the device or rack a preset file (.blpreset) holds, as choosing it in \
+                 the browser (Enter, a double-click or a drag) does: where `device.add` puts \
+                 a device of its role, on `track` (the shown track if left out) or in the rack \
+                 chain `chain`, after the selected device if that keeps the chain's order. A \
+                 device takes the preset's values and name; a rack comes whole, with new IDs \
+                 for its chains and devices. One undo step, named Insert Device (Insert Device \
+                 and Track when it goes on a new MIDI track). The new device is selected. A \
+                 chain preset is refused: `chain.load_preset` loads it. Reads a file outside \
+                 the project; the samples a rack preset carries are written to the User \
+                 Library's Samples/Preset Samples folder if the set's media store lacks \
+                 them.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<AddPresetArgs>()
+            .result::<DeviceAdded>(),
+        CommandSpec::new(REPLACE, "Replace Device")
+            .description(
+                "Replaces a device or rack with another of the same role, in its place, as \
+                 loading from the browser does while the device is hot-swapped (an audio \
+                 effect or audio effect rack for an audio effect; an instrument, an \
+                 instrument rack or a drum rack for an instrument; a MIDI effect or MIDI \
+                 effect rack for a MIDI effect). Give a `preset` file, or a `new_device` as \
+                 `device.add` describes one. `device` is the one being hot-swapped, else the \
+                 selected one, if left out. A device preset of the device's own kind loads \
+                 into it as `device.load_preset` does, keeping its ID and automation; \
+                 anything else replaces it with a new device with new IDs, without the \
+                 automation of a device of another kind, and a rack's chains go with it. \
+                 With `chain`, the new device becomes the only one in that chain, which keeps \
+                 its name and mixer. One undo step, named Load Preset for a preset and Insert \
+                 Device for a device. Hot-swap stays on for the replacement. Reads a file \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<ReplaceArgs>()
+            .result::<DeviceAdded>(),
         CommandSpec::new(LOAD_SAMPLE, "Load Sample")
             .description(
                 "Loads an audio file into a device that plays samples (the sampler, or the \
@@ -1472,10 +1620,16 @@ fn specs() -> Vec<CommandSpec> {
                  Presets button does; switches unless `on` says which. While it lasts, the \
                  browser shows a bar (Swapping Audio Effect) and opens the User Library's \
                  folder of the device's presets, and loading a preset from the browser (Enter \
-                 or a double-click) loads it into the device. Changes only the view.",
+                 or a double-click) loads it into the device. Any device, preset or rack \
+                 preset of the same role replaces it (`device.replace`), and hot-swap stays \
+                 on after each load. With no `device` and none selected, it arms the first \
+                 audio effect of the shown track, or its instrument on a MIDI track. Changes \
+                 only the view.",
             )
             .permission(Permission::Read)
-            .context(DeviceView)
+            .contexts([DeviceView, Browser])
+            .binding("S-DEV-008")
+            .binding("S-VIEW-006")
             .args::<HotSwapArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(PARAMETERS, "Device Parameters")
@@ -1623,9 +1777,11 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(CHAIN_HOT_SWAP, "Hot-Swap Chain")
             .description(
                 "Arms a chain for hot-swap, as its Hot-Swap button does, or disarms it; \
-                 arming it ends the hot-swap of a device, and the other way round. Only the \
-                 armed state is built so far: it shows on the chain's row in \
-                 `device_view.state`. It changes only the view.",
+                 arming it ends the hot-swap of a device, and the other way round. It shows \
+                 on the chain's row in `device_view.state`. While it is armed, loading a \
+                 chain preset from the browser replaces the chain (`chain.load_preset`), and \
+                 loading a device or a preset gives the chain that device as its only one \
+                 (`device.replace`). It changes only the view.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -1636,15 +1792,48 @@ fn specs() -> Vec<CommandSpec> {
                 "Makes a chain in a rack at `index` (the end if left out), as the chain \
                  list's drop area does, named after what it holds, and selects it: holding a \
                  new `device`, a device made from a `preset` file, or the existing device \
-                 `move_device` moved out of where it is; with none of them it is empty. The \
-                 chain must fit the rack's kind. In a drum rack a chain made without `index` \
-                 receives the first pad from the view's first that holds no chain, and with \
-                 `returns` it is a return chain, after the others. One undo step (Insert \
-                 Chain).",
+                 `move_device` moved out of where it is; with none of them it is empty. A \
+                 `preset` that holds a rack makes a chain holding the rack, and one that holds \
+                 a chain is loaded as `chain.load_preset` loads it. The chain must fit the \
+                 rack's kind. In a drum rack a chain made without `index` receives the first \
+                 pad from the view's first that holds no chain, and with `returns` it is a \
+                 return chain, after the others. One undo step (Insert Chain).",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
             .args::<CreateChainArgs>()
+            .result::<ChainAdded>(),
+        CommandSpec::new(CHAIN_SAVE_PRESET, "Save Chain Preset")
+            .description(
+                "Saves a chain as a Beatlayer chain preset file (.blpreset), as dragging its \
+                 row into the browser's User Library or a folder in Places does: to `path`, or \
+                 to a new file named after the chain in `folder`, or, with neither, in the \
+                 User Library, under Presets/<its rack's category>/<its rack's name>/, \
+                 numbered if the name is taken. The \
+                 preset holds the chain's name, colour, info text and mixer, every device in \
+                 it with its state (nested racks whole, plug-ins' own state included) and the \
+                 samples they play. The file is written whole or not at all. Writes a file \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<SaveChainPresetArgs>()
+            .result::<ChainPresetResult>(),
+        CommandSpec::new(CHAIN_LOAD_PRESET, "Load Chain Preset")
+            .description(
+                "Loads a chain preset file (.blpreset) into a rack as a new chain at `index` \
+                 (the end if left out), as dropping it on the rack's chain list does, with \
+                 new IDs for it and its devices, and selects it. With `chain` (or, with no \
+                 `rack`, the chain armed by its Hot-Swap button) it replaces that chain in \
+                 its place instead, and the new chain stays armed. The chain must fit the \
+                 rack's kind. One undo step, named Insert Chain, or Load Preset when it \
+                 replaces a chain. Reads a file outside the project; the samples the preset \
+                 carries are written to the User Library's Samples/Preset Samples folder if \
+                 the set's media store lacks them.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<LoadChainPresetArgs>()
             .result::<ChainAdded>(),
         CommandSpec::new(CHAIN_DROP_ON_TRACK, "Drop Chain on Track")
             .description(

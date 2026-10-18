@@ -634,3 +634,24 @@ fn d_switches_hot_swap_between_the_rack_and_its_pad() {
     let entry = keymap.entry_for("S-VIEW-007").unwrap();
     assert_eq!(entry.status, Status::Bound);
 }
+
+// Spec: racks R44. Q switches hot-swap on and off for the selected device
+// (S-DEV-008 in the Device View, S-VIEW-006 elsewhere).
+#[test]
+fn q_toggles_hot_swap() {
+    let keymap = Keymap::live12();
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        for contexts in [
+            &[Context::DeviceView, Context::Global][..],
+            &[Context::Browser, Context::Global][..],
+        ] {
+            let hit = keymap.resolve(platform, Key::Q, plain, contexts);
+            assert_eq!(
+                hit.map(|hit| hit.command.id.clone()).as_deref(),
+                Some("device.hot_swap"),
+                "{platform:?} in {contexts:?}"
+            );
+        }
+    }
+}

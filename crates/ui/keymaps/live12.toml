@@ -80,7 +80,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view", "browser"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-007"
@@ -647,7 +650,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-009"

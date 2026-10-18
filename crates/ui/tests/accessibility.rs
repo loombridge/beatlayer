@@ -2231,10 +2231,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(a_device, device_view, "Device Activator", Key::Enter),
         ),
         (
-            "device.hot_swap",
-            main(a_device, device_view, "Hot-Swap Presets", Key::Enter),
-        ),
-        (
             "device.save_preset",
             main(a_device, device_view, "Save Preset", Key::Enter),
         ),
@@ -2321,6 +2317,31 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "a drag onto the chain list's drop area; the keyboard pastes a chain \
                  (`chain.paste`, Cmd-V)",
+            )),
+        ),
+        (
+            "chain.save_preset",
+            Exception(Gap(
+                "a drag of the chain's row into the browser has no keyboard form yet (racks R46)",
+            )),
+        ),
+        (
+            "chain.load_preset",
+            Exception(Equivalent(
+                "Enter on a chain preset in the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "device.add_preset",
+            Exception(Equivalent(
+                "Enter on a preset in the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "device.replace",
+            Exception(Equivalent(
+                "Enter on a preset or device in the browser while hot-swapping \
+                 (`browser.load_selected`)",
             )),
         ),
         (
@@ -3214,6 +3235,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "chain.save_preset",
             "device.add_layers",
             "device.audition_sample",
             "device.convert",

@@ -1319,13 +1319,16 @@ impl DeviceViewUi {
         if !over_list {
             return;
         }
-        if let Some(drag) = chains {
-            // Where among the rows it would land: the gap nearest the pointer.
-            let gap = list
-                .rows
-                .iter()
-                .filter(|r| r.row.center().y < pointer.y)
-                .count();
+        // Spec: racks R43, R46. Presets and devices from the browser land
+        // as chains, where the rows would take a moved chain.
+        let browser = DragAndDrop::payload::<crate::browser::DevicesDrag>(ui.ctx());
+        // Where among the rows it would land: the gap nearest the pointer.
+        let gap = list
+            .rows
+            .iter()
+            .filter(|r| r.row.center().y < pointer.y)
+            .count();
+        if chains.is_some() || browser.is_some() {
             let y = match list.rows.get(gap) {
                 Some(next) => next.row.top() - 1.0,
                 None => list
@@ -1340,6 +1343,36 @@ impl DeviceViewUi {
                 ],
                 Stroke::new(2.0, c.accent.0),
             );
+            if released && let Some(drag) = browser {
+                DragAndDrop::clear_payload(ui.ctx());
+                for (n, path) in drag.paths.iter().enumerate() {
+                    let at = gap + n;
+                    match bl_shell::browser::device_by_id(path) {
+                        Some(device) => invoke(
+                            events,
+                            "chain.create",
+                            json!({
+                                "rack": frame.id,
+                                "index": at,
+                                "device": {
+                                    "kind": device.kind,
+                                    "name": device.name,
+                                    "role": device.role,
+                                    "sidechain": device.sidechain,
+                                    "midi_sidechain": device.midi_sidechain,
+                                },
+                            }),
+                        ),
+                        None => invoke(
+                            events,
+                            "chain.create",
+                            json!({ "rack": frame.id, "index": at, "preset": path }),
+                        ),
+                    }
+                }
+            }
+        }
+        if let Some(drag) = chains {
             if released {
                 DragAndDrop::clear_payload(ui.ctx());
                 let before = rack

@@ -61,7 +61,6 @@ pub(crate) struct Shared {
 impl Shared {
     /// The editor size the plug-in asked for, taking the ask (WP-2.10);
     /// `None` when it asked for nothing.
-    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
     pub(crate) fn take_resize_request(&self) -> Option<(u32, u32)> {
         let packed = self.resize_request.swap(0, Relaxed);
         if packed == 0 {

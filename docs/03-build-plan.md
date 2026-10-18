@@ -501,7 +501,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.20 | done | 18 October 2026 | [#142](https://github.com/loombridge/beatlayer/pull/142); Sweep, the Auto Filter ([the spec](specs/auto-filter.md)), filters with ten types and four circuits, its cutoff moved by an LFO and an envelope follower with a sidechain filter, with Mono Sidechain and Hi-Quality as menu items; the display's spectrum and handle, and a layout that hides unused controls, wait |
 | 5.20b | todo |  |  |
 | 5.20c | todo |  |  |
-| 5.21 | todo |  |  |
+| 5.21 | done | 18 October 2026 | [#148](https://github.com/loombridge/beatlayer/pull/148); Strip, Triad, Shutter and Bond, the channel EQ, three-band EQ, gate and bus compressor ([channel EQ](specs/channel-eq.md), [three-band EQ](specs/three-band-eq.md), [gate](specs/gate.md), [bus compressor](specs/bus-compressor.md)), with sidechains, look-ahead and oversampling latency, and gain reduction readable for the meters |
 | 5.22 | todo |  |  |
 | 5.22b | todo |  |  |
 | 5.23 | todo |  |  |

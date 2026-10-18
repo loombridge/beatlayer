@@ -15,8 +15,8 @@ use bl_model::{
 };
 
 use crate::eq::{Type, coeffs};
-use crate::sections::{Biquad, Coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::sections::{Biquad, Coeffs};
 
 /// Crush's device type.
 pub const CRUSHER: &str = "beatlayer.crush";

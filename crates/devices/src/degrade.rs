@@ -19,8 +19,8 @@ use bl_model::{
 };
 
 use crate::delay::BandPass;
-use crate::sections::{ANALYSER_BANDS, Analyser, spectrum_series};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::sections::{ANALYSER_BANDS, Analyser, spectrum_series};
 
 /// Degrade's device type.
 pub const DEGRADE: &str = "beatlayer.degrade";

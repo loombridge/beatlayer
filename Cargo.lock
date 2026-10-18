@@ -903,10 +903,12 @@ dependencies = [
 name = "bl-midi-io"
 version = "0.1.0"
 dependencies = [
+ "alsa",
  "bl-core",
  "bl-engine",
  "bl-model",
  "bl-rt",
+ "coremidi",
  "midir",
  "rtrb",
 ]

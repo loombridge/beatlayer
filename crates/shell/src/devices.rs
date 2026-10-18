@@ -28,12 +28,12 @@ use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, AddPresetArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect,
     CreateChainArgs, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry,
     DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs,
-    FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs,
-    HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MidiSidechainSection, ParameterState,
-    PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame, SaveChainPresetArgs, SavePresetArgs,
-    SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetAutoSelectArgs, SetRackViewArgs,
-    SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs,
-    Ungrouped,
+    ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
+    HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MidiSidechainSection,
+    ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame, SaveChainPresetArgs,
+    SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetAutoSelectArgs,
+    SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection,
+    SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -1048,6 +1048,12 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            external: d.external.as_ref().map(|external| ExternalSection {
+                port: external.port.clone(),
+                channel: external.channel,
+                audio_from: external.audio_from.label(),
+                hardware_latency: external.hardware_latency,
+            }),
             midi_sidechain: d
                 .midi_sidechain
                 .as_ref()
@@ -1990,7 +1996,7 @@ impl DeviceView {
         if let Some(ready) = ready {
             return ready;
         }
-        let device = new_device(editor.new_id(), args);
+        let device = new_device(editor.new_id(), args, &self.types);
         let default = user_library
             .map(|library| preset::default_preset_path(library, &device))
             .filter(|path| path.is_file())
@@ -2449,6 +2455,7 @@ impl DeviceView {
                         chain: None,
                         index: None,
                     },
+                    &self.types,
                 ),
                 state: None,
                 original: None,
@@ -2685,14 +2692,20 @@ impl DeviceView {
 
 /// A new device as `device.add` makes it: a rack of its kind, or a device of
 /// the type and role the arguments name.
-fn new_device(id: DeviceId, args: &AddDeviceArgs) -> Device {
+fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Device {
     if let DeviceKind::Rack { kind } = args.device.kind {
         return Device::rack(id, kind);
     }
+    let known = types.iter().find(|t| t.kind == args.device.kind);
     let mut device = Device::new(id, args.device.name.clone(), args.device.kind.clone())
         .with_role(args.device.role);
-    if args.device.sidechain {
+    if args.device.sidechain || known.is_some_and(|t| t.sidechain) {
         device = device.with_sidechain();
+    }
+    // Spec: external-devices R9. A device whose type works with hardware
+    // starts with its routing, which `device.set_external` sets.
+    if known.is_some_and(|t| t.external) {
+        device = device.with_external();
     }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();

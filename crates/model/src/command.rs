@@ -20,6 +20,7 @@ use crate::clip::{
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
+use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
@@ -32,7 +33,7 @@ use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
@@ -517,8 +518,10 @@ pub enum Command {
     SetMidiOutput {
         /// The MIDI track.
         track: TrackId,
-        /// Another MIDI track, or `null` (or nothing) for No Output.
-        to: Option<TrackId>,
+        /// Another MIDI track (its ID), an output port with its channel
+        /// (`{ "name": "Synth", "channel": 1 }`), or `null` (or nothing) for
+        /// No Output.
+        to: Option<MidiTo>,
     },
     /// Sets Main's Main Out: the audio interface's output channels the Main
     /// mix goes to, as a stereo pair.
@@ -1511,6 +1514,28 @@ pub enum Command {
         /// Whether to listen.
         listen: bool,
     },
+    /// Sets an external device's routing (WP-5.34): the settings given
+    /// change, the others stay. The device must declare routing to external
+    /// hardware.
+    SetExternal {
+        /// The device.
+        device: DeviceId,
+        /// MIDI To: `none` for No Output, or `port` with the MIDI output
+        /// port's name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        midi_to: Option<ExternalPort>,
+        /// The MIDI channel, 1 to 16.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(range(min = 1, max = 16))]
+        channel: Option<u8>,
+        /// Audio From: the audio interface's inputs it comes back on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio_from: Option<Channel>,
+        /// Hardware Latency with its unit: the unit switch is the unit
+        /// given, so switching the unit sends the converted value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware_latency: Option<HardwareLatency>,
+    },
 
     /// Inserts a new device at `index` in a rack's chain, keeping the chain
     /// in order for its kind of rack (WP-5.1). The chain may be in a rack
@@ -1848,6 +1873,15 @@ impl Command {
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
             Self::SetSidechainListen { .. } => "Change \"Sidechain Listen\"",
+            // WP-5.34: a routing change is named as Live names one; Hardware
+            // Latency's is to observe.
+            Self::SetExternal {
+                midi_to: None,
+                channel: None,
+                audio_from: None,
+                ..
+            } => "Change \"Hardware Latency\"",
+            Self::SetExternal { .. } => "Change \"Routing\"",
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
@@ -2223,7 +2257,7 @@ impl Document {
                 self.edit_routing(*track, |routing| routing.output = output)
             }
             Command::SetMidiOutput { track, to } => {
-                self.edit_routing(*track, |routing| routing.midi_output = *to)
+                self.edit_routing(*track, |routing| routing.midi_output = to.clone())
             }
             Command::SetMainOut { channel } => {
                 self.set_main_channel(*channel, |routing| &mut routing.main_out)
@@ -2837,6 +2871,45 @@ impl Document {
             }
             Command::SetSidechainListen { device, listen } => {
                 self.edit_sidechain(*device, |s| s.listen = *listen)
+            }
+            Command::SetExternal {
+                device,
+                midi_to,
+                channel,
+                audio_from,
+                hardware_latency,
+            } => {
+                let mut external = self
+                    .device_ref(*device)?
+                    .external
+                    .clone()
+                    .ok_or(ModelError::NoExternal(*device))?;
+                match midi_to {
+                    Some(ExternalPort::None) => external.port = None,
+                    Some(ExternalPort::Port { name }) => external.port = Some(name.clone()),
+                    None => {}
+                }
+                external.channel = channel.unwrap_or(external.channel);
+                external.audio_from = audio_from.unwrap_or(external.audio_from);
+                if let Some(latency) = hardware_latency {
+                    check_value(
+                        "hardware latency",
+                        match *latency {
+                            HardwareLatency::Milliseconds { value } => value,
+                            HardwareLatency::Samples { value } => f64::from(value),
+                        },
+                        latency.is_valid(),
+                    )?;
+                    external.hardware_latency = *latency;
+                }
+                crate::routing::check_port(
+                    external.port.as_deref().unwrap_or("-"),
+                    external.channel,
+                )?;
+                if Some(&external) != self.device_ref(*device)?.external.as_ref() {
+                    self.device_mut(*device)?.external = Some(external);
+                }
+                Ok(())
             }
             Command::InsertChainDevice {
                 chain,

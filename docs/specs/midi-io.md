@@ -63,7 +63,7 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 - **R22.** While it's on, the letters it uses (its note keys, Z, X, C, and V) don't run their single-letter shortcuts; with Shift, they do. Other letters, M among them, keep their shortcuts, as do keys pressed with Cmd, Ctrl, or Option (Alt). While a text field has the keyboard, every key types. (S6)
 - **R23.** Its notes reach the tracks whose input is Computer Keyboard or All Ins, as a source of their own. (S3)
 - **R24.** Its actions are commands people and agents run by ID: `midi.toggle_computer_keyboard` (M; edit-class, as a kept preference), and `midi.computer_keyboard_octave`, `midi.computer_keyboard_velocity`, and `midi.computer_keyboard_key` (read-class: they change nothing in the set or on disk). (D17)
-- **R25.** The Control Bar's MIDI track input indicator (L-CTRL-026) lights for a moment whenever a message reaches the tracks' inputs. The output indicator waits for MIDI output from tracks. (S7)
+- **R25.** The Control Bar's MIDI track input indicator (L-CTRL-026) lights for a moment whenever a message reaches the tracks' inputs. The lower lamp is the output indicator: it lights the same way whenever a message leaves for a port ([external devices](external-devices.md) R7). (S7)
 - **R26.** No note hangs: every note-on a track's devices received from its input gets a note-off on the first frame of the block after the edit that ends it, when monitoring stops (Monitor Off, or Auto with the track disarmed), or the track's input or channel changes. A track that is deleted takes its devices with it. Edits that change none of these keep the notes sounding. (Beatlayer's design)
 
 ## Tests

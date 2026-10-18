@@ -460,6 +460,7 @@ impl AuHost {
                 role,
                 description: DeviceDescription::new(descriptors),
                 sidechain: false,
+                external: false,
                 midi_sidechain: false,
             },
             vendor,

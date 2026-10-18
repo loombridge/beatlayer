@@ -1668,4 +1668,111 @@ mod tests {
             "{error}"
         );
     }
+    // Spec: external-devices R2, R15
+    #[test]
+    fn a_midi_to_port_saves_and_a_set_without_one_opens_as_before() {
+        use crate::external::HardwareLatency;
+        use crate::track::MidiTo;
+
+        let mut editor = Editor::new();
+        let mut track = |kind| {
+            let id = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id,
+                    kind,
+                    name: "T".to_owned(),
+                    parent: None,
+                    index: 0,
+                })
+                .unwrap();
+            id
+        };
+        let (keys, bass) = (track(TrackKind::Midi), track(TrackKind::Midi));
+        let outboard = editor.new_id();
+        let mut set = |to| {
+            editor
+                .apply(Command::SetMidiOutput { track: keys, to })
+                .unwrap();
+            serde_json::to_value(editor.document()).unwrap()
+        };
+        // A set saved before MIDI out: no MIDI To is left out, a track is its
+        // bare ID.
+        let none = set(None);
+        let routing = |value: &Value| value["tracks"][1]["routing"]["midi_output"].clone();
+        assert_eq!(routing(&none), Value::Null);
+        let by_track = set(Some(MidiTo::Track(bass)));
+        assert_eq!(routing(&by_track), json!(bass.0.get()));
+        let by_port = set(Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 3,
+        }));
+        assert_eq!(routing(&by_port), json!({ "name": "Synth", "channel": 3 }));
+        for (value, expected) in [
+            (none, None),
+            (by_track, Some(MidiTo::Track(bass))),
+            (
+                by_port,
+                Some(MidiTo::Port {
+                    name: "Synth".to_owned(),
+                    channel: 3,
+                }),
+            ),
+        ] {
+            let back = load(value).unwrap();
+            assert_eq!(back.track(keys).unwrap().routing().midi_output, expected);
+            back.check_invariants().unwrap();
+        }
+        // A port needs a name and a channel from 1 to 16.
+        for (name, channel) in [("", 1), ("Synth", 0), ("Synth", 17)] {
+            let to = Some(MidiTo::Port {
+                name: name.to_owned(),
+                channel,
+            });
+            assert!(
+                editor
+                    .apply(Command::SetMidiOutput { track: keys, to })
+                    .is_err()
+            );
+        }
+
+        // The external device's settings save with the set and load back.
+        editor
+            .apply(Command::InsertDevice {
+                track: keys,
+                index: 0,
+                device: Device::new(
+                    outboard,
+                    "Hardware",
+                    DeviceKind::Native {
+                        device_type: "beatlayer.test".to_owned(),
+                    },
+                )
+                .with_external(),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            saved["tracks"][1]["devices"][0]["external"],
+            json!({}),
+            "a new device's routing is all defaults"
+        );
+        editor
+            .apply(Command::SetExternal {
+                device: outboard,
+                midi_to: None,
+                channel: Some(2),
+                audio_from: None,
+                hardware_latency: Some(HardwareLatency::Samples { value: 64 }),
+            })
+            .unwrap();
+        let back = load(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&back, editor.document());
+        let external = back.device(outboard).unwrap().external.clone().unwrap();
+        assert_eq!(external.channel, 2);
+        assert_eq!(
+            external.hardware_latency,
+            HardwareLatency::Samples { value: 64 }
+        );
+    }
 }

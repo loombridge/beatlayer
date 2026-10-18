@@ -469,6 +469,30 @@ impl Compiler {
         self.compile_with(&document, &Resend::default())
     }
 
+    /// Reports the audio interface's round trip now (the device's reported
+    /// input and output latency, and Driver Error Compensation), as
+    /// the device reports it after a measurement or the compensation
+    /// changes: external devices report it to delay compensation (the
+    /// external devices spec, R13), so the last document is compiled again
+    /// with the new figure. Nothing if it is unchanged, or the set holds no
+    /// external device.
+    pub fn round_trip(&mut self, frames: u32) -> Update {
+        if self.config.round_trip_latency == frames {
+            return Update::default();
+        }
+        self.config.round_trip_latency = frames;
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        if !document
+            .tracks()
+            .any(|track| track.devices_deep().any(|d| d.external.is_some()))
+        {
+            return Update::default();
+        }
+        self.compile_with(&document, &Resend::default())
+    }
+
     /// Sends a sampler's node the audio of one of its sample slots, with
     /// `edits` applied (WP-2.16, R57): the media library decodes and renders
     /// here, on the compiler's thread, and shares the result with every
@@ -728,7 +752,7 @@ impl Compiler {
         let generation = self.generation + 1;
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
-        let midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
+        let mut midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
         let size = self.config.channels * self.config.max_frames;
         let ext_outs = document
             .track_order()
@@ -754,6 +778,16 @@ impl Compiler {
         }
         let (order, dependents) = run_order(&build, &wait_tasks);
         compensate(&mut build, &order);
+        // Spec: external-devices R4. A track's MIDI to a port waits as long
+        // as its audio would be held back on the way into Main.
+        for track in document.tracks() {
+            if track.kind() == TrackKind::Midi {
+                midi.set_compensation(
+                    track.id(),
+                    main_compensation(&build, document, &task_of, track.id()),
+                );
+            }
+        }
         // Automation is placed with each node's delay in it (WP-2.11), so
         // remember what every node's turned out to be.
         for slot in &build.slots {
@@ -1249,7 +1283,21 @@ impl Compiler {
                     }
                 },
             };
+            let mut latency = latency;
+            // Spec: external-devices R13. An external instrument reports the
+            // interface's round trip and its Hardware Latency, which delay
+            // compensation lines the rest of the set up with.
+            if let Some(external) = &device.external {
+                latency = self.config.round_trip_latency.saturating_add(
+                    external
+                        .hardware_latency
+                        .frames(self.config.sample_rate.hz()),
+                );
+            }
             let slot = claim(build, key, identity, !device.enabled, latency, node);
+            if let Some(external) = &device.external {
+                build.slots[slot as usize].external = Some(external.audio_from);
+            }
             // Spec: modulation R20. A modulator works its rows out before
             // any task runs.
             if bl_model::modulator::is_modulator_kind(&device.kind) {
@@ -1467,6 +1515,7 @@ fn claim(
         latency: if bypass { 0 } else { latency },
         delay: 0,
         modulator: ModKind::None,
+        external: None,
     });
     build.layout.insert(
         key,
@@ -1742,6 +1791,39 @@ fn compensate(build: &mut Build, order: &[u32]) {
     }
 }
 
+/// The frames `track`'s audio is held back on its way into Main: the delay
+/// lines of the inputs that carry it from one track to the next (the delay
+/// compensation spec, R2).
+fn main_compensation(
+    build: &Build,
+    document: &Document,
+    task_of: &BTreeMap<TrackId, u32>,
+    track: TrackId,
+) -> u32 {
+    let mut total = 0u32;
+    let mut at = track;
+    // A routing may make a loop, which the engine plays as silence; the
+    // walk is bounded by the number of tracks.
+    for _ in 0..task_of.len() {
+        let Some(to) = document.output_of(at) else {
+            break;
+        };
+        let (Some(&from_task), Some(&to_task)) = (task_of.get(&at), task_of.get(&to)) else {
+            break;
+        };
+        let task = build.tasks[to_task as usize];
+        if let Some(input) = build.inputs[task.inputs.range()]
+            .iter()
+            .find(|i| i.from == from_task && i.tap == Tap::PostMixer)
+            && input.delay != NO_DELAY
+        {
+            total = total.saturating_add(build.delays[input.delay as usize]);
+        }
+        at = to;
+    }
+    total
+}
+
 /// The frames a chain of steps adds: its devices' latencies and its racks'.
 fn flow_latency(build: &Build, steps: Span) -> u32 {
     build.steps[steps.range()]
@@ -1927,6 +2009,7 @@ fn needs_program(
                     || before.enabled != after.enabled
                     || before.media != after.media
                     || was.map(|s| &s.input) != is.map(|s| &s.input)
+                    || before.external != after.external
                     || before.midi_sidechain != after.midi_sidechain
                 {
                     recompile = true;

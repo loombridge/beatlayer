@@ -9,7 +9,7 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{ChainId, Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
-use crate::midi::{MidiRoutes, TrackMidiInput};
+use crate::midi::{MidiRoutes, OutOwner, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::modbus::{Bus, Control, ROWS};
 use crate::node::{
@@ -387,6 +387,9 @@ pub(crate) struct NodeSlot {
     pub(crate) delay: u32,
     /// Whether the node is a modulator, and how it works its output out.
     pub(crate) modulator: ModKind,
+    /// For an external instrument (WP-5.34): the interface inputs its sound
+    /// comes back on, which the program maps into the block it is given.
+    pub(crate) external: Option<Channel>,
 }
 
 /// How a modulator node works its rows out.
@@ -1088,6 +1091,7 @@ impl EngineProgram {
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
                     sidechain: None,
+                    external: None,
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
                     session,
@@ -1206,11 +1210,20 @@ impl EngineProgram {
             turn,
             block,
             scratch: &mut lane.events,
+            device: &mut lane.device,
             wake,
             delivered: 0,
         };
-        self.run_steps(&mut pass, task, task.chain, t, notes, 0);
+        let ended = self.run_steps(&mut pass, task, task.chain, t, notes, 0);
         delivered += pass.delivered;
+
+        // Spec: external-devices R3. What reached the end of the chain
+        // leaves for the port the track's MIDI To names.
+        self.midi.send(
+            OutOwner::Track(task.track),
+            turn.notes(notes + ended).notes(),
+            from,
+        );
 
         // Keep the chain's output for pre-fader sends and Post FX
         // inputs.
@@ -1231,6 +1244,7 @@ impl EngineProgram {
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
                 sidechain: None,
+                external: None,
                 notes: &[],
                 notes_out: None,
                 session,
@@ -1715,6 +1729,9 @@ struct Pass<'a> {
     turn: Turn<'a>,
     block: &'a Blk<'a>,
     scratch: &'a mut Vec<NodeEvent>,
+    /// The thread's scratch for the interface's inputs mapped to the tracks'
+    /// layout, for an external instrument (WP-5.34).
+    device: &'a mut [f32],
     /// The threads working on the block with this one, if there are any.
     wake: Option<&'a Wake>,
     delivered: u64,
@@ -1821,11 +1838,36 @@ impl EngineProgram {
                 continue;
             };
             out_buf.clear();
+            // Spec: external-devices R10. An external instrument sends what
+            // reaches it to its port, and hears the interface's inputs it
+            // is set to.
+            let mut returned = None;
+            if let (Some(audio_from), NodeKey::Device(device), false) =
+                (turn.slot(slot).external, turn.slot(slot).key, bypass)
+            {
+                self.midi
+                    .send(OutOwner::Device(device), in_buf.notes(), block.from);
+                map_device_input(
+                    pass.device,
+                    &self.device_input,
+                    self.device_input_channels,
+                    audio_from,
+                    channels,
+                    stride,
+                    frames,
+                );
+                returned = Some(&pass.device[..channels * stride]);
+            }
             if bypass {
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
                 // the notes it started, on this block's first frame.
                 node.release(out_buf);
+                if let (Some(_), NodeKey::Device(device)) =
+                    (turn.slot(slot).external, turn.slot(slot).key)
+                {
+                    self.midi.release(OutOwner::Device(device));
+                }
                 for &note in in_buf.notes() {
                     out_buf.push(note);
                 }
@@ -1842,6 +1884,7 @@ impl EngineProgram {
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
+                external: returned,
                 notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: block.session,
@@ -2051,6 +2094,7 @@ impl EngineProgram {
             session: block.session,
             modulation: turn.bus(frames),
             rows: None,
+            external: None,
         });
         turn.selects_mut(rack)[..frames].copy_from_slice(selector.values(frames));
         selector.filters_ctrl()
@@ -2093,6 +2137,7 @@ impl EngineProgram {
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
                     sidechain: None,
+                    external: None,
                     notes: &[],
                     notes_out: None,
                     session: block.session,
@@ -2150,6 +2195,7 @@ impl EngineProgram {
             turn: unsafe { Turn::new(self, t) },
             block,
             scratch: &mut lane.events,
+            device: &mut lane.device,
             wake: Some(wake),
             delivered: 0,
         };

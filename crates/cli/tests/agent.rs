@@ -3738,6 +3738,107 @@ fn an_agent_auto_warps_and_fixes_a_downbeat_by_command_id() {
     assert_eq!(defaults["warp_markers"].as_array().unwrap().len(), 2);
 }
 
+// Spec: external-devices R2, R15, R28
+#[test]
+fn an_agent_routes_an_external_instrument_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("hardware-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let result = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        result["results"][0].clone()
+    };
+
+    // A MIDI track's MIDI To, with a port and a channel.
+    run(
+        &mut client,
+        "routing.set_midi_output",
+        json!({ "track": tracks[0], "to": { "name": "Synth", "channel": 3 } }),
+    );
+    let track = call(
+        &mut client,
+        "query",
+        json!({ "id": tracks[0], "detail": "full" }),
+    );
+    assert_eq!(
+        track["saved"]["routing"]["midi_output"],
+        json!({ "name": "Synth", "channel": 3 })
+    );
+
+    // The external instrument: added, routed, and its Hardware Latency set
+    // in samples and then in milliseconds, each read back.
+    let hardware = bl_devices::hardware_instrument_type();
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [tracks[0]] }),
+    );
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({ "device": { "kind": hardware.kind, "name": hardware.name,
+                            "role": hardware.role } }),
+    );
+    let device = added["result"]["device"].clone();
+    let external = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": device, "detail": "full" }))["saved"]["external"]
+            .clone()
+    };
+    assert_eq!(external(&mut client), json!({}), "a new device's defaults");
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "midi_to": { "type": "port", "name": "Synth" },
+                "channel": 4, "audio_from": { "type": "pair", "channel": 3 } }),
+    );
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "hardware_latency": { "unit": "samples", "value": 600 } }),
+    );
+    assert_eq!(
+        external(&mut client),
+        json!({ "port": "Synth", "channel": 4, "audio_from": { "type": "pair", "channel": 3 },
+                "hardware_latency": { "unit": "samples", "value": 600 } })
+    );
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "hardware_latency": { "unit": "milliseconds", "value": 12.5 } }),
+    );
+    assert_eq!(
+        external(&mut client)["hardware_latency"],
+        json!({ "unit": "milliseconds", "value": 12.5 })
+    );
+
+    // A bad request changes nothing, and each change is one undo step.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_external",
+                "args": { "device": device, "channel": 17 } }] }),
+        )
+        .expect("the call reaches the server")
+        .ok();
+    assert!(refused.is_err(), "channel 17 is refused");
+    assert_eq!(external(&mut client)["channel"], json!(4));
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(
+        history["undo"]["items"],
+        json!([
+            "hardware-agent: Set External Device",
+            "hardware-agent: Set External Device",
+            "hardware-agent: Set External Device",
+            "hardware-agent: Add Device",
+            "hardware-agent: Set MIDI Output",
+        ])
+    );
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Saturator, Overdrive and Dynamic Tube, reads their
 // parameters, sets some by ID, shows Saturator's expanded part, reads each

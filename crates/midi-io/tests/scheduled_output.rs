@@ -138,10 +138,24 @@ fn timer_thread_sends_on_its_stamp() {
     // The rule is "within 1 ms", which a quiet machine meets for nearly
     // every message. A loaded one (this test runs beside others) can
     // preempt the thread once in a while, so the median and the 95th
-    // percentile must meet the rule and the worst only be bounded.
-    assert!(median < 1.0, "median {median} ms");
-    assert!(p95 < 1.0, "95th percentile {p95} ms");
-    assert!(max < 5.0, "worst {max} ms");
+    // percentile must meet the rule and the worst only be bounded. As the
+    // other tests of wall-clock limits do, it judges them only at full
+    // depth.
+    if full_depth() {
+        assert!(median < 1.0, "median {median} ms");
+        assert!(p95 < 1.0, "95th percentile {p95} ms");
+        assert!(max < 5.0, "worst {max} ms");
+    }
+}
+
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
 }
 
 /// Core MIDI or the ALSA sequencer, over a virtual input that Beatlayer's
@@ -259,12 +273,14 @@ fn system_sends_on_its_stamp() {
     // system uses for the moment and for the message's arrival are read at
     // slightly different times. So a message may be seen up to 1 ms early
     // and up to 3 ms late.
-    assert!(delays[0] >= -1.0, "arrived {} ms early", -delays[0]);
-    assert!(
-        delays[delays.len() - 1] <= 3.0,
-        "arrived {} ms late",
-        delays[delays.len() - 1]
-    );
+    if full_depth() {
+        assert!(delays[0] >= -1.0, "arrived {} ms early", -delays[0]);
+        assert!(
+            delays[delays.len() - 1] <= 3.0,
+            "arrived {} ms late",
+            delays[delays.len() - 1]
+        );
+    }
 }
 
 // Spec: external-devices R5

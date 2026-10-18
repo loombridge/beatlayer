@@ -226,6 +226,67 @@ fn a_choke_group_fades_the_others_within_five_ms() {
 
 // Spec: drum-racks R4
 #[test]
+fn a_choke_goes_out_on_the_channel_its_note_came_on() {
+    use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
+    use std::time::{Duration, Instant};
+    const BLOCK: usize = 512;
+    let (mut rig, midi, chains) = kit(BLOCK, 2, &[]);
+    for (chain, note) in [(0, 46), (1, 42)] {
+        set(
+            &mut rig,
+            Command::SetChainReceive {
+                chain: chains[chain],
+                receive: Receive::Note(note),
+            },
+        );
+        set(
+            &mut rig,
+            Command::SetChainChoke {
+                chain: chains[chain],
+                choke: Some(1),
+            },
+        );
+    }
+    set(
+        &mut rig,
+        Command::SetArm {
+            track: midi,
+            arm: true,
+        },
+    );
+    let (mut queue, consumer) = rtrb::RingBuffer::new(16);
+    assert!(rig.processor.set_midi_input(consumer).is_none());
+    // A pad controller on MIDI channel 10: the open hi-hat, then the
+    // closed one a block later.
+    let start = Instant::now();
+    let at = |block: u32| start + Duration::from_nanos(u64::from(block) * BLOCK as u64 * 20_833);
+    for (block, key) in [(0, 46), (1, 42)] {
+        queue
+            .push(MidiInputEvent {
+                source: MidiSource::ComputerKeyboard,
+                time: at(block) + Duration::from_millis(1),
+                message: MidiMessage::note_on(9, key, 100),
+            })
+            .unwrap();
+    }
+    for block in 0..4 {
+        let processor = &mut rig.processor;
+        bl_rt::rt_test!({
+            processor.process_at(BLOCK, &bl_engine::NoInput, at(block));
+        });
+    }
+    let choke: Vec<_> = rig
+        .probe
+        .recorded_notes()
+        .iter()
+        .filter(|n| n.event.kind == NoteKind::Choke)
+        .map(|n| (n.event.channel, n.event.key))
+        .collect();
+    assert_eq!(choke, vec![(9, 60)]);
+}
+
+// Spec: drum-racks R4
+#[test]
 fn a_chain_does_not_choke_itself() {
     let (mut rig, _, chains) = kit(64, 1, &[(36, 0, 1), (36, 2, 1)]);
     set(

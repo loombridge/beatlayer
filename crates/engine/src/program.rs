@@ -2047,7 +2047,7 @@ impl EngineProgram {
         // shortcut: past this many choking notes in one block the rest
         // choke nothing; upgrade if a kit ever needs more in one block.
         const ROOM: usize = 256;
-        let mut found = [(0u32, 0u32, 0u8); ROOM];
+        let mut found = [(0u32, 0u32, 0u8, 0u8); ROOM];
         let mut count = 0;
         for i in chains.range() {
             let chain = self.rack_chains[i];
@@ -2060,7 +2060,7 @@ impl EngineProgram {
             let buffer = 2 * self.tasks.len() + 2 * chain.buffer as usize;
             for note in turn.notes(buffer).notes() {
                 if note.kind == NoteKind::On && count < ROOM {
-                    found[count] = (note.offset, i as u32, note.key);
+                    found[count] = (note.offset, i as u32, note.key, note.channel);
                     count += 1;
                 }
             }
@@ -2070,7 +2070,7 @@ impl EngineProgram {
             Some(Instance::Drum(drum)) => drum.group(),
             _ => 0,
         };
-        for &(offset, i, key) in &found[..count] {
+        for &(offset, i, key, channel) in &found[..count] {
             let i = i as usize;
             let group = group_of(i);
             for j in chains.range().filter(|&j| j != i && group_of(j) == group) {
@@ -2081,11 +2081,12 @@ impl EngineProgram {
                 let mut sounded = drum.take_sounded();
                 let buffer = turn.notes(2 * self.tasks.len() + 2 * chain.buffer as usize);
                 while sounded != 0 {
+                    let key = sounded.trailing_zeros() as u8;
                     buffer.insert(NoteEvent {
                         offset,
                         kind: NoteKind::Choke,
-                        channel: 0,
-                        key: sounded.trailing_zeros() as u8,
+                        channel: drum.channel(key),
+                        key,
                         velocity: 0.0,
                         note_id: None,
                     });
@@ -2095,7 +2096,7 @@ impl EngineProgram {
             if let Some(Instance::Drum(drum)) =
                 turn.slot(self.rack_chains[i].notes_slot()).node.as_mut()
             {
-                drum.sound(key);
+                drum.sound(key, channel);
             }
         }
     }

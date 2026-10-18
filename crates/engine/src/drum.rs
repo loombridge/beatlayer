@@ -94,6 +94,9 @@ pub(crate) struct DrumNotes {
     held: [u8; 128],
     /// The keys the chain started since a choke ended them, as bits.
     sounded: u128,
+    /// For each sounded key, the MIDI channel its note-on came on, which
+    /// its choke goes out on.
+    channels: [u8; 128],
     /// Whether Preview is held, and whether its note-on has gone in.
     preview: bool,
     previewing: Option<u8>,
@@ -110,6 +113,7 @@ impl DrumNotes {
             choke,
             held: [NOT_HELD; 128],
             sounded: 0,
+            channels: [0; 128],
             preview: false,
             previewing: None,
         }
@@ -154,9 +158,16 @@ impl DrumNotes {
         std::mem::take(&mut self.sounded)
     }
 
-    /// Records that a note-on of `key` reached the chain's devices.
-    pub(crate) fn sound(&mut self, key: u8) {
+    /// The MIDI channel a sounded key's note-on came on.
+    pub(crate) fn channel(&self, key: u8) -> u8 {
+        self.channels[usize::from(key & 0x7F)]
+    }
+
+    /// Records that a note-on of `key` on `channel` reached the chain's
+    /// devices.
+    pub(crate) fn sound(&mut self, key: u8, channel: u8) {
         self.sounded |= 1u128 << (key & 0x7F);
+        self.channels[usize::from(key & 0x7F)] = channel;
     }
 
     /// Fills `out` with the notes of `input` that reach the chain, as they

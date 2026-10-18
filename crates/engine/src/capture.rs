@@ -386,7 +386,7 @@ pub fn merge(data: &MidiData, length: Ticks, played: Vec<Note>) -> (MidiData, Ti
             .filter(|note| note.start >= loop_start && note.start < loop_end)
             .map(|note| Note {
                 start: note.start + shift,
-                ..*note
+                ..note.clone()
             })
             .collect();
         merged.notes.extend(repeated);

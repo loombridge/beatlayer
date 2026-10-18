@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 
 use crate::clip::Clip;
+use crate::command::check_clip_envelope_value;
 use crate::device::DeviceRole;
 use crate::document::Document;
 use crate::error::ModelError;
@@ -86,8 +87,17 @@ impl Document {
             if envelope.kind == crate::EnvelopeKind::Automation && !in_slot {
                 return Err(ModelError::NotSlotClip(clip.id));
             }
-            self.check_automation_target(id, envelope.target)?;
+            // A MIDI controller's envelope only modulates (WP-2.29).
+            if envelope.kind == crate::EnvelopeKind::Automation && envelope.target.is_midi() {
+                return Err(ModelError::MidiControllerNotAParameter);
+            }
+            self.check_clip_target(id, clip, envelope.target)?;
             envelope.envelope.check()?;
+            if envelope.target.is_midi() {
+                for point in envelope.envelope.points() {
+                    check_clip_envelope_value(envelope.target, point.value)?;
+                }
+            }
         }
         Ok(())
     }

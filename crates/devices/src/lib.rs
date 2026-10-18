@@ -22,7 +22,9 @@
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
-//! adds them to the engine. The instruments are the polysynth
+//! adds them to the engine, with the three delays of WP-5.25
+//! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments
+//! are the polysynth
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16), the
 //! multisampler ([`multisampler`], WP-5.13) and the eight-slot drum sampler
 //! ([`kitbag`], WP-5.17). The
@@ -31,6 +33,7 @@
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod alignment_delay;
 pub mod auto_filter;
 pub mod bus_compressor;
 pub mod channel_eq;
@@ -42,8 +45,10 @@ pub mod dice;
 pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
+pub mod filter_delay;
 mod framework;
 pub mod gate;
+pub mod grain_delay;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -68,6 +73,7 @@ pub mod tube;
 pub mod utility;
 pub mod wax;
 
+pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
@@ -78,8 +84,10 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
+pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
+pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -139,6 +147,9 @@ pub fn register(registry: &mut Registry) {
     polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);
+    filter_delay::register(registry);
+    grain_delay::register(registry);
+    alignment_delay::register(registry);
     reverb::register(registry);
     utility::register(registry);
     eq::register(registry);

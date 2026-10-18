@@ -174,7 +174,7 @@ pub const ON_SELECTED: &[&str] = &[
 /// Whether `id` is one of the Device View's commands.
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id)
+    IDS.contains(&id) || crate::pads::handles(id)
 }
 
 /// A device frame's title bar height at 100%, in points (observed in Live
@@ -240,6 +240,36 @@ pub fn rack_devices_width(rack: &RackFrame) -> f32 {
     inside + RACK_END_BRACKET_WIDTH
 }
 
+/// The width at 100% of a rack's chain list: a drum rack's grows with the
+/// switches that show its Input/Output columns and its sends (drum racks
+/// spec, R21).
+#[must_use]
+pub fn rack_chain_list_width(rack: &RackFrame) -> f32 {
+    let returns = rack.chains.iter().filter(|c| c.output.is_some()).count();
+    RACK_CHAIN_LIST_WIDTH
+        + if rack.pads.is_some() && rack.views.input_output {
+            crate::pads::DRUM_IO_WIDTH
+        } else {
+            0.0
+        }
+        + if rack.pads.is_some() && rack.views.send {
+            returns as f32 * crate::pads::DRUM_SEND_WIDTH
+        } else {
+            0.0
+        }
+}
+
+/// The width at 100% of a drum rack's pad view, while it shows; 0 for any
+/// other rack.
+#[must_use]
+pub fn rack_pads_width(rack: &RackFrame) -> f32 {
+    if rack.pads.is_some() && rack.views.pads {
+        crate::pads::RACK_PAD_WIDTH
+    } else {
+        0.0
+    }
+}
+
 /// How wide an unfolded rack is at 100%: its view column and each view it
 /// shows, left to right (racks spec, R18).
 #[must_use]
@@ -250,8 +280,9 @@ pub fn rack_width(rack: &RackFrame) -> f32 {
         } else {
             0.0
         }
+        + rack_pads_width(rack)
         + if rack.views.chain_list {
-            RACK_CHAIN_LIST_WIDTH
+            rack_chain_list_width(rack)
         } else {
             0.0
         }
@@ -547,6 +578,18 @@ pub struct RackFrame {
     pub note: Option<String>,
     /// Whether the chain list has the focus, so S solos the selected chain.
     pub chain_list_focused: bool,
+    /// A drum rack's pad view (drum racks spec, R11); left out for any
+    /// other rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pads: Option<crate::pads::PadFrame>,
+    /// A drum rack's return tracks, which a return chain's Audio To can
+    /// choose, in order (R8).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub return_tracks: Vec<crate::pads::ReturnChoice>,
+    /// Whether a drum rack can take another return chain: it holds fewer
+    /// than six (R7).
+    #[serde(default)]
+    pub can_add_return: bool,
 }
 
 impl RackFrame {
@@ -581,6 +624,14 @@ pub struct ChainRow {
     pub has_mixer: bool,
     /// Whether it's selected.
     pub selected: bool,
+    /// A drum chain's notes, choke group and sends (drum racks spec, R21);
+    /// left out for any other chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drum: Option<crate::pads::DrumRow>,
+    /// A drum rack's return chain's output (R8); left out for any other
+    /// chain. A return chain has no sends, notes or choke group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<crate::pads::ReturnRow>,
 }
 
 /// One entry of the Device View selector's device list (racks spec, R25).
@@ -1002,6 +1053,12 @@ pub struct CreateChainArgs {
     /// A device to move into it from where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub move_device: Option<DeviceId>,
+    /// Make a return chain of a drum rack (the drop area of its return
+    /// section): it goes after the drum chains and the rack's other return
+    /// chains, holds audio effects only, and sends to the rack's own
+    /// output. A drum rack holds six at most.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub returns: bool,
 }
 
 /// Arguments of `chain.drop_on_track`.
@@ -1189,7 +1246,7 @@ pub struct SetDisplayViewArgs {
 ///
 /// [`RegisterError`] if one of their IDs is already registered.
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
-    for spec in specs() {
+    for spec in specs().into_iter().chain(crate::pads::specs()) {
         registry.register(spec)?;
     }
     Ok(())
@@ -1558,7 +1615,10 @@ fn specs() -> Vec<CommandSpec> {
                  list's drop area does, named after what it holds, and selects it: holding a \
                  new `device`, a device made from a `preset` file, or the existing device \
                  `move_device` moved out of where it is; with none of them it is empty. The \
-                 chain must fit the rack's kind. One undo step (Insert Chain).",
+                 chain must fit the rack's kind. In a drum rack a chain made without `index` \
+                 receives the first pad from the view's first that holds no chain, and with \
+                 `returns` it is a return chain, after the others. One undo step (Insert \
+                 Chain).",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -1681,7 +1741,13 @@ mod tests {
             assert!(spec.args.is_some() && spec.result.is_some(), "{id}");
             assert!(!spec.description.is_empty(), "{id}");
         }
-        assert_eq!(registry.iter().count(), IDS.len());
+        for id in crate::pads::IDS {
+            let spec = registry.get(id).unwrap_or_else(|| panic!("{id}"));
+            assert!(spec.permission.is_some(), "{id}");
+            assert!(spec.args.is_some() && spec.result.is_some(), "{id}");
+            assert!(!spec.description.is_empty(), "{id}");
+        }
+        assert_eq!(registry.iter().count(), IDS.len() + crate::pads::IDS.len());
         assert!(registry.problems().is_empty(), "{:?}", registry.problems());
     }
 }

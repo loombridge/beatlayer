@@ -100,6 +100,11 @@ pub fn selector_name(view: RackView) -> &'static str {
         RackView::Macros => "Macro Controls View",
         RackView::ChainList => "Chain List View",
         RackView::Devices => "Devices View",
+        RackView::Pads => "Pad View",
+        RackView::InputOutput => "Show/Hide Input/Output",
+        RackView::Send => "Show/Hide Sends",
+        RackView::Returns => "Show/Hide Returns",
+        RackView::AutoSelect => "Auto Select",
     }
 }
 
@@ -504,6 +509,12 @@ impl DeviceViewUi {
                     StrokeKind::Inside,
                 );
             }
+            // A drum rack's switches, drawn when the pad view lands.
+            RackView::Pads
+            | RackView::InputOutput
+            | RackView::Send
+            | RackView::Returns
+            | RackView::AutoSelect => {}
         }
         if response.has_focus() && crate::focus::outlined(ui.ctx()) {
             painter.rect_stroke(

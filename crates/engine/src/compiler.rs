@@ -14,7 +14,7 @@ use crate::automation;
 use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::disjoint::Shared;
 use crate::display::Displays;
-use crate::drum::{self, DrumNotes};
+use crate::drum::{self, ChainHits, DrumNotes};
 use crate::gc::{GcHandle, Program};
 use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
@@ -172,6 +172,8 @@ pub struct Compiler {
     modulator_rows: BTreeMap<DeviceId, u32>,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
+    /// The counters of the notes that reach drum chains.
+    hits: ChainHits,
 }
 
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
@@ -209,7 +211,15 @@ impl Compiler {
             progressive: BTreeMap::new(),
             modulator_rows: BTreeMap::new(),
             displays: Displays::default(),
+            hits: ChainHits::default(),
         }
+    }
+
+    /// The counters of the notes that reach the drum chains this compiler's
+    /// programs have, which the shell reads (the drum racks spec, R20).
+    #[must_use]
+    pub fn chain_hits(&self) -> ChainHits {
+        self.hits.clone()
     }
 
     /// The readers of the displays of the nodes this compiler makes, which
@@ -779,6 +789,8 @@ impl Compiler {
         self.layout = build.layout;
         self.displays
             .retain(|device| self.layout.contains_key(&NodeKey::Device(device)));
+        self.hits
+            .retain(|chain| self.layout.contains_key(&NodeKey::ChainNotes(chain)));
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
@@ -1270,6 +1282,7 @@ impl Compiler {
                 settings[0].1 as u8,
                 settings[1].1 as u8,
                 settings[2].1 as u8,
+                self.hits.counter(chain.id),
             )))
         })
     }

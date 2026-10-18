@@ -3828,8 +3828,8 @@ impl Document {
         // Only instrument and audio effect racks' chains are tapped (the
         // racks spec, R38).
         if !matches!(
-            self.device_ref(rack)?.rack_kind(),
-            Some(RackKind::Instrument | RackKind::AudioEffect)
+            (self.device_ref(rack)?.rack_kind(), moved.is_return),
+            (Some(RackKind::Instrument | RackKind::AudioEffect), _) | (Some(RackKind::Drum), true)
         ) {
             self.forget_chain_taps(&BTreeSet::from([id]));
         }

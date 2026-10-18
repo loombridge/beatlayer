@@ -68,6 +68,7 @@ use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
+use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
@@ -2260,6 +2261,12 @@ impl Shell {
         if id == device_ids::LOAD_SAMPLE {
             return self.load_sample(id, args);
         }
+        if id == pad_ids::PAD_DROP {
+            return self.pad_drop(args);
+        }
+        if id == pad_ids::PAD_HOT_SWAP_SAMPLE {
+            return self.pad_hot_swap_sample(args);
+        }
         if matches!(
             id,
             device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
@@ -2295,6 +2302,14 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: drum-racks R5. A held Preview button plays its chain.
+        for &(chain, on) in &outcome.previews {
+            self.audio.send_param(
+                bl_engine::NodeKey::ChainNotes(chain),
+                bl_engine::drum::param::PREVIEW,
+                f64::from(u8::from(on)),
+            );
+        }
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
@@ -2320,6 +2335,75 @@ impl Shell {
         }
         self.touch();
         Ok(outcome.value)
+    }
+
+    /// Drops samples, a device or a preset on a pad of a drum rack
+    /// (`pad.drop`, the drum racks spec, R14 to R16): the media store takes
+    /// the files, the set records where they are, and the pad's chains play
+    /// them. One undo step.
+    fn pad_drop(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_DROP;
+        let args: pad_ids::PadDropArgs = Self::args(id, args)?;
+        let mut samples = Vec::with_capacity(args.samples.len());
+        for path in &args.samples {
+            let path = PathBuf::from(path);
+            let hash = self
+                .media
+                .import(&path)
+                .map_err(|error| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!("{}: {error}", path.display()),
+                })?;
+            let entry = self.media.entry(hash).ok_or_else(|| ShellError::Failed {
+                command: id.to_owned(),
+                message: "the media store lost the file".to_owned(),
+            })?;
+            let media = bl_model::ContentHash(*hash.as_bytes());
+            self.store.add_media(media, &entry.path, entry.size);
+            samples.push(devices::PadSample {
+                media,
+                name: file_stem(&entry.path),
+            });
+        }
+        let user_library = self.browser_view.user_library().map(Path::to_path_buf);
+        let dropped = self
+            .devices
+            .pad_drop(&mut self.editor, user_library.as_deref(), args, &samples)
+            .map_err(|error| device_error(id, error))?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        Ok(to_value(&dropped))
+    }
+
+    /// A pad's Hot-Swap Sample button (`pad.hot_swap_sample`, the drum racks
+    /// spec, R19): the pad becomes the hot-swap target and the browser opens
+    /// the folder of the sample it plays.
+    fn pad_hot_swap_sample(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_HOT_SWAP_SAMPLE;
+        let args: pad_ids::PadHotSwapArgs = Self::args(id, args)?;
+        let media = self
+            .devices
+            .pad_sample_of(self.editor.document(), args.rack, args.note)
+            .map_err(|error| device_error(id, error))?
+            .ok_or_else(|| ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "the pad's chain plays no sample".to_owned(),
+            })?;
+        let state = self.run_devices(pad_ids::PAD_HOT_SWAP, to_value(&args))?;
+        let folder = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(media.0))
+            .and_then(|entry| entry.path.parent().map(Path::to_path_buf));
+        if let Some(folder) = folder {
+            self.browser = true;
+            self.run_browser(
+                browser_ids::OPEN_FOLDER,
+                json!({ "path": folder, "open": true, "keep_others": true }),
+            )
+            .ok();
+        }
+        Ok(state)
     }
 
     /// Loads a file into a device that plays one sample
@@ -2507,6 +2591,37 @@ impl Shell {
     /// The browser's selection, if it's one audio file and a device that
     /// plays samples is being hot-swapped: what Enter or a double-click
     /// loads into the device's selected slot (WP-5.17).
+    fn pad_hot_swap_drop(
+        &self,
+        rack: bl_model::DeviceId,
+        note: u8,
+    ) -> Option<pad_ids::PadDropArgs> {
+        let selected = self.browser_view.selected();
+        let samples: Vec<String> = selected
+            .iter()
+            .filter(|p| browser::arrange::is_audio(&p.to_string_lossy()))
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let preset = match selected {
+            [one]
+                if samples.is_empty()
+                    && one
+                        .extension()
+                        .is_some_and(|e| e == bl_project::preset::PRESET_EXTENSION) =>
+            {
+                Some(one.to_string_lossy().into_owned())
+            }
+            _ => None,
+        };
+        (!samples.is_empty() || preset.is_some()).then(|| pad_ids::PadDropArgs {
+            rack: Some(rack),
+            note,
+            samples,
+            preset,
+            ..Default::default()
+        })
+    }
+
     fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
         let device = self.devices.hot_swap()?;
         let takes = self.editor.document().device(device).is_some_and(|d| {
@@ -3121,6 +3236,15 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+        }
+        // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
+        // list selects each chain a note reaches.
+        if running {
+            let mut hits = std::collections::BTreeMap::new();
+            self.audio.chain_hits_into(&mut hits);
+            if self.devices.auto_select(self.editor.document(), &hits) {
+                self.touch();
+            }
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
@@ -5111,6 +5235,15 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((rack, note)) = self.devices.hot_swap_pad_target()
+            && let Some(drop) = self.pad_hot_swap_drop(rack, note)
+        {
+            // Spec: drum-racks R18. With a pad the target, what the browser
+            // loads lands on the pad as a drop would.
+            Self::args::<NoArgs>(id, args)?;
+            return self.pad_drop(to_value(&drop));
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some((device, layer, path)) = self.hot_swapped_layer_file()

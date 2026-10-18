@@ -7,9 +7,54 @@
 //! can silence them. It runs on the rack's own thread before the chains, so
 //! nothing in it waits on another chain.
 
-use bl_model::ParamId;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
+
+use bl_model::{ChainId, ParamId};
 
 use crate::node::{NodeEvent, NoteBuffer, NoteEvent, NoteKind, ParamValue};
+
+/// How many note-ons have reached each drum chain since its note routing
+/// was made, which the shell reads to select the chain a note reaches (Auto
+/// Select; the drum racks spec, R20). Only the compiler and the shell take
+/// its lock; the audio thread bumps the counters it already holds.
+#[derive(Clone, Default)]
+pub struct ChainHits(Arc<Mutex<BTreeMap<ChainId, Arc<AtomicU64>>>>);
+
+impl ChainHits {
+    /// The counter of `chain`, made if it has none.
+    pub(crate) fn counter(&self, chain: ChainId) -> Arc<AtomicU64> {
+        Arc::clone(self.lock().entry(chain).or_default())
+    }
+
+    /// Forgets the chains `keep` refuses: those the program no longer has.
+    pub(crate) fn retain(&self, mut keep: impl FnMut(ChainId) -> bool) {
+        self.lock().retain(|chain, _| keep(*chain));
+    }
+
+    /// Copies each chain's count into `out`.
+    pub fn read_all(&self, out: &mut BTreeMap<ChainId, u64>) {
+        out.clear();
+        out.extend(
+            self.lock()
+                .iter()
+                .map(|(chain, n)| (*chain, n.load(Relaxed))),
+        );
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<ChainId, Arc<AtomicU64>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl std::fmt::Debug for ChainHits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChainHits").finish_non_exhaustive()
+    }
+}
 
 /// The parameters of a chain's [`DrumNotes`], set by the compiler with the
 /// document's values.
@@ -52,11 +97,14 @@ pub(crate) struct DrumNotes {
     /// Whether Preview is held, and whether its note-on has gone in.
     preview: bool,
     previewing: Option<u8>,
+    /// Counts the note-ons that reach the chain, for the shell.
+    hits: Arc<AtomicU64>,
 }
 
 impl DrumNotes {
-    pub(crate) fn new(receive: u8, play: u8, choke: u8) -> Self {
+    pub(crate) fn new(receive: u8, play: u8, choke: u8, hits: Arc<AtomicU64>) -> Self {
         Self {
+            hits,
             receive,
             play,
             choke,
@@ -157,6 +205,7 @@ impl DrumNotes {
                         self.play
                     };
                     self.held[usize::from(note.key & 0x7F)] = key;
+                    self.hits.fetch_add(1, Relaxed);
                     out.push(NoteEvent { key, ..*note });
                 }
             }
@@ -226,7 +275,7 @@ mod tests {
     // Spec: drum-racks R2
     #[test]
     fn a_note_goes_on_at_the_play_note_and_its_off_follows() {
-        let mut drum = DrumNotes::new(36, 60, 0);
+        let mut drum = DrumNotes::new(36, 60, 0, Arc::default());
         let got = routed(&mut drum, &[on(5, 36), on(6, 37), off(9, 36), off(10, 37)]);
         assert_eq!(got, [(5, NoteKind::On, 60), (9, NoteKind::Off, 60)]);
     }
@@ -234,7 +283,7 @@ mod tests {
     // Spec: drum-racks R2
     #[test]
     fn a_note_off_follows_its_note_on_after_receive_and_play_change() {
-        let mut drum = DrumNotes::new(36, 60, 0);
+        let mut drum = DrumNotes::new(36, 60, 0, Arc::default());
         routed(&mut drum, &[on(0, 36)]);
         drum.set(param::RECEIVE, ParamValue::Set(40.0));
         drum.set(param::PLAY, ParamValue::Set(72.0));
@@ -244,7 +293,7 @@ mod tests {
     // Spec: drum-racks R2
     #[test]
     fn all_notes_passes_every_note_as_it_came_and_messages_reach_every_chain() {
-        let mut drum = DrumNotes::new(36, 60, 4);
+        let mut drum = DrumNotes::new(36, 60, 4, Arc::default());
         drum.set(param::RECEIVE, ParamValue::Set(param::ALL_NOTES));
         assert_eq!(drum.group(), 0, "all notes is in no choke group");
         let bend = NoteEvent {
@@ -256,14 +305,14 @@ mod tests {
             got.iter().map(|g| (g.0, g.2)).collect::<Vec<_>>(),
             [(0, 41), (1, 0), (2, 41)]
         );
-        let mut other = DrumNotes::new(36, 60, 0);
+        let mut other = DrumNotes::new(36, 60, 0, Arc::default());
         assert_eq!(routed(&mut other, &[bend]).len(), 1);
     }
 
     // Spec: drum-racks R5
     #[test]
     fn preview_plays_the_receive_note_while_held() {
-        let mut drum = DrumNotes::new(38, 60, 0);
+        let mut drum = DrumNotes::new(38, 60, 0, Arc::default());
         drum.set(param::PREVIEW, ParamValue::Set(1.0));
         assert_eq!(routed(&mut drum, &[]), [(0, NoteKind::On, 60)]);
         assert!(routed(&mut drum, &[]).is_empty(), "the note stays on");

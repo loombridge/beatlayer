@@ -401,6 +401,97 @@ impl Receive {
     }
 }
 
+/// A note's name in Live's octave numbering, where note 60 is C3 and note 36
+/// is C1: `C-2` for 0, `F#3` for 66, `G8` for 127.
+#[must_use]
+pub fn note_name(note: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let octave = i16::from(note / 12) - 2;
+    format!("{}{octave}", NAMES[usize::from(note % 12)])
+}
+
+/// The General MIDI drum sound on `note`, from 35 to 81, if it has one.
+#[must_use]
+pub fn general_midi_drum(note: u8) -> Option<&'static str> {
+    const SOUNDS: [&str; 47] = [
+        "Acoustic Bass Drum",
+        "Bass Drum 1",
+        "Side Stick",
+        "Acoustic Snare",
+        "Hand Clap",
+        "Electric Snare",
+        "Low Floor Tom",
+        "Closed Hi-Hat",
+        "High Floor Tom",
+        "Pedal Hi-Hat",
+        "Low Tom",
+        "Open Hi-Hat",
+        "Low-Mid Tom",
+        "Hi-Mid Tom",
+        "Crash Cymbal 1",
+        "High Tom",
+        "Ride Cymbal 1",
+        "Chinese Cymbal",
+        "Ride Bell",
+        "Tambourine",
+        "Splash Cymbal",
+        "Cowbell",
+        "Crash Cymbal 2",
+        "Vibraslap",
+        "Ride Cymbal 2",
+        "Hi Bongo",
+        "Low Bongo",
+        "Mute Hi Conga",
+        "Open Hi Conga",
+        "Low Conga",
+        "High Timbale",
+        "Low Timbale",
+        "High Agogo",
+        "Low Agogo",
+        "Cabasa",
+        "Maracas",
+        "Short Whistle",
+        "Long Whistle",
+        "Short Guiro",
+        "Long Guiro",
+        "Claves",
+        "Hi Wood Block",
+        "Low Wood Block",
+        "Mute Cuica",
+        "Open Cuica",
+        "Mute Triangle",
+        "Open Triangle",
+    ];
+    note.checked_sub(35)
+        .and_then(|at| SOUNDS.get(usize::from(at)))
+        .copied()
+}
+
+/// What a Receive chooser entry reads (drum racks spec, R3): All Notes, or a
+/// note's name, its number and its General MIDI drum sound where it has one.
+#[must_use]
+pub fn receive_label(receive: Receive) -> String {
+    match receive {
+        Receive::AllNotes => "All Notes".to_owned(),
+        Receive::Note(note) => match general_midi_drum(note) {
+            Some(sound) => format!("{} ({note}) {sound}", note_name(note)),
+            None => format!("{} ({note})", note_name(note)),
+        },
+    }
+}
+
+/// The entries of a Receive chooser, in order: All Notes first, then each
+/// note from 0 to 127 with its label (drum racks spec, R3).
+#[must_use]
+pub fn receive_choices() -> Vec<(Receive, String)> {
+    std::iter::once(Receive::AllNotes)
+        .chain((0..128).map(Receive::Note))
+        .map(|receive| (receive, receive_label(receive)))
+        .collect()
+}
+
 /// A drum chain's send to a return chain (drum racks spec, R6).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(

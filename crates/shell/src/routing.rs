@@ -764,8 +764,9 @@ fn rack_chains(doc: &Document, track: TrackId) -> Vec<(&Device, &Chain)> {
                 rack.rack_kind(),
                 Some(RackKind::Instrument | RackKind::AudioEffect)
             );
+            let drum = rack.rack_kind() == Some(RackKind::Drum);
             for chain in &rack.chains {
-                if offered {
+                if offered || (drum && chain.is_return) {
                     out.push((rack, chain));
                 }
                 walk(chain.devices.iter(), out);

@@ -159,7 +159,7 @@ The Envelope Follower's equivalent is the **Level Mod** (`beatlayer.level_mod`, 
 - A slot's Min and Max are positions on the target's travel, shown as percentages; the target's own units (R16) wait for a control that reads its target's scale.
 - A modulator isn't held back by its target's node delay (R20, delay-compensation R5): the order the audio-driven ones need is built (R28), but their rows still reach a target on the frames they were worked out for, not on the frames the target's delay compensation shifts its audio to.
 - The Wave Mod's display shows the waveform as the controls set it, and the Curve Mod's the shape, not the output now; the Strike Mod's shows its shape the same way, with its level and trigger LED beside it.
-- The Level Mod's Audio From chooser offers the tracks and their taps; the chains inside racks (R24) wait for WP-5.7's chain taps.
+- The Level Mod's Audio From chooser offers the tracks and their taps; the chains inside racks (R24) wait for the racks spec's chain taps (R38), which reach a track's Audio From but not yet a device's sidechain source.
 - The Gate Mod's display draws its envelope, but its handles (R25) don't drag yet: the knobs set it. The Play Mod's curves are drawn in its panel (R27) but not dragged in it.
 - What each Play Mod source reads before anything is played, and which note a per-note source follows, are Beatlayer's own until they are observed ("To observe" item 13).
 

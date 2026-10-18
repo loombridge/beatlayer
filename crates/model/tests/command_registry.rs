@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        139,
+        140,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -66,7 +66,7 @@ fn every_document_command_is_registered() {
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, and \
-         WP-3.10 the two for follow actions"
+         WP-3.10 the two for follow actions, and WP-5.27 set_midi_sidechain_source"
     );
 
     for op in &ops {
@@ -975,6 +975,20 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_sidechain_listen",
         json!({ "device": duck, "listen": true }),
+    );
+    // A device with a MIDI sidechain input, listening to a MIDI track.
+    let hear: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": hear, "name": "Hear", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.hear" } },
+            "midi_sidechain": {},
+        } }),
+    );
+    agent.run(
+        "device.set_midi_sidechain_source",
+        json!({ "device": hear }),
     );
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
@@ -2152,6 +2166,13 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSidechainListen {
                 device,
                 listen: true,
+            },
+        ),
+        (
+            "device.set_midi_sidechain_source",
+            Command::SetMidiSidechainSource {
+                device,
+                track: None,
             },
         ),
         (

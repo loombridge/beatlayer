@@ -58,6 +58,7 @@ pub mod remap;
 pub mod reverb;
 pub mod sampler;
 mod sections;
+pub mod shifter;
 pub mod stack;
 pub mod testing;
 pub mod three_band_eq;
@@ -88,6 +89,7 @@ pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
+pub use shifter::{SHIFTER, shifter_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
@@ -152,6 +154,7 @@ pub fn register(registry: &mut Registry) {
     crusher::register(registry);
     wax::register(registry);
     auto_filter::register(registry);
+    shifter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

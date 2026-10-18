@@ -20,8 +20,9 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_CHAIN,
-    NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input, Instance,
+    Migration, NO_CHAIN, NO_DELAY, NO_TASK, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task,
+    delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -567,7 +568,15 @@ impl Compiler {
             .enumerate()
             .map(|(i, &id)| (id, i as u32))
             .collect();
-        let mut build = Build::default();
+        let build_midi_sources = graph
+            .midi_links
+            .iter()
+            .filter_map(|link| Some((link.device, *task_of.get(&link.from)?)))
+            .collect();
+        let mut build = Build {
+            midi_sources: build_midi_sources,
+            ..Build::default()
+        };
 
         // Each track's inputs, in the order the graph lists them.
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
@@ -633,6 +642,21 @@ impl Compiler {
                 *slot = Some(kept);
                 kept += 1;
             }
+        }
+
+        // Tasks whose notes a MIDI sidechain hears keep a copy of them.
+        let mut midi_kept = 0;
+        for at in 0..build.midi_sidechains.len() {
+            let from = build.midi_sidechains[at].from;
+            if from == NO_TASK {
+                continue;
+            }
+            let keep = &mut build.tasks[from as usize].midi_keep;
+            let index = *keep.get_or_insert_with(|| {
+                midi_kept += 1;
+                midi_kept - 1
+            });
+            build.midi_sidechains[at].kept = index;
         }
 
         // The chains that routes tap keep a copy at each tap too.
@@ -727,6 +751,10 @@ impl Compiler {
             sidechain_pool: vec![0.0; build.sidechains.len() * size],
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
+            midi_sidechains: build.midi_sidechains,
+            midi_kept: (0..midi_kept)
+                .map(|_| NoteBuffer::with_capacity(1024))
+                .collect(),
             pool: vec![0.0; (tasks + build.chain_buffers as usize) * size],
             tap_pool: vec![0.0; kept as usize * size],
             delay_lines,
@@ -1045,10 +1073,15 @@ impl Compiler {
             _ => None,
         };
         let sidechain_start = build.sidechains.len() as u32;
+        let midi_start = build.midi_sidechains.len() as u32;
         let chain = self.add_flow(build, track.devices(), sidechain_inputs, &mut dependencies);
         let sidechains = Span {
             start: sidechain_start,
             end: build.sidechains.len() as u32,
+        };
+        let midi_sidechains = Span {
+            start: midi_start,
+            end: build.midi_sidechains.len() as u32,
         };
         let mixer = self.place(
             build,
@@ -1070,6 +1103,8 @@ impl Compiler {
             player,
             chain,
             sidechains,
+            midi_sidechains,
+            midi_keep: None,
             mixer,
             clip_delay: NO_DELAY,
             pre_fx: None,
@@ -1142,6 +1177,15 @@ impl Compiler {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
                 *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
                 self.add_sidechain(build, device.id, settings, slot, sources);
+            }
+            if device.midi_sidechain.is_some() {
+                let from = build.midi_sources.get(&device.id).copied();
+                *dependencies += u32::from(from.is_some_and(|from| from != own));
+                build.midi_sidechains.push(DeviceMidiSidechain {
+                    device: slot,
+                    from: from.unwrap_or(NO_TASK),
+                    kept: NO_TASK,
+                });
             }
         }
         let start = build.steps.len() as u32;
@@ -1355,6 +1399,9 @@ struct Build {
     chain_index: BTreeMap<ChainId, u32>,
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
+    /// The task each device's MIDI sidechain listens to (WP-5.27).
+    midi_sources: BTreeMap<DeviceId, u32>,
+    midi_sidechains: Vec<DeviceMidiSidechain>,
     unhosted: Vec<DeviceId>,
     /// The modulators' slots and devices, in the order their rows sit on the
     /// bus (WP-5.10).
@@ -1423,6 +1470,14 @@ fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
         for input in build.inputs[task.inputs.range()].iter().chain(sidechains) {
             dependents[input.from as usize].push(t as u32);
             waiting[t] += 1;
+        }
+        // A MIDI sidechain waits for the track whose notes it hears, unless
+        // that is its own track.
+        for midi in &build.midi_sidechains[task.midi_sidechains.range()] {
+            if midi.from != NO_TASK && midi.from as usize != t {
+                dependents[midi.from as usize].push(t as u32);
+                waiting[t] += 1;
+            }
         }
     }
     let mut left = waiting;

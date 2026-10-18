@@ -79,6 +79,11 @@ pub struct EngineProgram {
     pub(crate) sidechains: Vec<DeviceSidechain>,
     /// What each sidechain sums into its buffer.
     pub(crate) sidechain_inputs: Vec<Input>,
+    /// The MIDI sidechains of the devices each task runs (WP-5.27).
+    pub(crate) midi_sidechains: Vec<DeviceMidiSidechain>,
+    /// The notes of each MIDI track a MIDI sidechain listens to, kept for
+    /// the block: what its clips and input played, before its devices.
+    pub(crate) midi_kept: Vec<NoteBuffer>,
     /// One buffer per sidechain, holding what its device's detector
     /// hears.
     pub(crate) sidechain_pool: Vec<f32>,
@@ -540,6 +545,20 @@ pub(crate) struct DeviceSidechain {
     pub(crate) before: u32,
 }
 
+/// A device's MIDI sidechain in a task's chain (WP-5.27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeviceMidiSidechain {
+    /// The device's slot.
+    pub(crate) device: u32,
+    /// The task whose notes it hears, or [`NO_TASK`].
+    pub(crate) from: u32,
+    /// The source's notes in `midi_kept`, or [`NO_TASK`] with no source.
+    pub(crate) kept: u32,
+}
+
+/// No source task: a MIDI sidechain at No Input.
+pub(crate) const NO_TASK: u32 = u32::MAX;
+
 /// One track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Task {
@@ -554,6 +573,11 @@ pub(crate) struct Task {
     pub(crate) chain: Span,
     /// The sidechains of its devices, in `sidechains`.
     pub(crate) sidechains: Span,
+    /// The MIDI sidechains of its devices, in `midi_sidechains`.
+    pub(crate) midi_sidechains: Span,
+    /// Where it keeps the notes it plays for the MIDI sidechains that
+    /// listen to it, in `midi_kept`.
+    pub(crate) midi_keep: Option<u32>,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The delay line its clips are held back through so they line up with
@@ -956,6 +980,16 @@ impl EngineProgram {
             // its clips' notes, on its own frames.
             self.midi
                 .play(task.track, from, until, &mut self.note_buffers[0]);
+
+            // Spec: routing R32. What the track played, kept for the MIDI
+            // sidechains that listen to it.
+            if let Some(kept) = task.midi_keep {
+                let kept = &mut self.midi_kept[kept as usize];
+                kept.clear();
+                for &note in self.note_buffers[0].notes() {
+                    kept.push(note);
+                }
+            }
 
             // Its clips, held back to line up with its inputs.
             if task.clip_delay != NO_DELAY {
@@ -1500,6 +1534,16 @@ impl EngineProgram {
                 .get_disjoint_mut([pair + note_idx, pair + 1 - note_idx])
                 .expect("the pair's buffers are two");
             out_buf.clear();
+            // Spec: routing R32. A device with a MIDI sidechain hears its
+            // source's notes, or none at No Input, in place of the chain's.
+            let heard_notes = match self.midi_sidechains[task.midi_sidechains.range()]
+                .iter()
+                .find(|m| m.device == slot)
+            {
+                Some(m) if m.kept == NO_TASK => Some(&[][..]),
+                Some(m) => Some(self.midi_kept[m.kept as usize].notes()),
+                None => None,
+            };
             if bypass {
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
@@ -1523,7 +1567,7 @@ impl EngineProgram {
                 sidechain: heard
                     .as_ref()
                     .map(|(at, _)| &self.sidechain_pool[at.clone()]),
-                notes: in_buf.notes(),
+                notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: pass.session,
                 modulation: Bus::new(&self.bus, stride, frames),

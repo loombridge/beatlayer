@@ -460,6 +460,7 @@ impl AuHost {
                 role,
                 description: DeviceDescription::new(descriptors),
                 sidechain: false,
+                midi_sidechain: false,
             },
             vendor,
             version: has_version.then(|| version_text(version)),

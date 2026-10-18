@@ -22,6 +22,10 @@
 //!   any route, carries nothing. A device listening to its own track
 //!   before its devices (Pre FX) hears it, as the signal is there before
 //!   the chain runs; after them it would hear itself, and carries nothing.
+//! - MIDI sidechains come after those (WP-5.27): each device's MIDI source,
+//!   in display order, under the same rule. A device listening to its own
+//!   track hears the notes its clips and input play, which are there
+//!   before the chain runs.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -52,6 +56,18 @@ impl Via {
     }
 }
 
+/// A MIDI track's notes and channel messages reaching a device's MIDI
+/// sidechain (WP-5.27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MidiLink {
+    /// The MIDI track whose notes the device hears.
+    pub from: TrackId,
+    /// The track of the device.
+    pub to: TrackId,
+    /// The device.
+    pub device: DeviceId,
+}
+
 /// One route in the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Edge {
@@ -76,6 +92,8 @@ pub struct Edge {
 pub struct Graph {
     /// Every route the engine plays, sends included.
     pub edges: Vec<Edge>,
+    /// The MIDI sidechains the engine plays.
+    pub midi_links: Vec<MidiLink>,
     /// Routings the document asks for that the engine plays as silence,
     /// because they would close a loop: (from, to).
     pub broken: Vec<(TrackId, TrackId)>,
@@ -247,6 +265,7 @@ impl Graph {
             }
         }
         graph.add_sidechains(document, &order);
+        graph.add_midi_links(document, &order);
         graph
     }
 
@@ -294,6 +313,45 @@ impl Graph {
             } else {
                 all.entry(edge.from).or_default().push(edge.to);
                 self.edges.push(edge);
+            }
+        }
+    }
+
+    /// Adds the MIDI sidechains' links, after every audio route, leaving
+    /// out each that would close a loop.
+    fn add_midi_links(&mut self, document: &Document, order: &[TrackId]) {
+        let mut all: BTreeMap<TrackId, Vec<TrackId>> = BTreeMap::new();
+        for edge in &self.edges {
+            all.entry(edge.from).or_default().push(edge.to);
+        }
+        for &id in order {
+            let Some(track) = document.track(id) else {
+                continue;
+            };
+            for device in track.devices_deep() {
+                let Some(from) = device.midi_sidechain.as_ref().and_then(|s| s.source) else {
+                    continue;
+                };
+                if document.track(from).is_none() {
+                    continue;
+                }
+                // Its own track's notes are there before its chain runs.
+                if from == id {
+                    self.midi_links.push(MidiLink {
+                        from,
+                        to: id,
+                        device: device.id,
+                    });
+                } else if reaches(&all, id, from) {
+                    self.broken.push((from, id));
+                } else {
+                    all.entry(from).or_default().push(id);
+                    self.midi_links.push(MidiLink {
+                        from,
+                        to: id,
+                        device: device.id,
+                    });
+                }
             }
         }
     }

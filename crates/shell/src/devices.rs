@@ -26,9 +26,9 @@ use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, ChainAdded, ChainArgs, DeviceAdded, DeviceArgs, DeviceFrame,
     DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow,
     FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, LoadPresetArgs,
-    ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
-    Ungrouped,
+    MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult,
+    SavePresetArgs, SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs,
+    SidechainSection, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -770,6 +770,16 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            midi_sidechain: d
+                .midi_sidechain
+                .as_ref()
+                .map(|sidechain| MidiSidechainSection {
+                    shown: self.sidechains_shown.contains(&d.id),
+                    source: sidechain.source.map_or_else(
+                        || "No Input".to_owned(),
+                        |track| crate::routing::track_label(doc, track),
+                    ),
+                }),
             display_view: self.display_view(d),
             modulator: self.modulator_frame(doc, d),
         }
@@ -839,9 +849,10 @@ impl DeviceView {
             ids::EXPAND => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
-            ids::SHOW_SIDECHAIN => self
-                .target(doc, named)
-                .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
+            ids::SHOW_SIDECHAIN => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| d.sidechain.is_some() || d.midi_sidechain.is_some())
+            }),
             ids::DUPLICATE => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
                     .is_some_and(|d| d.role != DeviceRole::Instrument)
@@ -1027,7 +1038,7 @@ impl DeviceView {
                 if editor
                     .document()
                     .device(device)
-                    .is_none_or(|d| d.sidechain.is_none())
+                    .is_none_or(|d| d.sidechain.is_none() && d.midi_sidechain.is_none())
                 {
                     return Err(DeviceError::Unavailable(format!(
                         "{device} has no sidechain input"
@@ -1762,6 +1773,9 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs) -> Device {
         .with_role(args.device.role);
     if args.device.sidechain {
         device = device.with_sidechain();
+    }
+    if args.device.midi_sidechain {
+        device = device.with_midi_sidechain();
     }
     device
 }

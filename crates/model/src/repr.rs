@@ -896,6 +896,22 @@ mod tests {
         editor
             .apply(Command::SetClipVelocityAmount { clip, amount: 0.75 })
             .unwrap();
+        // Spec: follow-actions R1. Follow actions save with the clip and the
+        // scene.
+        let patch = crate::FollowPatch {
+            enabled: Some(true),
+            action_b: Some(crate::FollowAction::Any),
+            chance_a: Some(40),
+            linked: Some(false),
+            time: Some(Ticks::WHOLE * 2),
+            ..crate::FollowPatch::default()
+        };
+        editor
+            .apply(Command::SetClipFollowActions { clip, patch })
+            .unwrap();
+        editor
+            .apply(Command::SetSceneFollowActions { scene, patch })
+            .unwrap();
         let doc = editor.document().clone();
         let loaded = load(serde_json::to_value(&doc).unwrap()).unwrap();
         assert_eq!(loaded, doc);
@@ -903,6 +919,9 @@ mod tests {
             loaded.slot(track, scene).unwrap().launch.velocity_amount,
             0.75
         );
+        let follow = loaded.slot(track, scene).unwrap().launch.follow;
+        assert_eq!((follow.chance_a, follow.linked), (40, false));
+        assert_eq!(loaded.scene(scene).unwrap().follow, follow);
 
         // The set as it was saved without them opens with the defaults.
         let older = load(plain).unwrap();

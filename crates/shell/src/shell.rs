@@ -5315,6 +5315,14 @@ impl Shell {
                     ..current
                 }
             }
+            session_launch_ids::SET_FOLLOW_ACTIONS_ENABLED => {
+                let session_launch_ids::SetFollowActionsEnabledArgs { enabled } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    follow_actions: enabled.unwrap_or(!current.follow_actions),
+                    ..current
+                }
+            }
             session_launch_ids::STOP_SELECTED => {
                 Self::args::<NoArgs>(id, args)?;
                 // Spec: launch-quantisation R6. Every track with a selected

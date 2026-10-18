@@ -1172,6 +1172,27 @@ const ENTRIES: &[Entry] = &[
             step; launching doesn't read it yet.",
     },
     Entry {
+        id: "clip.set_follow_actions",
+        action: Action::Apply("set_clip_follow_actions"),
+        label: "Set Clip Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Changes a Session clip's follow actions, as the Launch Properties panel \
+            does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the clip started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
+    },
+    Entry {
         id: "clip.set_envelope_breakpoint",
         action: Action::Apply("set_clip_envelope_breakpoint"),
         label: "Add Envelope Breakpoint",
@@ -1380,6 +1401,28 @@ const ENTRIES: &[Entry] = &[
             left out or null switches the scene's tempo off, as double-clicking the field or \
             Return to Default does, so launching it leaves the set's tempo as it is. One undo \
             step.",
+    },
+    Entry {
+        id: "scene.set_follow_actions",
+        action: Action::Apply("set_scene_follow_actions"),
+        label: "Set Scene Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Changes a scene's follow actions, as the Scene View does: what the scene \
+            does after it was launched, over the scenes as a clip's do over its track's slots. \
+            `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the scene started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
     },
     Entry {
         id: "scene.set_time_signature",

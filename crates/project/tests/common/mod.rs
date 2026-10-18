@@ -368,6 +368,7 @@ impl Recipe {
                     bl_model::LaunchQuantization::Bars2
                 },
                 enabled: !self.id_skip.is_multiple_of(3),
+                follow_actions: !self.id_skip.is_multiple_of(5),
             },
         }
     }

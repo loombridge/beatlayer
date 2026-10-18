@@ -4,7 +4,7 @@ This is the definition of done for parity with Ableton Live 12. What Beatlayer a
 
 Live is sold in three editions (Intro, Standard, Suite). Beatlayer has one edition with everything, so edition limits such as Intro's 16 tracks don't apply.
 
-Device names in this page are Live's, used only to identify the parity target. Beatlayer's devices get their own names ([clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code)).
+Device names in this page are Live's, and Beatlayer's devices take the same names ([clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code)).
 
 Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP-1.8b"), and [the progress dashboard](../xtask/src/progress.rs) (`cargo xtask dashboard`) shows the row's status from theirs in the build plan's status table. In a row split across milestones, a package counts for the part in its own phase. A row in Phases 0 to 2 that names no package shows as unassigned, a gap in the plan; later phases are planned until they're broken into packages. When Ableton ships a release, add its features here first.
 

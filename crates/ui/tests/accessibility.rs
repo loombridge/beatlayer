@@ -1111,6 +1111,39 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// An audio effect rack with two chains, Pad and Lead, on audio track 3, the
+/// selected track, with no device selected (WP-5.2).
+fn a_rack(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "name": "Rack",
+                "role": "audio_effect",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    for (index, name) in ["Pad", "Lead"].into_iter().enumerate() {
+        let id: bl_model::ChainId = h.shell.new_id();
+        h.shell
+            .run(
+                "chain.add",
+                json!({ "rack": rack, "index": index, "chain": { "id": id, "name": name, "devices": [] } }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The eight-slot drum sampler on the third track, the selected track, no
 /// device selected (WP-5.17).
 fn a_drum_sampler(h: &mut Harness) {
@@ -2107,67 +2140,83 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "device.set_enabled_all",
-            Exception(LaterView(
-                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            Exception(Equivalent(
+                "Option-Enter (Alt-Enter) on the rack's Device Activator, as Option-click does \
+                 (I-CLICK-024)",
+            )),
+        ),
+        // The rack's frame (WP-5.2): the chain list's rows and their
+        // controls are in the Device View's Tab order, and its keys are
+        // the rack-chains context's.
+        (
+            "chain.add",
+            Exception(Equivalent(
+                "the chain list's drop area (`chain.create`), or Paste there (`chain.paste`, \
+                 Cmd-V)",
             )),
         ),
         (
-            "chain.add",
-            Exception(LaterView(
-                "the rack's chain list and its drop area (WP-5.2)",
+            "chain.create",
+            Exception(Equivalent(
+                "a drag onto the chain list's drop area; the keyboard pastes a chain \
+                 (`chain.paste`, Cmd-V)",
+            )),
+        ),
+        (
+            "chain.drop_on_track",
+            Exception(Equivalent(
+                "a drag onto the track's own chain; the keyboard cuts the chain's devices and \
+                 pastes them (`device.cut`, `device.paste`)",
             )),
         ),
         (
             "chain.remove",
-            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+            Exception(Equivalent("Delete in the chain list (`chain.delete`)")),
         ),
         (
             "chain.move",
-            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
-        ),
-        (
-            "chain.rename",
-            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+            Exception(Equivalent(
+                "a drag in the chain list; the keyboard cuts the chain and pastes it \
+                 (`chain.cut`, `chain.paste`)",
+            )),
         ),
         (
             "chain.set_colour",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's context menu, from its row with Shift-F10 (S-CTX-002)",
+            )),
         ),
         (
             "chain.set_info",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(LaterView(
+                "the chain's Edit Info Text, which waits for the Info View (WP-2.24)",
+            )),
         ),
         (
             "chain.set_gain",
-            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Volume of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_pan",
-            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Pan of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_enabled",
-            Exception(LaterView("the chain list's activator (WP-5.2)")),
+            main(a_rack, device_view, "Chain Activator of Pad", Key::Enter),
         ),
         (
             "chain.set_solo",
-            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's Solo button, or S in the chain list (`chain.solo`)",
+            )),
         ),
         (
-            "chain.copy",
-            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+            "chain.select",
+            main(a_rack, device_view, "Chain Pad", Key::Enter),
         ),
         (
-            "chain.cut",
-            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
-        ),
-        (
-            "chain.paste",
-            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
-        ),
-        (
-            "chain.duplicate",
-            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+            "chain.hot_swap",
+            main(a_rack, device_view, "Hot-Swap of Pad", Key::Enter),
         ),
         (
             "device.load_sample",

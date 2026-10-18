@@ -40,7 +40,7 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1978,8 +1978,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("rename_chain"),
         label: "Rename Chain",
         permission: Permission::Edit,
-        contexts: &[DeviceView],
-        keys: &[],
+        contexts: &[RackChains],
+        keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
     },
     Entry {

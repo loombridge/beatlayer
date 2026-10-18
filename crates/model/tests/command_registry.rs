@@ -2644,6 +2644,8 @@ fn bindings_follow_the_spec() {
         "transport.set_metronome_enabled",
         // WP-5.1: Option-click on a rack's Device Activator (S-DEV-003).
         "device.set_enabled_all",
+        // WP-5.2: Rename in a rack's chain list (S-EDIT-008).
+        "chain.rename",
     ]
     .into_iter()
     .collect();

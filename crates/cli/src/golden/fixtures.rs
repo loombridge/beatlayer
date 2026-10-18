@@ -176,6 +176,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: clip_fades,
     },
     Fixture {
+        name: "beat-repeat",
+        about: "A drum loop of two bars through Stutter, the equivalent of Beat Repeat, in \
+                Insert mode: a capture of a sixteenth on beat three of each bar repeats for \
+                half a bar, each repeat quieter and lower than the last, the grid varied by \
+                the device's seeded source.",
+        build: beat_repeat,
+    },
+    Fixture {
         name: "clip-tempo-change",
         about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
                 unbroken while its end lands where the tempo map puts it, and a looped clip \
@@ -459,6 +467,83 @@ fn chirp(frames: usize, rate: u32, from: f64, to: f64, level: f64) -> Vec<f32> {
         }
     }
     samples
+}
+
+/// A bar of drums at 120 BPM, mono at 48 kHz, made from `libm`'s sine and
+/// exponential, so it is the same to the bit on every platform: a kick on
+/// beats one and three, a snare (three inharmonic tones) on two and four,
+/// and a hat (two high tones) on the eighth notes. There is no noise: the
+/// reference's FLAC encoder expands on it.
+fn drum_bar() -> Vec<f32> {
+    let rate = 48_000.0;
+    let tau = std::f64::consts::TAU;
+    let mut bar = vec![0.0f32; 96_000];
+    let mut add = |at: usize, length: usize, voice: &mut dyn FnMut(f64) -> f64| {
+        for n in 0..length {
+            bar[at + n] += voice(n as f64 / rate) as f32;
+        }
+    };
+    for beat in [0, 2] {
+        let mut phase = 0.0;
+        add(beat * 24_000, 12_000, &mut |t| {
+            phase += (45.0 + 75.0 * libm::exp(-t * 30.0)) / rate;
+            libm::sin(phase * tau) * libm::exp(-t * 12.0) * 0.5
+        });
+    }
+    for beat in [1, 3] {
+        add(beat * 24_000, 9_000, &mut |t| {
+            let tones = libm::sin(190.0 * t * tau)
+                + 0.7 * libm::sin(327.0 * t * tau)
+                + 0.5 * libm::sin(511.0 * t * tau);
+            tones * 0.15 * libm::exp(-t * 20.0)
+        });
+    }
+    for eighth in 0..8 {
+        add(eighth * 12_000, 1_800, &mut |t| {
+            let tones = libm::sin(5_200.0 * t * tau) + libm::sin(7_300.0 * t * tau);
+            tones * 0.06 * libm::exp(-t * 90.0)
+        });
+    }
+    bar
+}
+
+/// Spec: beat-repeat R1 to R10. A drum loop through Stutter in Insert mode.
+fn beat_repeat() -> Scene {
+    use bl_devices::beat_repeat::{
+        BEAT_REPEAT, DECAY, GATE, GRID, INTERVAL, MODE, OFFSET, PITCH_DECAY, VARIATION,
+    };
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Stutter",
+        DeviceKind::Native {
+            device_type: BEAT_REPEAT.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (INTERVAL, 5.0),
+        (OFFSET, 8.0),
+        (GRID, 4.0),
+        (GATE, 8.0),
+        (MODE, 1.0),
+        (VARIATION, 50.0),
+        (PITCH_DECAY, 30.0),
+        (DECAY, 25.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(4.25)
 }
 
 fn single_tone() -> Scene {

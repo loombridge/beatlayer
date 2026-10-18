@@ -6,14 +6,23 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting a bug. Search the existing issues first, in case someone has reported it already.
+        Thank you for testing Beatlayer. Search the existing issues first, in case someone has reported the bug already.
+
+        Write the report in English and fill in every required field. We're sorry, but reports that don't follow the template may be rejected.
 
         Don't attach Ableton's content: its samples, presets, packs, or audio that Live rendered from them. Projects and audio you made from your own material are fine.
   - type: textarea
-    id: what-happened
+    id: expected
     attributes:
-      label: What happened
-      description: What you saw, and what you expected to see instead.
+      label: Expected
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed
+      description: What happened instead. Include any error message word for word.
     validations:
       required: true
   - type: textarea
@@ -24,6 +33,16 @@ body:
       placeholder: |
         1. Create a MIDI track.
         2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often it happens
+      options:
+        - Every time
+        - Sometimes
+        - Once
     validations:
       required: true
   - type: input

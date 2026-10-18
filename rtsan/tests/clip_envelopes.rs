@@ -88,6 +88,7 @@ fn clip_with_envelopes(editor: &mut Editor, track: TrackId, to: TrackId) -> Clip
     for target in targets {
         editor
             .apply(Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip: id,
                 target,
                 at: Ticks::ZERO,
@@ -96,6 +97,7 @@ fn clip_with_envelopes(editor: &mut Editor, track: TrackId, to: TrackId) -> Clip
             .unwrap();
         editor
             .apply(Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip: id,
                 target,
                 at: Ticks::WHOLE,
@@ -141,12 +143,14 @@ fn clip_envelopes_pass_under_rtsan() {
         // nodes their lists afresh.
         let command = match round % 24 {
             0 => Some(Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
                 at: Ticks::WHOLE / 2,
                 value: (round % 5) as f64 / 4.0,
             }),
             6 => Some(Command::MoveClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
                 at: Ticks::WHOLE / 2,
@@ -154,20 +158,24 @@ fn clip_envelopes_pass_under_rtsan() {
                 value: None,
             }),
             12 => Some(Command::SetClipEnvelopeLinked {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
                 linked: round % 48 != 12,
             }),
             18 => Some(Command::DeleteClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
                 at: Ticks::WHOLE / 4,
             }),
             21 if round % 240 == 21 => Some(Command::DeleteClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
             }),
             23 if round % 240 == 23 => Some(Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: volume(),
                 at: Ticks::ZERO,

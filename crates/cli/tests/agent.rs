@@ -900,6 +900,217 @@ fn an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id
     }
 }
 
+/// The loudest sample the master played since the last call.
+fn peak_since(host: &mut EngineHost) -> f32 {
+    let peak = host.samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    host.samples.clear();
+    peak
+}
+
+// Spec: channel-eq R1, three-band-eq R1, gate R7, bus-compressor R10,
+// device-framework R14 (WP-5.21): an agent adds the channel EQ, the
+// three-band EQ, the gate and the bus compressor by their types, sets them
+// by ID, reads them back, and keys the gate and the bus compressor from
+// another track, in a running engine, at no heap use on the audio thread.
+#[test]
+fn an_agent_adds_the_eqs_and_dynamics_sets_them_by_id_and_keys_them_from_another_track() {
+    use bl_devices::{bus_compressor, channel_eq, gate, three_band_eq};
+
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(256, registry);
+    let insert = |track: &str, index: u32, name: &str, device_type: &str| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": track}, "index": index,
+                          "device": { "id": {"$new": format!("{track} {name}")}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    let set_param = |track: &str, name: &str, param: u32, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": format!("{track} {name}")}, "param": param, "value": value } })
+    };
+    let tone = bl_engine::nodes::TEST_TONE;
+    let mut commands = Vec::new();
+    for track in ["Key", "Gated", "Bussed", "Equalled"] {
+        commands.push(json!({ "command": "track.create",
+            "args": { "id": {"$new": track}, "kind": "audio", "name": track, "index": 0 } }));
+        commands.push(insert(track, 0, "Tone", tone));
+    }
+    // The key: 1 kHz at -6 dB. The gated tone is quiet, below the gate's
+    // threshold; the bussed one is loud, above the compressor's.
+    commands.extend([
+        set_param("Key", "Tone", 0, 1_000.0),
+        set_param("Key", "Tone", 1, -6.0),
+        set_param("Gated", "Tone", 1, -50.0),
+        set_param("Bussed", "Tone", 1, -20.0),
+        set_param("Equalled", "Tone", 1, -20.0),
+    ]);
+    host.call(
+        "run",
+        json!({ "label": "Add tracks", "commands": commands }),
+    );
+    let track_id = |host: &mut EngineHost, name: &str| {
+        let document = host.client.transport().shell.editor().document();
+        document.tracks().find(|t| t.name() == name).unwrap().id()
+    };
+    // The four devices are added by their types, as the browser adds them,
+    // each in a call of its own.
+    for (track, device_type) in [
+        ("Gated", gate::gate_type()),
+        ("Bussed", bus_compressor::bus_compressor_type()),
+        ("Equalled", channel_eq::channel_eq_type()),
+        ("Equalled", three_band_eq::three_band_eq_type()),
+    ] {
+        let track = track_id(&mut host, track);
+        host.call(
+            "run",
+            json!({ "label": "Add", "commands": [{
+            "command": "device.add",
+            "args": { "track": track,
+                      "device": { "kind": device_type.kind, "name": device_type.name,
+                                  "role": device_type.role,
+                                  "sidechain": device_type.sidechain } } }] }),
+        );
+    }
+    let ids = {
+        let document = host.client.transport().shell.editor().document();
+        let device = |track_name: &str, index: usize| {
+            let track = document.tracks().find(|t| t.name() == track_name).unwrap();
+            track.devices().nth(index).unwrap().id
+        };
+        [
+            device("Gated", 1),
+            device("Bussed", 1),
+            device("Equalled", 1),
+            device("Equalled", 2),
+        ]
+    };
+    let tracks = ["Key", "Gated", "Bussed", "Equalled"].map(|name| track_id(&mut host, name));
+    let [shutter, bond, strip, triad] = ids;
+    let [key, gated, bussed, equalled] = tracks;
+    let set = |host: &mut EngineHost, device, param: bl_model::ParamId, value: f64| {
+        host.call(
+            "run",
+            json!({ "label": "Set", "commands": [
+            { "command": "device.set_param",
+              "args": { "device": device, "param": param.0, "value": value } } ] }),
+        );
+    };
+    set(&mut host, shutter, gate::THRESHOLD, -30.0);
+    set(&mut host, bond, bus_compressor::THRESHOLD, -30.0);
+    set(&mut host, bond, bus_compressor::RATIO, 20.0);
+    let mute = |host: &mut EngineHost, track, mute: bool| {
+        host.call(
+            "run",
+            json!({ "label": "Mute", "commands": [
+            { "command": "mixer.set_mute", "args": { "track": track, "mute": mute } } ] }),
+        );
+    };
+    let listen_to_key = |host: &mut EngineHost, device, track| {
+        host.call(
+            "run",
+            json!({ "label": "Key", "commands": [
+            { "command": "device.set_sidechain_input",
+              "args": { "device": device,
+                        "input": { "type": "track", "track": track, "tap": "post_fx" } } },
+            { "command": "device.set_sidechain_enabled",
+              "args": { "device": device, "enabled": true } } ] }),
+        );
+    };
+    // Only the key's own track is silent, and one other track plays at a time.
+    for track in [key, bussed, equalled] {
+        mute(&mut host, track, true);
+    }
+    let mut clock = 0;
+    // Half a second to settle every change, then half a second to measure.
+    let mut play = |host: &mut EngineHost| {
+        host.play_to(clock + 24_000);
+        host.samples.clear();
+        clock += 48_000;
+        host.play_to(clock);
+        peak_since(host)
+    };
+
+    // The gate shuts on its own quiet input; the key track opens it; Listen
+    // plays the key itself.
+    assert!(
+        play(&mut host) < 1e-6,
+        "shut: the quiet tone is under the threshold"
+    );
+    listen_to_key(&mut host, shutter, key);
+    let opened = play(&mut host);
+    assert!((0.002..0.0045).contains(&opened), "open: {opened}");
+    host.call("run", json!({ "label": "Listen", "commands": [
+        { "command": "device.set_sidechain_listen", "args": { "device": shutter, "listen": true } } ] }));
+    let heard = play(&mut host);
+    assert!(
+        (0.45..0.52).contains(&heard),
+        "Listen plays the key: {heard}"
+    );
+
+    // The bus compressor squeezes the loud tone, and squeezes it harder
+    // while the key track drives it.
+    mute(&mut host, gated, true);
+    mute(&mut host, bussed, false);
+    let alone = play(&mut host);
+    assert!(
+        alone > 0.02 && alone < 0.06,
+        "compressing its own input: {alone}"
+    );
+    listen_to_key(&mut host, bond, key);
+    let keyed = play(&mut host);
+    assert!(
+        keyed < 0.5 * alone,
+        "ducked by the key: {keyed} against {alone}"
+    );
+
+    // The EQs pass the tone flat; their parameters are set by ID and read
+    // back with how they read.
+    mute(&mut host, bussed, true);
+    mute(&mut host, equalled, false);
+    let flat = play(&mut host);
+    assert!((flat - 0.1).abs() < 0.005, "flat: {flat}");
+    host.call(
+        "run",
+        json!({ "label": "Set", "commands": [
+        { "command": "device.set_param",
+          "args": { "device": strip, "param": channel_eq::LOW.0, "value": -9.0 } },
+        { "command": "device.set_param",
+          "args": { "device": triad, "param": three_band_eq::FREQ_LOW.0, "value": 400.0 } },
+        { "command": "device.set_param",
+          "args": { "device": triad, "param": three_band_eq::SLOPE.0, "value": 1.0 } } ] }),
+    );
+    let read = |host: &mut EngineHost, device, name: &str| {
+        let reply = host.call(
+            "run",
+            json!({ "label": "Read", "commands": [
+            { "command": "device.parameters", "args": { "device": device } } ] }),
+        );
+        let params = reply["results"][0]["result"]["params"].clone();
+        let param = params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .cloned();
+        param.unwrap_or_else(|| panic!("no {name} in {params}"))
+    };
+    assert_eq!(read(&mut host, strip, "Low")["value"], json!(-9.0));
+    assert_eq!(read(&mut host, triad, "FreqLo")["value"], json!(400.0));
+    let slope = read(&mut host, triad, "Slope");
+    assert_eq!(
+        (slope["value"].clone(), slope["text"].clone()),
+        (json!(1.0), json!("48 dB"))
+    );
+    assert_eq!(read(&mut host, shutter, "Threshold")["value"], json!(-30.0));
+    assert_eq!(
+        read(&mut host, bond, "Oversampling")["menu_option"],
+        json!(true)
+    );
+    assert_eq!(host.offline.heap_operations(), 0);
+}
+
 /// The transport after the transport spec, one frame at a time,
 /// apart from the engine's code: what each frame of the engine clock plays.
 struct TransportModel {
@@ -1315,6 +1526,7 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
         .session(SessionCommand::SetQuantization(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         }));
 
     // Launch the slot's clip by ID. With the transport stopped the launch
@@ -2168,6 +2380,86 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
         assert_eq!(reopened(name, *param), Some(*value), "{name} {}", param.0);
     }
     assert_eq!(reopened("scatter", grain_delay::X_AXIS), Some(4.0));
+}
+
+// Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
+// (WP-5.24): an agent adds Degrade, Crush and Wax, sets a parameter of each
+// by ID, reads them back, and finds them as they were when the set is saved
+// and reopened.
+#[test]
+fn an_agent_sets_the_lo_fi_effects_by_id_and_finds_them_after_a_save_and_reopen() {
+    use bl_devices::{crusher, degrade, wax};
+
+    let dir = TempDir::new("lo-fi");
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    // Each device, with one parameter changed from its default.
+    let devices = [
+        (degrade::degrade_type(), degrade::STEREO_WIDTH, 80.0),
+        (crusher::crusher_type(), crusher::BITS, 5.0),
+        (wax::wax_type(), wax::CRACKLE_DENSITY, 40.0),
+    ];
+    let mut ids = Vec::new();
+    for (device_type, param, value) in &devices {
+        let added = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": { "track": track, "device": {
+                    "kind": device_type.kind, "name": device_type.name, "role": device_type.role,
+                } },
+            }] }),
+        );
+        let device = added["results"][0]["result"]["device"].clone();
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value },
+            }] }),
+        );
+        ids.push(device);
+    }
+    let read = |client: &mut Client<Stdio>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let before: Vec<Value> = ids.iter().map(|id| read(&mut client, id)).collect();
+    for (params, (device_type, param, value)) in before.iter().zip(&devices) {
+        let params = params.as_array().unwrap();
+        assert_eq!(params.len(), device_type.description.params.len());
+        let changed = params.iter().find(|p| p["id"] == json!(param)).unwrap();
+        assert_eq!(changed["value"], json!(value), "{}", device_type.name);
+        assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    }
+
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Lo-Fi.blset").to_string_lossy() } }] }),
+    );
+    let set = saved_path(&saved);
+    assert!(client.into_transport().finish().unwrap().success());
+
+    let mut reopened = bl_cli_mcp(&["--set", &set.to_string_lossy()]);
+    for (id, params) in ids.iter().zip(&before) {
+        assert_eq!(&read(&mut reopened, id), params);
+    }
 }
 
 /// Spec: warping R1, R4 to R11, R52. An agent warps a clip, edits its warp

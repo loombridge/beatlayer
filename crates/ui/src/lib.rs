@@ -47,6 +47,7 @@ pub mod device_display;
 pub mod device_panel;
 pub mod device_view;
 pub mod focus;
+pub mod follow_controls;
 pub mod in_out;
 pub mod input;
 pub mod keymap;

@@ -11,8 +11,9 @@ use bl_model::{
 };
 
 use crate::delay::{Line, MAX_DELAY_SECONDS, Mode, TRANSITION_SECONDS, sixteenth_frames};
-use crate::eq::{Biquad, Type, coeffs};
+use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::sections::Biquad;
 
 /// Trident's device type.
 pub const FILTER_DELAY: &str = "bl.device.trident";

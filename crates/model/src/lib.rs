@@ -69,6 +69,7 @@ mod document;
 mod editor;
 mod error;
 pub mod fader;
+mod follow;
 mod ids;
 mod launch;
 mod layers;
@@ -91,8 +92,8 @@ pub use automation::{
 };
 pub use changes::{Change, ChangeSet};
 pub use clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note,
-    TakeClip, TakeLane,
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
+    Note, TakeClip, TakeLane,
 };
 pub use command::Command;
 pub use device::{
@@ -104,6 +105,10 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub use follow::{
+    FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
+    FollowPatch,
+};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };

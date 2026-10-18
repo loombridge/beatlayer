@@ -788,6 +788,7 @@ fn modulated_clip(
     });
     for &(at, value) in envelope {
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at,

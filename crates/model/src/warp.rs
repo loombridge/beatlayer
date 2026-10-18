@@ -166,7 +166,7 @@ impl AudioData {
 
     /// The data with its Start and End markers and loop brace passed through
     /// `convert`, rounded to whole ticks if `whole`, and `warp` left as it is.
-    fn converted(&self, convert: impl Fn(f64) -> f64, whole: bool) -> Self {
+    pub(crate) fn converted(&self, convert: impl Fn(f64) -> f64, whole: bool) -> Self {
         let convert = |value: f64| {
             let converted = convert(value);
             if whole { converted.round() } else { converted }
@@ -180,7 +180,7 @@ impl AudioData {
         }
     }
 
-    fn require_warp(&self) -> Result<(), ModelError> {
+    pub(crate) fn require_warp(&self) -> Result<(), ModelError> {
         if self.warp {
             Ok(())
         } else {
@@ -192,7 +192,11 @@ impl AudioData {
 
     /// The clip with the same markers replaced by `markers` and its tempo by
     /// `tempo`, if they make a map (increasing order, a tempo in range).
-    fn with_map(&self, markers: Vec<WarpMarker>, tempo: f64) -> Result<Self, ModelError> {
+    pub(crate) fn with_map(
+        &self,
+        markers: Vec<WarpMarker>,
+        tempo: f64,
+    ) -> Result<Self, ModelError> {
         let next = Self {
             warp_markers: markers,
             tempo: Some(tempo),
@@ -521,7 +525,7 @@ impl AudioData {
     }
 
     /// Checks that `indices` name markers of the clip.
-    fn check_indices(&self, indices: &[usize]) -> Result<(), ModelError> {
+    pub(crate) fn check_indices(&self, indices: &[usize]) -> Result<(), ModelError> {
         if indices.is_empty() || indices.iter().any(|&i| i >= self.warp_markers.len()) {
             return Err(ModelError::InvalidInput(
                 "name warp markers by their place in the map, the first being 0",

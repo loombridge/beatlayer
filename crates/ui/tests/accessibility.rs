@@ -1703,6 +1703,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_loop_warp_short_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Loop/Warp Short Samples",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "settings.set_auto_warp_long_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Auto-Warp Long Samples",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_default_warp_mode",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Default Warp Mode",
+                Key::ArrowDown,
+            ),
+        ),
+        (
             "settings.set_default_launch_mode",
             settings(
                 "record-warp-launch",
@@ -2034,6 +2061,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_warp", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
         ("clip.insert_warp_markers", Exception(sample_editor)),
+        ("clip.set_1_1_1_here", Exception(sample_editor)),
+        ("clip.warp_from_here", Exception(sample_editor)),
+        ("clip.warp_as_loop", Exception(sample_editor)),
+        ("clip.warp_selection_as_loop", Exception(sample_editor)),
         ("clip.insert_transient", Exception(sample_editor)),
         ("clip.delete_transients", Exception(sample_editor)),
         ("clip.reset_transients", Exception(sample_editor)),

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use bl_analysis::cache::{Analysis, AnalysisCache, AnalysisOptions, AnalysisStatus};
 use bl_core::time::Ticks;
 use bl_media::{ContentHash, MediaError};
-use bl_model::{AudioData, ClipData, ClipId, Command, TRANSIENT_MATCH};
+use bl_model::{AudioData, ClipData, ClipId, Command, FileBeats, TRANSIENT_MATCH};
 use bl_shell_spec::warping::{ClipTransient, ClipTransients, ClipTransientsArgs};
 use serde_json::{Value, json};
 
@@ -58,7 +58,7 @@ impl Shell {
         }
     }
 
-    fn analysis_cache(&mut self) -> Option<&AnalysisCache> {
+    pub(super) fn analysis_cache(&mut self) -> Option<&AnalysisCache> {
         if self.analysis.is_none() {
             self.analysis =
                 AnalysisCache::new(Arc::clone(&self.media), self.analysis_options.clone()).ok();
@@ -184,6 +184,9 @@ impl Shell {
                 | "clip.delete_transients"
                 | "clip.move_transient"
                 | "clip.set_data"
+                | "clip.warp_from_here"
+                | "clip.warp_as_loop"
+                | "clip.warp_selection_as_loop"
         ) {
             return Ok(args);
         }
@@ -221,6 +224,21 @@ impl Shell {
                 if let Some(end) = end {
                     self.check_in_file(id, clip, end)?;
                 }
+            }
+            // R41: the warp commands need the file's analysis, and give it
+            // to the document, which holds no media.
+            Command::WarpFromHere {
+                clip,
+                analysis: None,
+                ..
+            }
+            | Command::WarpAsLoop {
+                clip,
+                analysis: None,
+            } => args["analysis"] = to_value(&self.file_beats(id, clip)?),
+            Command::WarpSelectionAsLoop { clip, to, .. } => {
+                self.file_beats(id, clip)?;
+                self.check_in_file(id, clip, to)?;
             }
             Command::InsertTransient { clip, time } => {
                 self.check_in_file(id, clip, time)?;
@@ -273,6 +291,36 @@ impl Shell {
             _ => {}
         }
         Ok(args)
+    }
+
+    /// The clip's file's tempo and beats, once its analysis is ready.
+    fn file_beats(&mut self, id: &str, clip: ClipId) -> Result<FileBeats, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let Some(ClipData::Audio(audio)) = self.editor.document().clip(clip).map(|c| &c.data)
+        else {
+            return Err(failed("the clip isn't an audio clip".to_owned()));
+        };
+        let audio = audio.clone();
+        let hash = ContentHash::from_bytes(audio.media.0);
+        let status = if self.media.contains(hash) {
+            self.analysis_cache().map(|cache| cache.request(hash))
+        } else {
+            None
+        };
+        match (status, self.file_seconds(&audio)) {
+            (Some(AnalysisStatus::Ready(analysis)), Some(seconds)) => Ok(FileBeats {
+                seconds,
+                bpm: analysis.tempo.map(|tempo| tempo.bpm),
+                beats: analysis.beats.clone(),
+            }),
+            (Some(AnalysisStatus::Failed(error)), _) => Err(failed(error.to_string())),
+            _ => Err(failed(
+                "the file's analysis isn't ready yet: try again in a moment".to_owned(),
+            )),
+        }
     }
 
     /// The clip's transients, once its file's analysis is ready.

@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 use bl_core::time::Ticks;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId, TrackKind,
+    Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId, TrackKind,
 };
 use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, ItemKind, PlacedClip};
 
 use super::listing::{self, stem};
 use crate::arrangement::placing;
+use crate::auto_warp::{Warping, new_clip};
 
 /// The undo step a drop makes. Live's name for it isn't observed yet
 /// (browser, "To observe in Live").
@@ -139,6 +140,7 @@ pub fn add_files(
     media: &MediaStore,
     insert_marker: Ticks,
     edge_fades: bool,
+    warping: Warping<'_>,
     args: &AddToArrangementArgs,
 ) -> Result<(AddResult, Vec<MediaFile>), AddError> {
     if args.paths.is_empty() {
@@ -206,11 +208,19 @@ pub fn add_files(
                 at = start;
             }
             let track = current.expect("a track is chosen or made above");
-            let length = length_at(editor.document(), at, file.seconds);
+            // Spec: warping R33. The warp settings come from the file.
+            let new = new_clip(
+                file.media.hash,
+                file.seconds,
+                editor.document(),
+                at,
+                warping,
+            );
+            let length = new.length;
             let id = editor.new_id();
             // Spec: audio-clips R7. With Create Fades on Clip Edges on, a
             // new clip's edges fade over 4 ms.
-            let audio = AudioData::new(file.media.hash);
+            let audio = new.audio;
             let audio = if edge_fades {
                 audio.with_edge_fades()
             } else {

@@ -92,6 +92,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The same page's Warp recorded audio switch (the recording spec,
         // R13).
         commands::SETTINGS_SET_WARP_RECORDED_AUDIO,
+        commands::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+        commands::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+        commands::SETTINGS_SET_DEFAULT_WARP_MODE,
         // The same page's Launch section (the launch quantisation spec,
         // R15).
         commands::SETTINGS_SET_DEFAULT_LAUNCH_MODE,

@@ -520,6 +520,7 @@ impl Shell {
         let ticks = |frames: Frames| tempo.frames_to_ticks(frames, rate);
         let length = (ticks(take.end) - ticks(take.start)).max(MIN_LENGTH);
         let edge_fades = self.create_fades_on_clip_edges();
+        let warp_recorded = self.warp_recorded_audio();
         let mut imported = Vec::new();
         for file in &files {
             match self.media.import(&file.path) {
@@ -583,6 +584,12 @@ impl Shell {
                         let audio = AudioData {
                             looping: true,
                             ..AudioData::new(*hash)
+                        };
+                        // Spec: warping R37.
+                        let audio = if warp_recorded {
+                            crate::auto_warp::warp_recorded(audio, &tempo, start, end)
+                        } else {
+                            audio
                         };
                         let audio = if edge_fades {
                             audio.with_edge_fades()

@@ -144,6 +144,9 @@ pub struct Context<'a> {
     /// Whether Create Fades on Clip Edges is on, so new clips get 4 ms fades
     /// (the audio clips spec, R7).
     pub edge_fades: bool,
+    /// What a new clip's warp settings are made from (the warping spec,
+    /// R33).
+    pub warping: crate::auto_warp::Warping<'a>,
 }
 
 /// What [`BrowserView::poll`] found.
@@ -1241,6 +1244,7 @@ impl BrowserView {
             ctx.media,
             ctx.insert_marker,
             ctx.edge_fades,
+            ctx.warping,
             args,
         )
         .map_err(|error| match error {

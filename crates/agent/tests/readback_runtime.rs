@@ -156,6 +156,15 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(before["create_fades_on_clip_edges"], true);
     assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
+    // Spec: warping R29. What a new install has.
+    assert_eq!(
+        before["warp"],
+        json!({
+            "loop_warp_short_samples": "auto",
+            "auto_warp_long_samples": true,
+            "default_warp_mode": "beats",
+        })
+    );
     assert_eq!(
         before["launch"],
         json!({
@@ -191,6 +200,21 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_warp_recorded_audio",
         json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_loop_warp_short_samples",
+        json!({ "mode": "warped_one_shot" }),
+    );
+    run(
+        &mut client,
+        "settings.set_auto_warp_long_samples",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_default_warp_mode",
+        json!({ "mode": "complex_pro" }),
     );
     run(
         &mut client,
@@ -256,6 +280,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
+    assert_eq!(
+        state["warp"],
+        json!({
+            "loop_warp_short_samples": "warped_one_shot",
+            "auto_warp_long_samples": false,
+            "default_warp_mode": "complex_pro",
+        })
+    );
     assert_eq!(
         state["launch"],
         json!({

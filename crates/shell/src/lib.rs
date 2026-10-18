@@ -66,6 +66,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+pub mod auto_warp;
 mod automation_record;
 pub mod browser;
 mod chord_learn;

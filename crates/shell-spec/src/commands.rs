@@ -121,6 +121,14 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
+/// `settings.set_loop_warp_short_samples`: choose Loop/Warp Short Samples
+/// (WP-4.9).
+pub const SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES: &str = "settings.set_loop_warp_short_samples";
+/// `settings.set_auto_warp_long_samples`: switch Auto-Warp Long Samples
+/// (WP-4.9).
+pub const SETTINGS_SET_AUTO_WARP_LONG_SAMPLES: &str = "settings.set_auto_warp_long_samples";
+/// `settings.set_default_warp_mode`: choose Default Warp Mode (WP-4.9).
+pub const SETTINGS_SET_DEFAULT_WARP_MODE: &str = "settings.set_default_warp_mode";
 /// `settings.set_default_launch_mode`: choose Default Launch Mode (WP-3.4).
 pub const SETTINGS_SET_DEFAULT_LAUNCH_MODE: &str = "settings.set_default_launch_mode";
 /// `settings.set_default_launch_quantization`: choose Default Launch
@@ -203,6 +211,9 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
+    SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+    SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+    SETTINGS_SET_DEFAULT_WARP_MODE,
     SETTINGS_SET_DEFAULT_LAUNCH_MODE,
     SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
     SETTINGS_SET_SELECT_ON_LAUNCH,
@@ -306,6 +317,22 @@ pub struct SettingsArgs {
 pub struct ThemeArgs {
     /// The theme.
     pub theme: ThemeChoice,
+}
+
+/// Arguments of `settings.set_loop_warp_short_samples`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoopWarpShortSamplesArgs {
+    /// What a new clip of a short sample gets.
+    pub mode: crate::settings::LoopWarpShortSamples,
+}
+
+/// Arguments of `settings.set_default_warp_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultWarpModeArgs {
+    /// The warp mode a new warped clip takes.
+    pub mode: crate::settings::DefaultWarpMode,
 }
 
 /// Arguments of `settings.set_default_launch_mode`.
@@ -1079,6 +1106,57 @@ fn specs() -> Vec<CommandSpec> {
             .result::<SwitchResult>(),
         // Record, Warp & Launch, Launch (L-SET-018; WP-3.4): edit-class
         // preferences, kept between starts and not saved with a set.
+        // Record, Warp & Launch, Warp/Fades (L-SET-018; WP-4.9): edit-class
+        // preferences, like the theme.
+        CommandSpec::new(
+            SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+            "Loop/Warp Short Samples",
+        )
+        .description(
+            "Chooses Loop/Warp Short Samples on the Settings window's Record, Warp & Launch \
+             page: what a new audio clip of a short sample, one under 60 seconds, gets when it \
+             is dropped from the browser, loaded with Enter or imported. `unwarped_one_shot` \
+             leaves Warp and the loop off; `warped_one_shot` warps it as a loop of whole bars, \
+             the loop off; `warped_loop` does the same with the loop on; `auto`, what a new \
+             install has, makes a warped loop when the file's analysis finds a steady beat \
+             that fits 1, 2, 4, 8 or 16 bars, and an unwarped one-shot otherwise. Clips \
+             already in the set keep their settings. The setting is kept for the next start, \
+             and isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<LoopWarpShortSamplesArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+            "Auto-Warp Long Samples",
+        )
+        .description(
+            "Switches Auto-Warp Long Samples on the Settings window's Record, Warp & Launch \
+             page; it's on in a new install, as Live's is. While it's on, a new audio clip of \
+             a long sample, one of 60 seconds or more, is warped with a warp marker on the \
+             first beat of every bar its analysis finds, and its 1.1.1 on the first beat; off, \
+             it is left unwarped. Clips already in the set keep their settings. The setting is \
+             kept for the next start, and isn't part of the set or an undo step. The result's \
+             `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(SETTINGS_SET_DEFAULT_WARP_MODE, "Default Warp Mode")
+            .description(
+                "Chooses Default Warp Mode on the Settings window's Record, Warp & Launch \
+                 page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or \
+                 `complex_pro`) a new warped clip takes. It's `beats` in a new install, as \
+                 Live's is. Clips already in the set keep their modes, and warp modes aren't \
+                 built into clips yet, so for now it only keeps the choice. The setting is \
+                 kept for the next start, and isn't part of the set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<DefaultWarpModeArgs>()
+            .result::<()>(),
         CommandSpec::new(SETTINGS_SET_DEFAULT_LAUNCH_MODE, "Default Launch Mode")
             .description(
                 "Chooses Default Launch Mode on the Settings window's Record, Warp & Launch \

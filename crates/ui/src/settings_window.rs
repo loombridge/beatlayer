@@ -18,8 +18,8 @@ use bl_shell::audio::{
 };
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
-    SessionAutomationTracks, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
-    zoom_step,
+    DefaultWarpMode, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeChoice,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
@@ -627,23 +627,15 @@ const RECORD: [Pending; 6] = [
     switch_row("Start Transport With Record", "WP-2.13").showing("On"),
 ];
 
-/// The Warp/Fades rows before Create Fades on Clip Edges, which come with
-/// warping.
-const WARP: [Pending; 3] = [
-    chooser_row("Loop/Warp Short Samples", "M4"),
-    switch_row("Auto-Warp Long Samples", "M4"),
-    chooser_row("Default Warp Mode", "M4"),
-];
-
 /// The Tap Tempo section.
 const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M2")];
 
 /// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
 /// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
-/// Create Fades on Clip Edges, the fourth row of Warp/Fades (WP-1.4b), and
-/// Warp recorded audio, a Beatlayer addition after it (IMP-02), and the
-/// Launch section's rows (WP-3.4), the only settings built. The other rows
-/// keep their places, pending.
+/// the Warp/Fades rows (WP-4.9, WP-1.4b) with Warp recorded audio, a
+/// Beatlayer addition after them (IMP-02), and the Launch section's rows
+/// (WP-3.4), the only settings built. The other rows keep their places,
+/// pending.
 fn record_warp_launch_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -685,9 +677,7 @@ fn record_warp_launch_page(
         rows.pending(ui, row);
     }
     rows.heading(ui, "Warp/Fades");
-    for row in &WARP {
-        rows.pending(ui, row);
-    }
+    warp_rows(ui, shell, theme, rows, events);
     let rect = rows.row(ui, "Create Fades on Clip Edges", SettingsLayout::SWITCH);
     if let Some(on) = switch(
         ui,
@@ -716,16 +706,85 @@ fn record_warp_launch_page(
             json!({ "on": on }),
         )));
     }
-    rows.note(
-        ui,
-        "Warp recorded audio applies once warping arrives (milestone M4): until then recorded \
-         clips play unwarped, whatever it says.",
-    );
     rows.heading(ui, "Launch");
     launch_rows(ui, shell, theme, rows, events);
     rows.heading(ui, "Tap Tempo");
     for row in &TAP_TEMPO {
         rows.pending(ui, row);
+    }
+}
+
+/// The Warp/Fades rows before Create Fades on Clip Edges (WP-4.9), in
+/// Live's order.
+fn warp_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let prefs = shell.warp_prefs();
+    let shorts: Vec<Choice<LoopWarpShortSamples>> = LoopWarpShortSamples::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Loop/Warp Short Samples", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "loop-warp-short-samples",
+        "Loop/Warp Short Samples",
+        rect,
+        &shorts,
+        Some(&prefs.loop_warp_short_samples),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+            json!({ "mode": mode }),
+        )));
+    }
+    let rect = rows.row(ui, "Auto-Warp Long Samples", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "auto-warp-long-samples",
+        "Auto-Warp Long Samples",
+        rect,
+        prefs.auto_warp_long_samples,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+            json!({ "on": on }),
+        )));
+    }
+    let modes: Vec<Choice<DefaultWarpMode>> = DefaultWarpMode::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Default Warp Mode", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "default-warp-mode",
+        "Default Warp Mode",
+        rect,
+        &modes,
+        Some(&prefs.default_warp_mode),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_WARP_MODE,
+            json!({ "mode": mode }),
+        )));
     }
 }
 

@@ -2827,6 +2827,141 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
     );
 }
 
+/// Warping R29 to R41 (WP-4.9): an agent drops a generated 40-second track
+/// at 128 BPM, reads the warp settings, auto-warps it from its first click,
+/// fixes its downbeat, and warps a loop, every command run by ID, one undo
+/// step each, every effect read back in the query tool's `clip`.
+#[test]
+fn an_agent_auto_warps_and_fixes_a_downbeat_by_command_id() {
+    let dir = TempDir::new("auto-warp");
+    let (samples, starts) = bl_analysis::signals::click_track(128.0, 0.37, 40.0, 48_000);
+    let path = dir.0.join("Track.wav");
+    {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for sample in &samples {
+            writer
+                .write_sample((sample * 0.9 * f32::from(i16::MAX)) as i16)
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = client.transport().shell.editor().undo_history().len();
+        let result = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        let after = client.transport().shell.editor().undo_history().len();
+        (result, after - before)
+    };
+
+    // The settings read back under `warp`.
+    run(
+        &mut client,
+        "settings.set_loop_warp_short_samples",
+        json!({ "mode": "unwarped_one_shot" }),
+    );
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "settings.state" }] }),
+    );
+    let warp = &state["results"][0]["result"]["warp"];
+    assert_eq!(warp["loop_warp_short_samples"], "unwarped_one_shot");
+    assert_eq!(warp["auto_warp_long_samples"], true);
+    assert_eq!(warp["default_warp_mode"], "beats");
+
+    let (added, _) = run(
+        &mut client,
+        "browser.add_to_arrangement",
+        json!({ "paths": [path.display().to_string()] }),
+    );
+    let clip = added["results"][0]["result"]["clips"][0]["clip"]
+        .as_u64()
+        .unwrap();
+    let media = match &client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .clip(serde_json::from_value(json!(clip)).unwrap())
+        .unwrap()
+        .data
+    {
+        ClipData::Audio(audio) => audio.media,
+        ClipData::Midi(_) => unreachable!("an audio clip"),
+    };
+    client.transport().shell.wait_analysis(media).unwrap();
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let markers = |audio: &Value| audio["warp_markers"]["items"].as_array().unwrap().clone();
+
+    let (_, steps) = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    assert_eq!(steps, 1);
+    // Warp From Here, from the first click: a marker on every bar.
+    let (_, steps) = run(
+        &mut client,
+        "clip.warp_from_here",
+        json!({ "clip": clip, "time": starts[0], "method": "auto" }),
+    );
+    assert_eq!(steps, 1, "one undo step");
+    let warped = audio(&mut client);
+    let bars = markers(&warped);
+    assert!(bars.len() > 20, "{} markers", bars.len());
+    assert!((warped["tempo"].as_f64().unwrap() - 128.0).abs() < 0.5);
+    // The markers: the file's start, the first click, then each later bar.
+    for (bar, marker) in bars[2..].iter().enumerate() {
+        let time = marker["time"].as_f64().unwrap();
+        assert!(
+            (time - starts[4 * (bar + 1)]).abs() < 0.001,
+            "bar {bar}: {time}"
+        );
+    }
+
+    // The third bar's downbeat becomes 1.1.1.
+    let (_, steps) = run(
+        &mut client,
+        "clip.set_1_1_1_here",
+        json!({ "clip": clip, "marker": 3 }),
+    );
+    assert_eq!(steps, 1);
+    let fixed = audio(&mut client);
+    assert_eq!(markers(&fixed)[3]["beat"], 0);
+    assert_eq!(markers(&fixed).len(), bars.len());
+    assert_eq!(fixed["tempo"], warped["tempo"]);
+
+    // Warp as a loop, and a selection of it.
+    let (_, steps) = run(&mut client, "clip.warp_as_loop", json!({ "clip": clip }));
+    assert_eq!(steps, 1);
+    let looped = audio(&mut client);
+    assert_eq!(looped["looping"], true);
+    assert_eq!(markers(&looped).len(), 2);
+    let (_, steps) = run(
+        &mut client,
+        "clip.warp_selection_as_loop",
+        json!({ "clip": clip, "from": starts[0], "to": starts[8] }),
+    );
+    assert_eq!(steps, 1);
+    // Two bars at 128 BPM, taken as a loop of 2 bars at the set's 120.
+    let selection = markers(&audio(&mut client));
+    assert_eq!(selection[1]["beat"], 2 * BAR);
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
 // parameters, sets some by ID, shows Singe's expanded part, reads each

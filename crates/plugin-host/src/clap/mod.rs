@@ -421,6 +421,7 @@ impl ClapHost {
                     description: DeviceDescription::new(params),
                     sidechain: false,
                     external: false,
+                    midi_sidechain: false,
                 },
                 vendor,
                 version,

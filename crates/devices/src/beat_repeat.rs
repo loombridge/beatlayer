@@ -1,4 +1,4 @@
-//! Stutter, the equivalent of Beat Repeat (WP-5.26; the beat-repeat spec):
+//! Beat Repeat (WP-5.26; the beat-repeat spec):
 //! at points on the song's beat grid it captures a slice of its input and
 //! repeats it for a while, with a pitch, a filter and a fade on the
 //! repeats.
@@ -15,7 +15,7 @@ use bl_model::{
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Stutter's device type.
+/// Beat Repeat's device type.
 pub const BEAT_REPEAT: &str = "bl.device.stutter";
 
 /// How often a capture can start: one of [`INTERVALS`].
@@ -95,7 +95,7 @@ const MAX_PITCH: f64 = 60.0;
 /// The fade each repeat adds at Decay 100 %, in decibels.
 const DECAY_DB: f64 = 6.0;
 
-/// Stutter's type: Beatlayer's own name and layout, Live's parameters (the
+/// Beat Repeat's type: Beatlayer's own layout, Live's parameters (the
 /// beat-repeat spec).
 #[must_use]
 pub fn beat_repeat_type() -> DeviceType {
@@ -166,7 +166,7 @@ pub fn beat_repeat_type() -> DeviceType {
         ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Makes each repeat quieter than the one before."),
     ];
-    DeviceType::native(BEAT_REPEAT, "Stutter", DeviceRole::AudioEffect)
+    DeviceType::native(BEAT_REPEAT, "Beat Repeat", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -200,7 +200,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Stutter to `registry`.
+/// Adds Beat Repeat to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, beat_repeat_type(), Stutter::new);
 }
@@ -226,7 +226,7 @@ struct Span {
     repeat: u32,
 }
 
-/// Stutter: a capture buffer and a filter per channel, and one state
+/// Beat Repeat: a capture buffer and a filter per channel, and one state
 /// machine for them all.
 struct Stutter {
     rate: SampleRate,

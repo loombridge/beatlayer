@@ -1,4 +1,4 @@
-//! Snapshot, the native sampler (WP-2.16; the sampler spec): Classic,
+//! Simpler, the native sampler (WP-2.16; the sampler spec): Classic,
 //! One-Shot and Slicing playback of one sample — the region, the loop and
 //! its constant-power crossfade, Transpose, Detune, Glide and Portamento,
 //! the amplitude envelope, velocity and pan — with Slicing's slices, a
@@ -13,7 +13,9 @@
 use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap};
-use bl_engine::{DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry, SlotSample};
+use bl_engine::{
+    Audition, DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry, SlotSample,
+};
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -221,7 +223,7 @@ const LFO_MAX_HZ: f64 = 30.0;
 /// The kit's filters measure pitch with A4 at this frequency.
 const REFERENCE_HZ: f32 = 440.0;
 
-/// The Snapshot device type.
+/// The Simpler device type.
 #[must_use]
 pub fn sampler_type() -> DeviceType {
     let time = |id, name: &str, default: f64| {
@@ -483,7 +485,7 @@ pub fn sampler_type() -> DeviceType {
         )
         .describe("How far the LFO moves the filter's cutoff, up to four octaves each way."),
     ];
-    DeviceType::native(SAMPLER, "Snapshot", DeviceRole::Instrument)
+    DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -641,6 +643,8 @@ impl SliceBy {
 pub struct Sampler {
     /// The decoded sample: the media crate's audio, at the engine's rate.
     data: Option<NodeData>,
+    /// A click in the display waiting for the next block (WP-5.15, R54).
+    audition: Option<Audition>,
     voices: [Voice; SLOTS],
     /// How many notes have been played: voices are stolen oldest first.
     counter: u64,
@@ -682,6 +686,7 @@ impl Sampler {
         let frames = config.max_frames.max(1);
         Self {
             data: None,
+            audition: None,
             voices: [Voice::idle(); SLOTS],
             counter: 0,
             last_pitch: None,
@@ -806,11 +811,11 @@ impl Sampler {
     /// Takes a note: starts, releases or chokes voices by the mode's rules.
     fn play(&mut self, note: NoteEvent, settings: &Settings) {
         match note.kind {
-            NoteKind::On => self.note_on(note, settings),
+            NoteKind::On => self.note_on(note, settings, None),
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
             // The sampler plays no per-note expression (MPE): today only
-            // Cascade does. Nor does it answer a channel message yet.
+            // Drift does. Nor does it answer a channel message yet.
             NoteKind::Expression { .. }
             | NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }
@@ -818,10 +823,14 @@ impl Sampler {
         }
     }
 
-    fn note_on(&mut self, note: NoteEvent, s: &Settings) {
+    /// Starts a voice for `note`. An audition (R54) passes where in the
+    /// sample the voice starts and the frame it ends at: it plays the whole
+    /// region's rules from there at the sample's root pitch, slices or not.
+    fn note_on(&mut self, note: NoteEvent, s: &Settings, audition: Option<(f64, u64)>) {
         // Slicing plays the slice the note names; Classic and One-Shot the
         // whole region.
-        let (region_start, region_end) = if s.mode == Mode::Slice {
+        let sliced = s.mode == Mode::Slice && audition.is_none();
+        let (region_start, region_end) = if sliced {
             match self.slices.bounds_of(note.key) {
                 Some(bounds) => bounds,
                 None => return,
@@ -833,7 +842,7 @@ impl Sampler {
             return;
         }
         let base = s.transpose + s.detune / 100.0;
-        let pitch = if s.mode == Mode::Slice {
+        let pitch = if sliced {
             // A slice plays at the sample's own rate; the note names the
             // slice and doesn't transpose it.
             base
@@ -843,10 +852,12 @@ impl Sampler {
         let velocity = note.velocity.clamp(0.0, 1.0);
         // Glide's monophonic mode takes the sounding voice over: the new
         // note glides from its pitch, keeping its position and envelope.
-        // Slices don't glide: they play at the sample's own rate.
+        // Slices don't glide: they play at the sample's own rate, and an
+        // audition starts a voice of its own at the root pitch.
         if s.glide
             && !s.glide_portamento
-            && s.mode != Mode::Slice
+            && !sliced
+            && audition.is_none()
             && let Some(voice) = self.newest_playing()
         {
             voice.key = note.key;
@@ -885,7 +896,7 @@ impl Sampler {
         }
         self.counter += 1;
         let counter = self.counter;
-        let from = if s.glide {
+        let from = if s.glide && audition.is_none() {
             self.last_pitch.unwrap_or(pitch)
         } else {
             pitch
@@ -897,11 +908,12 @@ impl Sampler {
         voice.active = true;
         voice.key = note.key;
         voice.counter = counter;
-        voice.position = region_start as f64;
-        voice.end = region_end;
+        voice.audition = audition.is_some();
+        voice.position = audition.map_or(region_start as f64, |(at, _)| at);
+        voice.end = audition.map_or(region_end, |(_, end)| end);
         voice.pitch = from;
         voice.target = pitch;
-        voice.step = if s.glide_frames == 0 || s.mode == Mode::Slice {
+        voice.step = if s.glide_frames == 0 || sliced {
             voice.pitch = pitch;
             0.0
         } else {
@@ -923,7 +935,38 @@ impl Sampler {
         voice.lfo_random = random(&mut self.rng[slot]);
         self.filter.reset_voice(slot, &self.filter_params);
         self.voices[slot] = voice;
-        self.last_pitch = Some(pitch);
+        if audition.is_none() {
+            self.last_pitch = Some(pitch);
+        }
+    }
+
+    /// A click in the display (R54): the button going down starts a voice
+    /// at C3, the sample's own pitch, from the clicked point; going up fades
+    /// it out whatever the mode's Trigger says.
+    fn audition(&mut self, audition: Audition, s: &Settings, frames: usize) {
+        if audition.down {
+            let at = audition.from.clamp(0.0, 1.0) * frames as f64;
+            let end = if at < s.region_end as f64 {
+                s.region_end
+            } else {
+                frames as u64
+            };
+            let note = NoteEvent {
+                offset: 0,
+                kind: NoteKind::On,
+                channel: 0,
+                key: 60,
+                velocity: 1.0,
+                note_id: None,
+            };
+            self.note_on(note, s, Some((at, end)));
+        } else {
+            for voice in self.voices.iter_mut() {
+                if voice.active && voice.audition && !voice.fading {
+                    voice.fade(s);
+                }
+            }
+        }
     }
 
     fn note_off(&mut self, key: u8, s: &Settings) {
@@ -1183,11 +1226,14 @@ impl NativeDevice for Sampler {
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         let rate = audio.sample_rate();
         let settings = self.settings(params, rate, audio.tempo(), audio.song_position());
+        if let Some(audition) = self.audition.take() {
+            self.audition(audition, &settings, sample.frames());
+        }
         // Slices are Slicing mode's alone: working them out in Classic or
         // One-Shot would scan the region on the audio thread for nothing.
         if settings.mode == Mode::Slice {
             self.slices
-                .update(&sample, &settings, Arc::as_ptr(&sample) as usize);
+                .update(&sample, &settings.cut(), Arc::as_ptr(&sample) as usize);
         }
         let gain = params.ramp(at(GAIN));
         let volume = params.ramp(at(VOLUME));
@@ -1223,6 +1269,10 @@ impl NativeDevice for Sampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
+        if let Some(audition) = data.downcast_ref::<Audition>() {
+            self.audition = Some(*audition);
+            return;
+        }
         // The sampler has one sample slot.
         if data
             .downcast_ref::<SlotSample>()
@@ -1335,7 +1385,7 @@ fn voice_cycle(s: &Settings, key: u8) -> f64 {
 
 /// The LFO waveform at `phase` (0 to 1): -1 to 1. `random` is the value
 /// the Random waveform holds for its cycle.
-fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
+pub(crate) fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
     match wave {
         1 => {
             if phase < 0.5 {
@@ -1354,7 +1404,7 @@ fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
 
 /// The next value of the LFO's Random waveform: a new value in -1 to 1
 /// each cycle.
-fn random(state: &mut u32) -> f32 {
+pub(crate) fn random(state: &mut u32) -> f32 {
     *state ^= *state << 13;
     *state ^= *state >> 17;
     *state ^= *state << 5;
@@ -1368,6 +1418,65 @@ struct Slices {
     signature: Option<SliceSignature>,
     bounds: [u64; MAX_SLICES + 1],
     count: usize,
+}
+
+/// What Slice By cuts a sample by (the sampler spec, R14): the region it
+/// cuts and how.
+#[derive(Clone, Copy)]
+struct Cut {
+    by: SliceBy,
+    /// Transient detection's sensitivity, 0 to 1.
+    sensitivity: f64,
+    /// Beat slicing's division, in frames at the set's tempo.
+    division_frames: f64,
+    /// Region slicing's number of equal slices.
+    regions: usize,
+    region_start: u64,
+    region_end: u64,
+    /// The sample's rate, which transient detection's windows are in.
+    rate: f64,
+}
+
+impl Settings {
+    fn cut(&self) -> Cut {
+        Cut {
+            by: self.slice_by,
+            sensitivity: self.sensitivity,
+            division_frames: self.division_frames,
+            regions: self.regions,
+            region_start: self.region_start,
+            region_end: self.region_end,
+            rate: self.sample_rate,
+        }
+    }
+}
+
+/// Where Slice mode cuts `sample` now, as frame boundaries of the sample
+/// (R13, R14): the first is the region's start and the last its end, so
+/// `n` slices have `n + 1`. This is what the display draws (WP-5.15, R54);
+/// the device cuts the same way. `value` reads a parameter by ID, and
+/// `sixteenth` is the frames in a sixteenth note at the set's tempo, at the
+/// sample's rate. The boundaries are empty for Manual, which places none.
+#[must_use]
+pub fn slice_boundaries(
+    sample: &SampleData,
+    value: &dyn Fn(ParamId) -> f64,
+    sixteenth: f64,
+) -> Vec<u64> {
+    let frames = sample.frames() as f64;
+    let (start, length) = (value(START) / 100.0, value(LENGTH) / 100.0);
+    let cut = Cut {
+        by: SliceBy::of(value(SLICE_BY)),
+        sensitivity: value(SLICE_SENSITIVITY) / 100.0,
+        division_frames: value(SLICE_DIVISION).max(1.0) * sixteenth,
+        regions: value(SLICE_REGIONS).max(1.0) as usize,
+        region_start: (start * frames) as u64,
+        region_end: (((start + length).min(1.0) * frames) as u64).min(sample.frames() as u64),
+        rate: f64::from(sample.sample_rate()),
+    };
+    let mut slices = Slices::new();
+    slices.update(sample, &cut, 0);
+    slices.bounds[..slices.count].to_vec()
 }
 
 /// The inputs slicing's boundaries depend on: when they all match, the
@@ -1404,14 +1513,14 @@ impl Slices {
     /// Works the boundaries out again when their inputs changed. The
     /// signature holds the sensitivity to the nearest per cent, so
     /// automation that sweeps it doesn't re-slice on every block.
-    fn update(&mut self, sample: &SampleData, s: &Settings, address: usize) {
+    fn update(&mut self, sample: &SampleData, s: &Cut, address: usize) {
         let signature = SliceSignature {
-            by: s.slice_by,
+            by: s.by,
             sensitivity: (s.sensitivity * 100.0).round(),
             // Only Beat slicing reads the tempo through this, so only Beat
             // re-slices while it moves: a tempo ramp must not re-scan the
             // region every block.
-            division_frames: if s.slice_by == SliceBy::Beat {
+            division_frames: if s.by == SliceBy::Beat {
                 s.division_frames
             } else {
                 0.0
@@ -1429,7 +1538,7 @@ impl Slices {
         if s.region_end <= s.region_start || sample.frames() == 0 {
             return;
         }
-        match s.slice_by {
+        match s.by {
             SliceBy::Manual => {}
             SliceBy::Transient => self.detect(sample, s),
             SliceBy::Beat => self.beat(s),
@@ -1447,7 +1556,7 @@ impl Slices {
     }
 
     /// Equal slices: the Regions parameter's count.
-    fn regions(&mut self, s: &Settings) {
+    fn regions(&mut self, s: &Cut) {
         let count = s.regions.clamp(1, MAX_SLICES);
         let length = s.region_end - s.region_start;
         for k in 0..=count as u64 {
@@ -1460,7 +1569,7 @@ impl Slices {
     /// region's start: Beatlayer's reading of the manual's Beat slicing
     /// until warp and tempo detection exist, so the sample is taken to
     /// play at the set's tempo.
-    fn beat(&mut self, s: &Settings) {
+    fn beat(&mut self, s: &Cut) {
         let step = s.division_frames.max(1.0);
         self.push(s.region_start);
         let mut at = s.region_start as f64 + step;
@@ -1477,10 +1586,10 @@ impl Slices {
     /// Beatlayer's own detector; up to 64 slices, the first found. The
     /// region's start and end are boundaries of their own, so the slices
     /// cover it.
-    fn detect(&mut self, sample: &SampleData, s: &Settings) {
+    fn detect(&mut self, sample: &SampleData, s: &Cut) {
         let samples = sample.channel(0).unwrap_or(&[]);
         let (start, end) = (s.region_start, s.region_end);
-        let fall = (-1.0 / (TRANSIENT_FALL_MS / 1000.0 * s.sample_rate)).exp();
+        let fall = (-1.0 / (TRANSIENT_FALL_MS / 1000.0 * s.rate)).exp();
         // First, the loudest the envelope gets, for the threshold.
         let mut env = 0.0f64;
         let mut peak = 0.0f64;
@@ -1622,6 +1731,8 @@ struct Voice {
     velocity: f32,
     /// Whether it plays One-Shot's or Slicing's straight-through rules.
     one_shot: bool,
+    /// Whether a click in the display started it (R54).
+    audition: bool,
     env: Env,
     /// The filter envelope, which moves the cutoff (the sampler spec's
     /// filter rule).
@@ -1649,6 +1760,7 @@ impl Voice {
             ratio: 1.0,
             velocity: 1.0,
             one_shot: false,
+            audition: false,
             env: Env::idle(),
             filter_env: Env::idle(),
             lfo_phase: 0.0,

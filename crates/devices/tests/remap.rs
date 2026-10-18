@@ -1,4 +1,4 @@
-//! Remap, the scale-map MIDI effect (WP-5.30; the MIDI scale map spec): the grid
+//! Scale, the scale-map MIDI effect (WP-5.30; the MIDI scale map spec): the grid
 //! from the notes that come in to the notes that go out, Base, Transpose,
 //! Fold and the window. Every block is a real-time section under the
 //! allocation trap.
@@ -11,7 +11,7 @@ use bl_devices::remap::{BASE, FOLD, LOWEST, RANGE, REMAP, TRANSPOSE, map};
 use bl_engine::NoteKind;
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
 
-/// Plays one note per beat of `keys` through Remap and returns the keys of
+/// Plays one note per beat of `keys` through Scale and returns the keys of
 /// the note-ons.
 fn through(params: &[(bl_model::ParamId, f64)], keys: &[u8]) -> (Vec<u8>, usize) {
     let mut chain = Chain::new(4096);

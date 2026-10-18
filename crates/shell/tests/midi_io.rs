@@ -535,7 +535,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
     registry.set_media(Arc::new(Constant));
     let mut rig = Rig::with_registry(registry);
 
-    // Snapshot with a sample, on the MIDI track.
+    // Simpler with a sample, on the MIDI track.
     let folder = std::env::temp_dir().join(format!("bl-midi-play-{}", std::process::id()));
     std::fs::create_dir_all(&folder).unwrap();
     let file = folder.join("Tone.wav");
@@ -547,7 +547,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: SAMPLER.to_owned() },
-            "name": "Snapshot",
+            "name": "Simpler",
             "role": DeviceRole::Instrument,
         } }),
     );
@@ -577,7 +577,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
         json!({ "key": "A", "pressed": true }),
     );
     let heard = (0..4).map(|_| peak(&mut rig)).fold(0.0_f32, f32::max);
-    assert!(heard > 0.01, "the key plays Snapshot: {heard}");
+    assert!(heard > 0.01, "the key plays Simpler: {heard}");
 }
 
 // Spec: midi-io R12, midi-transpose R1
@@ -605,7 +605,7 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: LIFT.to_owned() },
-            "name": "Lift",
+            "name": "Pitch",
             "role": DeviceRole::MidiEffect,
         } }),
     );
@@ -635,7 +635,7 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
         .iter()
         .map(|n| (n.event.kind, n.event.key))
         .collect();
-    // The computer keyboard's A is middle C; Lift moves it up a fifth.
+    // The computer keyboard's A is middle C; Pitch moves it up a fifth.
     assert_eq!(heard, [(NoteKind::On, 67), (NoteKind::Off, 67)]);
 }
 
@@ -704,7 +704,7 @@ fn a_ports_channel_messages_reach_the_instrument_through_a_midi_effect() {
             value: 64.0 / 127.0,
         },
     ];
-    // Lift moves the note, and passes the messages as they came.
+    // Pitch moves the note, and passes the messages as they came.
     assert_eq!(kinds(&probe), expected);
 
     // Switched off, it ends the note it started and passes all of them.
@@ -731,7 +731,7 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: STACK.to_owned() },
-            "name": "Stack",
+            "name": "Chord",
             "role": DeviceRole::MidiEffect,
         } }),
     );

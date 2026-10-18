@@ -175,7 +175,7 @@ pub fn show(
         }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
-        // mappings and, for the Curve Mod, its shape.
+        // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {
             let slot = name
                 .strip_prefix("Mapping ")
@@ -200,7 +200,27 @@ pub fn show(
         }
         // Spec: device-framework R36. The device's own drawing fills its
         // first cell, and a screen reader hears its readings.
-        let shown = display.filter(|d| index == 0 && has_drawing(d));
+        // A cell named like one of the display's series draws only that
+        // series (the Expression Control's tabs); otherwise the first cell draws it all.
+        let own;
+        let shown = match display {
+            Some(d) if d.series.iter().any(|s| s.name == name) => {
+                own = DeviceDisplay {
+                    series: d
+                        .series
+                        .iter()
+                        .filter(|s| s.name == name)
+                        .cloned()
+                        .collect(),
+                    markers: Vec::new(),
+                    readings: Vec::new(),
+                    ..d.clone()
+                };
+                Some(&own)
+            }
+            Some(d) if index == 0 && has_drawing(d) => Some(d),
+            _ => None,
+        };
         if let Some(display) = shown {
             crate::device_display::draw(
                 ui,
@@ -234,6 +254,13 @@ pub fn show(
             value,
             modulated: played(param),
             rect,
+            stops: if frame.multisampler.is_some()
+                && param == bl_devices::multisampler::FILTER_MORPH
+            {
+                &bl_devices::multisampler::MORPH_STOPS
+            } else {
+                &[]
+            },
         };
         match widget {
             Widget::Knob => control.knob(ui, theme, events),
@@ -379,6 +406,9 @@ struct Control<'a> {
     /// Its base and what it plays while a clip modulates it.
     modulated: Option<(f64, f64)>,
     rect: Rect,
+    /// For a knob whose context menu snaps it to a stop: the stops' names
+    /// and values (the multisampler's Morph, spec R37).
+    stops: &'static [(&'static str, f64)],
 }
 
 impl Control<'_> {
@@ -597,6 +627,16 @@ impl Control<'_> {
         );
         focus_ring(ui, theme, self.rect, &response);
         self.describe(ui, &response, Role::Slider);
+        if !self.stops.is_empty() {
+            response.context_menu(|ui| {
+                for (name, value) in self.stops {
+                    if ui.button(*name).clicked() {
+                        self.change(*value, events);
+                        ui.close();
+                    }
+                }
+            });
+        }
     }
 
     /// A number box: a dark box with the value centred and a fill showing

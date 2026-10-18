@@ -51,7 +51,7 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
-/// `device.swap_to_snapshot`: replace a Strike drum sampler with the Snapshot
+/// `device.swap_to_snapshot`: replace a Drum Sampler with the Simpler
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
 pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
@@ -291,17 +291,17 @@ pub fn external_width(frame: &DeviceFrame) -> f32 {
 }
 
 /// The width at 100% of what sits left of a device's body: its sidechain
-/// strip and, while shown, its sidechain section (WP-2.19b); 0 without a
-/// sidechain input.
+/// strip and, while shown, its sidechain section (WP-2.19b, and a MIDI
+/// sidechain's, WP-5.27); 0 without a sidechain input.
 #[must_use]
 pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
-    frame.sidechain.as_ref().map_or(0.0, |s| {
-        SIDECHAIN_STRIP_WIDTH
-            + if s.shown {
-                SIDECHAIN_SECTION_WIDTH
-            } else {
-                0.0
-            }
+    let shown = frame
+        .sidechain
+        .as_ref()
+        .map(|s| s.shown)
+        .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
+    shown.map_or(0.0, |shown| {
+        SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
     }) + external_width(frame)
 }
 
@@ -490,7 +490,7 @@ pub struct DeviceFrame {
     #[serde(default)]
     pub takes_sample: bool,
     /// Whether its type is the drum sampler, whose context menu offers the
-    /// swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`,
+    /// swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`,
     /// one-shot drum sampler R23).
     #[serde(default)]
     pub swaps_to_snapshot: bool,
@@ -530,6 +530,10 @@ pub struct DeviceFrame {
     /// Its routing to hardware, if it is an external device (WP-5.34).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalSection>,
+    /// Its MIDI sidechain section, if it has a MIDI sidechain input
+    /// (WP-5.27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_sidechain: Option<MidiSidechainSection>,
     /// The view its display shows, if its display has views (WP-5.43): one
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -625,7 +629,7 @@ pub struct ModulatorFrame {
     /// it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub armed: Option<u8>,
-    /// A Curve Mod's breakpoint shape (the default one until it is edited);
+    /// A Shaper's breakpoint shape (the default one until it is edited);
     /// left out for a modulator that has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
@@ -692,6 +696,19 @@ pub struct ExternalSection {
     pub audio_from: String,
     /// Hardware Latency, in the unit its switch is on.
     pub hardware_latency: bl_model::HardwareLatency,
+}
+
+/// A device's MIDI sidechain section, in the same left strip as a
+/// sidechain's (WP-5.27; the routing spec, R34): the toggle shows the
+/// section, which holds the MIDI source chooser.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MidiSidechainSection {
+    /// Whether the section is shown, by the toggle at the top of the
+    /// device's left strip. It changes only the view.
+    pub shown: bool,
+    /// What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`)
+    /// or `No Input`.
+    pub source: String,
 }
 
 /// A floating device's window, as `device.windows` reports it (WP-2.5b).
@@ -850,6 +867,10 @@ pub struct NewDevice {
     /// Whether it has a sidechain input, as its type declares (WP-2.19b).
     #[serde(default, skip_serializing_if = "is_false")]
     pub sidechain: bool,
+    /// Whether it has a MIDI sidechain input, as its type declares
+    /// (WP-5.27).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub midi_sidechain: bool,
 }
 
 #[expect(
@@ -1396,13 +1417,13 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
-        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Snapshot")
+        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Simpler")
             .description(
-                "Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as \
-                 Strike's context menu does: the new device takes the old one's place, sample, \
+                "Replaces a Drum Sampler with Simpler in One-Shot mode, as \
+                 Drum Sampler's context menu does: the new device takes the old one's place, sample, \
                  and on or off state, and keeps its sample's Start and Length; every other \
-                 setting is Snapshot's default. One undo step, named Swap to Snapshot, and the \
-                 new device is selected. A device that isn't a Strike drum sampler is refused.",
+                 setting is Simpler's default. One undo step, named Swap to Simpler, and the \
+                 new device is selected. A device that isn't a Drum Sampler is refused.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -1452,10 +1473,11 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Shows or hides a device's sidechain section, as the toggle at the top of the \
                  device's left strip does; switches unless `shown` says which. Only devices \
-                 with a sidechain input have one. It changes only the view: it isn't an undo \
+                 with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo \
                  step. The section's settings are the set's: `device.set_sidechain_input`, \
                  `device.set_sidechain_enabled`, `device.set_sidechain_mix`, \
-                 `device.set_sidechain_gain`, and `device.set_sidechain_listen`.",
+                 `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI \
+                 sidechain's, `device.set_midi_sidechain_source`.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

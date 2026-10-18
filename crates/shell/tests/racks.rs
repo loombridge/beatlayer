@@ -1221,7 +1221,7 @@ fn a_copied_rack_maps_its_own_copies_and_a_removed_chain_takes_its_mappings() {
     let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
     let wave = json!({
         "kind": { "native": { "device_type": "beatlayer.wave_mod" } },
-        "name": "Wave Mod",
+        "name": "LFO",
         "role": "audio_effect",
     });
     let wave = add_to_chain(&mut shell, chains[0], wave).device;

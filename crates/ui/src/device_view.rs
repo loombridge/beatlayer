@@ -10,6 +10,11 @@
 //! side. Show Options and a right-click open the device's context menu
 //! (C-DEVICE). An empty chain says "Drop an Instrument or Sample Here".
 //!
+//! A plug-in device (WP-2.10, L-DEV-010) adds the window button, a
+//! wrench named Show/Hide Plug-In Window, after the activator and before
+//! the name, lit while the plug-in's editor window is open; its panel is
+//! eight knobs mapped to the plug-in's first parameters (D19, IMP-03).
+//!
 //! A floating device (WP-2.5b, IMP-14) keeps its place in the chain as a
 //! strip like a folded device's, outlined in the accent, so the signal
 //! order stays readable; its window draws the same frame at the window's
@@ -38,6 +43,13 @@ use crate::keymap::{Keymap, Platform};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
+/// The plug-in window button's name, as Live's Info View names it
+/// (L-DEV-010).
+pub const PLUGIN_WINDOW_BUTTON: &str = "Show/Hide Plug-In Window";
+
+/// `plugin.show_window`, which the window button runs.
+const PLUGIN_SHOW_WINDOW: &str = bl_shell::plugin_commands::SHOW_WINDOW;
+
 /// What an empty chain's Device View says (L-DEV-001, observed).
 pub const EMPTY_TEXT: &str = "Drop an Instrument or Sample Here";
 
@@ -51,6 +63,8 @@ pub(crate) struct DeviceDrag {
 /// scroll.
 pub struct DeviceViewUi {
     multisampler: crate::multisampler::MultisamplerUi,
+    /// Simpler's sample displays (WP-5.15).
+    sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
     scroll: f32,
@@ -102,7 +116,7 @@ pub fn window_frame_id(device: DeviceId) -> Id {
 /// Where a floating device's Dock button sits in its window at `rect`.
 #[must_use]
 pub fn dock_rect(rect: Rect) -> Rect {
-    window_layout(rect, false)
+    window_layout(rect, false, false)
         .1
         .dock
         .expect("a window has a Dock button")
@@ -148,6 +162,7 @@ fn sample_drop(
     ui: &Ui,
     state: &DeviceViewState,
     placed: &[(DeviceId, Rect)],
+    rect: Rect,
     events: &mut Vec<UiEvent>,
 ) {
     let (dropped, pointer) = ui.input(|i| {
@@ -162,6 +177,37 @@ fn sample_drop(
     let (Some(path), Some(pointer)) = (dropped.into_iter().next(), pointer) else {
         return;
     };
+    // Spec: multisampler R47. An SFZ instrument dropped on a multisampler
+    // adds its regions as layers; anywhere else in a MIDI track's Device
+    // View it makes a multisampler on the track.
+    if crate::browser::is_sfz(&path) {
+        if !rect.contains(pointer) {
+            return;
+        }
+        let over = placed
+            .iter()
+            .find(|(_, frame)| frame.contains(pointer))
+            .filter(|(device, _)| {
+                state
+                    .devices
+                    .iter()
+                    .any(|frame| frame.id == *device && frame.multisampler.is_some())
+            });
+        match (over, state.track, state.track_kind) {
+            (Some((device, _)), _, _) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "device": device }),
+            ),
+            (None, Some(track), Some(bl_model::TrackKind::Midi)) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "track": track }),
+            ),
+            _ => {}
+        }
+        return;
+    }
     let Some((device, _)) = placed.iter().find(|(_, rect)| rect.contains(pointer)) else {
         return;
     };
@@ -202,6 +248,7 @@ impl DeviceViewUi {
     pub fn new() -> Self {
         Self {
             multisampler: crate::multisampler::MultisamplerUi::default(),
+            sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
             renaming_chain: None,
             scroll: 0.0,
@@ -323,7 +370,19 @@ impl DeviceViewUi {
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
-        sample_drop(ui, &state, &placed, events);
+        sample_drop(ui, &state, &placed, rect, events);
+    }
+
+    /// Where the zone editor is, if the selected multisampler has it open:
+    /// above the Device View in `detail` (R1).
+    #[must_use]
+    pub fn zone_editor_rect(shell: &Shell, detail: Rect) -> Option<Rect> {
+        shell.device_view_state().devices.iter().find_map(|d| {
+            d.multisampler
+                .as_ref()
+                .filter(|m| d.selected && m.view.zone_editor)
+                .map(|m| crate::multisampler::zone_editor_rect(detail, m.view.size))
+        })
     }
 
     /// Draws the zone editor of the selected multisampler whose editor is
@@ -442,12 +501,13 @@ impl DeviceViewUi {
             c.control.0
         };
         let text_colour = if frame.selected { c.window.0 } else { c.text.0 };
+        let plugin = is_plugin(frame);
         let (bar, mut controls) = if strip {
             folded_layout(rect)
         } else if window {
-            window_layout(rect, frame.expandable)
+            window_layout(rect, frame.expandable, plugin)
         } else {
-            unfolded_layout(rect, frame.expandable)
+            unfolded_layout(rect, frame.expandable, plugin)
         };
         if strip && frame.rack.is_some() {
             // A rack's strip holds its view selectors under the activator.
@@ -498,15 +558,33 @@ impl DeviceViewUi {
                             &played,
                             events,
                         ),
-                        None => crate::device_panel::show(
-                            ui,
-                            theme,
-                            frame,
-                            display.as_ref(),
-                            body,
-                            &played,
-                            events,
-                        ),
+                        None => {
+                            crate::device_panel::show(
+                                ui,
+                                theme,
+                                frame,
+                                display.as_ref(),
+                                body,
+                                &played,
+                                events,
+                            );
+                            // Spec: multisampler R54. Simpler's sample
+                            // display fills its first cell.
+                            if matches!(
+                                &frame.kind,
+                                bl_model::DeviceKind::Native { device_type }
+                                    if device_type == bl_devices::sampler::SAMPLER
+                            ) && let Some(panel) = frame.panel.as_ref()
+                                && let Some((_, cell, _)) =
+                                    crate::device_panel::place_shown(panel, frame.expanded, body)
+                                        .1
+                                        .into_iter()
+                                        .next()
+                            {
+                                self.sample_displays
+                                    .snapshot(ui, shell, theme, frame, cell, events);
+                            }
+                        }
                     }
                 }
                 self.title(
@@ -526,6 +604,9 @@ impl DeviceViewUi {
                 if let Some(expand) = controls.expand {
                     self.round_button(ui, theme, frame, "expand", expand, events);
                 }
+                if let Some(wrench) = controls.wrench {
+                    self.wrench(ui, shell, theme, frame, wrench, events);
+                }
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
                 let options =
@@ -536,6 +617,8 @@ impl DeviceViewUi {
                 }
                 if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
+                    crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
                 if let (Some(section), false) = (&frame.external, strip) {
                     crate::external::draw(ui, shell, theme, frame.id, section, rect, events);
@@ -702,6 +785,81 @@ impl DeviceViewUi {
             node.set_value(if frame.enabled { "on" } else { "off" }.to_owned());
             node.set_description(
                 "Switches the device off and on; off, it passes its input through".to_owned(),
+            );
+        });
+    }
+
+    /// A plug-in device's window button (L-DEV-010): a wrench, named
+    /// Show/Hide Plug-In Window, lit while the plug-in's editor window is
+    /// open, which opens and closes it (`plugin.show_window`). Dimmed for a
+    /// plug-in without an editor that can open.
+    fn wrench(
+        &self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let info = shell.plugin_info(frame.id);
+        let has_window = info.as_ref().is_some_and(|i| i.has_window);
+        let open = info.as_ref().is_some_and(|i| i.window_open);
+        let id = control_id(frame.id, "plugin_window");
+        let sense = if has_window {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let response = ui.interact(rect, id, sense);
+        if has_window {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        }
+        if has_window
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+        {
+            // Spec: clap-hosting R13. Not an undo step.
+            invoke(events, PLUGIN_SHOW_WINDOW, json!({ "device": frame.id }));
+        }
+        let c = &theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let centre = rect.center();
+        let r = rect.width() / 2.0;
+        let face = if open {
+            c.accent.0
+        } else if response.hovered() && has_window {
+            c.control_hover.0
+        } else {
+            c.window.0
+        };
+        painter.circle_filled(centre, r, face);
+        let ink = if open {
+            c.accent_text.0
+        } else if has_window {
+            c.text_dim.0
+        } else {
+            c.separator.0
+        };
+        // A wrench: a handle from the lower left to a ring at the upper
+        // right.
+        let stroke = Stroke::new(1.2, ink);
+        let head = centre + vec2(r * 0.3, -r * 0.3);
+        painter.line_segment([centre + vec2(-r * 0.6, r * 0.6), head], stroke);
+        painter.circle_stroke(head, r * 0.3, stroke);
+        focus_ring(ui, theme, rect, &response);
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::Button, has_window, open, PLUGIN_WINDOW_BUTTON)
+        });
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(PLUGIN_WINDOW_BUTTON.to_owned());
+            node.set_value(if open { "on" } else { "off" }.to_owned());
+            if !has_window {
+                node.set_disabled();
+            }
+            node.set_description(
+                "Shows or hides the plug-in's own panel in a floating window".to_owned(),
             );
         });
     }
@@ -889,8 +1047,30 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
-            ui.add_enabled(false, egui::Button::new("Convert to Snapshot"))
-                .on_disabled_hover_text("Not built yet: arrives with WP-5.15.");
+            if ui.button("Convert to Simpler").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "snapshot" }),
+                );
+                ui.close();
+            }
+        }
+        // Spec: multisampler R62. Simpler's menu converts it the other way.
+        if matches!(
+            &frame.kind,
+            bl_model::DeviceKind::Native { device_type }
+                if device_type == bl_devices::sampler::SAMPLER
+        ) {
+            ui.separator();
+            if ui.button("Convert to Multisampler").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "multisampler" }),
+                );
+                ui.close();
+            }
         }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it
@@ -918,11 +1098,11 @@ impl DeviceViewUi {
             }
             crate::menus::take_focus_first(ui, &response);
         }
-        // Strike's own items after its switches (31.4.5): the swap to
-        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // Drum Sampler's own items after its switches (31.4.5): the swap to
+        // Simpler, and Save as Default Pad, which the Drum Rack's pads
         // (T145) bring.
         if frame.swaps_to_snapshot {
-            let response = ui.button("Swap to Snapshot");
+            let response = ui.button("Swap to Simpler");
             crate::menus::register_item(ui.ctx(), &response);
             if response.clicked() {
                 invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));
@@ -1225,6 +1405,9 @@ struct Controls {
     /// The expand toggle, right of the activator, on a device that has an
     /// expanded part (L-DEV-004).
     expand: Option<Rect>,
+    /// A plug-in device's window button, after the activator and the
+    /// expand toggle, before the name (L-DEV-010).
+    wrench: Option<Rect>,
     title: Rect,
     hot_swap: Rect,
     save: Rect,
@@ -1237,9 +1420,10 @@ struct Controls {
 const BUTTON: f32 = 11.0;
 
 /// An unfolded frame's title bar along its top: the activator, the expand
-/// toggle where the device has an expanded part, the name, then Hot-Swap
-/// Presets, Save Preset, and Show Options at the right.
-fn unfolded_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
+/// toggle where the device has an expanded part, a plug-in's window button,
+/// the name, then Hot-Swap Presets, Save Preset, and Show Options at the
+/// right.
+fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Controls) {
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     let y = bar.center().y;
     let button = |x: f32| Rect::from_center_size(pos2(x, y), vec2(BUTTON, BUTTON));
@@ -1249,8 +1433,12 @@ fn unfolded_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
     let hot_swap = button(save.center().x - step);
     let activator = button(bar.left() + 2.0 + BUTTON / 2.0);
     let expand = expandable.then(|| button(activator.right() + 3.0 + BUTTON / 2.0));
+    let wrench = plugin.then(|| button(expand.unwrap_or(activator).right() + 3.0 + BUTTON / 2.0));
     let title = Rect::from_min_max(
-        pos2(expand.unwrap_or(activator).right() + 4.0, bar.top()),
+        pos2(
+            wrench.or(expand).unwrap_or(activator).right() + 4.0,
+            bar.top(),
+        ),
         pos2(hot_swap.left() - 4.0, bar.bottom()),
     );
     (
@@ -1258,6 +1446,7 @@ fn unfolded_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
         Controls {
             activator,
             expand,
+            wrench,
             title,
             hot_swap,
             save,
@@ -1269,11 +1458,11 @@ fn unfolded_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
 
 /// A floating window's frame: the unfolded title bar along its top, with
 /// the Dock button at its right end, after Show Options.
-fn window_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
+fn window_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Controls) {
     let step = BUTTON + 3.0;
     let mut narrower = rect;
     narrower.max.x -= step;
-    let (_, mut controls) = unfolded_layout(narrower, expandable);
+    let (_, mut controls) = unfolded_layout(narrower, expandable, plugin);
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     controls.dock = Some(Rect::from_center_size(
         pos2(bar.right() - 2.0 - BUTTON / 2.0, bar.center().y),
@@ -1301,6 +1490,7 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
         Controls {
             activator,
             expand: None,
+            wrench: None,
             title,
             hot_swap,
             save,
@@ -1380,7 +1570,7 @@ pub fn activator_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.activator
     } else {
-        unfolded_layout(frame, false).1.activator
+        unfolded_layout(frame, false, false).1.activator
     }
 }
 
@@ -1390,7 +1580,7 @@ pub fn title_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.title
     } else {
-        unfolded_layout(frame, false).1.title
+        unfolded_layout(frame, false, false).1.title
     }
 }
 
@@ -1401,7 +1591,23 @@ pub fn button_rects(frame: Rect, folded: bool) -> [Rect; 3] {
     let controls = if folded {
         folded_layout(frame).1
     } else {
-        unfolded_layout(frame, false).1
+        unfolded_layout(frame, false, false).1
     };
     [controls.hot_swap, controls.save, controls.options]
+}
+
+/// Where a plug-in device's window button (Show/Hide Plug-In Window,
+/// L-DEV-010) sits in its unfolded frame.
+#[must_use]
+pub fn plugin_window_rect(frame: Rect, expandable: bool) -> Rect {
+    unfolded_layout(frame, expandable, true)
+        .1
+        .wrench
+        .expect("a plug-in's title bar has the window button")
+}
+
+/// Whether a frame is a plug-in device's, whose title bar has the window
+/// button.
+fn is_plugin(frame: &DeviceFrame) -> bool {
+    matches!(frame.kind, bl_model::DeviceKind::Plugin { .. })
 }

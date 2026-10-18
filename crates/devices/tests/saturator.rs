@@ -1,4 +1,4 @@
-//! Singe, the native saturator (WP-5.23; the saturator spec): the eight
+//! Saturator, the native saturator (WP-5.23; the saturator spec): the eight
 //! curves' transfer functions read from a slow ramp, the Waveshaper's
 //! controls, Post Clip and Output, the Color filters, Hi-Quality and its
 //! latency, the Pre-DC Filter, Dry/Wet, the display, and renders that don't
@@ -24,7 +24,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Singe of `params`, up to `max_frames` at a time.
+/// A Saturator of `params`, up to `max_frames` at a time.
 fn singe(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = saturator_type();
     node(&registry(), &device(&device_type, params), max_frames)
@@ -194,8 +194,12 @@ fn the_saturator_is_described_and_laid_out() {
     }
     let threshold = description.param(THRESHOLD).unwrap();
     assert_eq!((threshold.min(), threshold.max()), (-50.0, 0.0));
-    // Singe is registered with the shipped devices.
-    assert!(bl_devices::device_types().iter().any(|t| t.name == "Singe"));
+    // Saturator is registered with the shipped devices.
+    assert!(
+        bl_devices::device_types()
+            .iter()
+            .any(|t| t.name == "Saturator")
+    );
 }
 
 // Spec: saturator R2

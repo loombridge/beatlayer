@@ -35,6 +35,9 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
+# The test plug-in, built from source, for the plug-in device panel's tests
+# (WP-2.10).
+bl-test-clap = { path = "../test-clap" }
 # The null device and its channels, for the In/Out choosers' tests
 # (WP-2.13).
 bl-audio-io.workspace = true

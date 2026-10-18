@@ -1,0 +1,320 @@
+{
+  "format": "beatlayer-set",
+  "schema": 7,
+  "revision": 7,
+  "saved_by": "Beatlayer 0.0.0",
+  "ids": 20,
+  "media": [
+    {
+      "hash": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
+      "path": "Samples/Imported/Kick loop.wav",
+      "size": 1058444
+    },
+    {
+      "hash": "5050505050505050505050505050505050505050505050505050505050505050",
+      "path": "../Library/Pads/Warm pad.aif",
+      "size": 4294967296
+    }
+  ],
+  "launch": {
+    "quantization": "1_bar",
+    "enabled": true
+  },
+  "document": {
+    "settings": {
+      "tempo": [
+        {
+          "kind": "constant",
+          "start": 0,
+          "bpm": 124.0
+        },
+        {
+          "kind": "ramp",
+          "start": 22579200,
+          "from": 124.0,
+          "to": 98.5
+        },
+        {
+          "kind": "constant",
+          "start": 33868800,
+          "bpm": 98.5
+        }
+      ],
+      "time_signatures": [
+        {
+          "at": 0,
+          "signature": {
+            "numerator": 4,
+            "denominator": 4
+          }
+        },
+        {
+          "at": 45158400,
+          "signature": {
+            "numerator": 7,
+            "denominator": 8
+          }
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "id": 2,
+        "kind": "group",
+        "name": "Drums",
+        "mixer": {
+          "volume": 1.0,
+          "pan": 0.0,
+          "mute": false,
+          "solo": false,
+          "arm": false
+        },
+        "children": [
+          {
+            "id": 3,
+            "kind": "audio",
+            "name": "Kick",
+            "mixer": {
+              "volume": 0.5011872336272722,
+              "pan": 0.0,
+              "mute": false,
+              "solo": false,
+              "arm": false
+            },
+            "devices": [
+              {
+                "id": 10,
+                "name": "Utility",
+                "kind": {
+                  "native": {
+                    "device_type": "beatlayer.utility"
+                  }
+                },
+                "enabled": true,
+                "params": [
+                  [
+                    0,
+                    -6.0
+                  ],
+                  [
+                    1,
+                    0.3333333333333333
+                  ],
+                  [
+                    2,
+                    -0.0
+                  ],
+                  [
+                    7,
+                    1.7976931348623157e+308
+                  ]
+                ]
+              }
+            ],
+            "clips": [
+              {
+                "id": 7,
+                "name": "Kick loop",
+                "start": 0,
+                "length": 11289600,
+                "mute": false,
+                "data": {
+                  "audio": {
+                    "media": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "kind": "midi",
+            "name": "Hats ♪",
+            "mixer": {
+              "volume": 1.0,
+              "pan": 0.30000000000000004,
+              "mute": false,
+              "solo": true,
+              "arm": false
+            },
+            "clips": [
+              {
+                "id": 8,
+                "name": "",
+                "start": 2822400,
+                "length": 2822400,
+                "mute": true,
+                "data": {
+                  "midi": {
+                    "notes": [
+                      {
+                        "key": 42,
+                        "velocity": 64,
+                        "start": 0,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 72,
+                        "start": 352800,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 80,
+                        "start": 705600,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 88,
+                        "start": 1058400,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 96,
+                        "start": 1411200,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 104,
+                        "start": 1764000,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 112,
+                        "start": 2116800,
+                        "length": 176400
+                      },
+                      {
+                        "key": 42,
+                        "velocity": 120,
+                        "start": 2469600,
+                        "length": 176400
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "kind": "midi",
+        "name": "Bass",
+        "mixer": {
+          "volume": 1.0,
+          "pan": 0.0,
+          "mute": true,
+          "solo": false,
+          "arm": true
+        },
+        "devices": [
+          {
+            "id": 11,
+            "name": "Example Synth",
+            "kind": {
+              "plugin": {
+                "format": "clap",
+                "plugin_id": "org.example.synth"
+              }
+            },
+            "enabled": false,
+            "params": [
+              [
+                4294967295,
+                0.25
+              ]
+            ]
+          }
+        ],
+        "clips": [
+          {
+            "id": 9,
+            "name": "",
+            "start": 5644800,
+            "length": 5644800,
+            "mute": false,
+            "data": {
+              "midi": {
+                "notes": [
+                  {
+                    "key": 36,
+                    "velocity": 127,
+                    "start": 235200,
+                    "length": 470400
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "returns": [
+      {
+        "id": 6,
+        "kind": "return",
+        "name": "A Reverb",
+        "mixer": {
+          "volume": 0.0,
+          "pan": 0.0,
+          "mute": false,
+          "solo": false,
+          "arm": false
+        }
+      }
+    ],
+    "main": {
+      "id": 1,
+      "kind": "main",
+      "name": "Main",
+      "mixer": {
+        "volume": 5e-324,
+        "pan": 0.0,
+        "mute": false,
+        "solo": false,
+        "arm": false
+      }
+    },
+    "scenes": [
+      {
+        "id": 12,
+        "name": ""
+      },
+      {
+        "id": 13,
+        "name": ""
+      },
+      {
+        "id": 14,
+        "name": ""
+      },
+      {
+        "id": 15,
+        "name": ""
+      },
+      {
+        "id": 16,
+        "name": ""
+      },
+      {
+        "id": 17,
+        "name": ""
+      },
+      {
+        "id": 18,
+        "name": ""
+      },
+      {
+        "id": 19,
+        "name": ""
+      }
+    ]
+  }
+}

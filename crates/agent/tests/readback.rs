@@ -11,7 +11,8 @@ use bl_model::{
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, External, HardwareLatency, Input,
     LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData,
     MidiTo, MixerParam, Monitor, Note, Output, ParamId, PressurePoint, SendTap, Sidechain,
-    TakeClip, TakeLane, Tap, TrackId, TrackKind, TransientEdits, WarpMarker,
+    TakeClip, TakeLane, Tap, TonesSettings, TrackId, TrackKind, TransientEdits, WarpMarker,
+    WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -271,6 +272,11 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // The edits made to that sample (WP-5.15).
+    device.sample_edits = vec![bl_model::SampleEdit {
+        kind: bl_model::SampleEditKind::FadeIn,
+        range: None,
+    }];
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(
@@ -308,6 +314,7 @@ fn fixture() -> Project {
         mix: 0.25,
         listen: true,
     });
+    device.midi_sidechain = Some(bl_model::MidiSidechain { source: Some(keys) });
     apply(
         &mut editor,
         Command::InsertDevice {
@@ -316,11 +323,11 @@ fn fixture() -> Project {
             device,
         },
     );
-    // A Curve Mod mapping that device, with a shape of its own.
+    // A Shaper mapping that device, with a shape of its own.
     let curve: bl_model::DeviceId = editor.new_id();
     let mut modulator = Device::new(
         curve,
-        "Curve Mod",
+        "Shaper",
         DeviceKind::Native {
             device_type: bl_model::modulator::CURVE_MOD.to_owned(),
         },
@@ -432,6 +439,13 @@ fn fixture() -> Project {
             ],
             tempo: Some(100.0),
             signature: Some(TimeSignature::new(3, 4).unwrap()),
+            warp_mode: WarpMode::Tones,
+            warp_settings: WarpSettings {
+                tones: TonesSettings { grain_size: 40.0 },
+                ..WarpSettings::default()
+            },
+            ram: true,
+            high_quality: false,
             transient_edits: TransientEdits {
                 added: vec![0.5],
                 removed: vec![1.25],
@@ -767,6 +781,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "automation.1.enabled",
                 "automation.0.target",
                 "devices.0.sidechain.input",
+                "devices.0.midi_sidechain.source",
                 "take_lanes.0.clips.1.data.gain",
                 "clips.0",
             ][..],
@@ -818,6 +833,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "external.channel",
                 "external.audio_from",
                 "external.hardware_latency",
+                "midi_sidechain",
                 "floating",
                 "media",
                 "layers",
@@ -858,6 +874,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.warp_markers.1.beat",
                 "data.audio.tempo",
                 "data.audio.signature",
+                "data.audio.warp_mode",
+                "data.audio.warp_settings.tones.grain_size",
+                "data.audio.ram",
+                "data.audio.high_quality",
                 "data.audio.transient_edits.added.0",
                 "data.audio.transient_edits.removed.0",
             ][..],

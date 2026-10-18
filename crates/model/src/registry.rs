@@ -1112,7 +1112,9 @@ const ENTRIES: &[Entry] = &[
         description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
             where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
             for as long as it lasts in the arrangement; off, it plays from its Start marker to its \
-            End marker once. The Start marker must be before the brace's end to switch it on.",
+            End marker once. The Start marker must be before the brace's end to switch it on. \
+            An audio clip can only loop while Warp is on (`clip.set_warp`): switching the loop on \
+            for an unwarped audio clip is refused.",
     },
     Entry {
         id: "clip.set_gain",
@@ -1157,8 +1159,10 @@ const ENTRIES: &[Entry] = &[
             clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's \
             tempo there, so it goes on playing at the speed it did; switching off keeps the \
             map. Either way the markers and brace convert, so each keeps its place in the \
-            audio, and the clip keeps its place and length in the arrangement. Until warped \
-            playback arrives (Phase 4), a warped clip still plays at its file's own speed.",
+            audio, and the clip keeps its place and length in the arrangement. A warped clip \
+            plays through its warp map at the set's tempo, in its warp mode \
+            (`clip.set_warp_mode`); only a warped clip can loop, so switching Warp off also \
+            switches the clip's loop off in the same undo step.",
     },
     Entry {
         id: "clip.insert_warp_marker",
@@ -1311,6 +1315,128 @@ const ENTRIES: &[Entry] = &[
             about the first marker, so each keeps its place in the audio. The clip's place \
             and length in the arrangement don't change. Refused if the clip's tempo would \
             leave 1 to 1,000 BPM.",
+    },
+    Entry {
+        id: "clip.set_1_1_1_here",
+        action: Action::Apply("set_one_one_one_here"),
+        label: "Set 1.1.1 Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Makes a point of a warped audio clip's file its 1.1.1, the downbeat of its \
+            first bar: at the selected warp marker (`marker`, its place in the map, the first \
+            being 0) or at the Sample Editor's insert marker (`beat`, ticks from the clip's \
+            current 1.1.1, or `time`, seconds in the file); give one of the three. A warp \
+            marker is made there if there was none. Every marker, the End marker and the loop \
+            brace then move by the same ticks, so no segment changes tempo and each keeps its \
+            place in the audio, and the Start marker goes to 1.1.1. Refused for a clip that \
+            isn't warped, or if the End marker or the loop brace would end up before 1.1.1. \
+            One undo step.",
+    },
+    Entry {
+        id: "clip.warp_from_here",
+        action: Action::Apply("warp_from_here"),
+        label: "Warp From Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip from a point on: at the selected warp marker \
+            (`marker`) or at a new one at the insert marker (`beat` or `time`, as for \
+            `clip.set_1_1_1_here`). The markers before it stay and those after it are replaced. \
+            `method` is `auto`, a marker on the first beat of every bar after the point from \
+            the tempo found there; `start_at`, the same starting from the tempo `bpm`, the set's \
+            tempo at the point unless given, which settles whether a beat is counted at double \
+            or half the speed; `straight`, which deletes the markers after the point and sets \
+            the clip's tempo to the tempo found after it; or `bpm`, which deletes them and sets \
+            the clip's tempo to `bpm`, the set's tempo at the point unless given. The file's \
+            tempo and beats come from its analysis (`analysis` gives them), so every method but \
+            `bpm` is refused while it is not ready. Refused for a clip that isn't warped. One \
+            undo step.",
+    },
+    Entry {
+        id: "clip.warp_as_loop",
+        action: Action::Apply("warp_as_loop"),
+        label: "Warp as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip's whole file as a loop of 1, 2, 4, 8, 16 or 32 \
+            bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: \
+            a warp marker at the start of the file on 1.1.1 and one at its end on the last \
+            bar's end, the Start and End markers and the loop brace on the whole file, the loop \
+            on, and that tempo as the clip's. The clip keeps its place and length in the \
+            arrangement. Refused for a clip that isn't warped, or while the file's analysis is \
+            not ready. One undo step.",
+    },
+    Entry {
+        id: "clip.warp_selection_as_loop",
+        action: Action::Apply("warp_selection_as_loop"),
+        label: "Warp Selection as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps the part of a warped audio clip's file from `from` to `to` \
+            (seconds in the file) as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number \
+            whose tempo is nearest the set's tempo at the clip's start: a warp marker at each \
+            end of the part, the Start and End markers and the loop brace on it, the loop on. \
+            The clip keeps its place and length in the arrangement. Refused for a clip that \
+            isn't warped. One undo step.",
+    },
+    Entry {
+        id: "clip.set_warp_mode",
+        action: Action::Apply("set_clip_warp_mode"),
+        label: "Set Warp Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets how a warped audio clip's audio is fitted to the speed its warp map \
+            sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` \
+            (`data.audio.warp_mode`; a new clip is `beats`). `re_pitch` plays the file faster \
+            or slower, so its pitch moves with the speed. An unwarped clip keeps its mode for \
+            when Warp goes back on, and every mode's controls stay with the clip. Until the \
+            other modes are built, they play as `re_pitch` does.",
+    },
+    Entry {
+        id: "clip.set_warp_settings",
+        action: Action::Apply("set_clip_warp_settings"),
+        label: "Set Warp Settings",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets controls of an audio clip's warp modes, named by mode, any of them in \
+            one undo step (`data.audio.warp_settings`; a control at its default isn't listed \
+            there). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, \
+            `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, \
+            `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: \
+            `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, \
+            default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 \
+            %, default 100), `envelope` (8 to 512, default 128). Give at least one control; a \
+            value out of range refuses the whole command.",
+    },
+    Entry {
+        id: "clip.set_ram_mode",
+        action: Action::Apply("set_clip_ram_mode"),
+        label: "Set Clip RAM Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's RAM mode (`data.audio.ram`, off for a new clip). \
+            On, the clip's whole file is held in memory instead of streamed from disk, so it \
+            never underruns; the audio it plays is the same. Switching it while the clip plays \
+            leaves no gap.",
+    },
+    Entry {
+        id: "clip.set_high_quality",
+        action: Action::Apply("set_clip_high_quality"),
+        label: "Set Clip High Quality",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's high-quality interpolation (`data.audio.high_quality`, \
+            on for a new clip). On, the clip is resampled by a band-limited interpolator wherever \
+            it is read at a rate other than 1, as Re-Pitch does at any speed but 1, at more CPU \
+            and with less distortion; off, by a cheaper one. Where no resampling happens it \
+            changes nothing.",
     },
     Entry {
         id: "clip.set_legato",
@@ -1753,14 +1879,18 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as \
-            the slot's Map button and a click on the parameter's control do. `target` is a mixer \
-            control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any \
-            device on any track, but not a parameter of the modulator itself. The slot's earlier \
-            mapping is replaced; one modulator doesn't map one parameter twice. A modulator in \
-            Remote Control can't map a parameter another modulator in Remote Control holds. The \
-            mapping is saved with the set, goes with its target when that is deleted, and shows \
-            in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).",
+        description: "Maps one of a modulator's slots (`slot`, 0 to 7; the Expression Control's are 0 to 4) \
+            to a parameter, as the slot's Map button and a click on the parameter's control do. \
+            `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a \
+            parameter of any device on any track, but not a parameter of the modulator itself. \
+            The slot's earlier mapping is replaced; one modulator doesn't map one parameter \
+            twice. A modulator in Remote Control can't map a parameter another modulator in \
+            Remote Control holds. A modulator driven by audio, notes or MIDI (the Envelope Follower, \
+            Envelope MIDI, Shaper MIDI and Expression Control) doesn't map another modulator's parameters, nor \
+            one on a track that feeds its own track, which would make the two tracks wait on each \
+            other. The mapping is saved with the set, goes with its target when that is deleted, \
+            and shows in the `mappings` field of the query tool's `device`. One undo step (Map \
+            Modulator).",
     },
     Entry {
         id: "modulator.unmap",
@@ -1769,7 +1899,8 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap \
+        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Expression Control's \
+            are 0 to 4), as its Unmap \
             button does: the parameter plays its own value again from the next frame. A slot \
             with no mapping stays as it is. One undo step (Unmap Modulator).",
     },
@@ -1780,12 +1911,13 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
-            does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
-            `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
-            place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \
-            there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit \
-            Shape).",
+        description: "Replaces the breakpoint shape of a Shaper or a Shaper MIDI, as every edit \
+            of its display does (adding, moving, bending or deleting a breakpoint, making one \
+            the sustain breakpoint, Clear and the six presets). `points` lists up to 64 \
+            breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the \
+            output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 \
+            straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in \
+            a shape). An empty list outputs 0. One undo step (Edit Shape).",
     },
     Entry {
         id: "device.compare_switch",
@@ -1904,7 +2036,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
+        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
     },
     Entry {
         id: "device.set_layer_media",
@@ -1914,6 +2046,33 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.",
+    },
+    Entry {
+        id: "device.add_sample_edit",
+        action: Action::Apply("add_sample_edit"),
+        label: "Edit Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds one edit to the end of a sample's edit list without looking at the audio: `edit.kind` is `trim`, `cut`, `reverse`, `fade_in`, `fade_out` or `normalize`, and `edit.range` (`from` to `to`, in frames of the sample as the earlier edits left it) is its selection, left out for the whole sample (Trim and Cut need one). With a `layer` the edit joins that layer's list and its length and markers follow the audio; with none it joins the sample of the device itself, which this command doesn't check against the sample's length. The source file is never written. One undo step named for the edit. `device.edit_sample` checks the selection against the sample.",
+    },
+    Entry {
+        id: "device.clear_sample_edits",
+        action: Action::Apply("clear_sample_edits"),
+        label: "Revert Edits",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties a sample's edit list, a layer's (`layer`) or the device's own (none given). A layer's sample is `length` frames long again, the unedited sample's length at its own rate, and its markers keep their share of it. One undo step. `device.edit_sample` with `revert` reads the length itself.",
+    },
+    Entry {
+        id: "device.set_processed_layer_sample",
+        action: Action::Apply("set_processed_layer_sample"),
+        label: "Replace With Processed Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a layer's sample with a processed copy of its edited sample that is already in the media store (`media`, `length` frames at its own rate): the copy holds the edits, so the layer's list empties. `crop` is the span of the edited sample the copy keeps, which moves the markers as a Trim does; with none the markers stay where they are. One undo step, named Crop with a `crop` and Reverse without. `device.crop_sample` and `device.reverse_sample` write the copy.",
     },
     Entry {
         id: "device.distribute_layers",
@@ -1957,7 +2116,7 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the routing of a device that works with hardware outside the \
-            computer (the Hardware Instrument), as the choosers in its title bar do; give only \
+            computer (the External Instrument), as the choosers in its title bar do; give only \
             the settings to change. `midi_to` is `{ \"type\": \"none\" }` (No Output, a new \
             device's) or `{ \"type\": \"port\", \"name\": ... }` with a MIDI output port's \
             name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI \
@@ -1971,6 +2130,20 @@ const ENTRIES: &[Entry] = &[
             send the converted value. Each change recompiles the song's audio, so these are \
             settings, not parameters. Read them back in the query tool's `device` result, \
             under `external`.",
+    },
+    Entry {
+        id: "device.set_midi_sidechain_source",
+        action: Action::Apply("set_midi_sidechain_source"),
+        label: "Set MIDI Sidechain Source",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI \
+            source chooser in its sidechain parameters does: `track` is a MIDI track (the \
+            device's own track too), or left out for No Input, a new device's. The device \
+            hears the notes and channel messages that track's clips and input play, before \
+            its own devices change them; the track still plays as before. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
     },
     Entry {
         id: "device.set_sidechain_enabled",

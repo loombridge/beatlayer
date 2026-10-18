@@ -117,7 +117,13 @@ publisher = "Loombridge"
 description = "An open-source digital audio workstation."
 copyright = "Copyright © 2026 the Beatlayer contributors. Licensed under GPL-3.0-or-later."
 category = "Music"
-binaries = [{ path = "beatlayer", main = true }, { path = "bl-cli" }]
+# beatlayer-scan is the plug-in scanner's child process (crates/plugin-host),
+# which the app looks for beside its own executable.
+binaries = [
+    { path = "beatlayer", main = true },
+    { path = "bl-cli" },
+    { path = "beatlayer-scan" },
+]
 icons = [
     "packaging/icons/icon.icns",
     "packaging/icons/icon.ico",

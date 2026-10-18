@@ -1,4 +1,4 @@
-//! The Hardware Instrument (WP-5.34; the external devices spec, R9 to R13):
+//! The External Instrument (WP-5.34; the external devices spec, R9 to R13):
 //! an instrument that makes no sound of its own. It sends the track's notes
 //! to a MIDI output port, and brings the synthesiser's sound back from the
 //! audio interface's inputs through a Gain.
@@ -14,19 +14,19 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// The Hardware Instrument's type id.
+/// The External Instrument's type id.
 pub const HARDWARE_INSTRUMENT: &str = "beatlayer.hardware_instrument";
 
 /// The level of the sound coming back.
 pub const GAIN: ParamId = ParamId(0);
 
-/// The Hardware Instrument's type: an instrument with routing to external
+/// The External Instrument's type: an instrument with routing to external
 /// hardware.
 #[must_use]
 pub fn hardware_instrument_type() -> DeviceType {
     DeviceType::native(
         HARDWARE_INSTRUMENT,
-        "Hardware Instrument",
+        "External Instrument",
         DeviceRole::Instrument,
     )
     .with_external()
@@ -37,7 +37,7 @@ pub fn hardware_instrument_type() -> DeviceType {
     ]))
 }
 
-/// Adds the Hardware Instrument to `registry`.
+/// Adds the External Instrument to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, hardware_instrument_type(), |_, _| Hardware);
 }

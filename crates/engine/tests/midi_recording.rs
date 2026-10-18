@@ -2,8 +2,8 @@
 //! are copied into a ring, stamped with the song frame they landed on, from
 //! the frame playback starts on (after any count-in) to the end of the take.
 //!
-//! - Notes played during a take are in the ring on the exact sample the
-//!   input placed them on, whether or not the track monitors.
+//! - Notes and controllers played during a take are in the ring on the exact
+//!   sample the input placed them on, whether or not the track monitors.
 //! - A count-in of one bar delays the take by a bar, and notes played during
 //!   it are not recorded.
 //! - Stopping during the count-in records nothing.
@@ -121,9 +121,11 @@ fn drain(ring: &mut Consumer<RecordedMidi>) -> Vec<(i64, MidiMessage)> {
     messages
 }
 
-// Spec: midi-io R12, R15 (WP-2.14). A note lands in the block after the one
-// it arrived in, on the sample its time gives, and the take stamps it with
-// the song frame: the sample it was played on, to the sample.
+// Spec: midi-io R12, R15 (WP-2.14); midi-controller-data R10. A note lands in
+// the block after the one it arrived in, on the sample its time gives, and
+// the take stamps it with the song frame: the sample it was played on, to
+// the sample. A controller is stamped the same way, and a message no clip
+// keeps, such as All Notes Off, is not recorded.
 #[test]
 fn notes_played_during_a_take_are_on_their_exact_samples() {
     let mut midi = Midi::new(|_| {});
@@ -141,8 +143,10 @@ fn notes_played_during_a_take_are_on_their_exact_samples() {
         MidiMessage::note_off(0, 60),
     );
     let controller = MidiMessage::from_bytes(&[0xB0, 1, 64]).unwrap();
+    let all_notes_off = MidiMessage::from_bytes(&[0xB0, 123, 0]).unwrap();
     midi.block();
     midi.send(0, 70, controller);
+    midi.send(0, 80, all_notes_off);
     midi.send(1, 100, on);
     midi.block();
     midi.send(2, 40, off);
@@ -166,13 +170,90 @@ fn notes_played_during_a_take_are_on_their_exact_samples() {
     assert_eq!(
         drain(&mut ring),
         vec![
+            // Arrived 70 frames into block 0, placed in block 1.
+            (48_000 + BLOCK as i64 + 70, controller),
             // Arrived 100 frames into block 1, placed in block 2.
             (48_000 + 2 * BLOCK as i64 + 100, on),
             // Arrived 40 frames into block 2, placed in block 3.
             (48_000 + 3 * BLOCK as i64 + 40, off),
         ],
-        "the notes, not the controller"
+        "the notes and the controller, not All Notes Off"
     );
+}
+
+// Spec: midi-controller-data R10. Control changes, pitch bend, channel
+// pressure and polyphonic pressure on any channel go into the ring beside
+// the notes, with the channel they came on, whether the track monitors or
+// not; every block runs under the allocation trap.
+#[test]
+fn every_kind_of_controller_goes_into_the_ring_whatever_its_channel() {
+    let mut midi = Midi::new(|_| {});
+    let (mut ring, _) = midi.record(64);
+    midi.rig
+        .sender
+        .transport(TransportCommand::SetRecording(true));
+    midi.rig.sender.transport(TransportCommand::Play);
+    let sent: Vec<MidiMessage> = [
+        &[0xB0, 1, 10][..],
+        &[0xB1, 74, 20],
+        &[0xE0, 0x00, 0x50],
+        &[0xE5, 0x10, 0x20],
+        &[0xD0, 30],
+        &[0xDF, 40],
+        &[0xA0, 60, 50],
+        &[0xA3, 61, 60],
+    ]
+    .iter()
+    .map(|bytes| MidiMessage::from_bytes(bytes).unwrap())
+    .collect();
+    midi.block();
+    for (i, message) in sent.iter().enumerate() {
+        midi.send(0, 10 * (i as u64 + 1), *message);
+    }
+    for _ in 0..3 {
+        midi.block();
+    }
+    midi.rig.sender.transport(TransportCommand::Stop);
+    midi.block();
+    midi.rig.collector.collect();
+    let heard: Vec<MidiMessage> = drain(&mut ring).into_iter().map(|(_, m)| m).collect();
+    assert_eq!(heard, sent);
+}
+
+// Spec: midi-controller-data R10. A control change for a controller no clip
+// holds (bank select, the channel mode messages) and a program change are
+// not recorded.
+#[test]
+fn messages_no_clip_keeps_are_left_out_of_the_ring() {
+    let mut midi = Midi::new(|_| {});
+    let (mut ring, _) = midi.record(64);
+    midi.rig
+        .sender
+        .transport(TransportCommand::SetRecording(true));
+    midi.rig.sender.transport(TransportCommand::Play);
+    midi.block();
+    for (i, bytes) in [
+        &[0xB0, 0, 1][..],
+        &[0xB0, 32, 1],
+        &[0xB0, 120, 0],
+        &[0xC0, 5],
+    ]
+    .iter()
+    .enumerate()
+    {
+        midi.send(
+            0,
+            10 * (i as u64 + 1),
+            MidiMessage::from_bytes(bytes).unwrap(),
+        );
+    }
+    for _ in 0..3 {
+        midi.block();
+    }
+    midi.rig.sender.transport(TransportCommand::Stop);
+    midi.block();
+    midi.rig.collector.collect();
+    assert_eq!(drain(&mut ring), vec![]);
 }
 
 // Spec: metronome R5 (WP-2.14). Recording starts when the count-in ends, so

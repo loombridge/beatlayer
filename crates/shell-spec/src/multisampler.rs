@@ -1,7 +1,11 @@
-//! The multisampler's commands that run on the shell (WP-5.13; the
-//! multisampler spec, R3, R7, R10, R11, R13, R20, R30): adding layers from
-//! files, changing their settings with Snap, replacing a layer's sample,
-//! normalising, and what the multisampler's views show.
+//! The multisampler's commands that run on the shell (WP-5.13 to WP-5.15;
+//! the multisampler spec, R3, R7, R10, R11, R13, R20, R30, R47): adding
+//! layers from files, importing an SFZ file, changing their settings with
+//! Snap, replacing a layer's sample, normalising, and what the
+//! multisampler's views show; and the commands that edit the samples of both
+//! sampler devices (WP-5.15, R55 to R63): the edit list, Crop and Reverse as
+//! processed files, the conversions between Simpler and the multisampler,
+//! and auditioning from a point.
 //!
 //! The document's own layer commands (`device.insert_layers`,
 //! `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`,
@@ -14,14 +18,18 @@
 
 use bl_commands::Context::DeviceView;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
+use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode};
 use bl_model::{
-    DeviceId, EditorSize, LayerId, LayerSettings, MultisamplerView, SamplerTab, ZoneKind,
+    ContentHash, DeviceId, DeviceLayout, EditorSize, LayerId, LayerSettings, MultisamplerView,
+    SampleEdit, SampleEditKind, SampleRange, SamplerTab, TrackId, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// `device.add_layers`: add layers from files (R3).
 pub const ADD_LAYERS: &str = "device.add_layers";
+/// `device.import_sfz`: import an SFZ file as a multisampler's layers (R47).
+pub const IMPORT_SFZ: &str = "device.import_sfz";
 /// `device.set_layer`: change layers' settings, snapping markers while
 /// Snap is on (R20).
 pub const SET_LAYER: &str = "device.set_layer";
@@ -40,13 +48,33 @@ pub const SELECT_LAYERS: &str = "device.select_layers";
 /// (R10).
 pub const HOT_SWAP_LAYER: &str = "device.hot_swap_layer";
 
+/// `device.edit_sample`: add an edit to a sample's list, or revert them
+/// (R55, R58).
+pub const EDIT_SAMPLE: &str = "device.edit_sample";
+/// `device.crop_sample`: write the region as a processed copy (R59).
+pub const CROP_SAMPLE: &str = "device.crop_sample";
+/// `device.reverse_sample`: write the sample reversed as a processed copy
+/// (R59).
+pub const REVERSE_SAMPLE: &str = "device.reverse_sample";
+/// `device.convert`: convert Simpler and the multisampler into each other
+/// (R62).
+pub const CONVERT: &str = "device.convert";
+/// `device.audition_sample`: play a sample from a point through its device
+/// (R54).
+pub const AUDITION_SAMPLE: &str = "device.audition_sample";
+
 /// The undo step's name for adding layers from files: Live's name for
 /// dropping samples on its layer list is to observe.
 pub const ADD_LAYERS_STEP: &str = "Add Samples";
 
+/// The undo step's name for importing an SFZ file (to observe: Live has no
+/// such import).
+pub const IMPORT_SFZ_STEP: &str = "Import SFZ";
+
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
     ADD_LAYERS,
+    IMPORT_SFZ,
     SET_LAYER,
     SNAP_LAYER_MARKERS,
     SET_LAYER_SAMPLE,
@@ -54,7 +82,45 @@ pub const IDS: &[&str] = &[
     SET_VIEW,
     SELECT_LAYERS,
     HOT_SWAP_LAYER,
+    EDIT_SAMPLE,
+    CROP_SAMPLE,
+    REVERSE_SAMPLE,
+    CONVERT,
+    AUDITION_SAMPLE,
 ];
+
+/// The multisampler's layout as `tab` shows it (R1): its layout holds one
+/// group of nodes for each tab after Zone, in the tabs' order, and the tab
+/// shows its own, padded with an empty band to the width of the widest tab,
+/// so the device is as wide whichever tab shows. Any other layout is
+/// returned as it is.
+#[must_use]
+pub fn tab_layout(layout: &DeviceLayout, tab: SamplerTab) -> DeviceLayout {
+    let LayoutNode::Row(groups) = &layout.root else {
+        return layout.clone();
+    };
+    let index = match tab {
+        SamplerTab::Sample => 0,
+        SamplerTab::PitchOsc => 1,
+        SamplerTab::FilterGlobal => 2,
+        SamplerTab::Modulation => 3,
+        SamplerTab::Midi => 4,
+    };
+    let Some(group) = groups.get(index) else {
+        return layout.clone();
+    };
+    let width = |node: &LayoutNode| DeviceLayout::new(node.clone()).docked_size().width;
+    let widest = groups.iter().map(width).fold(0.0, f32::max);
+    DeviceLayout::new(LayoutNode::Row(vec![
+        group.clone(),
+        LayoutNode::Band(ControlBand {
+            width: (widest - width(group)).max(0.0),
+            height: BODY_HEIGHT,
+            controls: Vec::new(),
+            slots: None,
+        }),
+    ]))
+}
 
 /// Whether `id` is one of these commands.
 #[must_use]
@@ -75,6 +141,14 @@ pub struct AddLayersArgs {
     /// (or at the end with none selected) if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<usize>,
+    /// Puts the first straight after this layer, instead of at `index` or
+    /// after the selected ones (R61).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<LayerId>,
+    /// Gives each new layer this layer's key, velocity and sample select
+    /// zones with their fades, so the two sound together (R61).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub like: Option<LayerId>,
 }
 
 /// What `device.add_layers` returns.
@@ -86,6 +160,61 @@ pub struct LayersAdded {
     pub layers: Vec<LayerId>,
     /// The files that weren't added, each with why.
     pub skipped: Vec<String>,
+}
+
+/// Arguments of `device.import_sfz`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportSfzArgs {
+    /// The `.sfz` file.
+    pub path: String,
+    /// A multisampler to add the regions to as layers, at the end of its
+    /// list. Left out, the import makes a multisampler: on `track`, or on a
+    /// new MIDI track below the last track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The MIDI track to put a new multisampler on, after its other devices.
+    /// Ignored with `device`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+}
+
+/// An opcode or header the import left unread or settled device-wide, with
+/// how many regions use it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzCount {
+    /// The opcode, or the header in angle brackets.
+    pub name: String,
+    /// How many regions use it.
+    pub regions: usize,
+}
+
+/// A region the import left out.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzLeftOut {
+    /// Its place among the file's regions, from 1.
+    pub region: usize,
+    /// Its sample as the file names it.
+    pub sample: String,
+    /// Why.
+    pub reason: String,
+}
+
+/// What `device.import_sfz` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SfzImported {
+    /// The multisampler.
+    pub device: DeviceId,
+    /// Its track.
+    pub track: TrackId,
+    /// The new layers, in list order: now the selected layers.
+    pub layers: Vec<LayerId>,
+    /// Opcodes and headers left unread.
+    pub unread: Vec<SfzCount>,
+    /// Opcodes most regions agree on, which set the device's own controls.
+    pub settled: Vec<SfzCount>,
+    /// Regions left out, each with why.
+    pub left_out: Vec<SfzLeftOut>,
 }
 
 /// Arguments of `device.set_layer`.
@@ -247,6 +376,134 @@ pub struct HotSwapLayerArgs {
     pub on: Option<bool>,
 }
 
+/// Arguments of `device.edit_sample`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditSampleArgs {
+    /// The sampler device; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A multisampler's layer; its first selected layer if left out.
+    /// Simpler has one sample and no layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+    /// What the edit does. Leave it out with `revert`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<SampleEditKind>,
+    /// The selection it acts on, in frames of the sample as the earlier
+    /// edits left it, at its own rate. Left out it acts on the whole
+    /// sample; Trim and Cut need one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<SampleRange>,
+    /// Clears the sample's edit list instead of adding to it.
+    #[serde(default)]
+    pub revert: bool,
+}
+
+/// What `device.edit_sample` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SampleEdited {
+    /// The sampler device.
+    pub device: DeviceId,
+    /// The layer edited; none for Simpler's sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+    /// The sample's edit list now.
+    pub edits: Vec<SampleEdit>,
+    /// The edited sample's length in frames at its own rate.
+    pub length: u64,
+}
+
+/// Arguments of `device.crop_sample` and `device.reverse_sample`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessSampleArgs {
+    /// The sampler device; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A multisampler's layer; its first selected layer if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+}
+
+/// What `device.crop_sample` and `device.reverse_sample` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SampleProcessed {
+    /// The sampler device.
+    pub device: DeviceId,
+    /// The layer; none for Simpler's sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+    /// The processed copy, now the sample's media.
+    pub media: ContentHash,
+    /// Where the copy is in the project folder.
+    pub path: String,
+    /// Its length in frames at its own rate.
+    pub length: u64,
+}
+
+/// What `device.convert` makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvertTo {
+    /// Simpler, from a multisampler.
+    Snapshot,
+    /// A multisampler, from Simpler.
+    Multisampler,
+}
+
+/// Arguments of `device.convert`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConvertArgs {
+    /// The sampler device; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// What to convert it to.
+    pub to: ConvertTo,
+}
+
+/// What `device.convert` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Converted {
+    /// The new device, in the old one's place.
+    pub device: DeviceId,
+    /// What it is.
+    pub to: ConvertTo,
+    /// What of the old device didn't carry over, each in a sentence.
+    pub dropped: Vec<String>,
+}
+
+/// Arguments of `device.audition_sample`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AuditionArgs {
+    /// The sampler device; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A multisampler's layer; its first selected layer if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+    /// Where in the sample to start, as a share of its length from 0 to 1.
+    #[serde(default)]
+    pub from: f64,
+    /// Whether the button goes down (`true`, the default) or comes up.
+    #[serde(default = "yes")]
+    pub down: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// What `device.audition_sample` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Auditioned {
+    /// Whether the audio engine took it: it is off, or has no device, when
+    /// this is `false`, and nothing plays.
+    pub sent: bool,
+}
+
 /// A multisampler's views and selection, as `device_view.state` reports
 /// them (R30).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -274,8 +531,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Adds audio files to a multisampler as layers, as dropping them on the zone \
                  editor's layer list does: each file is imported into the set's media, and \
-                 gets one layer after the selected layers (or at the end), or at `index`, with \
-                 every zone whole and unfaded, its Root Key from the file's sampler metadata \
+                 gets one layer after the selected layers (or at the end), or at `index`, or \
+                 straight after the layer `after`, with every zone whole and unfaded (or \
+                 copied from the layer `like`, so the new layers sound together with it), its Root Key from the file's sampler metadata \
                  (C3 where it has none), Sample Start and End at the file's ends, and its loop \
                  points from the file's first loop with Sustain Mode left off. The new layers \
                  become the selected ones. A file that isn't audio is skipped and named in \
@@ -285,6 +543,29 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<AddLayersArgs>()
             .result::<LayersAdded>(),
+    )?;
+    registry.register(
+        CommandSpec::new(IMPORT_SFZ, "Import SFZ")
+            .description(
+                "Imports an SFZ multisample instrument, the open text format, as a \
+                 multisampler: each region becomes a layer (its sample, key and velocity \
+                 zones with their crossfades as fades, Root Key, tuning, Volume, Pan, start \
+                 and end points, loop and loop mode), and the device-wide settings most \
+                 regions agree on (the volume, filter, filter and pitch envelopes, Vel > Vol, \
+                 Pitch Bend Range, reverse, the fade law) set the new device's controls. \
+                 Sequences (`seq_length`) turn Round Robin on in Forward mode, random windows \
+                 (`lorand`) in Random mode. With `device`, a multisampler, only the layers are \
+                 added, at the end of its list; otherwise a multisampler is made on `track`, \
+                 or on a new MIDI track below the last. The samples join the set's media where \
+                 they lie. Regions whose sample is missing or isn't audio, or whose `trigger` \
+                 isn't `attack`, are left out and named in `left_out`; opcodes the import \
+                 doesn't read are listed in `unread`. A file with no region left changes \
+                 nothing. One undo step. It reads files outside the set.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<ImportSfzArgs>()
+            .result::<SfzImported>(),
     )?;
     registry.register(
         CommandSpec::new(SET_LAYER, "Change Sample Settings")
@@ -387,6 +668,106 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<HotSwapLayerArgs>()
             .result::<MultisamplerState>(),
+    )?;
+    register_sample_edits(registry)
+}
+
+/// The commands that edit the samples of Simpler and the multisampler
+/// (WP-5.15).
+fn register_sample_edits(registry: &mut Registry) -> Result<(), RegisterError> {
+    registry.register(
+        CommandSpec::new(EDIT_SAMPLE, "Edit Sample")
+            .description(
+                "Edits a sampler's sample without writing a file, as the sample display's \
+                 context menu does: `kind` is `trim` (keep the selection), `cut` (remove it \
+                 and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain \
+                 over the selection) or `normalize` (scale the selection so its largest \
+                 magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames \
+                 of the sample as the earlier edits left it, at its own rate; left out it is \
+                 the whole sample, except for trim and cut, which need one. The edit joins the \
+                 sample's list, kept with the set and applied to the file's audio in order; the \
+                 file is never written. A multisampler's `layer` (its first selected layer if \
+                 left out) keeps its markers on the audio they marked: those after a cut move \
+                 earlier by its length, those inside it to its start, and those outside a trim \
+                 to its nearer end; Simpler's Start, Length and Loop are shares of the sample \
+                 and stay. `revert: true` clears the list instead. One undo step named for the \
+                 edit. The list reads back as `sample_edits` in the query tool's `device` \
+                 result for Simpler and as `edits` in each layer of `layers` for the \
+                 multisampler.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<EditSampleArgs>()
+            .result::<SampleEdited>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CROP_SAMPLE, "Crop Sample")
+            .description(
+                "Removes the sample outside Simpler's region, or outside a multisampler \
+                 layer's Sample Start and Sample End, by writing a processed copy: a WAV with \
+                 the sample's edits applied, at its rate and channels, in the project's \
+                 `Samples/Processed/Crop/` folder. The device or layer then plays the copy, \
+                 with its edit list empty and the region the whole of it, as one undo step; \
+                 the original file stays as it was. A set that has never been saved has no \
+                 project folder, and the command is refused with a message in the Status Bar. \
+                 The copy is the sample's new media, which reads back in the device's `media` \
+                 or the layer's `media`.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ProcessSampleArgs>()
+            .result::<SampleProcessed>(),
+    )?;
+    registry.register(
+        CommandSpec::new(REVERSE_SAMPLE, "Reverse Sample")
+            .description(
+                "Reverses the whole sample by writing a processed copy: a WAV with the sample's \
+                 edits applied and then reversed, at its rate and channels, in the project's \
+                 `Samples/Processed/Reverse/` folder. The device or layer then plays the copy \
+                 with its edit list empty and its markers where they were, as one undo step; \
+                 the original file stays as it was. A set that has never been saved is refused \
+                 with a message in the Status Bar. The copy reads back as the device's or \
+                 layer's `media`. `device.edit_sample` with `kind: reverse` reverses without a \
+                 file.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ProcessSampleArgs>()
+            .result::<SampleProcessed>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CONVERT, "Convert Sampler")
+            .description(
+                "Converts Simpler to a multisampler (`to: multisampler`) or a multisampler to \
+                 Simpler (`to: snapshot`), keeping the device's place in its chain, its name, \
+                 its on or off state and its sample, as one undo step. Simpler becomes one \
+                 layer with every zone whole, its region as Sample Start and Sample End, its \
+                 loop as a sustain loop and its edits, with its envelope, volume and pan as the \
+                 multisampler's; a multisampler becomes Simpler in Classic mode playing its \
+                 first layer. Slicing and One-Shot, and layers past the first, don't carry \
+                 over, and the result's `dropped` names what didn't. The new device has a new \
+                 ID, which the result gives.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ConvertArgs>()
+            .result::<Converted>(),
+    )?;
+    registry.register(
+        CommandSpec::new(AUDITION_SAMPLE, "Audition Sample")
+            .description(
+                "Plays a sampler's sample from a point through the device, as a click in its \
+                 display does: `from` is the start as a share of the sample from 0 to 1, \
+                 `layer` a multisampler's layer (its first selected layer if left out). The \
+                 voice plays at the sample's root pitch (C3 for Simpler, the layer's root key \
+                 for the multisampler) through the device's settings, and goes on until the \
+                 same command comes with `down: false`, as the button's release. It needs the \
+                 audio engine on; `sent` says whether it was. It changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<AuditionArgs>()
+            .result::<Auditioned>(),
     )?;
     Ok(())
 }

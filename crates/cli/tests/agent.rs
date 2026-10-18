@@ -805,7 +805,7 @@ impl EngineHost {
     }
 }
 
-/// An agent reads the Contour's spectrum and the Squeeze's gain reduction
+/// An agent reads the EQ Eight's spectrum and the Compressor's gain reduction
 /// by their device IDs, as the engine published them after the last block,
 /// at any block size (the device framework spec, R26 and R28).
 #[test]
@@ -827,14 +827,14 @@ fn an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id
                 { "command": "track.create",
                   "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
                 device(0, "Tone", bl_engine::nodes::TEST_TONE),
-                device(1, "Contour", bl_devices::eq::EQ),
-                device(2, "Squeeze", bl_devices::compressor::COMPRESSOR),
+                device(1, "EQ Eight", bl_devices::eq::EQ),
+                device(2, "Compressor", bl_devices::compressor::COMPRESSOR),
                 { "command": "device.set_param",
                   "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
                 { "command": "device.set_param",
                   "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
                 { "command": "device.set_param",
-                  "args": { "device": {"$ref": "Squeeze"}, "param": 0, "value": -30.0 } },
+                  "args": { "device": {"$ref": "Compressor"}, "param": 0, "value": -30.0 } },
             ] }),
         );
         let ids: Vec<_> = {
@@ -1686,7 +1686,7 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
         json!({ "commands": [
             { "command": "device.add", "args": { "device": {
                 "kind": { "native": { "device_type": "beatlayer.mosaic" } },
-                "name": "Mosaic", "role": "instrument" } } },
+                "name": "Sampler", "role": "instrument" } } },
         ] }),
     );
     let device = {
@@ -2223,7 +2223,7 @@ fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
 }
 
 // Spec: auto-filter R15, device-framework R14 (WP-5.20): an agent inserts
-// Sweep by its type, sets its parameters by ID, including the two menu
+// Auto Filter by its type, sets its parameters by ID, including the two menu
 // options, and reads every one back with its descriptor.
 #[test]
 fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -2238,15 +2238,15 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Sweep"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Auto Filter"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Sweep", "commands": [
+        json!({ "label": "Add Auto Filter", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Sweep"}, "name": "Sweep",
+                        "device": { "id": {"$new": "Auto Filter"}, "name": "Auto Filter",
                                     "kind": { "native": { "device_type": AUTO_FILTER } },
                                     "enabled": true, "params": [] } } },
             set(TYPE, 9.0),
@@ -2256,7 +2256,7 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
             set(HI_QUALITY, 1.0),
         ] }),
     );
-    let device = reply["ids"]["Sweep"].clone();
+    let device = reply["ids"]["Auto Filter"].clone();
     let read = call(
         &mut client,
         "run",
@@ -2292,9 +2292,103 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
-// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
+// Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
+// agent inserts Shifter by its type with its MIDI sidechain, sets its
+// parameters by ID, points its MIDI source at a MIDI track and reads both
+// back; the source goes when that track does.
+#[test]
+fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_track() {
+    use bl_devices::shifter::{COARSE, MODE, PITCH_SOURCE, SHIFT, SHIFTER};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("veer-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Shifter", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": SHIFTER } },
+                                    "name": "Shifter", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Shifter", "commands": [
+            set(MODE, 1.0),
+            set(SHIFT, 123.0),
+            set(COARSE, -7.0),
+            set(PITCH_SOURCE, 1.0),
+            { "command": "device.set_midi_sidechain_source",
+              "args": { "device": device, "track": keys } },
+        ] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 34, "every parameter is listed");
+    let value = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))["value"]
+            .clone()
+    };
+    assert_eq!(
+        [MODE, SHIFT, COARSE, PITCH_SOURCE].map(value),
+        [json!(1.0), json!(123.0), json!(-7.0), json!(1.0)]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+
+    // The source reads back from the device, and goes with its track.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+    // An audio track isn't a source.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                    "args": { "device": device, "track": audio } }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
+}
+
+// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Drum Sampler,
 // reads its parameters with its two menu options, switches one by ID, and
-// swaps it to Snapshot, by command ID.
+// swaps it to Simpler, by command ID.
 #[test]
 fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id() {
     use bl_devices::drum_sampler::{ENV_FOLLOWS_PITCH, PER_NOTE_BEND, drum_sampler_type};
@@ -2383,11 +2477,11 @@ fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id
         .iter()
         .find(|p| p["name"] == "Mode")
         .unwrap();
-    assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
+    assert_eq!(mode["value"], json!(1.0), "Simpler in One-Shot mode");
 }
 
 // Spec: beat-repeat R14, device-framework R14 (WP-5.26): an agent inserts
-// Stutter by its type, sets its parameters by ID and reads every one back
+// Beat Repeat by its type, sets its parameters by ID and reads every one back
 // with its descriptor.
 #[test]
 fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -2400,15 +2494,15 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Stutter"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Beat Repeat"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Stutter", "commands": [
+        json!({ "label": "Add Beat Repeat", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Stutter"}, "name": "Stutter",
+                        "device": { "id": {"$new": "Beat Repeat"}, "name": "Beat Repeat",
                                     "kind": { "native": { "device_type": BEAT_REPEAT } },
                                     "enabled": true, "params": [] } } },
             set(INTERVAL, 3.0),
@@ -2418,7 +2512,7 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
             set(REPEAT, 1.0),
         ] }),
     );
-    let device = reply["ids"]["Stutter"].clone();
+    let device = reply["ids"]["Beat Repeat"].clone();
     let read = call(
         &mut client,
         "run",
@@ -2447,7 +2541,7 @@ fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id(
 // Spec: filter-delay R9, grain-delay R8, alignment-delay R8 (WP-5.25): an
 // agent inserts the three delays by command ID, sets parameters by ID,
 // reads them back with their descriptors, saves the set and reopens it
-// with every value, and moves Scatter's X–Y axis as one undo step.
+// with every value, and moves Grain Delay's X–Y axis as one undo step.
 #[test]
 fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
     use bl_devices::alignment_delay::{self, ALIGNMENT_DELAY};
@@ -2579,7 +2673,7 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
 }
 
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
-// (WP-5.24): an agent adds Degrade, Crush and Wax, sets a parameter of each
+// (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved
 // and reopened.
 #[test]
@@ -2827,6 +2921,562 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
     );
 }
 
+/// An agent imports an SFZ instrument by path, then reads its layers, its
+/// device settings and what the import left unread back (WP-5.14; the
+/// multisampler spec, R47 and R53).
+#[test]
+fn an_agent_imports_an_sfz_by_path() {
+    let sfz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/sfz/Sine Bank.sfz")
+        .to_string_lossy()
+        .into_owned();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let imported = call(
+        &mut client,
+        "run",
+        json!({ "label": "Import the kit", "commands": [
+            { "command": "device.import_sfz", "args": { "path": sfz } },
+        ] }),
+    );
+    let result = &imported["results"][0]["result"];
+    assert_eq!(result["layers"].as_array().unwrap().len(), 5);
+    assert_eq!(result["left_out"][0]["sample"], "missing.wav");
+    assert_eq!(result["unread"][0]["name"], "group");
+    let device = result["device"].clone();
+    // The layers read back, in the order a round robin takes them, with the
+    // zones the file gave.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device) }),
+    );
+    let layers = &found["layers"];
+    assert_eq!(layers["count"], 5);
+    let items = layers["list"]["items"].as_array().unwrap();
+    let names: Vec<&str> = items.iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["low_soft", "low_hard", "mid_a", "mid_b", "high"]);
+    assert_eq!(items[0]["key"]["low"], 36);
+    assert_eq!(items[0]["velocity"]["high"], 63);
+    assert_eq!(items[2]["key"]["fade_high"], 3);
+    assert_eq!(items[4]["sustain"], "loop");
+    // Round Robin is on in Forward mode, and Vel > Vol is the file's 0.
+    let parameters = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.parameters", "args": { "device": device } },
+        ] }),
+    );
+    let params = parameters["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let value = |name: &str| {
+        params
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    assert_eq!(value("Round Robin"), 1.0);
+    assert_eq!(value("Vel > Vol"), 0.0);
+    assert_eq!(value("Env Release"), 50.0);
+}
+
+/// Spec: warp-modes R1 to R3, R12; warping R14. An agent sets a clip's warp
+/// mode and controls and its RAM and HiQ switches by ID and reads each back
+/// in the query tool's `clip`; a loop can't be switched on for an unwarped
+/// clip, and unwarping a looped one switches the loop off.
+#[test]
+fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Loop"}, "kind": "audio", "name": "Loop", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Loop")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Break"}, "name": "Break", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "audio": { "media": "ab".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(steps(client), before + 1, "{command} is one undo step");
+        audio(client)
+    };
+    let refused = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap();
+        assert!(result.ok().is_err(), "{command} {args}");
+        assert_eq!(steps(client), before, "a refused {command} changes nothing");
+    };
+
+    // A new clip has the table's defaults, which are not saved.
+    let new = audio(&mut client);
+    for key in ["warp_mode", "warp_settings", "ram", "high_quality"] {
+        assert!(new.get(key).is_none(), "{key} in a new clip: {new}");
+    }
+    let mode = run(
+        &mut client,
+        "clip.set_warp_mode",
+        json!({ "clip": clip, "mode": "re_pitch" }),
+    );
+    assert_eq!(mode["warp_mode"], "re_pitch");
+    let settings = run(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip,
+                "beats": { "preserve": "eighth", "transient_loop_mode": "loop_off",
+                           "transient_envelope": 40 },
+                "texture": { "flux": 10.0 },
+                "complex_pro": { "formants": 20.0, "envelope": 200 } }),
+    );
+    assert_eq!(
+        settings["warp_settings"],
+        json!({
+            "beats": { "preserve": "eighth", "transient_loop_mode": "loop_off",
+                       "transient_envelope": 40 },
+            "texture": { "flux": 10.0 },
+            "complex_pro": { "formants": 20.0, "envelope": 200 },
+        })
+    );
+    // A setting out of range changes nothing, and so does naming none.
+    refused(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip, "tones": { "grain_size": 101.0 } }),
+    );
+    refused(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip }),
+    );
+    let ram = run(
+        &mut client,
+        "clip.set_ram_mode",
+        json!({ "clip": clip, "ram": true }),
+    );
+    assert_eq!(ram["ram"], true);
+    let hiq = run(
+        &mut client,
+        "clip.set_high_quality",
+        json!({ "clip": clip, "high_quality": false }),
+    );
+    assert_eq!(hiq["high_quality"], false);
+    // Each reads back as it was set after the others.
+    let all = audio(&mut client);
+    assert_eq!(all["warp_mode"], "re_pitch");
+    assert_eq!(all["ram"], true);
+
+    // Only a warped clip loops.
+    refused(
+        &mut client,
+        "clip.set_loop_enabled",
+        json!({ "clip": clip, "enabled": true }),
+    );
+    run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    let looped = run(
+        &mut client,
+        "clip.set_loop_enabled",
+        json!({ "clip": clip, "enabled": true }),
+    );
+    assert_eq!(looped["looping"], true);
+    let unwarped = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": false }),
+    );
+    assert!(
+        unwarped.get("looping").is_none(),
+        "unwarping switches the loop off"
+    );
+}
+
+// Spec: multisampler R63. An agent edits the samples of Simpler and of a
+// multisampler by command ID, reverts and converts them, and reads each
+// result back through the query tool's `device` object.
+#[test]
+fn an_agent_edits_a_sample_and_reads_the_edits_back() {
+    let dir = TempDir::new("sample-edits");
+    let file = dir.0.join("Stem.wav");
+    write_stem(&file, 220.0);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    // Commands that need the shell run one to a call.
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let refused = |client: &mut Client<InProcess>, command: &str, args: Value| -> bool {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .is_err()
+    };
+    let add = |client: &mut Client<InProcess>, name: &str, device_type: &str| {
+        one(
+            client,
+            "track.create",
+            json!({ "id": {"$new": name}, "kind": "midi", "name": name, "index": 0 }),
+        );
+        let track = {
+            let document = client.transport().shell.editor().document();
+            document.tracks().find(|t| t.name() == name).unwrap().id()
+        };
+        one(
+            client,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
+        one(
+            client,
+            "device.add",
+            json!({ "device": {
+                "kind": { "native": { "device_type": device_type } },
+                "name": name, "role": "instrument" } }),
+        );
+        let document = client.transport().shell.editor().document();
+        document.track(track).unwrap().devices().next().unwrap().id
+    };
+    let snapshot = add(&mut client, "Snap", "beatlayer.snapshot");
+    let mosaic = add(&mut client, "Sampler", "beatlayer.mosaic");
+    one(
+        &mut client,
+        "device.load_sample",
+        json!({ "device": snapshot, "path": file.to_string_lossy() }),
+    );
+    one(
+        &mut client,
+        "device.add_layers",
+        json!({ "device": mosaic, "paths": [file.to_string_lossy()] }),
+    );
+    let device = |client: &mut Client<InProcess>, id: bl_model::DeviceId| -> Value {
+        call(
+            client,
+            "query",
+            json!({ "path": format!("device {}", id.0.get()), "detail": "full" }),
+        )
+    };
+    let layer = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .device(mosaic)
+        .unwrap()
+        .layers
+        .list[0]
+        .id;
+
+    // Edits by ID: Simpler's list reads back under `saved.sample_edits`, the
+    // layer's under its own `edits`.
+    let cut = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "cut", "range": { "from": 0, "to": 12_000 } }),
+    );
+    assert_eq!(cut["length"], 36_000);
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "fade_out" }),
+    );
+    let trim = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "kind": "trim",
+                "range": { "from": 6_000, "to": 30_000 } }),
+    );
+    assert_eq!(trim["length"], 24_000);
+    let read = device(&mut client, snapshot);
+    let edits = read["saved"]["sample_edits"]["items"].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[0]["kind"], "cut");
+    let read = device(&mut client, mosaic);
+    let item = &read["layers"]["list"]["items"][0];
+    assert_eq!(item["edits"][0]["kind"], "trim");
+    assert_eq!(item["length"], 24_000);
+    assert_eq!(item["end"], 24_000, "the layer's markers followed the trim");
+
+    // A selection past the sample is refused and changes nothing; so does
+    // Crop in a set that has never been saved.
+    assert!(refused(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "trim", "range": { "from": 0, "to": 90_000 } }),
+    ));
+    assert!(refused(
+        &mut client,
+        "device.crop_sample",
+        json!({ "device": snapshot })
+    ));
+    assert_eq!(
+        device(&mut client, snapshot)["saved"]["sample_edits"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Auditioning is a read and changes nothing.
+    let before = client.transport().shell.editor().document().clone();
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "from": 0.5 }),
+    );
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "down": false }),
+    );
+    assert_eq!(*client.transport().shell.editor().document(), before);
+
+    // Revert clears both lists; the conversion keeps the sample.
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "revert": true }),
+    );
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "revert": true }),
+    );
+    assert!(
+        device(&mut client, snapshot)["saved"]
+            .get("sample_edits")
+            .is_none()
+    );
+    assert_eq!(
+        device(&mut client, mosaic)["layers"]["list"]["items"][0]["length"],
+        48_000
+    );
+    let converted = one(
+        &mut client,
+        "device.convert",
+        json!({ "device": snapshot, "to": "multisampler" }),
+    );
+    let new: u64 = converted["device"].as_u64().unwrap();
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {new}") }),
+    );
+    assert_eq!(
+        read["layers"]["count"], 1,
+        "Simpler is a multisampler of one layer now"
+    );
+}
+
+/// Warping R29 to R41 (WP-4.9): an agent drops a generated 40-second track
+/// at 128 BPM, reads the warp settings, auto-warps it from its first click,
+/// fixes its downbeat, and warps a loop, every command run by ID, one undo
+/// step each, every effect read back in the query tool's `clip`.
+#[test]
+fn an_agent_auto_warps_and_fixes_a_downbeat_by_command_id() {
+    let dir = TempDir::new("auto-warp");
+    let (samples, starts) = bl_analysis::signals::click_track(128.0, 0.37, 40.0, 48_000);
+    let path = dir.0.join("Track.wav");
+    {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for sample in &samples {
+            writer
+                .write_sample((sample * 0.9 * f32::from(i16::MAX)) as i16)
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = client.transport().shell.editor().undo_history().len();
+        let result = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        let after = client.transport().shell.editor().undo_history().len();
+        (result, after - before)
+    };
+
+    // The settings read back under `warp`.
+    run(
+        &mut client,
+        "settings.set_loop_warp_short_samples",
+        json!({ "mode": "unwarped_one_shot" }),
+    );
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "settings.state" }] }),
+    );
+    let warp = &state["results"][0]["result"]["warp"];
+    assert_eq!(warp["loop_warp_short_samples"], "unwarped_one_shot");
+    assert_eq!(warp["auto_warp_long_samples"], true);
+    assert_eq!(warp["default_warp_mode"], "beats");
+
+    let (added, _) = run(
+        &mut client,
+        "browser.add_to_arrangement",
+        json!({ "paths": [path.display().to_string()] }),
+    );
+    let clip = added["results"][0]["result"]["clips"][0]["clip"]
+        .as_u64()
+        .unwrap();
+    let media = match &client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .clip(serde_json::from_value(json!(clip)).unwrap())
+        .unwrap()
+        .data
+    {
+        ClipData::Audio(audio) => audio.media,
+        ClipData::Midi(_) => unreachable!("an audio clip"),
+    };
+    client.transport().shell.wait_analysis(media).unwrap();
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let markers = |audio: &Value| audio["warp_markers"]["items"].as_array().unwrap().clone();
+
+    let (_, steps) = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    assert_eq!(steps, 1);
+    // Warp From Here, from the first click: a marker on every bar.
+    let (_, steps) = run(
+        &mut client,
+        "clip.warp_from_here",
+        json!({ "clip": clip, "time": starts[0], "method": "auto" }),
+    );
+    assert_eq!(steps, 1, "one undo step");
+    let warped = audio(&mut client);
+    let bars = markers(&warped);
+    assert!(bars.len() > 20, "{} markers", bars.len());
+    assert!((warped["tempo"].as_f64().unwrap() - 128.0).abs() < 0.5);
+    // The markers: the file's start, the first click, then each later bar.
+    for (bar, marker) in bars[2..].iter().enumerate() {
+        let time = marker["time"].as_f64().unwrap();
+        assert!(
+            (time - starts[4 * (bar + 1)]).abs() < 0.001,
+            "bar {bar}: {time}"
+        );
+    }
+
+    // The third bar's downbeat becomes 1.1.1.
+    let (_, steps) = run(
+        &mut client,
+        "clip.set_1_1_1_here",
+        json!({ "clip": clip, "marker": 3 }),
+    );
+    assert_eq!(steps, 1);
+    let fixed = audio(&mut client);
+    assert_eq!(markers(&fixed)[3]["beat"], 0);
+    assert_eq!(markers(&fixed).len(), bars.len());
+    assert_eq!(fixed["tempo"], warped["tempo"]);
+
+    // Warp as a loop, and a selection of it.
+    let (_, steps) = run(&mut client, "clip.warp_as_loop", json!({ "clip": clip }));
+    assert_eq!(steps, 1);
+    let looped = audio(&mut client);
+    assert_eq!(looped["looping"], true);
+    assert_eq!(markers(&looped).len(), 2);
+    let (_, steps) = run(
+        &mut client,
+        "clip.warp_selection_as_loop",
+        json!({ "clip": clip, "from": starts[0], "to": starts[8] }),
+    );
+    assert_eq!(steps, 1);
+    // Two bars at 128 BPM, taken as a loop of 2 bars at the set's 120.
+    let selection = markers(&audio(&mut client));
+    assert_eq!(selection[1]["beat"], 2 * BAR);
+
+    // Save Default Clip (R42) writes beside the sample and is no undo step;
+    // `clip.defaults` reads it back.
+    let selected = audio(&mut client);
+    let (saved, steps) = run(&mut client, "clip.save_default", json!({ "clip": clip }));
+    assert_eq!(steps, 0);
+    let file = saved["results"][0]["result"]["file"].as_str().unwrap();
+    assert_eq!(Path::new(file).parent(), path.parent());
+    assert!(Path::new(file).is_file());
+    let (read, steps) = run(&mut client, "clip.defaults", json!({ "clip": clip }));
+    assert_eq!(steps, 0);
+    let defaults = &read["results"][0]["result"]["defaults"];
+    assert_eq!(defaults["warp"], true);
+    assert_eq!(defaults["tempo"], selected["tempo"]);
+    assert_eq!(defaults["warp_markers"].as_array().unwrap().len(), 2);
+}
+
 // Spec: external-devices R2, R15, R28
 #[test]
 fn an_agent_routes_an_external_instrument_and_reads_it_back() {
@@ -2929,8 +3579,8 @@ fn an_agent_routes_an_external_instrument_and_reads_it_back() {
 }
 
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
-// R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
-// parameters, sets some by ID, shows Singe's expanded part, reads each
+// R1, R10 and R12 (WP-5.23): an agent adds Saturator, Overdrive and Dynamic Tube, reads their
+// parameters, sets some by ID, shows Saturator's expanded part, reads each
 // display's curve, and finds the devices and values again when the saved
 // set is opened.
 #[test]
@@ -3018,7 +3668,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
         json!(80.0)
     );
 
-    // Singe has an expanded part; Grit and Valve have none.
+    // Saturator has an expanded part; Overdrive and Dynamic Tube have none.
     let expand = |client: &mut Client<InProcess>, device: &Value| {
         call(
             client,
@@ -3086,7 +3736,7 @@ fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() 
 }
 
 // Spec: multiband-dynamics R18, device-framework R14 (WP-5.22): an agent
-// inserts Triband by its type, sets its parameters by ID, a band's among
+// inserts Multiband Dynamics by its type, sets its parameters by ID, a band's among
 // them, and reads every one back with its descriptor.
 #[test]
 fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id() {
@@ -3101,15 +3751,15 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
     let track = default_tracks(&mut client)[2];
     let set = |param: bl_model::ParamId, value: f64| {
         json!({ "command": "device.set_param",
-                "args": { "device": {"$ref": "Triband"}, "param": param, "value": value } })
+                "args": { "device": {"$ref": "Multiband Dynamics"}, "param": param, "value": value } })
     };
     let reply = call(
         &mut client,
         "run",
-        json!({ "label": "Add Triband", "commands": [
+        json!({ "label": "Add Multiband Dynamics", "commands": [
             { "command": "device.insert",
               "args": { "track": track, "index": 0,
-                        "device": { "id": {"$new": "Triband"}, "name": "Triband",
+                        "device": { "id": {"$new": "Multiband Dynamics"}, "name": "Multiband Dynamics",
                                     "kind": { "native": { "device_type": MULTIBAND_DYNAMICS } },
                                     "enabled": true, "params": [] } } },
             set(LOW_ON, 0.0),
@@ -3118,7 +3768,7 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
             set(band_param(HIGH, SOLO), 1.0),
         ] }),
     );
-    let device = reply["ids"]["Triband"].clone();
+    let device = reply["ids"]["Multiband Dynamics"].clone();
     let read = call(
         &mut client,
         "run",

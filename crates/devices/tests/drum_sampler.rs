@@ -1,4 +1,4 @@
-//! Strike, the one-shot drum sampler (WP-5.18; the one-shot drum sampler
+//! Drum Sampler, the one-shot drum sampler (WP-5.18; the one-shot drum sampler
 //! spec): the region and the pitch, the Trigger and Gate envelopes, each of
 //! the nine playback effects measured, the filter's types, the global
 //! controls, the modulation route, per-note bend and slide, and a render
@@ -61,7 +61,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// Strike of `params`, up to 4,096 frames at a time.
+/// Drum Sampler of `params`, up to 4,096 frames at a time.
 fn strike(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let device_type: DeviceType = drum_sampler_type();
     node(&registry(), &device(&device_type, params), 4096)
@@ -79,7 +79,7 @@ fn sine(frames: usize, hz: f64, amplitude: f64) -> Arc<bl_media::SampleData> {
     })
 }
 
-/// Strike with the sample, through the collector the engine would.
+/// Drum Sampler with the sample, through the collector the engine would.
 fn loaded(
     params: &[(ParamId, f64)],
     data: &Arc<bl_media::SampleData>,
@@ -224,7 +224,7 @@ fn rms(signal: &[f32]) -> f64 {
 #[test]
 fn strike_is_described_laid_out_and_lists_its_two_menu_options() {
     let device_type = drum_sampler_type();
-    assert_eq!(device_type.name, "Strike");
+    assert_eq!(device_type.name, "Drum Sampler");
     assert_eq!(device_type.role, DeviceRole::Instrument);
     device_type.description.check().unwrap();
     // The device reads its parameters by their numbers, in order.
@@ -1045,7 +1045,7 @@ fn the_engine_plays_the_sample_the_set_names() {
     let registry = registry().with_media(Arc::new(media));
     let mut offline = Offline::new(EngineConfig::new(RATE, 256), registry);
     let unhosted = offline.sync(editor.document());
-    assert!(unhosted.is_empty(), "Strike is hosted: {unhosted:?}");
+    assert!(unhosted.is_empty(), "Drum Sampler is hosted: {unhosted:?}");
     assert!(offline.missing_media().is_empty(), "the sample is found");
     offline.sender().transport(TransportCommand::Play);
     let mut out = Vec::new();

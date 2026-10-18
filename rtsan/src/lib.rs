@@ -12,7 +12,7 @@
 //! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
 //!   with node migration, parameter changes, scheduled commands, node data,
 //!   and the state for the UI, every block a real-time section.
-//! - `tests/device_displays.rs`: Contour's spectrum and Squeeze's gain
+//! - `tests/device_displays.rs`: EQ Eight's spectrum and Compressor's gain
 //!   reduction published after every block, at blocks of 1 to 4,096 frames,
 //!   through parameter changes and program swaps (WP-5.43).
 //! - `tests/shell.rs`: the app's audio callback (`bl-shell`'s

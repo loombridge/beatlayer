@@ -1,4 +1,4 @@
-//! The Hardware Instrument (WP-5.34; the external devices spec, R9, R11): a
+//! The External Instrument (WP-5.34; the external devices spec, R9, R11): a
 //! gain on what the engine brings back from the interface, with nothing
 //! in its own sound.
 

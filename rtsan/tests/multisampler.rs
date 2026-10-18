@@ -12,7 +12,12 @@ bl_rt::install_trap!();
 use std::sync::Arc;
 
 use bl_core::time::{SampleRate, Ticks};
-use bl_devices::multisampler::{ENV_LOOP, MULTISAMPLER, ROUND_ROBIN, RR_MODE, VOICES};
+use bl_devices::multisampler::{
+    AUX_AMOUNT_A, AUX_DEST_A, AUX_ON, BEND_RANGE, ENV_LOOP, FENV_AMOUNT, FENV_ON, FILTER_MORPH,
+    FILTER_ON, FILTER_SLOPE, FILTER_TYPE, GLIDE, LFO_AMOUNT_A, LFO_DEST_A, LFO1_PITCH, LFOS,
+    MULTISAMPLER, OSC_ON, OSC_VOLUME, PITCH_ENV_AMOUNT, ROUND_ROBIN, RR_MODE, SHAPER_ON, SPREAD,
+    VOICES, dest, midi_param,
+};
 use bl_engine::{Collector, Compiler, EngineConfig, Registry, TransportCommand, channel};
 use bl_media::{BitDepth, Dither, MediaStore, wav_bytes};
 use bl_model::{
@@ -72,7 +77,7 @@ fn a_multisampler_passes_under_rtsan() {
         .unwrap();
     let mut device = Device::new(
         editor.new_id(),
-        "Mosaic",
+        "Sampler",
         DeviceKind::Native {
             device_type: MULTISAMPLER.to_owned(),
         },
@@ -82,6 +87,42 @@ fn a_multisampler_passes_under_rtsan() {
     device.params.insert(RR_MODE, 2.0);
     device.params.insert(VOICES, 8.0);
     device.params.insert(ENV_LOOP, 1.0);
+    // WP-5.14: every stage of the tabs on at once: Spread and Portamento,
+    // the pitch envelope, a frequency-modulating oscillator, the Morph
+    // filter at 24 dB with its envelope, the shaper, the auxiliary
+    // envelope, three LFOs, and MIDI sources sending to Volume and Pitch.
+    for (param, value) in [
+        (SPREAD, 60.0),
+        (GLIDE, 2.0),
+        (PITCH_ENV_AMOUNT, 5.0),
+        (OSC_ON, 1.0),
+        (OSC_VOLUME, 20.0),
+        (FILTER_ON, 1.0),
+        (FILTER_TYPE, 4.0),
+        (FILTER_SLOPE, 1.0),
+        (FILTER_MORPH, 40.0),
+        (FENV_ON, 1.0),
+        (FENV_AMOUNT, 24.0),
+        (SHAPER_ON, 1.0),
+        (AUX_ON, 1.0),
+        (AUX_DEST_A, dest::FILTER_FREQ as f64),
+        (AUX_AMOUNT_A, 30.0),
+        (BEND_RANGE, 4.0),
+        (LFOS[0].on, 1.0),
+        (LFOS[0].extra(LFO1_PITCH), 10.0),
+        (LFOS[1].on, 1.0),
+        (LFOS[1].extra(LFO_DEST_A), dest::VOLUME as f64),
+        (LFOS[1].extra(LFO_AMOUNT_A), 30.0),
+        (LFOS[2].on, 1.0),
+        (LFOS[2].extra(LFO_DEST_A), dest::PAN as f64),
+        (LFOS[2].extra(LFO_AMOUNT_A), 30.0),
+        (midi_param(1, 0), dest::VOLUME as f64),
+        (midi_param(1, 2), -30.0),
+        (midi_param(0, 0), dest::PITCH as f64),
+        (midi_param(0, 2), 10.0),
+    ] {
+        device.params.insert(param, value);
+    }
     let id = device.id;
     editor
         .apply(Command::InsertDevice {

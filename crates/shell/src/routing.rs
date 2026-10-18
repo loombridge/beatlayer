@@ -1012,6 +1012,44 @@ pub fn external_choosers(
     })
 }
 
+fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
+    let args = if track.is_null() {
+        json!({ "device": device })
+    } else {
+        json!({ "device": device, "track": track })
+    };
+    Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// A device's MIDI sidechain source chooser (WP-5.27; the routing spec,
+/// R34): the MIDI tracks in display order, the device's own among them,
+/// then ─ No Input. `None` for a device without a MIDI sidechain input.
+#[must_use]
+pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let current = doc.device(device)?.midi_sidechain.as_ref()?.source;
+    let mut entries = Vec::new();
+    for id in doc.track_order() {
+        if doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set_midi_sidechain_source(device, json!(id)),
+                current == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "No Input",
+        set_midi_sidechain_source(device, Value::Null),
+        current.is_none(),
+    ));
+    let mut chooser = chooser("MIDI Sidechain Source", entries);
+    if current.is_none() {
+        "No Input".clone_into(&mut chooser.text);
+    }
+    Some(chooser)
+}
+
 /// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with
 /// a track as the source, empty with No Input (observed). `None` for a
 /// device without a sidechain input.

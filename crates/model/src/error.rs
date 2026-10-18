@@ -32,6 +32,8 @@ pub enum ModelError {
     NoSidechain(DeviceId),
     /// The device has no routing to external hardware to set.
     NoExternal(DeviceId),
+    /// The device has no MIDI sidechain input to set.
+    NoMidiSidechain(DeviceId),
     /// The device isn't in this track's chain, so the track has no such
     /// parameter to automate (WP-2.12).
     DeviceNotInTrack {
@@ -301,6 +303,7 @@ impl fmt::Display for ModelError {
             }
             Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
             Self::NoExternal(id) => write!(f, "{id} has no routing to external hardware"),
+            Self::NoMidiSidechain(id) => write!(f, "{id} has no MIDI sidechain input"),
             Self::DeviceNotInTrack { device, track } => {
                 write!(f, "{device} isn't in {track}'s chain")
             }

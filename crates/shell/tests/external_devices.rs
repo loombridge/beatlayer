@@ -37,7 +37,7 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
     // It is an instrument of its own name with a Gain from -inf to +24 dB
     // at 0 dB, and works with hardware.
     let t = hardware_instrument_type();
-    assert_eq!(t.name, "Hardware Instrument");
+    assert_eq!(t.name, "External Instrument");
     assert_eq!(t.role, DeviceRole::Instrument);
     assert!(t.external && !t.sidechain);
     let gain = t
@@ -192,7 +192,7 @@ fn an_offline_render_silences_the_external_devices_and_names_them() {
         )
         .unwrap();
     let device = add_hardware(&mut shell);
-    let name = format!("Hardware Instrument ({device})");
+    let name = format!("External Instrument ({device})");
 
     // An export sends nothing to hardware and brings back silence; the
     // result names the device.

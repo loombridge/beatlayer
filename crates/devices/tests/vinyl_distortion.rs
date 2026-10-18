@@ -1,4 +1,4 @@
-//! Wax, the native vinyl-distortion effect (WP-5.24; the vinyl distortion
+//! Vinyl Distortion, the native vinyl-distortion effect (WP-5.24; the vinyl distortion
 //! spec): the tracing model's even harmonics, the pinch's odd ones, the
 //! overall drive, Soft and Hard, and the crackle.
 
@@ -14,12 +14,12 @@ use bl_engine::Node;
 use bl_model::ParamId;
 use common::{db, device, dft_at, node, noise, sine, stream};
 
-/// A Wax of `params`, for blocks of up to 4,096 frames.
+/// A Vinyl Distortion of `params`, for blocks of up to 4,096 frames.
 fn wax(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     node(&common::registry(), &device(&wax_type(), params), 4_096)
 }
 
-/// `input` on both channels through a Wax, in `block`-sized blocks.
+/// `input` on both channels through a Vinyl Distortion, in `block`-sized blocks.
 fn render(params: &[(ParamId, f64)], input: &[f32], block: usize) -> Vec<Vec<f32>> {
     stream(
         wax(params).as_mut(),

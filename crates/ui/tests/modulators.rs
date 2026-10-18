@@ -1,14 +1,14 @@
 //! Mapping a modulator in the UI (WP-5.10), headless: the Map button lights
 //! and tints every parameter it can map, a click on one maps it as one undo
-//! step, Esc puts the button out, Unmap removes the mapping, and the Curve
-//! Mod's display adds, moves, curves and deletes breakpoints. Spec:
+//! step, Esc puts the button out, Unmap removes the mapping, and the
+//! Shaper's display adds, moves, curves and deletes breakpoints. Spec:
 //! modulation R15, R19, R23.
 
 mod common;
 
 use bl_devices::testing::{self, UTILITY_GAIN};
 use bl_model::DeviceId;
-use bl_model::modulator::{ModTarget, ShapePoint, default_shape};
+use bl_model::modulator::{ModTarget, ShapePoint, default_shape_of};
 use bl_shell::device_commands::DeviceAdded;
 use bl_ui::device_panel::{body_rect, place};
 use bl_ui::device_view::layout;
@@ -43,7 +43,7 @@ fn add(h: &mut Harness, kind: &bl_model::DeviceKind, name: &str) -> DeviceId {
     added.device
 }
 
-/// A track holding a test utility and a Wave Mod, shown in the Device View.
+/// A track holding a test utility and an LFO, shown in the Device View.
 fn rig() -> Rig {
     let mut h = Harness::with_title_bar(Window::Main);
     h.shell.run("audio.toggle_engine", json!({})).unwrap();
@@ -244,7 +244,7 @@ fn unmap_removes_the_mapping() {
     );
 }
 
-/// The Curve Mod's shape display and its device.
+/// The Shaper's shape display and its device.
 fn curve_rig() -> (Rig, DeviceId, Rect) {
     let mut rig = rig();
     let curve_type = bl_devices::modulator::curve_mod_type();
@@ -254,14 +254,11 @@ fn curve_rig() -> (Rig, DeviceId, Rect) {
 }
 
 fn shape(h: &Harness, device: DeviceId) -> Vec<ShapePoint> {
-    h.shell
-        .editor()
-        .document()
-        .device(device)
-        .unwrap()
+    let device = h.shell.editor().document().device(device).unwrap();
+    device
         .shape
         .clone()
-        .unwrap_or_else(default_shape)
+        .unwrap_or_else(|| default_shape_of(&device.kind))
 }
 
 fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
@@ -295,7 +292,7 @@ fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     assert_eq!(
         shape(&rig.h, curve).len(),
         3,
-        "a new Curve Mod plays the triangle"
+        "a new Shaper plays the triangle"
     );
     // The plot area sits above the cell's bottom controls.
     let plot = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y));
@@ -371,5 +368,86 @@ fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     assert_eq!(
         shape(&rig.h, curve),
         bl_model::modulator::shape_preset(1).unwrap()
+    );
+}
+
+/// The Shaper MIDI's shape display, on a MIDI track.
+fn strike_rig() -> (Rig, DeviceId, Rect) {
+    let mut rig = rig();
+    let midi = rig
+        .h
+        .shell
+        .editor()
+        .document()
+        .top_level()
+        .find(|&id| {
+            rig.h.shell.editor().document().track(id).unwrap().kind() == bl_model::TrackKind::Midi
+        })
+        .expect("a set starts with a MIDI track");
+    rig.h
+        .shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let strike_type = bl_devices::strike_mod::strike_mod_type();
+    let added: DeviceAdded = serde_json::from_value(
+        rig.h
+            .shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": strike_type.kind, "name": strike_type.name, "role": "midi_effect" } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    rig.h.settle();
+    let area = node_rect(&mut rig.h, "Curve Shape");
+    (rig, added.device, area)
+}
+
+// Spec: modulation R26
+#[test]
+fn strike_display_marks_the_sustain_breakpoint_with_a_cmd_click() {
+    let (mut rig, strike, area) = strike_rig();
+    let start = shape(&rig.h, strike);
+    assert_eq!(
+        start.iter().filter(|p| p.sustain).count(),
+        1,
+        "a new Shaper MIDI has a sustain breakpoint"
+    );
+    let at = |p: &ShapePoint| {
+        pos2(
+            area.left() + area.width() * p.x as f32,
+            area.bottom() - area.height() * p.y as f32,
+        )
+    };
+    // Cmd/Ctrl-clicking another breakpoint moves the mark to it, as one
+    // undo step.
+    let steps = rig.h.shell.editor().undo_history().count();
+    let target = start.iter().position(|p| !p.sustain && p.x > 0.5).unwrap();
+    let click = at(&start[target]);
+    let command = Modifiers::COMMAND;
+    rig.h.frame(vec![
+        Event::ModifiersChanged(command),
+        Event::PointerMoved(click),
+    ]);
+    for pressed in [true, false] {
+        rig.h.frame(vec![Event::PointerButton {
+            pos: click,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: command,
+        }]);
+    }
+    rig.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    let marked = shape(&rig.h, strike);
+    assert_eq!(
+        marked.iter().map(|p| p.sustain).collect::<Vec<_>>(),
+        (0..marked.len()).map(|i| i == target).collect::<Vec<_>>(),
+        "one sustain breakpoint, and it is the one clicked"
+    );
+    assert_eq!(rig.h.shell.editor().undo_history().count(), steps + 1);
+    assert_eq!(
+        rig.h.shell.editor().undo_history().next(),
+        Some("Edit Shape")
     );
 }

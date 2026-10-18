@@ -1,5 +1,5 @@
-//! Device displays under RealtimeSanitizer (WP-5.43): Contour's spectrum and
-//! Squeeze's gain reduction are published after every block, in blocks of 1
+//! Device displays under RealtimeSanitizer (WP-5.43): EQ Eight's spectrum and
+//! Compressor's gain reduction are published after every block, in blocks of 1
 //! to 4,096 frames, while parameters move and programs swap. RTSan stops the
 //! process at the first allocation, free, lock, or blocking call on the
 //! audio thread, and the allocation trap fails the test at any heap use it

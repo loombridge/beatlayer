@@ -12,7 +12,7 @@ use bl_core::time::{
 };
 use bl_model::{
     AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor, MidiData, Note,
-    ParamId, PluginFormat, TrackId, TrackKind,
+    ParamId, PluginFormat, TrackId, TrackKind, WarpMarker,
 };
 use bl_project::{Media, MediaPath, MediaRef, Project};
 use proptest::prelude::*;
@@ -303,6 +303,32 @@ fn audio_data(byte: u8) -> AudioData {
     let audio = AudioData::new(hash(media));
     if byte.is_multiple_of(2) {
         return audio;
+    }
+    if byte.is_multiple_of(3) {
+        // A warped clip (WP-4.1): its markers and brace are whole ticks, and
+        // it has the map, tempo, and signature a warped clip can carry.
+        let ticks = i64::from(byte) * 1_000;
+        return AudioData {
+            warp: true,
+            warp_markers: vec![
+                WarpMarker {
+                    time: 0.25,
+                    beat: Ticks(-ticks),
+                },
+                WarpMarker {
+                    time: 1.5 + f64::from(byte) / 64.0,
+                    beat: Ticks(100 * ticks),
+                },
+            ],
+            tempo: Some(60.0 + f64::from(byte) / 3.0),
+            signature: Some(TimeSignature::new(3, 4).unwrap()),
+            start: 0.0,
+            end: Some((200 * ticks) as f64),
+            looping: byte % 4 == 1,
+            loop_start: ticks as f64,
+            loop_end: Some((50 * ticks) as f64),
+            ..audio
+        };
     }
     let start = f64::from(byte) / 64.0;
     AudioData {

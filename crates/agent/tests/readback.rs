@@ -10,7 +10,7 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind, WarpMarker,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -399,14 +399,28 @@ fn fixture() -> Project {
         Ticks(2 * BAR),
         ClipData::Audio(AudioData {
             media: ContentHash([7; 32]),
-            start: 0.5,
-            end: Some(3.0),
+            // Warped (WP-4.1), so its markers and brace are ticks.
+            start: 352_800.0,
+            end: Some(2_116_800.0),
             looping: true,
-            loop_start: 1.0,
-            loop_end: Some(2.5),
+            loop_start: 705_600.0,
+            loop_end: Some(1_764_000.0),
             gain: 0.5,
             fade_in: 0.25,
             fade_out: 0.5,
+            warp: true,
+            warp_markers: vec![
+                WarpMarker {
+                    time: 0.25,
+                    beat: Ticks(-176_400),
+                },
+                WarpMarker {
+                    time: 2.0,
+                    beat: Ticks(BAR),
+                },
+            ],
+            tempo: Some(100.0),
+            signature: Some(TimeSignature::new(3, 4).unwrap()),
         }),
     );
     audio.name = "Verse vox".to_owned();
@@ -773,6 +787,11 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.gain",
                 "data.audio.fade_in",
                 "data.audio.fade_out",
+                "data.audio.warp",
+                "data.audio.warp_markers.0.time",
+                "data.audio.warp_markers.1.beat",
+                "data.audio.tempo",
+                "data.audio.signature",
             ][..],
         ),
         (

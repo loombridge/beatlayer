@@ -32,6 +32,7 @@ use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
+use crate::warp::WarpMarker;
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -127,9 +128,12 @@ impl Clip {
     #[must_use]
     pub fn origin(&self, tempo: &TempoMap) -> Ticks {
         match &self.data {
-            ClipData::Audio(audio) => {
-                tempo.seconds_to_ticks(tempo.ticks_to_seconds(self.start) - audio.start)
-            }
+            ClipData::Audio(audio) => match audio.file_start_beat() {
+                // Warped: the file's start falls as far from the Start
+                // marker's beat as the map says, in ticks.
+                Some(beat) => Ticks(self.start.get() - (audio.start - beat).round() as i64),
+                None => tempo.seconds_to_ticks(tempo.ticks_to_seconds(self.start) - audio.start),
+            },
             ClipData::Midi(_) => self.content_start(),
         }
     }
@@ -164,8 +168,13 @@ impl Clip {
     pub fn earliest_start(&self, tempo: &TempoMap) -> Ticks {
         let earliest = match &self.data {
             ClipData::Audio(audio) => {
-                let at = tempo.ticks_to_seconds(self.start) - audio.start;
-                let mut at = tempo.seconds_to_ticks(at).min(self.start);
+                let at = match audio.file_start_beat() {
+                    Some(beat) => Ticks(self.start.get() - (audio.start - beat.ceil()) as i64),
+                    None => {
+                        tempo.seconds_to_ticks(tempo.ticks_to_seconds(self.start) - audio.start)
+                    }
+                };
+                let mut at = at.min(self.start);
                 // The nearest tick can be a hair before the file's start.
                 while at < self.start && self.with_start(at, tempo).is_err() {
                     at = at.saturating_add(Ticks(1));
@@ -202,8 +211,8 @@ impl Clip {
         match &mut moved.data {
             ClipData::Audio(audio) => {
                 let next = audio.moved_by(self.start, start, tempo);
-                if next.start < 0.0 {
-                    return Err(ModelError::BeforeFileStart(-next.start));
+                if let Some(before) = next.seconds_before_file() {
+                    return Err(ModelError::BeforeFileStart(before));
                 }
                 *audio = next;
             }
@@ -296,7 +305,7 @@ fn is_linked(linked: &bool) -> bool {
 /// count as its start: a millionth of a frame at 192 kHz, far below what
 /// rounding a time to a frame can see. Moving a marker by the time between
 /// two ticks and back can land this close to 0 on the wrong side.
-const MARKER_SLACK: f64 = 1e-12;
+pub(crate) const MARKER_SLACK: f64 = 1e-12;
 
 /// Whether a position is zero, so a zero offset is left out of saved sets.
 #[expect(
@@ -335,9 +344,10 @@ pub const EDGE_FADE_SECONDS: f64 = 0.004;
 /// (the audio clips spec).
 ///
 /// The samples stay in the media store; the clip names them by content hash.
-/// Until warping (Phase 4), a clip plays unwarped, at its file's own speed,
-/// so its markers and loop brace are positions in the file in seconds, as
-/// Live shows them for an unwarped clip. A clip starts playing at its Start
+/// An unwarped clip plays at its file's own speed, so its markers and loop
+/// brace are positions in the file in seconds, as Live shows them. A warped
+/// clip (WP-4.1, the warping spec) follows the set's tempo through its warp
+/// map, and its markers and brace are beats in its contents, in ticks. A clip starts playing at its Start
 /// marker. With the loop off, it plays to its End marker or its own end in
 /// the Arrangement, whichever comes first; with the loop on, it plays into
 /// the loop brace and repeats it until the clip ends.
@@ -345,7 +355,7 @@ pub const EDGE_FADE_SECONDS: f64 = 0.004;
 /// Every field but `media` has a default, a new clip's, and is saved only
 /// when it differs from it, so a set saved before WP-1.4, whose audio clips
 /// hold only `media`, loads unchanged and plays each file whole.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "An audio clip's data: the audio file it plays, named by content hash, and \
                    how it plays it. Times are seconds into the file. Every field but `media` \
@@ -393,6 +403,25 @@ pub struct AudioData {
     #[serde(default, skip_serializing_if = "is_zero")]
     #[schemars(range(min = 0.0))]
     pub fade_out: f64,
+    /// The Warp switch (the warping spec, R1): off unless given. On, the
+    /// clip follows the set's tempo through its warp map, and `start`, `end`,
+    /// `loop_start` and `loop_end` are whole ticks of its contents, counted
+    /// from the clip's 1.1.1, instead of seconds in the file.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub warp: bool,
+    /// The warp markers, in increasing order of both fields: a warped clip
+    /// has at least one. Switching Warp off keeps them (R3).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warp_markers: Vec<WarpMarker>,
+    /// The clip's tempo in BPM, from 1 to 1,000: the speed of the file after
+    /// the last warp marker (R2). Given whenever there are markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1.0, max = 1000.0))]
+    pub tempo: Option<f64>,
+    /// A warped clip's own time signature, the Clip View's Signature fields;
+    /// `null` (or nothing) means the song's signature at the clip's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<TimeSignature>,
 }
 
 impl AudioData {
@@ -411,27 +440,36 @@ impl AudioData {
             gain: 1.0,
             fade_in: 0.0,
             fade_out: 0.0,
+            warp: false,
+            warp_markers: Vec::new(),
+            tempo: None,
+            signature: None,
         }
     }
 
     /// The data of a clip whose left edge moved from `from` to `to`: its
     /// Start marker moves by the time between them under `tempo`, so the
     /// clip plays the same audio at the same moments (the audio clips spec,
-    /// R16). With the loop on, a marker that moves later to or past the loop
-    /// brace's end wraps back inside the brace by whole lengths of it, as
-    /// Live's does; a brace that ends at the end of the file, whose length
+    /// R16); a warped clip's moves by the ticks between them (the warping
+    /// spec, R5). With the loop on, a marker that moves later to or past the
+    /// loop brace's end wraps back inside the brace by whole lengths of it,
+    /// as Live's does; a brace that ends at the end of the file, whose length
     /// the set doesn't know, can't wrap it. A marker that lands a hair
     /// before the file's start, as moving back by the same ticks can, is
     /// the file's start; one further before it is left negative, for the
     /// caller to refuse.
     #[must_use]
-    pub fn moved_by(self, from: Ticks, to: Ticks, tempo: &TempoMap) -> Self {
+    pub fn moved_by(&self, from: Ticks, to: Ticks, tempo: &TempoMap) -> Self {
         if from == to {
-            return self;
+            return self.clone();
         }
-        let by = tempo.ticks_to_seconds(to) - tempo.ticks_to_seconds(from);
+        let by = if self.warp {
+            (to - from).get() as f64
+        } else {
+            tempo.ticks_to_seconds(to) - tempo.ticks_to_seconds(from)
+        };
         let mut start = self.start + by;
-        if (-MARKER_SLACK..0.0).contains(&start) {
+        if !self.warp && (-MARKER_SLACK..0.0).contains(&start) {
             start = 0.0;
         }
         if let (true, true, Some(end)) = (self.looping, by > 0.0, self.loop_end) {
@@ -442,7 +480,10 @@ impl AudioData {
                 start = self.loop_start + if into < length { into } else { 0.0 };
             }
         }
-        Self { start, ..self }
+        Self {
+            start,
+            ..self.clone()
+        }
     }
 
     /// The same data with [`EDGE_FADE_SECONDS`] fades at both edges: what a

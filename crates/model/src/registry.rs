@@ -1517,6 +1517,79 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "modulator.map",
+        action: Action::Apply("map_modulator"),
+        label: "Map Modulator",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as \
+            the slot's Map button and a click on the parameter's control do. `target` is a mixer \
+            control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any \
+            device on any track, but not a parameter of the modulator itself. The slot's earlier \
+            mapping is replaced; one modulator doesn't map one parameter twice. A modulator in \
+            Remote Control can't map a parameter another modulator in Remote Control holds. The \
+            mapping is saved with the set, goes with its target when that is deleted, and shows \
+            in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).",
+    },
+    Entry {
+        id: "modulator.unmap",
+        action: Action::Apply("unmap_modulator"),
+        label: "Unmap Modulator",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap \
+            button does: the parameter plays its own value again from the next frame. A slot \
+            with no mapping stays as it is. One undo step (Unmap Modulator).",
+    },
+    Entry {
+        id: "modulator.set_shape",
+        action: Action::Apply("set_shape"),
+        label: "Edit Shape",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
+            does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
+            `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
+            place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \
+            there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit \
+            Shape).",
+    },
+    Entry {
+        id: "device.compare_switch",
+        action: Action::Apply("compare_switch"),
+        label: "Compare: Switch",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[Key::Runs("S-DEV-011")],
+        description: "Makes the other of a native device's two states, A and B, the active \
+            one, as the Edit menu's and the device menu's Compare: Switch to B/A and the P key \
+            do. Every parameter whose value differs between the states moves to the newly \
+            active state's value, a continuous one gliding as any change does, and every \
+            parameter of the device that has an envelope is overridden until Re-Enable \
+            Automation. One undo step, named as the item that ran it. A change to a parameter \
+            goes to the active state only. Racks and plug-ins have no states, so a command for \
+            one is refused. `device.parameters` says which state is active and each \
+            parameter's value in the other; the query tool's `device` has both in `compare`. \
+            From the keyboard and the menus it switches the selected device.",
+    },
+    Entry {
+        id: "device.compare_copy",
+        action: Action::Apply("compare_copy"),
+        label: "Compare: Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Copies every value of a native device's active state, A or B, over the \
+            other, as the Edit menu's and the device menu's Compare: Copy A to B (Copy B to A \
+            while B is active) do. What the device plays doesn't change, and no envelope is \
+            overridden. One undo step, named as the item that ran it. Racks and plug-ins have \
+            no states, so a command for one is refused. From the menus it copies the selected \
+            device's state.",
+    },
+    Entry {
         id: "device.set_sample",
         action: Action::Apply("set_device_sample"),
         label: "Set Sample",
@@ -1524,10 +1597,12 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the audio a device plays (`media`, a content hash, or null to play \
-            none), which the media store holds like a clip's audio. A device whose type plays a \
-            sample plays that file; other devices ignore it. The set keeps the reference, so it \
-            reopens playing the same file. To load a file from disk as a person does, use \
-            `device.load_sample`.",
+            none), which the media store holds like a clip's audio, in sample slot `slot` \
+            (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum \
+            sampler eight). A device whose type plays samples plays that file; other devices \
+            ignore it. The set keeps the reference, so it reopens playing the same file. Null \
+            clears the slot, one undo step named Clear Sample. To load a file from disk as a \
+            person does, use `device.load_sample`.",
     },
     Entry {
         id: "device.set_sidechain_input",

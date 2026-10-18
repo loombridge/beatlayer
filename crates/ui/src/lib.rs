@@ -55,6 +55,7 @@ pub mod keymap;
 pub mod launch_panel;
 pub mod layout;
 pub mod main_window;
+pub mod mapping;
 pub mod menus;
 pub mod mixer;
 pub mod rack_view;

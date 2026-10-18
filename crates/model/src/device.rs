@@ -11,8 +11,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
 use crate::track::Input;
+
+/// The most sample slots a device's media can fill.
+pub const MAX_MEDIA_SLOTS: usize = 16;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -49,6 +53,18 @@ pub struct Device {
     #[serde(with = "param_pairs")]
     #[schemars(with = "Vec<(ParamId, f64)>")]
     pub params: OrdMap<ParamId, f64>,
+    /// Whether the device's B state is the active one, whose values
+    /// [`params`](Self::params) holds (device compare R1). Left out of the
+    /// saved set while A is active.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub b_active: bool,
+    /// The values of the state that isn't active, in the same form as
+    /// [`params`](Self::params) (device compare R1, R10). `None` while the
+    /// two states are equal, as a new device's are, and left out of the
+    /// saved set then. Use [`other_params`](Self::other_params) to read it.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "other_pairs")]
+    #[schemars(with = "Option<Vec<(ParamId, f64)>>")]
+    pub other_params: Option<OrdMap<ParamId, f64>>,
     /// The device's sidechain input, if its type declares one (WP-2.19b):
     /// where its detector can listen other than its own input. Left out
     /// of the saved set for a device without one.
@@ -67,11 +83,27 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
-    /// The media the device plays, by content hash (WP-2.16): the sampler's
-    /// sample, which the media store holds like a clip's audio (the sampler
-    /// spec, R11). Left out of the saved set for a device that plays none.
+    /// The media the device plays, by content hash, one entry per sample
+    /// slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the
+    /// eight-slot drum sampler's slots are 0 to 7. The media store holds
+    /// each like a clip's audio (the sampler spec, R11). A slot with no
+    /// sample is `None`, and the list never ends in one. Left out of the
+    /// saved set for a device that plays none; a set saved before slots
+    /// existed holds one hash, which loads as slot 0.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "media_slots"
+    )]
+    pub media: Vec<Option<ContentHash>>,
+    /// The parameters a modulator maps, one per slot (the modulation spec,
+    /// R19). Left out of the saved set for a device that maps none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<Mapping>,
+    /// The breakpoints of a Curve Mod's shape (R23); `None` plays the
+    /// default shape. Left out of the saved set while it is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media: Option<ContentHash>,
+    pub shape: Option<Vec<ShapePoint>>,
     /// A rack's chains, in order (WP-5.1). Empty for every device that
     /// isn't a rack, and left out of the saved set then, so sets saved
     /// before racks load unchanged.
@@ -205,6 +237,23 @@ impl Default for Sidechain {
     }
 }
 
+/// Reads a device's media: a list of slots, or the one hash (or `null`) a
+/// set saved before sample slots held, which is slot 0.
+fn media_slots<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Option<ContentHash>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Slots(Vec<Option<ContentHash>>),
+        One(Option<ContentHash>),
+    }
+    Ok(match Saved::deserialize(deserializer)? {
+        Saved::Slots(slots) => slots,
+        Saved::One(one) => one.into_iter().map(Some).collect(),
+    })
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde passes a reference"
@@ -258,11 +307,36 @@ impl Device {
             enabled: true,
             show_preset_name: true,
             params: OrdMap::new(),
+            b_active: false,
+            other_params: None,
             sidechain: None,
             floating: false,
             plugin: None,
-            media: None,
+            media: Vec::new(),
+            mappings: Vec::new(),
+            shape: None,
             chains: Vec::new(),
+        }
+    }
+
+    /// The media in sample slot `slot`, if it holds any.
+    #[must_use]
+    pub fn media_at(&self, slot: usize) -> Option<ContentHash> {
+        self.media.get(slot).copied().flatten()
+    }
+
+    /// Puts `media` in sample slot `slot`, growing the list to reach it and
+    /// trimming empty slots off its end.
+    pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
+        if self.media.len() <= slot {
+            if media.is_none() {
+                return;
+            }
+            self.media.resize(slot + 1, None);
+        }
+        self.media[slot] = media;
+        while self.media.last() == Some(&None) {
+            self.media.pop();
         }
     }
 
@@ -271,6 +345,59 @@ impl Device {
     #[must_use]
     pub fn can_float(&self) -> bool {
         matches!(self.kind, DeviceKind::Native { .. })
+    }
+
+    /// Whether the device has A and B states: native devices do; racks
+    /// and plug-ins don't, as in Live (device compare R6).
+    #[must_use]
+    pub fn can_compare(&self) -> bool {
+        matches!(self.kind, DeviceKind::Native { .. })
+    }
+
+    /// The values of the state that isn't active.
+    #[must_use]
+    pub fn other_params(&self) -> &OrdMap<ParamId, f64> {
+        self.other_params.as_ref().unwrap_or(&self.params)
+    }
+
+    /// Sets one parameter in the active state only (device compare R2).
+    pub(crate) fn set_param(&mut self, param: ParamId, value: f64) {
+        let before = self.params.clone();
+        self.params.insert(param, value);
+        if self.can_compare() {
+            self.other_params.get_or_insert(before);
+            self.forget_equal_other();
+        }
+    }
+
+    /// Sets both states to `params`, with A active, as a device starts,
+    /// loading a preset does (device compare R9) and a copy does (R8).
+    pub fn set_both(&mut self, params: OrdMap<ParamId, f64>) {
+        self.params = params;
+        self.b_active = false;
+        self.other_params = None;
+    }
+
+    /// Makes the other state active (device compare R3).
+    pub(crate) fn compare_switch(&mut self) {
+        let other = self
+            .other_params
+            .take()
+            .unwrap_or_else(|| self.params.clone());
+        self.other_params = Some(std::mem::replace(&mut self.params, other));
+        self.b_active = !self.b_active;
+        self.forget_equal_other();
+    }
+
+    /// Copies the active state over the other (device compare R4).
+    pub(crate) fn compare_copy(&mut self) {
+        self.other_params = None;
+    }
+
+    fn forget_equal_other(&mut self) {
+        if self.other_params.as_ref() == Some(&self.params) {
+            self.other_params = None;
+        }
     }
 
     /// The same device with a sidechain input, as a new device has.
@@ -418,6 +545,43 @@ pub enum PluginFormat {
     AudioUnit,
     /// LV2 (Linux).
     Lv2,
+}
+
+/// Serialises an optional set of parameter values as `param_pairs` does.
+mod other_pairs {
+    use imbl::OrdMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::param_pairs;
+    use crate::ids::ParamId;
+
+    struct Pairs(OrdMap<ParamId, f64>);
+
+    impl Serialize for Pairs {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            param_pairs::serialize(&self.0, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Pairs {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            param_pairs::deserialize(deserializer).map(Self)
+        }
+    }
+
+    #[expect(clippy::ref_option, reason = "serde passes a reference")]
+    pub(super) fn serialize<S: Serializer>(
+        params: &Option<OrdMap<ParamId, f64>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        params.clone().map(Pairs).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<OrdMap<ParamId, f64>>, D::Error> {
+        Ok(Option::<Pairs>::deserialize(deserializer)?.map(|pairs| pairs.0))
+    }
 }
 
 /// Serialises parameter values as a list of `[parameter, value]` pairs.

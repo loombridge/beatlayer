@@ -1210,3 +1210,117 @@ fn chain_rows_carry_what_the_list_draws() {
         .unwrap();
     assert!(frame(&shell, midi_rack).chains.iter().all(|r| !r.has_mixer));
 }
+
+// Spec: modulation R19
+#[test]
+fn a_copied_rack_maps_its_own_copies_and_a_removed_chain_takes_its_mappings() {
+    use bl_model::modulator::{ModTarget, is_modulator_kind};
+    let Set {
+        mut shell, audio, ..
+    } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
+    let wave = json!({
+        "kind": { "native": { "device_type": "beatlayer.wave_mod" } },
+        "name": "Wave Mod",
+        "role": "audio_effect",
+    });
+    let wave = add_to_chain(&mut shell, chains[0], wave).device;
+    let gain = add_to_chain(&mut shell, chains[0], effect("Gain")).device;
+    let other = add_to_chain(&mut shell, chains[1], effect("Other")).device;
+    let map = |shell: &mut Shell, slot: u8, target: Value| {
+        shell
+            .invoke(
+                "modulator.map",
+                json!({ "device": wave, "slot": slot, "target": target }),
+            )
+            .unwrap();
+    };
+    let param = testing::GAIN_PARAM.0;
+    map(
+        &mut shell,
+        0,
+        json!({ "type": "device", "device": gain, "param": param }),
+    );
+    map(
+        &mut shell,
+        1,
+        json!({ "type": "device", "device": other, "param": param }),
+    );
+    map(
+        &mut shell,
+        2,
+        json!({ "type": "mixer", "track": audio, "param": "pan" }),
+    );
+    // The copy's modulator and its other devices, in chain order.
+    let copied = |shell: &Shell, devices: &[bl_model::Device]| {
+        let doc = shell.editor().document();
+        let wave = devices
+            .iter()
+            .flat_map(bl_model::Device::walk)
+            .find(|d| is_modulator_kind(&d.kind))
+            .unwrap();
+        let targets: Vec<ModTarget> = wave.mappings.iter().map(|m| m.target).collect();
+        doc.check_invariants().unwrap();
+        targets
+    };
+
+    let steps_before = steps(&shell);
+    let copy: DeviceAdded = serde_json::from_value(
+        shell
+            .invoke("device.duplicate", json!({ "device": rack }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(steps(&shell), steps_before + 1);
+    let doc = shell.editor().document();
+    let copy_rack = doc.device(copy.device).unwrap().clone();
+    let copy_gain = copy_rack.chains[0].devices[1].id;
+    let copy_other = copy_rack.chains[1].devices[0].id;
+    assert_eq!(
+        copied(&shell, std::slice::from_ref(&copy_rack)),
+        [
+            ModTarget::Device {
+                device: copy_gain,
+                param: testing::GAIN_PARAM
+            },
+            ModTarget::Device {
+                device: copy_other,
+                param: testing::GAIN_PARAM
+            },
+        ]
+    );
+
+    let steps_before = steps(&shell);
+    let copy: ChainAdded = serde_json::from_value(
+        shell
+            .invoke("chain.duplicate", json!({ "chain": chains[0] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(steps(&shell), steps_before + 1);
+    let chain = shell.editor().document().chain(copy.chain).unwrap().clone();
+    assert_eq!(
+        copied(&shell, &chain.devices),
+        [ModTarget::Device {
+            device: chain.devices[1].id,
+            param: testing::GAIN_PARAM
+        }]
+    );
+
+    shell
+        .invoke("chain.cut", json!({ "chain": chains[1] }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let targets: Vec<ModTarget> = doc
+        .device(wave)
+        .unwrap()
+        .mappings
+        .iter()
+        .map(|m| m.target)
+        .collect();
+    assert!(!targets.contains(&ModTarget::Device {
+        device: other,
+        param: testing::GAIN_PARAM
+    }));
+    assert_eq!(targets.len(), 2);
+}

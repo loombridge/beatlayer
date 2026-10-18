@@ -97,6 +97,8 @@ pub mod transport;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+/// Capture MIDI's command ID and its result types (WP-3.14).
+pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;

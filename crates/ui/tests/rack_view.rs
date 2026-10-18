@@ -650,6 +650,48 @@ fn a_chain_drags_between_racks_and_onto_another_track() {
     assert!(h.shell.editor().document().chain(first_chains[1]).is_some());
 }
 
+// Spec: racks R24. Several chains dragged down their own rack land below the
+// gap in the list's order.
+#[test]
+fn selected_chains_drag_down_their_rack_in_order() {
+    let mut h = harness();
+    let (rack, chains) = rack(&mut h, &["A", "B", "X"]);
+    h.shell
+        .invoke("chain.select", json!({ "chain": chains[0] }))
+        .unwrap();
+    h.shell
+        .invoke(
+            "chain.select",
+            json!({ "chain": chains[1], "mode": "range" }),
+        )
+        .unwrap();
+    h.settle();
+    let list = layout_of(&mut h, rack);
+    let rows = list.chain_list.clone().unwrap().rows;
+    let steps = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        row(&list, 0).name.center(),
+        pos2(rows[2].row.center().x, rows[2].row.bottom() - 1.0),
+    );
+    let order: Vec<ChainId> = h
+        .shell
+        .editor()
+        .document()
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(order, [chains[2], chains[0], chains[1]]);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+}
+
 // Spec: racks R25
 #[test]
 fn the_device_list_shows_racks_as_a_hierarchy() {

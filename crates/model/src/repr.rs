@@ -292,6 +292,9 @@ impl TryFrom<DocumentRepr> for Document {
                 document.check_clip_envelopes(id, clip)?;
             }
         }
+        // Spec: modulation R19. A mapping naming a parameter the set doesn't
+        // have doesn't load.
+        document.prune_mappings();
         Ok(document)
     }
 }
@@ -507,6 +510,63 @@ mod tests {
         serde_json::from_value(value).map_err(|error| error.to_string())
     }
 
+    // Spec: modulation R19
+    #[test]
+    fn modulator_mappings_save_with_the_set_and_load_back() {
+        use crate::modulator::{Mapping, ModTarget, ShapePoint, WAVE_MOD};
+        let (mut doc, [_, audio, _]) = song();
+        let target = doc.device_ids().next().unwrap();
+        let mut wave = Device::new(
+            crate::DeviceId(bl_core::id::Id::new(doc.max_id().get() + 1).unwrap()),
+            "Wave Mod",
+            DeviceKind::Native {
+                device_type: WAVE_MOD.to_owned(),
+            },
+        );
+        wave.mappings = vec![
+            Mapping {
+                slot: 0,
+                target: ModTarget::Device {
+                    device: target,
+                    param: ParamId(4),
+                },
+            },
+            Mapping {
+                slot: 3,
+                target: ModTarget::Mixer {
+                    track: audio,
+                    param: crate::MixerParam::Pan,
+                },
+            },
+        ];
+        wave.shape = Some(vec![ShapePoint {
+            x: 0.0,
+            y: 0.5,
+            bend: 0.25,
+        }]);
+        doc.apply(&Command::InsertDevice {
+            track: audio,
+            index: 1,
+            device: wave.clone(),
+        })
+        .unwrap();
+        let json = serde_json::to_string(&doc).unwrap();
+        let back: Document = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.device(wave.id).unwrap().mappings, wave.mappings);
+        assert_eq!(back.device(wave.id).unwrap().shape, wave.shape);
+        // A mapping that names a parameter the set lacks doesn't load.
+        let stale = json.replacen(
+            &format!("\"device\":{}", target.0.get()),
+            "\"device\":777777",
+            1,
+        );
+        let loaded: Document = serde_json::from_str(&stale).unwrap();
+        assert!(
+            loaded.device(wave.id).unwrap().mappings.len() == 1,
+            "the stale mapping went"
+        );
+    }
+
     #[test]
     fn round_trip() {
         let (doc, _) = song();
@@ -685,6 +745,37 @@ mod tests {
         let mut value = serde_json::to_value(&doc).unwrap();
         value["tracks"][0]["children"][0]["devices"][0]["role"] = json!("instrument");
         assert!(load(value).unwrap_err().contains("instrument"));
+    }
+
+    // Spec: device-compare R10
+    #[test]
+    fn both_states_save_with_the_set_and_load_back() {
+        let (mut doc, [_, audio, _]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let saved = |doc: &Document| {
+            serde_json::to_value(doc).unwrap()["tracks"][0]["children"][0]["devices"][0].clone()
+        };
+        // Equal states write neither the active state nor the other.
+        let before = saved(&doc);
+        assert!(before.get("b_active").is_none() && before.get("other_params").is_none());
+        // A change leaves the other state as it was, and it's written.
+        let set = |value| Command::SetDeviceParam {
+            device,
+            param: ParamId(4),
+            value,
+        };
+        doc.apply(&set(-12.0)).unwrap();
+        assert_eq!(saved(&doc)["other_params"], json!([[4, -6.0]]));
+        doc.apply(&Command::CompareSwitch { device }).unwrap();
+        let after = saved(&doc);
+        assert_eq!(after["b_active"], json!(true));
+        assert_eq!(after["params"], json!([[4, -6.0]]));
+        assert_eq!(after["other_params"], json!([[4, -12.0]]));
+        assert_eq!(load(serde_json::to_value(&doc).unwrap()).unwrap(), doc);
+        // Copying makes them equal again, and the other isn't written.
+        doc.apply(&Command::CompareCopy { device }).unwrap();
+        assert!(saved(&doc).get("other_params").is_none());
+        assert_eq!(load(serde_json::to_value(&doc).unwrap()).unwrap(), doc);
     }
 
     // Spec: clap-hosting R8

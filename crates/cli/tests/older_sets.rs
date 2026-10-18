@@ -10,7 +10,10 @@ use bl_core::id::IdAllocator;
 use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
 use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
-use bl_model::{AudioData, Clip, ClipData, Command, ContentHash, Document, Editor, TrackKind};
+use bl_model::{
+    AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Document, Editor, ParamId,
+    TrackKind,
+};
 use bl_project::{LoadOptions, Media, Project, decode_json, encode_json};
 use serde_json::{Value, json};
 
@@ -342,4 +345,59 @@ fn an_older_clip_envelope_renders_the_same() {
     for (frame, (a, b)) in now.iter().zip(&played).enumerate().skip(10_000) {
         assert!((a - b).abs() < 1e-3, "frame {frame}: {a} isn't {b}");
     }
+}
+
+// Spec: device-compare R10
+#[test]
+fn a_set_without_b_loads_with_b_equal_to_a() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device = editor.new_id();
+    let mut utility = Device::new(
+        device,
+        "Utility",
+        DeviceKind::Native {
+            device_type: "beatlayer.utility".to_owned(),
+        },
+    );
+    utility.params.insert(ParamId(2), -3.0);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: utility,
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: IdAllocator::new(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+    };
+    // A set from before the two states has neither field.
+    let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    let saved_device = &saved["document"]["tracks"][0]["devices"][0];
+    assert!(saved_device.get("b_active").is_none());
+    assert!(saved_device.get("other_params").is_none());
+
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let loaded = loaded.document.device(device).unwrap();
+    assert!(!loaded.b_active);
+    assert_eq!(loaded.other_params(), &loaded.params);
 }

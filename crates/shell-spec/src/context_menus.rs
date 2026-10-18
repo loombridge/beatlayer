@@ -12,7 +12,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::{SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
+use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
@@ -139,12 +139,8 @@ const DEVICE: &[Row] = &[
         Cmd("device.set_show_preset_name"),
     ),
     SEPARATOR,
-    (
-        "C-DEVICE-010",
-        "Compare: Switch to B",
-        Pending(Some("S-DEV-011")),
-    ),
-    ("C-DEVICE-011", "Compare: Copy A to B", Pending(None)),
+    ("C-DEVICE-010", "Compare: Switch to B", Cmd(COMPARE_SWITCH)),
+    ("C-DEVICE-011", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     (
         "C-DEVICE-012",
@@ -326,7 +322,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
-        "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }
 }
@@ -414,9 +409,14 @@ mod tests {
             device.len(),
             "the rest is the device menu"
         );
-        for row in RACK_COMPARE_ROWS {
+        // The Compare commands refuse a rack, so the shell shows them
+        // disabled (device compare R6).
+        for (row, command) in RACK_COMPARE_ROWS
+            .into_iter()
+            .zip([COMPARE_SWITCH, COMPARE_COPY])
+        {
             let item = rack.iter().find(|i| i.row == row).unwrap();
-            assert!(matches!(item.action, Pending(_)), "{row} is disabled");
+            assert_eq!(item.command(), Some(command), "{row}");
         }
         let ungroup = rack.iter().find(|i| i.row == R26_UNGROUP).unwrap();
         assert_eq!(ungroup.command(), Some(UNGROUP));

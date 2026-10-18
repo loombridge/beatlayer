@@ -172,11 +172,27 @@ fn sample_drop(
     if !takes {
         return;
     }
-    invoke(
-        events,
-        ids::LOAD_SAMPLE,
-        json!({ "device": device, "path": path }),
-    );
+    // Dropped on a sample slot's cell, it loads into that slot; anywhere
+    // else on the device, into the selected one (WP-5.17).
+    let slot = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device)
+        .and_then(|frame| {
+            let panel = frame.panel.as_ref()?;
+            let rect = placed.iter().find(|(id, _)| id == device)?.1;
+            let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+            body.min.x += ids::sidechain_width(frame);
+            let (_, cells) = crate::device_panel::place_shown(panel, frame.expanded, body);
+            cells
+                .into_iter()
+                .find_map(|(_, cell, slot)| slot.filter(|_| cell.contains(pointer)))
+        });
+    let mut args = json!({ "device": device, "path": path });
+    if let Some(slot) = slot {
+        args["slot"] = json!(slot);
+    }
+    invoke(events, ids::LOAD_SAMPLE, args);
 }
 
 impl DeviceViewUi {
@@ -255,7 +271,10 @@ impl DeviceViewUi {
             .devices
             .iter()
             .fold(DEVICE_GAP, |w, d| w + ids::frame_width(d) + DEVICE_GAP);
-        if background.hovered() || ui.rect_contains_pointer(rect) {
+        let over_chain_list = ui.ctx().pointer_hover_pos().is_some_and(|pointer| {
+            crate::rack_view::over_chain_list(&state, rect, self.scroll, pointer)
+        });
+        if (background.hovered() || ui.rect_contains_pointer(rect)) && !over_chain_list {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             self.scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
         }
@@ -372,7 +391,7 @@ impl DeviceViewUi {
         let _ = ui.interact(rect, id, Sense::hover());
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Group);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_description(format!(
                 "{}, {}{}",
                 frame.role.label(),
@@ -527,7 +546,7 @@ impl DeviceViewUi {
         let painter = ui.painter_at(rect);
         if strip {
             // The name reads upwards on a folded device (observed).
-            let galley = painter.layout_no_wrap(frame.title.clone(), theme.small_font(), colour);
+            let galley = painter.layout_no_wrap(frame.title_text(), theme.small_font(), colour);
             let at = pos2(
                 rect.center().x - galley.size().y / 2.0,
                 rect.top() + galley.size().x.min(rect.height()),
@@ -537,7 +556,7 @@ impl DeviceViewUi {
             painter.text(
                 pos2(rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
-                &frame.title,
+                frame.title_text(),
                 theme.small_font(),
                 colour,
             );
@@ -565,11 +584,11 @@ impl DeviceViewUi {
         }
         focus_ring(ui, theme, rect, &response);
         response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, frame.selected, &frame.title)
+            WidgetInfo::selected(WidgetType::Button, true, frame.selected, frame.title_text())
         });
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Button);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_selected(frame.selected);
             node.set_description(
                 if window {
@@ -784,11 +803,10 @@ impl DeviceViewUi {
                 continue;
             }
             let response = crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+            let rack_compare =
+                frame.rack.is_some() && context_menus::RACK_COMPARE_ROWS.contains(&item.row);
             let response = match context_menus::pending_package(item.row) {
-                Some(_)
-                    if frame.rack.is_some()
-                        && context_menus::RACK_COMPARE_ROWS.contains(&item.row) =>
-                {
+                _ if rack_compare => {
                     let text = "A/B compare doesn't apply to racks.".to_owned();
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.set_description(text.clone());
@@ -831,6 +849,24 @@ impl DeviceViewUi {
                 ui.close();
             }
             crate::menus::take_focus_first(ui, &response);
+        }
+        // Strike's own items after its switches (31.4.5): the swap to
+        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // (T145) bring.
+        if frame.swaps_to_snapshot {
+            let response = ui.button("Swap to Snapshot");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+            let text = "Not built yet: arrives with the Drum Rack's pads (T145).";
+            let pad = ui.add_enabled(false, egui::Button::new("Save as Default Pad"));
+            ui.ctx().accesskit_node_builder(pad.id, |node| {
+                node.set_description(text.to_owned());
+            });
+            pad.on_disabled_hover_text(text);
         }
     }
 
@@ -889,6 +925,15 @@ impl DeviceViewUi {
                 (landing.gap, landing.index, Some((device, landing.changes)))
             }
             (None, Some(drag)) if slot.chain.is_none() => {
+                // Spec: racks R24. Only a drop outside every rack spreads a
+                // chain's devices on the track.
+                let over_rack = placed
+                    .iter()
+                    .zip(&state.devices)
+                    .any(|((_, at), d)| d.rack.is_some() && at.contains(pointer));
+                if over_rack {
+                    return;
+                }
                 let Some((gap, ok)) = chain_landing(shell, state, drag, track, slot, pointer.x)
                 else {
                     return;

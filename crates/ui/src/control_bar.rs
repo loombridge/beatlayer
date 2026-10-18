@@ -100,6 +100,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Metronome => Some(ids::SET_METRONOME_ENABLED),
         Element::Follow => Some(FOLLOW),
         Element::AutomationArm => Some(AUTOMATION_ARM),
+        Element::CaptureMidi => Some(CAPTURE_MIDI),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -115,6 +116,7 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::ReEnableAutomation => Some(Invocation::new(RE_ENABLE_AUTOMATION, json!({}))),
         Element::AutomationArm => Some(Invocation::new(AUTOMATION_ARM, json!({}))),
+        Element::CaptureMidi => Some(Invocation::new(CAPTURE_MIDI, json!({}))),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
@@ -151,6 +153,9 @@ pub fn automation_overridden(shell: &Shell) -> bool {
             .tracks()
             .any(bl_model::Track::automation_overridden)
 }
+
+/// The Capture MIDI command (the capture MIDI spec).
+pub const CAPTURE_MIDI: &str = bl_shell::capture_midi_commands::CAPTURE;
 
 /// The Re-Enable Automation command (the automation spec, R5).
 pub const RE_ENABLE_AUTOMATION: &str = bl_model::registry::RE_ENABLE_AUTOMATION;
@@ -283,6 +288,19 @@ impl TransportFields {
                         "Puts every control whose automation a hand move turned off \
                          back under its envelope."
                             .to_owned(),
+                    ),
+                    ..Look::default()
+                });
+            }
+            Element::CaptureMidi => {
+                // Spec: capture-midi R1. It is enabled once notes have been
+                // played on a monitoring MIDI track.
+                let ready = shell.capture_midi_ready();
+                return Some(Look {
+                    disabled: !ready,
+                    value: Some(if ready { "ready" } else { "nothing to capture" }.to_owned()),
+                    description: Some(
+                        "Brings back the notes just played on a MIDI track as a clip.".to_owned(),
                     ),
                     ..Look::default()
                 });

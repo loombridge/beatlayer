@@ -402,6 +402,34 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: modulation R18. A modulator's mappings, which
+        // `modulator.map` and `modulator.unmap` change, and a Curve Mod's
+        // shape.
+        if bl_model::modulator::is_modulator_kind(&device.kind) {
+            value["mappings"] = json!(device.mappings);
+            if let Some(shape) = &device.shape {
+                value["shape"] = json!(shape);
+            }
+        }
+        if device.can_compare() {
+            // Spec: device-compare R11.
+            let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {
+                params
+                    .iter()
+                    .map(|(param, value)| json!({ "param": param, "value": value }))
+                    .collect::<Vec<_>>()
+            };
+            let (a, b) = if device.b_active {
+                (device.other_params(), &device.params)
+            } else {
+                (&device.params, device.other_params())
+            };
+            value["compare"] = json!({
+                "active": if device.b_active { "B" } else { "A" },
+                "a": pairs(a),
+                "b": pairs(b),
+            });
+        }
         if self.detail == Detail::Full {
             value["saved"] = self.saved(device);
         }

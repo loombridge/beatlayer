@@ -4,6 +4,7 @@ use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_model::{ParamId, TrackId};
 use rtrb::Consumer;
 
+use crate::capture::CapturedMidi;
 use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
@@ -256,12 +257,23 @@ impl Clone for EngineState {
 pub struct Monitor {
     pub(crate) state: triple_buffer::Output<EngineState>,
     pub(crate) reports: Consumer<Report>,
+    pub(crate) captured: Consumer<CapturedMidi>,
 }
 
 impl Monitor {
     /// The latest state the audio thread published.
     pub fn state(&mut self) -> &EngineState {
         self.state.read()
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call,
+    /// oldest first, for Capture MIDI (WP-3.14).
+    pub fn captured(&mut self) -> Vec<CapturedMidi> {
+        let mut notes = Vec::with_capacity(self.captured.slots());
+        while let Ok(note) = self.captured.pop() {
+            notes.push(note);
+        }
+        notes
     }
 
     /// Reports since the last call, oldest first.

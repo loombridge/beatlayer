@@ -1,0 +1,65 @@
+# Capture MIDI: bringing back the notes just played
+
+- **Status:** implemented
+- **Work packages:** WP-3.14
+- **Parity-matrix row:** Capture MIDI
+- **Checked against:** the Live 12 reference manual, chapter 19 "Recording New Clips", section 19.10, read 17 October 2026, and Live 12.4.3 on macOS, observed on 15 and 17 October 2026.
+
+## The behaviour
+
+While Beatlayer runs, it remembers the notes played on every MIDI track that monitors its input, whether or not the transport runs and whether or not anything records. Capture MIDI (Create ▸ Capture MIDI, and the Control Bar's button) turns what was remembered into a MIDI clip on each track that was played, with the notes' velocities and timing. It needs no Record press first. It is disabled until a note has been played, and capturing empties the memory.
+
+A track with a clip playing, with the transport running, takes the notes into that clip. Any other track gets a new clip in a Session slot, which then launches. With the transport stopped, the first note lands on 1.1.1 and the song's tempo may change to the tempo that was played; with it running, the tempo stays.
+
+This spec covers what is remembered, where the clip goes, how long it is and what its loop is, the tempo, and the merge. It leaves to other specs: recording ([recording](recording.md), [session recording](session-recording.md)); controller data in a capture, which follows the MIDI controller data work package ([midi-controller-data](midi-controller-data.md) R15); and capture into the Arrangement, which is not built yet.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, 19.10 "Capturing MIDI" | Capture MIDI retrieves notes just played on armed or input-monitored MIDI tracks without pressing Record. In a new, empty set with the transport stopped it makes a clip on each monitored MIDI track in the view in focus, detects the tempo within a range and sets loop boundaries. In a set with content, or with the transport running, it leaves the tempo alone and uses it to find the phrase. Notes before the phrase appear before the clip's start marker. |
+| S2 | Observation | Live 12.4.3 on macOS, 15 October 2026, Session View | Capture MIDI in the Create menu is disabled in a new set and enabled once notes have been played. 8 notes played into a track with a clip in the selected slot were merged into that clip, with Start, End and the loop on the last bar. |
+| S3 | Observation | Live 12.4.3 on macOS, 17 October 2026, computer MIDI keyboard into an armed MIDI track with an instrument | A track with no clip playing put the clip in the selected slot; with the slot empty a new clip was made there and launched. With a clip playing and the transport running, the notes were added to that clip. A selected slot holding a clip that was not playing sent the clip to the next empty slot below; in the last scene, a scene was added at the end. With the transport running the tempo stayed; with it stopped it was set. Capture MIDI was greyed out on a MIDI track with no instrument and its output set to No Output. A capture made an empty-slot clip on a running transport that launched in time, with its loop on the last 2 bars for 8 notes. |
+| S4 | Observation | Live 12.4.3 on macOS, 17 October 2026, notes sent at exact times on a virtual MIDI port, timing checked by logging the port; each capture into an empty slot with the transport stopped | The first note landed on 1.1.1. The loop was the fewest whole bars that cover the span from the first note-on to the last. 4 quarter notes (span 3 beats) gave 1 bar, 8 (7) gave 2, 9 (8) gave 2 with the ninth note on the loop's end, after it, 12 (11) gave 3, 8 notes 0.667 beat apart (4.67) gave 2, and 8 half notes at tempo 200 (14) gave 4. Note lengths did not count. Capturing emptied the buffer, and the menu item greyed out straight after. Notes played about 20 s before a phrase stayed in the clip with their gap, before a loop that covered the last phrase. Merging into a playing clip kept its loop length (3 bars) and moved the loop to the take's last 3 bars. |
+| S5 | Observation | As S4, the tempo with the transport stopped; each capture adds an undo step named for the tempo change even when the tempo stays | Song tempo, then the tempo of the notes played (one note every n seconds), then the result: 120 and 120 gave 120.00 with the notes on the beats; 104 and 100 gave 104.00 with the notes stretched onto the beats; 145 and 150 gave 145.00 stretched; 140 and 150 gave 140.00 stretched; 135, 130, 125 and 115 with 150 gave 150.00; 100 with 120 gave 119.50; 120 with 100 gave 100.00; 140 with 100 gave 99.50; 160 with 100 gave 200.00 with each note a half note; 108 with 150 gave 108.00 with the notes at their raw times, 0.72 beat apart; 100 with 150 gave 100.00 with raw times, 0.667 beat apart. |
+| S6 | Observation | As S4, with the transport running | The tempo did not change. A new clip in an empty slot launched in time with its loop on the last bars of the phrase. A merge kept the loop length. |
+| S7 | Observation | Live 12.4.3 on macOS, 17 October 2026, with controller data | With only controller messages sent and no notes, Capture MIDI stayed disabled. Controller data is [midi-controller-data](midi-controller-data.md)'s. |
+
+## Rules
+
+- **R1.** The engine logs each note-on and note-off a MIDI track's input receives while the track monitors (its Monitor switch is In, or Auto and it is armed), on the sample it landed on, with the transport stopped or running; other messages are not logged. The shell keeps at most 4,096 messages per track, the oldest going first, until a capture or a recording uses them: a running recording discards what is played during it. Capture MIDI is enabled when the buffer holds a note-on, and refused otherwise, with the Control Bar's button and Create ▸ Capture MIDI disabled. A track's note-off alone enables nothing. (S1, S2, S4, S7)
+- **R2.** Each note-on starts a note on its key and the next note-off on that key (or a note-on on it again) ends it, so a note has its velocity, its release velocity (64 when the note-off had none) and its length. A note still held ends with the track's last message. A note-off with nothing held is ignored. The clip has no channel. (S1)
+- **R3.** With the transport stopped, the first note-on of all the captured tracks is at 1.1.1, and a note's position is its time from there at the tempo of R6. A new clip's loop is on: it ends on the bar line at or after the last note-on, and is as many whole bars as cover the span from the first note-on of the last phrase to its last note-on, at least one. A note-on exactly on the loop's end stays in the clip after it. The clip's length is the loop's end, its Start marker is the loop's start, and notes before the loop stay in the clip. (S1, S4)
+- **R4.** Each track that was played gets one clip. A MIDI track with a clip playing while the transport runs takes the notes into that clip (R5). Any other track gets a new clip in the slot of the selected scene if it is empty, else in the next empty slot below on that track, else in a scene added at the end, which later tracks share. The new clip launches as `session.launch` does, and the slot is selected. (S2, S3)
+- **R5.** The notes joining a playing clip are placed where they were played, counted from the frame the clip launched on. A clip that loops is unrolled to the end of the loop pass its last note falls in, each pass a copy of the loop, and the loop moves to that last pass, keeping its length; a note exactly on a pass boundary counts for the pass before it and stays after the loop's end. Notes in the first pass leave the clip's markers alone. A clip that does not loop takes the notes that start before its end. (S3, S4, S6)
+- **R6.** With the transport stopped, and the song's tempo one constant tempo, the tempo is worked out from the last phrase's onsets: notes within 30 ms are one onset, the played tempo is 60 over the median gap between onsets, and with fewer than two onsets there is none. The played tempo is tried as a beat, then at twice its value, as each note a half note, and never at half. The first one within 2/3 to 4/3 of the song's tempo is the candidate. A candidate within 1.09 times of the song's tempo (above or below) leaves the tempo, and the notes are stretched so the played tempo's beats fall on the song's. A candidate farther away becomes the song's tempo, to 0.5 BPM, and the notes are counted at it. With no candidate in range the tempo stays and the notes keep their raw times. The loop's bars are counted at the tempo the capture ends with. (S1, S5)
+- **R7.** With the transport running, the tempo stays. A new clip is placed on the song's bar grid: its start is the bar line at or before the first note, and a note stands at its song position, to the sample through the tempo map. Notes played before the transport started are placed by their distance in time from the first note that has a song position. (S6)
+- **R8.** A phrase is the notes after the last silence of two bars between note-ons, at the song's tempo when the capture began. The loop covers the last phrase, and earlier notes stay before it. (S4)
+- **R9.** `midi.capture` (permission class `edit`) is Create ▸ Capture MIDI and the Control Bar's Capture MIDI button. It is one undo step named `Capture MIDI` that holds the tempo change, any scene it added, and the clips. It returns the clips made or joined and the new tempo, and `transport.state` reads `capture_midi_ready` back. (S2)
+- **R10.** Control changes, pitch bend and pressure are not captured: only notes are logged, and they do not enable the command. (S7)
+
+## Beatlayer's own choices
+
+- The fit band of 1.09 and the accepted range of 2/3 to 4/3 are inside the brackets S5 shows: 1.071 fitted and 1.111 did not; 1.30 was accepted and 1.39 refused; 0.714 was accepted and 0.625 refused. The exact edges are not observable.
+- The median gap, the 30 ms onset, the two-bar phrase silence, and measuring several tracks' tempo together from all their last phrases are Beatlayer's, because uneven phrases were not observed.
+- The tempo change and the clip are one undo step. Live adds a step for the tempo change on its own.
+- Phrase detection longer than a bar, as the manual describes it, is a later improvement; R3 and R8 use the notes' span.
+- The tempo is changed to 0.5 BPM from exact note times. In Live the same notes gave results such as 119.50 where exact 0.5 s spacing would give 120.00, from the timing of the port; the tests use a spacing of 0.5018 s for that row.
+- A song with tempo changes along it keeps its tempo.
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples`, `a_track_that_does_not_monitor_logs_nothing`, `a_full_ring_drops_notes_and_counts_them`; `crates/engine/src/capture.rs`, `the_buffer_keeps_the_latest_and_a_lone_note_off_enables_nothing`; `crates/shell/tests/capture_midi.rs`, `a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step`; `crates/ui/tests/capture_midi.rs`, `the_button_and_the_command_are_disabled_with_nothing_played` | frame by frame, unit, UI script |
+| R2 | `crates/engine/src/capture.rs`, `notes_pair_and_a_held_note_ends_with_the_last_message`; `crates/engine/tests/capture_midi.rs`, `a_captured_phrase_plays_back_on_the_samples_it_was_played_on` | unit, render |
+| R3 | `crates/engine/src/capture.rs`, `the_loop_is_the_bars_that_cover_the_first_note_on_to_the_last`, `an_earlier_phrase_stays_before_the_loop`; `crates/engine/tests/capture_midi.rs`, `a_captured_phrase_plays_back_on_the_samples_it_was_played_on` | unit, render |
+| R4 | `crates/shell/tests/capture_midi.rs`, `a_taken_slot_sends_the_clip_to_the_next_empty_one_or_a_new_scene`, `a_playing_clip_takes_the_notes_of_a_later_capture` | unit |
+| R5 | `crates/engine/src/capture.rs`, `notes_in_a_later_pass_unroll_the_clip_and_move_the_loop`, `notes_in_the_first_pass_leave_the_loop_alone`, `a_note_on_a_pass_boundary_stays_after_the_loop`; `crates/shell/tests/capture_midi.rs`, `a_playing_clip_takes_the_notes_of_a_later_capture` | unit |
+| R6 | `crates/engine/src/capture.rs`, `the_tempo_follows_the_rows_observed_in_live`, `a_kept_tempo_stretches_the_notes_and_none_in_range_leaves_them_raw` | unit |
+| R7 | `crates/shell/tests/capture_midi.rs`, `a_playing_clip_takes_the_notes_of_a_later_capture` (the tempo stays) | unit |
+| R8 | `crates/engine/src/capture.rs`, `an_earlier_phrase_stays_before_the_loop` | unit |
+| R9 | `crates/shell/tests/capture_midi.rs`, `a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step`; `crates/shell-spec/src/capture_midi.rs`, `every_listed_id_is_registered_and_complete` | unit |
+| R10 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples` (the controller is not logged) | frame by frame |
+
+The engine tests run every block under the allocation trap, and the shell test checks that the stream's `heap_operations` stays 0.

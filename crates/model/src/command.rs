@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, entry, override_target,
+    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device, override_target,
 };
 use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
 use crate::device::{Device, DeviceRole};
@@ -20,7 +20,7 @@ use crate::error::ModelError;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain};
+use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -922,6 +922,10 @@ pub enum Command {
         /// The name the title bar shows while Show Preset Name is on, such
         /// as the preset's; empty for the device's own name.
         name: String,
+        /// A Curve Mod's breakpoint shape (the modulation spec, R23), which
+        /// a preset of one holds; `null` for the default shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<Vec<crate::modulator::ShapePoint>>,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -938,6 +942,18 @@ pub enum Command {
         /// Whether it's on.
         enabled: bool,
     },
+    /// Makes the other of a device's A and B states the active one
+    /// (device compare R3). Only native devices have two states.
+    CompareSwitch {
+        /// The device.
+        device: DeviceId,
+    },
+    /// Copies the active one of a device's A and B states over the other
+    /// (device compare R4). Only native devices have two states.
+    CompareCopy {
+        /// The device.
+        device: DeviceId,
+    },
     /// Sets one of a device's parameters to a finite value.
     SetDeviceParam {
         /// The device.
@@ -946,6 +962,34 @@ pub enum Command {
         param: ParamId,
         /// The value, in the parameter's own units.
         value: f64,
+    },
+    /// Maps a slot of a modulator to a parameter (the modulation spec, R15):
+    /// the Map button's gesture. The slot's earlier mapping goes.
+    MapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+        /// The parameter to map: a mixer control or send of any track, or a
+        /// parameter of any device but the modulator's own.
+        target: crate::modulator::ModTarget,
+    },
+    /// Removes the mapping of a modulator's slot (R15): the Unmap button.
+    UnmapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+    },
+    /// Replaces the breakpoint shape of a Curve Mod (R23): every edit of
+    /// its display, Clear and the presets make a new list.
+    SetShape {
+        /// The Curve Mod device.
+        device: DeviceId,
+        /// The breakpoints, in order along the cycle (at most 64), each with
+        /// its place and output from 0 to 1 and the bend of the segment
+        /// starting there, from −1 to 1.
+        points: Vec<crate::modulator::ShapePoint>,
     },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
@@ -956,6 +1000,10 @@ pub enum Command {
         /// store is where the audio comes from; a device given media the
         /// store doesn't hold is silent.
         media: Option<ContentHash>,
+        /// The sample slot to set: 0, the only one the sampler has, unless
+        /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
+        #[serde(default)]
+        slot: u8,
     },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
@@ -1253,9 +1301,16 @@ impl Command {
             Self::SetDeviceFloating {
                 floating: false, ..
             } => "Dock Device",
+            // Spec: device-compare R3, R4; `label_in` names the direction.
+            Self::CompareSwitch { .. } => "Compare: Switch",
+            Self::CompareCopy { .. } => "Compare: Copy",
             Self::SetDeviceParam { .. } => "Change parameter",
             // WP-2.16. Live's undo name for loading a Simpler sample is to
             // observe; Beatlayer's names the edit.
+            // WP-5.10: Beatlayer's own names.
+            Self::MapModulator { .. } => "Map Modulator",
+            Self::UnmapModulator { .. } => "Unmap Modulator",
+            Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
@@ -1281,6 +1336,21 @@ impl Command {
             Self::SetChainPan { .. } => "Change chain pan",
             Self::SetChainEnabled { .. } => "Change \"Chain On\"",
             Self::SetChainSolo { .. } => "Solo chain",
+        }
+    }
+
+    /// The undo step's name for this command run on `before`: the same as
+    /// [`label`](Self::label), but a Compare command says which way it went
+    /// (device compare R3, R4).
+    #[must_use]
+    pub fn label_in(&self, before: &Document) -> &'static str {
+        let b = |device: &DeviceId| before.device(*device).is_some_and(|d| d.b_active);
+        match self {
+            Self::CompareSwitch { device } if b(device) => "Compare: Switch to A",
+            Self::CompareSwitch { .. } => "Compare: Switch to B",
+            Self::CompareCopy { device } if b(device) => "Compare: Copy B to A",
+            Self::CompareCopy { .. } => "Compare: Copy A to B",
+            _ => self.label(),
         }
     }
 
@@ -1402,7 +1472,11 @@ impl Document {
                 parent,
                 index,
             } => self.create_track(*id, *kind, name, *parent, *index),
-            Command::DeleteTrack { track } => self.delete_track(*track),
+            Command::DeleteTrack { track } => {
+                self.delete_track(*track)?;
+                self.prune_mappings();
+                Ok(())
+            }
             Command::MoveTrack {
                 track,
                 parent,
@@ -1415,6 +1489,10 @@ impl Document {
                 Ok(())
             }
             Command::SetVolume { track, volume } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Volume,
+                })?;
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
                 if self.track_ref(*track)?.mixer.volume != *volume {
                     let track_ref = self.track_mut(*track)?;
@@ -1429,6 +1507,10 @@ impl Document {
                 Ok(())
             }
             Command::SetPan { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Pan,
+                })?;
                 check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
                 if self.track_ref(*track)?.mixer.pan != *pan {
                     let track_ref = self.track_mut(*track)?;
@@ -1443,6 +1525,10 @@ impl Document {
                 Ok(())
             }
             Command::SetMute { track, mute } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Mute,
+                })?;
                 let current = self.track_ref(*track)?;
                 check_kind(current, TrackKind::has_mute_and_solo, NOT_MAIN)?;
                 if current.mixer.mute != *mute {
@@ -1488,6 +1574,10 @@ impl Document {
                 Ok(())
             }
             Command::SetSend { track, to, level } => {
+                self.check_not_held(crate::modulator::ModTarget::Send {
+                    track: *track,
+                    to: *to,
+                })?;
                 check_value("send level", *level, (0.0..=1.0).contains(level))?;
                 let sender = self.track_ref(*track)?;
                 check_kind(sender, TrackKind::has_sends, SENDER)?;
@@ -1591,6 +1681,7 @@ impl Document {
                 input,
                 channel,
             } => {
+                self.check_instrument_source(*track, input)?;
                 let input = input.clone();
                 let channel = *channel;
                 self.edit_routing(*track, |routing| {
@@ -1767,7 +1858,8 @@ impl Document {
                 let owner = self.device_owner(*device)?;
                 let removed = self.take_device(*device)?;
                 self.index.remove_device(&removed);
-                forget(self.track_mut(owner)?, &Gone::device(&removed));
+                self.forget_in(owner, &Gone::device(&removed))?;
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveDevice {
@@ -1793,9 +1885,11 @@ impl Document {
                 device,
                 params,
                 name,
+                shape,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
-                loaded.params = params.clone();
+                loaded.set_both(params.clone());
+                loaded.shape.clone_from(shape);
                 loaded.set_name(name);
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
@@ -1825,9 +1919,28 @@ impl Document {
                 value,
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
+                self.check_not_held(crate::modulator::ModTarget::Device {
+                    device: *device,
+                    param: *param,
+                })?;
+                // Spec: modulation R16. Remote Control holds what a
+                // modulator maps; one parameter has one holder.
+                if *param == crate::modulator::MODE && *value >= 0.5 {
+                    let current = self.device_ref(*device)?;
+                    if current
+                        .mappings
+                        .iter()
+                        .any(|m| self.held_by(m.target, *device).is_some())
+                    {
+                        return Err(ModelError::InvalidInput(
+                            "another modulator in Remote Control already holds a parameter this \
+                             one maps",
+                        ));
+                    }
+                }
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     let owner = self.device_owner(*device)?;
-                    self.device_mut(*device)?.params.insert(*param, *value);
+                    self.device_mut(*device)?.set_param(*param, *value);
                     override_target(
                         &mut self.track_mut(owner)?.automation,
                         &AutomationTarget::Device {
@@ -1838,9 +1951,44 @@ impl Document {
                 }
                 Ok(())
             }
-            Command::SetDeviceSample { device, media } => {
-                if self.device_ref(*device)?.media != *media {
-                    self.device_mut(*device)?.media = *media;
+            Command::MapModulator {
+                device,
+                slot,
+                target,
+            } => self.map_modulator(*device, *slot, *target),
+            Command::UnmapModulator { device, slot } => self.unmap_modulator(*device, *slot),
+            Command::SetShape { device, points } => self.set_shape(*device, points),
+            Command::CompareSwitch { device } => {
+                if !self.device_ref(*device)?.can_compare() {
+                    return Err(ModelError::NoCompare(*device));
+                }
+                let owner = self.device_owner(*device)?;
+                self.device_mut(*device)?.compare_switch();
+                override_device(&mut self.track_mut(owner)?.automation, *device);
+                Ok(())
+            }
+            Command::CompareCopy { device } => {
+                if !self.device_ref(*device)?.can_compare() {
+                    return Err(ModelError::NoCompare(*device));
+                }
+                if self.device_ref(*device)?.other_params.is_some() {
+                    self.device_mut(*device)?.compare_copy();
+                }
+                Ok(())
+            }
+            Command::SetDeviceSample {
+                device,
+                media,
+                slot,
+            } => {
+                check_value(
+                    "sample slot",
+                    f64::from(*slot),
+                    usize::from(*slot) < crate::device::MAX_MEDIA_SLOTS,
+                )?;
+                if self.device_ref(*device)?.media_at(usize::from(*slot)) != *media {
+                    self.device_mut(*device)?
+                        .set_media(usize::from(*slot), *media);
                 }
                 Ok(())
             }
@@ -1894,7 +2042,8 @@ impl Document {
                     .remove_chain(*chain)
                     .ok_or(ModelError::NoSuchChain(*chain))?;
                 self.index.remove_chain(&removed);
-                forget(self.track_mut(owner)?, &Gone::chain(&removed));
+                self.forget_in(owner, &Gone::chain(&removed))?;
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveChain { chain, rack, index } => self.move_chain(*chain, *rack, *index),
@@ -2763,6 +2912,8 @@ impl Document {
         insert_at(chain, index, Shared::new(device.clone()))?;
         self.index.add_device(device, track);
         check_chain(self.track_ref(track)?)?;
+        // Spec: modulation R19. A mapping to a parameter the set lacks goes.
+        self.prune_mappings();
         self.check_routing(track)
     }
 
@@ -2818,7 +2969,7 @@ impl Document {
     ) -> Result<(), ModelError> {
         if from != to {
             self.index.add_device(moved, to);
-            forget(self.track_mut(from)?, &Gone::device(moved));
+            self.forget_in(from, &Gone::device(moved))?;
         }
         Ok(())
     }
@@ -2934,7 +3085,7 @@ impl Document {
         for (offset, device) in inside.into_iter().enumerate() {
             self.put_device(place.track, place.chain, place.index + offset, device)?;
         }
-        forget(self.track_mut(place.track)?, &gone);
+        self.forget_in(place.track, &gone)?;
         check_chain(self.track_ref(place.track)?)
     }
 
@@ -2992,9 +3143,17 @@ impl Document {
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, moved.clone());
+        // Only instrument and audio effect racks' chains are tapped (the
+        // racks spec, R38).
+        if !matches!(
+            self.device_ref(rack)?.rack_kind(),
+            Some(RackKind::Instrument | RackKind::AudioEffect)
+        ) {
+            self.forget_chain_taps(&BTreeSet::from([id]));
+        }
         if from != to {
             self.index.add_chain(&moved, to);
-            forget(self.track_mut(from)?, &Gone::chain(&moved));
+            self.forget_in(from, &Gone::chain(&moved))?;
         }
         check_chain(self.track_ref(to)?)
     }
@@ -3388,6 +3547,14 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
+    /// Forgets what a track held for the devices and chains that left it,
+    /// and the inputs that tapped those chains.
+    fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
+        forget(self.track_mut(track)?, gone);
+        self.forget_chain_taps(&gone.chains);
+        Ok(())
+    }
+
     fn device_owner(&self, id: DeviceId) -> Result<TrackId, ModelError> {
         self.device_track(id).ok_or(ModelError::NoSuchDevice(id))
     }
@@ -3423,7 +3590,7 @@ impl Document {
             .ok_or(ModelError::NoSuchChain(id))
     }
 
-    fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
+    pub(crate) fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
         self.device(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
@@ -3441,7 +3608,7 @@ impl Document {
         Ok(())
     }
 
-    fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
+    pub(crate) fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;
         let position = chain
@@ -3761,8 +3928,15 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.floating && !device.can_float() {
         return Err(ModelError::CannotFloat(device.id));
     }
-    for value in device.params.values() {
+    for value in device.params.values().chain(device.other_params().values()) {
         check_value("parameter value", *value, value.is_finite())?;
+    }
+    crate::modulator::check_mappings(device)?;
+    if let Some(shape) = &device.shape {
+        crate::modulator::check_shape(shape)?;
+    }
+    if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
+        return Err(ModelError::NoCompare(device.id));
     }
     if let Some(sidechain) = &device.sidechain {
         let gain = sidechain.gain;
@@ -5381,6 +5555,7 @@ mod tests {
             device,
             params: params.clone(),
             name: "Warm".to_owned(),
+            shape: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -5392,6 +5567,7 @@ mod tests {
                 device,
                 params: bad,
                 name: String::new(),
+                shape: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -7216,5 +7392,163 @@ mod tests {
         let held = song.doc.slot(midi_track, scene).unwrap();
         assert_eq!((held.name.as_str(), held.mute), ("Riff", true));
         assert_eq!(song.doc.clip(clip).unwrap().name, "Riff");
+    }
+
+    fn param_of(song: &Song, device: DeviceId, active: bool) -> Option<f64> {
+        let d = song.doc.device(device).unwrap();
+        let params = if active { &d.params } else { d.other_params() };
+        params.get(&ParamId(2)).copied()
+    }
+
+    fn set_param(song: &mut Song, device: DeviceId, value: f64) {
+        song.apply(Command::SetDeviceParam {
+            device,
+            param: ParamId(2),
+            value,
+        })
+        .unwrap();
+    }
+
+    // Spec: device-compare R1
+    #[test]
+    fn a_new_device_has_two_equal_states_with_a_active() {
+        let mut song = Song::new();
+        let device = utility(song.fresh());
+        assert!(device.can_compare());
+        assert!(!device.b_active);
+        assert_eq!(device.other_params(), &device.params);
+    }
+
+    // Spec: device-compare R2
+    #[test]
+    fn a_change_goes_to_the_active_state_only() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        // A changed, B kept the default (not set).
+        assert_eq!(param_of(&song, device, true), Some(-3.0));
+        assert_eq!(param_of(&song, device, false), None);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
+        // A preset loads into both states, with A active (R9).
+        song.apply(Command::SetDeviceState {
+            device,
+            params: [(ParamId(2), 1.0)].into_iter().collect(),
+            name: String::new(),
+            shape: None,
+        })
+        .unwrap();
+        let d = song.doc.device(device).unwrap();
+        assert!(!d.b_active && d.other_params.is_none());
+        assert_eq!(param_of(&song, device, false), Some(1.0));
+    }
+
+    // Spec: device-compare R3, R4, R7
+    #[test]
+    fn a_switch_swaps_the_states_and_overrides_the_envelopes_and_a_copy_does_not() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        let target = AutomationTarget::Device {
+            device,
+            param: ParamId(7),
+        };
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        set_param(&mut song, device, -3.0);
+        let enabled = |song: &Song| {
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&target)
+                .unwrap()
+                .enabled
+        };
+        // Setting another parameter by hand leaves this envelope on; a copy
+        // overrides nothing.
+        assert!(enabled(&song));
+        song.apply(Command::CompareCopy { device }).unwrap();
+        assert!(enabled(&song));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
+        // Equal states: a switch still overrides every envelope of the
+        // device (R7), and the other state keeps its values.
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        assert!(!enabled(&song));
+        assert!(song.doc.device(device).unwrap().b_active);
+        assert_eq!(param_of(&song, device, true), Some(-3.0));
+        // Re-Enable Automation, then a switch back overrides it again.
+        song.apply(Command::ReEnableAutomationFor { track, target })
+            .unwrap();
+        assert!(enabled(&song));
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        assert!(!enabled(&song));
+        assert!(!song.doc.device(device).unwrap().b_active);
+    }
+
+    // Spec: device-compare R4
+    #[test]
+    fn a_copy_overwrites_the_other_state() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        // B is active: Copy B to A.
+        song.apply(Command::CompareCopy { device }).unwrap();
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(5.0));
+        assert!(song.doc.device(device).unwrap().b_active);
+    }
+
+    // Spec: device-compare R6, R8
+    #[test]
+    fn plug_ins_have_no_states_and_a_moved_device_keeps_both() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let other = song.track(TrackKind::Audio, None);
+        let plugin = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                plugin,
+                "Reverb",
+                DeviceKind::Plugin {
+                    format: PluginFormat::Clap,
+                    plugin_id: "org.example.reverb".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::CompareSwitch { device: plugin }),
+            ModelError::NoCompare(plugin)
+        );
+        assert_eq!(
+            song.reject(Command::CompareCopy { device: plugin }),
+            ModelError::NoCompare(plugin)
+        );
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        song.apply(Command::MoveDevice {
+            device,
+            track: other,
+            index: 0,
+        })
+        .unwrap();
+        assert!(song.doc.device(device).unwrap().b_active);
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
     }
 }

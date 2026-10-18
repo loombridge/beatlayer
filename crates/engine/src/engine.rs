@@ -13,6 +13,7 @@ use bl_model::{DeviceId, Document, LaunchSettings};
 use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
+use crate::capture::{CAPTURE_RING, CapturedMidi};
 use crate::compiler::{Compiler, Update};
 use crate::display::Displays;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
@@ -36,6 +37,7 @@ use crate::state::{EngineState, Monitor};
 pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
     let (producer, consumer) = RingBuffer::new(config.queue_capacity);
     let (report_producer, report_consumer) = RingBuffer::new(config.report_capacity);
+    let (capture_producer, capture_consumer) = RingBuffer::new(CAPTURE_RING);
     let (state_input, state_output) = triple_buffer::triple_buffer(&EngineState::with_capacity(
         config.max_tracks,
         config.max_slots,
@@ -46,10 +48,17 @@ pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
         queue: producer,
         outbox: VecDeque::new(),
     };
-    let processor = Processor::new(*config, consumer, report_producer, state_input);
+    let processor = Processor::new(
+        *config,
+        consumer,
+        report_producer,
+        state_input,
+        capture_producer,
+    );
     let monitor = Monitor {
         state: state_output,
         reports: report_consumer,
+        captured: capture_consumer,
     };
     (sender, processor, monitor)
 }
@@ -351,6 +360,8 @@ pub struct Engine {
     monitors: mpsc::Receiver<Monitor>,
     /// Reports from processors that have been replaced, not yet read.
     held: Vec<Report>,
+    /// Captured notes from processors that have been replaced, not yet read.
+    held_captured: Vec<CapturedMidi>,
     /// The scene override the compiler thread was last told of.
     override_sent: SceneOverride,
     gc: GcHandle,
@@ -426,6 +437,7 @@ impl Engine {
             monitor,
             monitors,
             held: Vec::new(),
+            held_captured: Vec::new(),
             override_sent: SceneOverride::default(),
             gc,
             counts,
@@ -456,6 +468,7 @@ impl Engine {
         while let Ok(monitor) = self.monitors.try_recv() {
             let mut old = mem::replace(&mut self.monitor, monitor);
             self.held.extend(old.reports());
+            self.held_captured.extend(old.captured());
             // The processor that takes over starts with the set's own maps,
             // and the compiler thread has compiled for it.
             self.override_sent = SceneOverride::default();
@@ -588,6 +601,16 @@ impl Engine {
         let mut reports = mem::take(&mut self.held);
         reports.extend(self.monitor.reports());
         reports
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call,
+    /// oldest first, with those of processors that have been replaced
+    /// (WP-3.14).
+    pub fn captured(&mut self) -> Vec<CapturedMidi> {
+        self.adopt();
+        let mut notes = mem::take(&mut self.held_captured);
+        notes.extend(self.monitor.captured());
+        notes
     }
 
     /// What the compiler thread has done.

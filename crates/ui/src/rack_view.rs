@@ -1119,6 +1119,20 @@ impl DeviceViewUi {
                     .filter(|chain| !drag.chains.contains(&chain.id))
                     .count();
                 events.push(UiEvent::BeginNamedGesture("Move Chain".to_owned()));
+                // The rack's own dragged chains go to the end first, so each
+                // move below lands among chains that stay put.
+                let last = rack.chains.len().saturating_sub(1);
+                for chain in drag
+                    .chains
+                    .iter()
+                    .filter(|c| rack.chains.iter().any(|r| r.id == **c))
+                {
+                    invoke(
+                        events,
+                        "chain.move",
+                        json!({ "chain": chain, "rack": frame.id, "index": last }),
+                    );
+                }
                 for (n, chain) in drag.chains.iter().enumerate() {
                     invoke(
                         events,
@@ -1316,6 +1330,32 @@ pub fn layouts(shell: &Shell, rect: Rect) -> Vec<(DeviceId, RackLayout)> {
         collect(device, at, &mut found);
     }
     found
+}
+
+/// Whether `pointer` is over a rack's chain list in the Device View at
+/// `rect`, scrolled by `scroll`: the list takes the wheel there, so the
+/// Device View doesn't scroll as well (racks spec, R21).
+#[must_use]
+pub fn over_chain_list(
+    state: &bl_shell::device_commands::DeviceViewState,
+    rect: Rect,
+    scroll: f32,
+    pointer: egui::Pos2,
+) -> bool {
+    let mut found = Vec::new();
+    for (device, (_, at)) in state
+        .devices
+        .iter()
+        .zip(crate::device_view::frames(state, rect, scroll))
+    {
+        collect(device, at, &mut found);
+    }
+    found.iter().any(|(_, layout)| {
+        layout
+            .chain_list
+            .as_ref()
+            .is_some_and(|list| list.area.contains(pointer))
+    })
 }
 
 fn collect(device: &DeviceFrame, at: Rect, found: &mut Vec<(DeviceId, RackLayout)>) {

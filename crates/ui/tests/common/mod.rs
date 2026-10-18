@@ -213,6 +213,7 @@ impl Harness {
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(*area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::FocusValue(focused) => self.shell.set_value_focused(*focused),
+                UiEvent::StatusHint(hint) => self.shell.set_hint(hint.clone()),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }

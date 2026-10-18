@@ -510,6 +510,88 @@ mod tests {
         serde_json::from_value(value).map_err(|error| error.to_string())
     }
 
+    // Spec: drum-racks R27
+    #[test]
+    fn drum_racks_save_and_load_with_returns() {
+        use crate::{Chain, ChainId, DeviceId, RackKind, Receive};
+        let (mut doc, [_, audio, ret]) = song();
+        let (rack, pad, hat, reverb): (DeviceId, ChainId, ChainId, ChainId) = (
+            DeviceId(bl_core::id::Id::new(900).unwrap()),
+            ChainId(bl_core::id::Id::new(901).unwrap()),
+            ChainId(bl_core::id::Id::new(902).unwrap()),
+            ChainId(bl_core::id::Id::new(903).unwrap()),
+        );
+        // A drum rack holds instruments, so it sits on a MIDI track.
+        let midi = TrackId(bl_core::id::Id::new(904).unwrap());
+        for command in [
+            Command::CreateTrack {
+                id: midi,
+                kind: TrackKind::Midi,
+                name: "Drums".to_owned(),
+                parent: None,
+                index: 0,
+            },
+            Command::InsertDevice {
+                track: midi,
+                index: 0,
+                device: Device::rack(rack, RackKind::Drum)
+                    .with_chain(Chain::for_pad(pad, "Kick", 36))
+                    .with_chain(Chain::for_pad(hat, "Hat", 42))
+                    .with_chain(Chain::new_return(reverb, "Reverb")),
+            },
+            Command::SetChainReceive {
+                chain: hat,
+                receive: Receive::Note(46),
+            },
+            Command::SetChainPlay {
+                chain: hat,
+                play: 61,
+            },
+            Command::SetChainChoke {
+                chain: hat,
+                choke: Some(1),
+            },
+            Command::SetChainSend {
+                chain: pad,
+                to: reverb,
+                level: 0.5,
+            },
+            Command::SetChainAudioTo {
+                chain: reverb,
+                track: Some(ret),
+            },
+            Command::SetAutomationBreakpoint {
+                track: midi,
+                target: AutomationTarget::ChainSend {
+                    chain: pad,
+                    to: reverb,
+                },
+                at: Ticks::ZERO,
+                value: 0.25,
+            },
+        ] {
+            doc.apply(&command).unwrap();
+        }
+        let _ = audio;
+        let value = serde_json::to_value(&doc).unwrap();
+        let back = load(value.clone()).unwrap();
+        assert_eq!(back, doc);
+        let chains = &value["tracks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == json!(midi))
+            .unwrap()["devices"][0]["chains"];
+        // A chain with its defaults saves none of a drum chain's fields.
+        assert!(chains[0].get("play").is_none() && chains[0].get("choke").is_none());
+        assert_eq!(chains[1]["receive"], json!({ "note": 46 }));
+        assert_eq!(chains[1]["play"], json!(61));
+        assert_eq!(chains[1]["choke"], json!(1));
+        assert_eq!(chains[0]["sends"], json!([{ "to": reverb, "level": 0.5 }]));
+        assert_eq!(chains[2]["is_return"], json!(true));
+        assert_eq!(chains[2]["audio_to"], json!(ret));
+    }
+
     // Spec: modulation R19
     #[test]
     fn modulator_mappings_save_with_the_set_and_load_back() {

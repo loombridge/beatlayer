@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-445 commands in 35 areas.
+467 commands in 36 areas.
 
 ## Permission classes
 
@@ -123,19 +123,27 @@ Each command has:
 | [`chain.delete`](#chaindelete) | Delete Chain | `destructive` | `Delete` | `Delete` |
 | [`chain.drop_on_track`](#chaindrop_on_track) | Drop Chain on Track | `edit` |  |  |
 | [`chain.duplicate`](#chainduplicate) | Duplicate Chain | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`chain.extract`](#chainextract) | Extract Chain | `edit` |  |  |
+| [`chain.extract_return`](#chainextract_return) | Extract Return Chain | `edit` |  |  |
 | [`chain.hot_swap`](#chainhot_swap) | Hot-Swap Chain | `read` |  |  |
 | [`chain.load_preset`](#chainload_preset) | Load Chain Preset | `external` |  |  |
 | [`chain.move`](#chainmove) | Move Chain | `edit` |  |  |
 | [`chain.paste`](#chainpaste) | Paste Chain | `edit` | `Cmd+V` | `Ctrl+V` |
+| [`chain.preview`](#chainpreview) | Preview Chain | `edit` |  |  |
 | [`chain.remove`](#chainremove) | Delete Chain | `destructive` |  |  |
 | [`chain.rename`](#chainrename) | Rename Chain | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`chain.save_preset`](#chainsave_preset) | Save Chain Preset | `external` |  |  |
 | [`chain.select`](#chainselect) | Select Chain | `read` |  |  |
+| [`chain.set_audio_to`](#chainset_audio_to) | Change Audio To | `edit` |  |  |
+| [`chain.set_choke`](#chainset_choke) | Change Choke | `edit` |  |  |
 | [`chain.set_colour`](#chainset_colour) | Set Chain Colour | `edit` |  |  |
 | [`chain.set_enabled`](#chainset_enabled) | Chain Activator | `edit` |  |  |
 | [`chain.set_gain`](#chainset_gain) | Set Chain Gain | `edit` |  |  |
 | [`chain.set_info`](#chainset_info) | Edit Chain Info Text | `edit` |  |  |
 | [`chain.set_pan`](#chainset_pan) | Set Chain Pan | `edit` |  |  |
+| [`chain.set_play`](#chainset_play) | Change Play | `edit` |  |  |
+| [`chain.set_receive`](#chainset_receive) | Change Receive | `edit` |  |  |
+| [`chain.set_send`](#chainset_send) | Set Chain Send | `edit` |  |  |
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
@@ -213,6 +221,7 @@ Each command has:
 | [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
+| [`device.group_to_drum_rack`](#devicegroup_to_drum_rack) | Group to Drum Rack | `edit` |  |  |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` | `Q`; `Q` | `Q`; `Q` |
 | [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
 | [`device.import_sfz`](#deviceimport_sfz) | Import SFZ | `external` |  |  |
@@ -325,6 +334,17 @@ Each command has:
 | [`note.ramp_value`](#noteramp_value) | Ramp Note Values | `edit` |  |  |
 | [`note.resize`](#noteresize) | Resize Notes | `edit` |  |  |
 | [`note.set_value`](#noteset_value) | Set Note Value | `edit` |  |  |
+| [`pad.delete`](#paddelete) | Delete Pad | `destructive` |  |  |
+| [`pad.drop`](#paddrop) | Drop on Pad | `edit` |  |  |
+| [`pad.hot_swap`](#padhot_swap) | Hot-Swap Pad | `read` |  |  |
+| [`pad.hot_swap_sample`](#padhot_swap_sample) | Hot-Swap Sample | `read` |  |  |
+| [`pad.preview`](#padpreview) | Preview Pad | `edit` |  |  |
+| [`pad.rename`](#padrename) | Rename Pad | `edit` |  |  |
+| [`pad.save_default`](#padsave_default) | Save as Default Pad | `edit` |  |  |
+| [`pad.select`](#padselect) | Select Pad | `read` |  |  |
+| [`pad.set_mute`](#padset_mute) | Mute Pad | `edit` |  |  |
+| [`pad.set_solo`](#padset_solo) | Solo Pad | `edit` |  |  |
+| [`pad.swap`](#padswap) | Swap Pads | `edit` |  |  |
 | [`perception.analyze`](#perceptionanalyze) | Analyze Audio | `read` |  |  |
 | [`perception.capture_view`](#perceptioncapture_view) | Capture View | `read` |  |  |
 | [`perception.preview`](#perceptionpreview) | Preview Audio | `read` |  |  |
@@ -338,7 +358,9 @@ Each command has:
 | [`plugin.set_window`](#pluginset_window) | Set Plug-In Window Place | `read` |  |  |
 | [`plugin.settings`](#pluginsettings) | Plug-In Settings | `edit` |  |  |
 | [`plugin.show_window`](#pluginshow_window) | Show Plug-In Window | `read` |  |  |
+| [`rack.move_pads`](#rackmove_pads) | Move the Pads | `read` |  |  |
 | [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
+| [`rack.switch_hot_swap_target`](#rackswitch_hot_swap_target) | Switch Hot-Swap Target | `read` | `D` | `D` |
 | [`routing.set_cue_out`](#routingset_cue_out) | Set Cue Out | `edit` |  |  |
 | [`routing.set_input`](#routingset_input) | Set Input | `edit` |  |  |
 | [`routing.set_main_out`](#routingset_main_out) | Set Main Out | `edit` |  |  |
@@ -2004,7 +2026,7 @@ Result: [`PreviewState`](#previewstate).
 
 **Add Chain**. Permission: `edit`. Contexts: `device-view`.
 
-Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.
+Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.
 
 Default keys: none.
 
@@ -2042,7 +2064,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Create Chain**. Permission: `edit`. Contexts: `device-view`.
 
-Makes a chain in a rack at `index` (the end if left out), as the chain list's drop area does, named after what it holds, and selects it: holding a new `device`, a device made from a `preset` file, or the existing device `move_device` moved out of where it is; with none of them it is empty. A `preset` that holds a rack makes a chain holding the rack, and one that holds a chain is loaded as `chain.load_preset` loads it. The chain must fit the rack's kind. One undo step (Insert Chain).
+Makes a chain in a rack at `index` (the end if left out), as the chain list's drop area does, named after what it holds, and selects it: holding a new `device`, a device made from a `preset` file, or the existing device `move_device` moved out of where it is; with none of them it is empty. A `preset` that holds a rack makes a chain holding the rack, and one that holds a chain is loaded as `chain.load_preset` loads it. The chain must fit the rack's kind. In a drum rack a chain made without `index` receives the first pad from the view's first that holds no chain, and with `returns` it is a return chain, after the others. One undo step (Insert Chain).
 
 Default keys: none.
 
@@ -2055,6 +2077,7 @@ Arguments:
 | `index` | integer or null | no | Where the chain goes in the rack's list; the end if left out. |
 | `move_device` | [`DeviceId`](#deviceid) or null | no | A device to move into it from where it is. |
 | `preset` | string or null | no | A preset file: the chain holds a new device with its values. |
+| `returns` | boolean | no | Make a return chain of a drum rack (the drop area of its return section): it goes after the drum chains and the rack's other return chains, holds audio effects only, and sends to the rack's own output. A drum rack holds six at most. |
 
 Result: [`ChainAdded`](#chainadded).
 
@@ -2136,6 +2159,38 @@ Arguments:
 
 Result: [`ChainAdded`](#chainadded).
 
+#### `chain.extract`
+
+**Extract Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Pulls a drum chain out of its rack onto a new MIDI track, as dragging it from the Session mixer onto the drop area right of the tracks does: the track holds the chain's devices, and the notes the chain received leave the clips of the rack's track (Arrangement and Session) for clips on the new track at the same places and in the same slots, moved to the chain's Play note so its devices hear what they heard in the rack. The chain leaves the rack. One undo step (Move Chain). Dragged from the chain list onto another track or rack it takes only its devices: `chain.drop_on_track`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+
+Result: [`Extracted`](#extracted).
+
+#### `chain.extract_return`
+
+**Extract Return Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Pulls a return chain out of its drum rack onto a new return track after the last one, as dragging it onto the Session mixer's returns does: the track holds the chain's audio effects, and the drum chains' sends to it leave the rack with it. One undo step (Move Chain).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+
+Result: [`Extracted`](#extracted).
+
 #### `chain.hot_swap`
 
 **Hot-Swap Chain**. Permission: `read`. Contexts: `device-view`.
@@ -2211,6 +2266,23 @@ Arguments:
 
 Result: [`ChainAdded`](#chainadded).
 
+#### `chain.preview`
+
+**Preview Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Holds a drum chain's Preview button, or lets it go: while it is held the chain plays its Receive note into itself alone, as `pad.preview` does for a pad. It changes nothing in the set and isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+| `on` | boolean | yes | Press (true) or release (false) the Preview button. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `chain.remove`
 
 **Delete Chain**. Permission: `destructive`. Contexts: `device-view`.
@@ -2282,6 +2354,40 @@ Arguments:
 | `mode` | [`ChainSelect`](#chainselect) | no | How the selection changes; a click if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.set_audio_to`
+
+**Change Audio To**. Permission: `edit`. Contexts: `device-view`.
+
+Sets where a drum rack's return chain sends its output: `track` is one of the set's return tracks, whose input it then adds to as a send does (that return runs after the drum rack's track), or null for the rack's own output, which is a new return chain's. Deleting the return track sends the chain back to the rack's output. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The return chain. |
+| `track` | [`TrackId`](#trackid) or null | no | The return track, or `null`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_choke`
+
+**Change Choke**. Permission: `edit`. Contexts: `device-view`.
+
+Puts a drum rack's chain in a choke group from 1 to 16, or in none with null: a note that reaches a chain in a group silences every other chain in that group by fading their output over 5 ms, and a chain doesn't choke itself. Unused while the chain's Receive is all notes. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+| `choke` | integer or null | no | The group, or `null` for none. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `chain.set_colour`
 
@@ -2365,6 +2471,58 @@ Arguments:
 |---|---|---|---|
 | `chain` | [`ChainId`](#chainid) | yes | The chain. |
 | `pan` | number | yes | The position. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_play`
+
+**Change Play**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the note a drum rack's chain passes on to its devices, from 0 to 127 (60 is C3, which plays a sampler's sample at its own pitch and is a new chain's), at the velocity it came with. Unused while the chain's Receive is all notes. Only a drum rack's drum chains have a Play. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+| `play` | integer from 0 to 255 | yes | The note. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_receive`
+
+**Change Receive**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the note a drum rack's chain answers: `receive` is `{"note": n}` for one MIDI note from 0 to 127 (Live's octave numbering: C3 is 60, and a pad's chain answers its pad's note, 36 for C1 on the first pad) or `"all_notes"`, which passes every note as it came and leaves the chain's Play and Choke unused. A note-on reaches every chain that answers it; a note no chain answers sounds nothing, and a note-off follows its note-on to the chains it reached whatever Receive says by then. The chain moves to its new note's pad at once. Only a drum rack's drum chains have a Receive. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+| `receive` | [`Receive`](#receive) | yes | What it answers. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_send`
+
+**Set Chain Send**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a drum rack's drum chain's send to one of the rack's return chains (`to`) as linear gain: 0 is -inf dB and a new send's level, 1 is 0 dB. The send is taken after the chain's Volume, Pan and activator, and glides to a new value over 20 ms. Moving it by hand turns off its automation envelope. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The drum chain. |
+| `to` | [`ChainId`](#chainid) | yes | The return chain. |
+| `level` | number | yes | The gain. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3776,6 +3934,22 @@ Arguments:
 |---|---|---|---|
 | `chains` | array or null | no | Several chains of one rack to group instead: they become the chains of a new rack of the same kind, in a new chain in the first one's place. |
 | `devices` | array or null | no | The devices to wrap in a new rack, all in one chain; the selected device if both lists are left out. |
+
+Result: [`Grouped`](#grouped).
+
+#### `device.group_to_drum_rack`
+
+**Group to Drum Rack**. Permission: `edit`. Contexts: `device-view`.
+
+Wraps the selected devices (or `devices`, all in one chain of a MIDI track) in a new drum rack, which takes the first device's place: the rack holds one chain, named after the first device, that receives note 36 (C1, the first pad a new drum rack shows) and plays C3, and holds the devices in their order, each keeping its settings and running state. They must fit one chain of an instrument rack: MIDI effects, then at most one instrument, then audio effects. One undo step (Group).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array or null | no | The devices, all in one chain of a track; the selected device if left out. |
 
 Result: [`Grouped`](#grouped).
 
@@ -5783,6 +5957,208 @@ Arguments:
 
 Result: [`NoteEditResult`](#noteeditresult).
 
+### Area `pad`
+
+#### `pad.delete`
+
+**Delete Pad**. Permission: `destructive`. Contexts: `device-view`.
+
+Deletes the chains on a pad, with their devices and automation: one undo step (Delete Chain). Undo restores them, but because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note, 0 to 127. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.drop`
+
+**Drop on Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Drops what the browser drags onto a pad. One audio file in `samples` on an empty pad makes a chain on its note holding the sampler with the file loaded (or a chain made from the pad default that Save as Default Pad saved), named after the file; on a pad with a chain it replaces the chain's sampler and sample and keeps its effects. Several files go one to a pad, rising a note each from `note` (those past note 127 are left out), or with `layer` onto that one pad as an instrument rack with a chain per file. A `device` or `preset` goes at the end of the pad's chain if it is an audio effect, at the end of its MIDI effects if it is a MIDI effect, and in place of its instrument if it is an instrument; on an empty pad each makes a chain holding it. A pad of several chains takes no drop. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note; with several samples, the first of the pads they rise from. |
+| `device` | [`NewDevice`](#newdevice) or null | no | A device to drop, as `device.add` describes one. |
+| `layer` | boolean | no | With several samples, layer them on this one pad (Cmd, or Alt on Windows and Linux) rather than spread them over pads. |
+| `move_device` | [`DeviceId`](#deviceid) or null | no | A device to move onto the pad from where it is. |
+| `preset` | string or null | no | A preset file to drop. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+| `samples` | array of string | no | Audio files: one goes on the pad, several on pads rising from it. |
+
+Result: [`PadDropped`](#paddropped).
+
+#### `pad.hot_swap`
+
+**Hot-Swap Pad**. Permission: `read`. Contexts: `device-view`.
+
+Makes a pad the target of hot-swap, as its Hot-Swap button does, or ends it: loading an item from the browser then lands on the pad as dropping it would (`pad.drop`). It ends the hot-swap of a device or a chain. Only a pad of one chain, or an empty one, can be the target. It changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `on` | boolean or null | no | Start (true) or end (false) hot-swapping the pad; switches if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.hot_swap_sample`
+
+**Hot-Swap Sample**. Permission: `read`. Contexts: `device-view`.
+
+A pad's Hot-Swap Sample button: it makes the pad the hot-swap target and opens the folder of the sample its chain plays in the browser, so loading a sample replaces the pad's (one undo step each). Pressing it again, the hot-swap bar's close button, Esc, Q, or going from the browser to another view ends it. Only a pad whose chain plays a sample has one.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `on` | boolean or null | no | Start (true) or end (false) hot-swapping the pad; switches if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.preview`
+
+**Preview Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Holds a pad's Preview button, or lets it go: while it is held each of the pad's chains plays its Receive note into itself alone at velocity 100 (C3 for a chain on All Notes), through the rest of the track's chain and its mixer, whether or not the song plays. A press with no release plays until the release, so an agent that presses must release. It changes nothing in the set and isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `on` | boolean | yes | Press (true) or release (false) the Preview button. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.rename`
+
+**Rename Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Renames the chain of a pad that holds one chain: an empty name gives it the name a chain has without one. A pad of several chains can't be renamed. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `name` | string | yes | The new name; empty gives the name a chain has without one. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.save_default`
+
+**Save as Default Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Saves the pad's chain as the default pad: a sample dropped on an empty pad afterwards makes its chain from that default, with the sample in the first sampler. The one saved last is used. A pad of one chain only. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note, 0 to 127. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.select`
+
+**Select Pad**. Permission: `read`. Contexts: `device-view`.
+
+Selects a pad, as clicking it does, and its chains in the chain list, so the devices view shows them. The selected pad is the one D switches hot-swap to. It changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note, 0 to 127. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.set_mute`
+
+**Mute Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Mutes a pad, or unmutes it: it switches off the Chain Activator of each of the pad's chains (a pad of several chains mutes them all, and a mixed pad mutes the rest). One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `on` | boolean or null | no | Turn it on (true) or off (false); switches if left out, a mixed pad turning on. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.set_solo`
+
+**Solo Pad**. Permission: `edit`. Contexts: `device-view`.
+
+Solos a pad, or unsolos it: it sets the Solo of each of the pad's chains, and leaves every other chain's as it is. While any drum chain is soloed the rack's return chains stay audible carrying only the soloed chains' sends. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | The pad's note. |
+| `on` | boolean or null | no | Turn it on (true) or off (false); switches if left out, a mixed pad turning on. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `pad.swap`
+
+**Swap Pads**. Permission: `edit`. Contexts: `device-view`.
+
+Drags one pad onto another: each pad's chains take the other pad's note as their Receive, so the set's clips play the other sound. With `layer` (Cmd, or Alt on Windows and Linux) both pads' chains are layered on `to` as one chain holding an instrument rack of them, and `from` is left empty. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `from` | integer from 0 to 255 | yes | The pad dragged. |
+| `to` | integer from 0 to 255 | yes | The pad it's dropped on. |
+| `layer` | boolean | no | Layer both pads' chains on `to` instead (Cmd, or Alt on Windows and Linux). |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 ### Area `perception`
 
 #### `perception.analyze`
@@ -6020,6 +6396,25 @@ Result: [`PluginInfo`](#plugininfo).
 
 ### Area `rack`
 
+#### `rack.move_pads`
+
+**Move the Pads**. Permission: `read`. Contexts: `device-view`.
+
+Moves the sixteen notes a drum rack's pad view shows (the rack in focus, or `rack`): to `first` (a note, rounded down to a row), or by `groups` of sixteen notes and `rows` of four from where it is, as dragging the overview's selector, or Up and Down with Cmd (Alt on Windows and Linux) for a row, do. The view stays within notes 0 to 127. It changes only the view: it isn't an undo step, and the set keeps which notes show (`device_view.state`, the rack's `pads.first`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `first` | integer or null | no | Show the sixteen notes from here (rounded down to a row); the view moves by `groups` and `rows` from where it is if left out. |
+| `groups` | integer or null | no | How many groups of sixteen notes to move up (positive) or down. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The drum rack; the selected device if left out. |
+| `rows` | integer or null | no | How many rows of four notes to move up or down. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `rack.set_view`
 
 **Show or Hide a Rack's View**. Permission: `edit`. Contexts: `device-view`.
@@ -6040,6 +6435,22 @@ Arguments:
 | `view` | [`RackView`](#rackview) | yes | The view. |
 | `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 | `shown` | boolean or null | no | Show (true) or hide (false); switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `rack.switch_hot_swap_target`
+
+**Switch Hot-Swap Target**. Permission: `read`. Contexts: `global`.
+
+While a drum rack is being hot-swapped, switches the target between the rack and the rack's last selected pad, as D does; with a pad the target an item loaded from the browser lands on the pad. It changes only the view.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-VIEW-007 | `D` | `D` | `global` | Switch between a Drum Rack and its last selected pad | runs it |
+
+Arguments: none (send `{}`).
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
@@ -8355,16 +8766,24 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`chain.delete`](#chaindelete) | the query tool's `device` | `chains` |
 | [`chain.drop_on_track`](#chaindrop_on_track) | the query tool's `track` | `devices` |
 | [`chain.duplicate`](#chainduplicate) | the query tool's `device` | `chains` |
+| [`chain.extract`](#chainextract) | the query tool's `track` | `devices` |
+| [`chain.extract_return`](#chainextract_return) | the query tool's `track` | `devices` |
 | [`chain.load_preset`](#chainload_preset) | the query tool's `device` | `chains` |
 | [`chain.move`](#chainmove) | the query tool's `device` | `chains` |
 | [`chain.paste`](#chainpaste) | the query tool's `device` | `chains` |
+| [`chain.preview`](#chainpreview) | `device_view.state` | `devices` |
 | [`chain.remove`](#chainremove) | the query tool's `device` | `chains` |
 | [`chain.rename`](#chainrename) | the query tool's `device` | `chains` |
+| [`chain.set_audio_to`](#chainset_audio_to) | the query tool's `device` | `chains` |
+| [`chain.set_choke`](#chainset_choke) | the query tool's `device` | `chains` |
 | [`chain.set_colour`](#chainset_colour) | the query tool's `device` | `chains` |
 | [`chain.set_enabled`](#chainset_enabled) | the query tool's `device` | `chains` |
 | [`chain.set_gain`](#chainset_gain) | the query tool's `device` | `chains` |
 | [`chain.set_info`](#chainset_info) | the query tool's `device` | `chains` |
 | [`chain.set_pan`](#chainset_pan) | the query tool's `device` | `chains` |
+| [`chain.set_play`](#chainset_play) | the query tool's `device` | `chains` |
+| [`chain.set_receive`](#chainset_receive) | the query tool's `device` | `chains` |
+| [`chain.set_send`](#chainset_send) | the query tool's `device` | `chains` |
 | [`chain.set_solo`](#chainset_solo) | the query tool's `device` | `chains` |
 | [`chain.solo`](#chainsolo) | the query tool's `device` | `chains` |
 | [`clip.create`](#clipcreate) | the query tool's `track` | `clips` |
@@ -8433,6 +8852,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
 | [`device.edit_sample`](#deviceedit_sample) | the query tool's `device` | `sample_edits` |
 | [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
+| [`device.group_to_drum_rack`](#devicegroup_to_drum_rack) | the query tool's `track` | `devices` |
 | [`device.import_sfz`](#deviceimport_sfz) | the query tool's `device` | `layers` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
@@ -8504,6 +8924,13 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`note.ramp_value`](#noteramp_value) | the query tool's `clip` | `data.midi.notes` |
 | [`note.resize`](#noteresize) | the query tool's `clip` | `data.midi.notes` |
 | [`note.set_value`](#noteset_value) | the query tool's `clip` | `data.midi.notes` |
+| [`pad.delete`](#paddelete) | the query tool's `device` | `chains` |
+| [`pad.drop`](#paddrop) | the query tool's `device` | `chains` |
+| [`pad.preview`](#padpreview) | `device_view.state` | `devices` |
+| [`pad.rename`](#padrename) | the query tool's `device` | `chains` |
+| [`pad.set_mute`](#padset_mute) | the query tool's `device` | `chains` |
+| [`pad.set_solo`](#padset_solo) | the query tool's `device` | `chains` |
+| [`pad.swap`](#padswap) | the query tool's `device` | `chains` |
 | [`plugin.load`](#pluginload) | the query tool's `track` | `devices` |
 | [`plugin.load_au`](#pluginload_au) | the query tool's `track` | `devices` |
 | [`plugin.rescan`](#pluginrescan) | `plugin.list` | `plugins` |
@@ -8614,6 +9041,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
+| [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
 | [`set.relink_missing`](#setrelink_missing) | finds files outside the set; the clips that use them read their media |
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
@@ -9912,7 +10340,7 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -9920,6 +10348,7 @@ One of:
 - an object with `type` = `"send"`, `to` ([`TrackId`](#trackid)): The level of the track's send to a return track.
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
+- an object with `type` = `"chain_send"`, `chain` ([`ChainId`](#chainid)), `to` ([`ChainId`](#chainid)): The level of a drum chain's send to a return chain of its rack (drum racks R6, G2).
 - an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
 - an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
 - an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
@@ -9928,7 +10357,7 @@ One of:
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, `chain` with a rack's chain and its mixer `param`, or `chain_send` with a drum rack's chain and the return chain it sends to (`to`). A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -10009,6 +10438,29 @@ One of:
         "type",
         "chain",
         "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The level of a drum chain's send to a return chain of its rack (drum racks R6, G2).",
+      "properties": {
+        "chain": {
+          "$ref": "#/$defs/ChainId",
+          "description": "The drum chain."
+        },
+        "to": {
+          "$ref": "#/$defs/ChainId",
+          "description": "The return chain."
+        },
+        "type": {
+          "const": "chain_send",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "chain",
+        "to"
       ],
       "type": "object"
     },
@@ -10571,10 +11023,16 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 |---|---|---|---|
 | `id` | [`ChainId`](#chainid) | yes | The chain's ID. |
 | `name` | string | yes | The chain's name. |
+| `audio_to` | [`TrackId`](#trackid) or null | no | Where a return chain's output goes: one of the set's return tracks, or the rack's own output while there is none (drum racks spec, R8). |
+| `choke` | integer or null | no | The choke group a drum rack's chain is in, from 1 to 16, or none. |
 | `colour` | integer or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
 | `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
 | `info` | string | no | The info text the user gave the chain (Edit Info Text). |
+| `is_return` | boolean | no | Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7). |
 | `mixer` | [`ChainMixer`](#chainmixer) | no | The chain's mixer. |
+| `play` | integer from 0 to 255 | no | The note a drum rack's chain passes on to its devices, from 0 to 127: C3 (60) in a new chain. |
+| `receive` | [`Receive`](#receive) | no | The note a drum rack's chain answers (drum racks spec, R1). Only a drum rack's chains have one; any other chain keeps the default. |
+| `sends` | array of [`ChainSend`](#chainsend) | no | A drum rack's drum chain's sends to its return chains, post-fader; a return chain without an entry gets none (−∞ dB). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10582,6 +11040,27 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 {
   "description": "One chain of a rack: its own name, colour, info text and mixer, and its devices in signal order.",
   "properties": {
+    "audio_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where a return chain's output goes: one of the set's return tracks, or the rack's own output while there is none (drum racks spec, R8)."
+    },
+    "choke": {
+      "description": "The choke group a drum rack's chain is in, from 1 to 16, or none.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "colour": {
       "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none.",
       "format": "uint8",
@@ -10608,6 +11087,10 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       "description": "The info text the user gave the chain (Edit Info Text).",
       "type": "string"
     },
+    "is_return": {
+      "description": "Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7).",
+      "type": "boolean"
+    },
     "mixer": {
       "$ref": "#/$defs/ChainMixer",
       "default": {},
@@ -10616,6 +11099,24 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
     "name": {
       "description": "The chain's name.",
       "type": "string"
+    },
+    "play": {
+      "description": "The note a drum rack's chain passes on to its devices, from 0 to 127: C3 (60) in a new chain.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "receive": {
+      "$ref": "#/$defs/Receive",
+      "description": "The note a drum rack's chain answers (drum racks spec, R1). Only a drum rack's chains have one; any other chain keeps the default."
+    },
+    "sends": {
+      "description": "A drum rack's drum chain's sends to its return chains, post-fader; a return chain without an entry gets none (−∞ dB).",
+      "items": {
+        "$ref": "#/$defs/ChainSend"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -10789,6 +11290,8 @@ One row of a rack's chain list (racks spec, R21).
 | `pan` | number | yes | Its Pan, from -1 to 1. |
 | `has_mixer` | boolean | yes | Whether it has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `selected` | boolean | yes | Whether it's selected. |
+| `drum` | [`DrumRow`](#drumrow) or null | no | A drum chain's notes, choke group and sends (drum racks spec, R21); left out for any other chain. |
+| `output` | [`ReturnRow`](#returnrow) or null | no | A drum rack's return chain's output (R8); left out for any other chain. A return chain has no sends, notes or choke group. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10805,6 +11308,17 @@ One row of a rack's chain list (racks spec, R21).
         "integer",
         "null"
       ]
+    },
+    "drum": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DrumRow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A drum chain's notes, choke group and sends (drum racks spec, R21); left out for any other chain."
     },
     "enabled": {
       "description": "Its Chain Activator.",
@@ -10825,6 +11339,17 @@ One row of a rack's chain list (racks spec, R21).
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReturnRow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A drum rack's return chain's output (R8); left out for any other chain. A return chain has no sends, notes or choke group."
     },
     "pan": {
       "description": "Its Pan, from -1 to 1.",
@@ -10907,6 +11432,41 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ChainSend`
+
+A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), taken after the chain's Volume, Pan and activator.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `to` | [`ChainId`](#chainid) | yes | The return chain. |
+| `level` | number | yes | The level as linear gain: 0 in a new send. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), taken after the chain's Volume, Pan and activator.",
+  "properties": {
+    "level": {
+      "description": "The level as linear gain: 0 in a new send.",
+      "format": "double",
+      "type": "number"
+    },
+    "to": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The return chain."
+    }
+  },
+  "required": [
+    "to",
+    "level"
+  ],
+  "type": "object"
 }
 ```
 
@@ -13882,6 +14442,89 @@ A driver type this build and machine offer.
 
 </details>
 
+### `DrumRow`
+
+A drum chain's row in the chain list (drum racks spec, R21).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `receive` | [`Receive`](#receive) | yes | What it answers. |
+| `receive_label` | string | yes | How the chooser reads it. |
+| `play` | integer from 0 to 255 | yes | The note it passes on. |
+| `play_label` | string | yes | How the chooser reads it. |
+| `choke` | integer or null | yes | Its choke group. |
+| `sends` | array of number | yes | Its send to each return chain, in the rack's order, as linear gain. |
+| `previewing` | boolean | yes | Whether its Preview button is held. |
+| `all_notes` | boolean | yes | Whether Play and Choke are disabled: Receive is All Notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A drum chain's row in the chain list (drum racks spec, R21).",
+  "properties": {
+    "all_notes": {
+      "description": "Whether Play and Choke are disabled: Receive is All Notes.",
+      "type": "boolean"
+    },
+    "choke": {
+      "description": "Its choke group.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "play": {
+      "description": "The note it passes on.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "play_label": {
+      "description": "How the chooser reads it.",
+      "type": "string"
+    },
+    "previewing": {
+      "description": "Whether its Preview button is held.",
+      "type": "boolean"
+    },
+    "receive": {
+      "$ref": "#/$defs/Receive",
+      "description": "What it answers."
+    },
+    "receive_label": {
+      "description": "How the chooser reads it.",
+      "type": "string"
+    },
+    "sends": {
+      "description": "Its send to each return chain, in the rack's order, as linear gain.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "receive",
+    "receive_label",
+    "play",
+    "play_label",
+    "choke",
+    "sends",
+    "previewing",
+    "all_notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Edge`
 
 A clip's `start` (left) edge, which shows more or less of its beginning, or its `end` (right) edge.
@@ -14404,6 +15047,51 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
     "channel",
     "audio_from",
     "hardware_latency"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Extracted`
+
+What `chain.extract` and `chain.extract_return` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The new track. |
+| `devices` | array of [`DeviceId`](#deviceid) | yes | The devices that moved to it, in order. |
+| `clips` | integer, at least 0 | yes | How many clips on the new track hold notes taken from the old. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `chain.extract` and `chain.extract_return` return.",
+  "properties": {
+    "clips": {
+      "description": "How many clips on the new track hold notes taken from the old.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "devices": {
+      "description": "The devices that moved to it, in order.",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The new track."
+    }
+  },
+  "required": [
+    "track",
+    "devices",
+    "clips"
   ],
   "type": "object"
 }
@@ -18718,6 +19406,302 @@ One of:
 
 </details>
 
+### `PadDropped`
+
+What `pad.drop` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chains` | array of [`ChainId`](#chainid) | yes | The chains the drop made or changed, in order. |
+| `notes` | array of integer from 0 to 255 | yes | The pads they are on, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `pad.drop` returns.",
+  "properties": {
+    "chains": {
+      "description": "The chains the drop made or changed, in order.",
+      "items": {
+        "$ref": "#/$defs/ChainId"
+      },
+      "type": "array"
+    },
+    "notes": {
+      "description": "The pads they are on, in order.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "chains",
+    "notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PadFrame`
+
+The pad view (drum racks spec, R11 to R13).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `first` | integer from 0 to 255 | yes | The lowest note shown: a multiple of 4, at most 112. |
+| `pads` | array of [`PadState`](#padstate) | yes | The sixteen pads shown, from `first` up: the grid reads rising left to right and from the bottom row up. |
+| `occupied` | array of integer from 0 to 255 | yes | The notes that have a chain, for the overview. |
+| `selected` | integer or null | yes | The selected pad. |
+| `hot_swap` | integer or null | yes | The pad hot-swap targets, while it does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The pad view (drum racks spec, R11 to R13).",
+  "properties": {
+    "first": {
+      "description": "The lowest note shown: a multiple of 4, at most 112.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "hot_swap": {
+      "description": "The pad hot-swap targets, while it does.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "occupied": {
+      "description": "The notes that have a chain, for the overview.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "pads": {
+      "description": "The sixteen pads shown, from `first` up: the grid reads rising left to right and from the bottom row up.",
+      "items": {
+        "$ref": "#/$defs/PadState"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected pad.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "first",
+    "pads",
+    "occupied",
+    "selected",
+    "hot_swap"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PadKind`
+
+What a pad holds (drum racks spec, R12).
+
+One of:
+
+- `"empty"`: No chain receives its note: it shows only the note's name.
+- `"single"`: One chain: it shows the chain's name.
+- `"multi"`: Several chains on its note: it reads `Multi`.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a pad holds (drum racks spec, R12).",
+  "oneOf": [
+    {
+      "const": "empty",
+      "description": "No chain receives its note: it shows only the note's name.",
+      "type": "string"
+    },
+    {
+      "const": "single",
+      "description": "One chain: it shows the chain's name.",
+      "type": "string"
+    },
+    {
+      "const": "multi",
+      "description": "Several chains on its note: it reads `Multi`.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PadState`
+
+One pad of the pad view.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `note` | integer from 0 to 255 | yes | Its MIDI note. |
+| `slot` | integer from 0 to 255 | yes | Its place among the sixteen pads shown, from 0 for the lowest: what keeps the keyboard's place while the view moves. |
+| `name` | string | yes | The note's name in Live's numbering (`C1`). |
+| `hover` | string | yes | What hovering it shows in the Status Bar: the note and its General MIDI sound. |
+| `kind` | [`PadKind`](#padkind) | yes | What it holds. |
+| `label` | string | yes | What it shows: the chain's name, `Multi`, or the note's name. |
+| `chains` | array of [`ChainId`](#chainid) | yes | The chains that receive its note. |
+| `mute` | [`PadSwitch`](#padswitch) | yes | Its mute: the chains' activators off, lit while they are. |
+| `solo` | [`PadSwitch`](#padswitch) | yes | Its solo: the chains' Solo. |
+| `previewing` | boolean | yes | Whether any of its chains' Preview buttons is held. |
+| `has_sample` | boolean | yes | Whether its one chain plays a sample, so it has a Hot-Swap Sample button. |
+| `selected` | boolean | yes | Whether it's the selected pad. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One pad of the pad view.",
+  "properties": {
+    "chains": {
+      "description": "The chains that receive its note.",
+      "items": {
+        "$ref": "#/$defs/ChainId"
+      },
+      "type": "array"
+    },
+    "has_sample": {
+      "description": "Whether its one chain plays a sample, so it has a Hot-Swap Sample button.",
+      "type": "boolean"
+    },
+    "hover": {
+      "description": "What hovering it shows in the Status Bar: the note and its General MIDI sound.",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/PadKind",
+      "description": "What it holds."
+    },
+    "label": {
+      "description": "What it shows: the chain's name, `Multi`, or the note's name.",
+      "type": "string"
+    },
+    "mute": {
+      "$ref": "#/$defs/PadSwitch",
+      "description": "Its mute: the chains' activators off, lit while they are."
+    },
+    "name": {
+      "description": "The note's name in Live's numbering (`C1`).",
+      "type": "string"
+    },
+    "note": {
+      "description": "Its MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "previewing": {
+      "description": "Whether any of its chains' Preview buttons is held.",
+      "type": "boolean"
+    },
+    "selected": {
+      "description": "Whether it's the selected pad.",
+      "type": "boolean"
+    },
+    "slot": {
+      "description": "Its place among the sixteen pads shown, from 0 for the lowest: what keeps the keyboard's place while the view moves.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "solo": {
+      "$ref": "#/$defs/PadSwitch",
+      "description": "Its solo: the chains' Solo."
+    }
+  },
+  "required": [
+    "note",
+    "slot",
+    "name",
+    "hover",
+    "kind",
+    "label",
+    "chains",
+    "mute",
+    "solo",
+    "previewing",
+    "has_sample",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PadSwitch`
+
+A switch that may be on for some of a pad's chains: Multi pads show it.
+
+One of:
+
+- `"off"`: Off for every chain of the pad.
+- `"on"`: On for every chain of the pad.
+- `"mixed"`: On for some of them.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A switch that may be on for some of a pad's chains: Multi pads show it.",
+  "oneOf": [
+    {
+      "const": "off",
+      "description": "Off for every chain of the pad.",
+      "type": "string"
+    },
+    {
+      "const": "on",
+      "description": "On for every chain of the pad.",
+      "type": "string"
+    },
+    {
+      "const": "mixed",
+      "description": "On for some of them.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ParamDescriptor`
 
 What one of a device's parameters is.
@@ -20096,7 +21080,10 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
 | `selected_chains` | array of [`ChainId`](#chainid) | yes | The selected chains: those clicked, or the first chain while none is. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | The devices of the selected chain, left to right: empty while no chain or several are selected. |
 | `chain_list_focused` | boolean | yes | Whether the chain list has the focus, so S solos the selected chain. |
+| `can_add_return` | boolean | yes | Whether a drum rack can take another return chain: it holds fewer than six (R7). |
 | `note` | string or null | no | What the devices view says instead of devices while several chains are selected, such as `3 chains selected`. |
+| `pads` | [`PadFrame`](#padframe) or null | no | A drum rack's pad view (drum racks spec, R11); left out for any other rack. |
+| `return_tracks` | array of [`ReturnChoice`](#returnchoice) | no | A drum rack's return tracks, which a return chain's Audio To can choose, in order (R8). |
 
 <details><summary>JSON Schema</summary>
 
@@ -20104,6 +21091,11 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
 {
   "description": "A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view column of selectors, then each view that's shown, left to right.",
   "properties": {
+    "can_add_return": {
+      "default": false,
+      "description": "Whether a drum rack can take another return chain: it holds fewer than six (R7).",
+      "type": "boolean"
+    },
     "chain_list_focused": {
       "description": "Whether the chain list has the focus, so S solos the selected chain.",
       "type": "boolean"
@@ -20133,6 +21125,24 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
         "null"
       ]
     },
+    "pads": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PadFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A drum rack's pad view (drum racks spec, R11); left out for any other rack."
+    },
+    "return_tracks": {
+      "description": "A drum rack's return tracks, which a return chain's Audio To can choose, in order (R8).",
+      "items": {
+        "$ref": "#/$defs/ReturnChoice"
+      },
+      "type": "array"
+    },
     "selected_chains": {
       "description": "The selected chains: those clicked, or the first chain while none is.",
       "items": {
@@ -20151,7 +21161,8 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
     "chains",
     "selected_chains",
     "devices",
-    "chain_list_focused"
+    "chain_list_focused",
+    "can_add_return"
   ],
   "type": "object"
 }
@@ -20211,6 +21222,11 @@ One of:
 - `"macros"`: The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).
 - `"chain_list"`: The chain list.
 - `"devices"`: The selected chain's devices.
+- `"pads"`: A drum rack's pad view (drum racks spec, R11).
+- `"input_output"`: A drum rack's Input/Output switch (R21).
+- `"send"`: A drum rack's Send switch.
+- `"returns"`: A drum rack's Return switch.
+- `"auto_select"`: A drum rack's Auto Select switch.
 
 <details><summary>JSON Schema</summary>
 
@@ -20232,6 +21248,31 @@ One of:
       "const": "devices",
       "description": "The selected chain's devices.",
       "type": "string"
+    },
+    {
+      "const": "pads",
+      "description": "A drum rack's pad view (drum racks spec, R11).",
+      "type": "string"
+    },
+    {
+      "const": "input_output",
+      "description": "A drum rack's Input/Output switch (R21).",
+      "type": "string"
+    },
+    {
+      "const": "send",
+      "description": "A drum rack's Send switch.",
+      "type": "string"
+    },
+    {
+      "const": "returns",
+      "description": "A drum rack's Return switch.",
+      "type": "string"
+    },
+    {
+      "const": "auto_select",
+      "description": "A drum rack's Auto Select switch.",
+      "type": "string"
     }
   ]
 }
@@ -20241,20 +21282,30 @@ One of:
 
 ### `RackViews`
 
-Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.
+Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders), `returns` (the return chains' section) and `auto_select` (the chain list follows the notes), all off in a new rack.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `macros` | boolean | yes | The Macro Controls. |
 | `chain_list` | boolean | yes | The chain list. |
 | `devices` | boolean | yes | The selected chain's devices. |
+| `auto_select` | boolean | no | A drum rack's Auto Select switch. |
+| `first_pad` | integer from 0 to 255 | no | The lowest note the pad view shows: 36 (C1) in a new drum rack. |
+| `input_output` | boolean | no | A drum rack's Input/Output switch. |
+| `pads` | boolean | no | A drum rack's pad view. |
+| `returns` | boolean | no | A drum rack's Return switch. |
+| `send` | boolean | no | A drum rack's Send switch. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.",
+  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders), `returns` (the return chains' section) and `auto_select` (the chain list follows the notes), all off in a new rack.",
   "properties": {
+    "auto_select": {
+      "description": "A drum rack's Auto Select switch.",
+      "type": "boolean"
+    },
     "chain_list": {
       "default": true,
       "description": "The chain list.",
@@ -20265,9 +21316,32 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
       "description": "The selected chain's devices.",
       "type": "boolean"
     },
+    "first_pad": {
+      "description": "The lowest note the pad view shows: 36 (C1) in a new drum rack.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "input_output": {
+      "description": "A drum rack's Input/Output switch.",
+      "type": "boolean"
+    },
     "macros": {
       "default": true,
       "description": "The Macro Controls.",
+      "type": "boolean"
+    },
+    "pads": {
+      "description": "A drum rack's pad view.",
+      "type": "boolean"
+    },
+    "returns": {
+      "description": "A drum rack's Return switch.",
+      "type": "boolean"
+    },
+    "send": {
+      "description": "A drum rack's Send switch.",
       "type": "boolean"
     }
   },
@@ -20312,6 +21386,48 @@ One of:
       "const": "set",
       "description": "The whole set: 1.1.1 to the end of its last clip.",
       "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Receive`
+
+What a drum chain answers: `all_notes`, or `{"note": n}` with a MIDI note from 0 to 127 (36 is C1, which a new chain on the first pad answers).
+
+One of:
+
+- `"all_notes"`: Every note, passed on as it came.
+- an object with `note` (integer from 0 to 255): One note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a drum chain answers: `all_notes`, or `{\"note\": n}` with a MIDI note from 0 to 127 (36 is C1, which a new chain on the first pad answers).",
+  "oneOf": [
+    {
+      "const": "all_notes",
+      "description": "Every note, passed on as it came.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "One note.",
+      "properties": {
+        "note": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -20878,6 +21994,81 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `ReturnChoice`
+
+An entry of a return chain's Audio To chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The return track. |
+| `label` | string | yes | Its label: its letter and name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An entry of a return chain's Audio To chooser.",
+  "properties": {
+    "label": {
+      "description": "Its label: its letter and name.",
+      "type": "string"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The return track."
+    }
+  },
+  "required": [
+    "track",
+    "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ReturnRow`
+
+A return chain's output (drum racks spec, R8).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `audio_to` | [`TrackId`](#trackid) or null | yes | The return track it sends to, or `null` for the rack's own output. |
+| `audio_to_label` | string | yes | How its Audio To chooser reads it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A return chain's output (drum racks spec, R8).",
+  "properties": {
+    "audio_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The return track it sends to, or `null` for the rack's own output."
+    },
+    "audio_to_label": {
+      "description": "How its Audio To chooser reads it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "audio_to",
+    "audio_to_label"
+  ],
+  "type": "object"
 }
 ```
 

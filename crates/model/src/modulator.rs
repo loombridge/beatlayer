@@ -20,10 +20,25 @@ use crate::ids::{DeviceId, ParamId, TrackId};
 pub const WAVE_MOD: &str = "beatlayer.wave_mod";
 /// The Curve Mod's device type: Beatlayer's equivalent of a Shaper device.
 pub const CURVE_MOD: &str = "beatlayer.curve_mod";
+/// The Level Mod's device type: Beatlayer's equivalent of an Envelope
+/// Follower device (WP-5.11).
+pub const LEVEL_MOD: &str = "beatlayer.level_mod";
+/// The Gate Mod's device type: Beatlayer's equivalent of an Envelope MIDI
+/// device.
+pub const GATE_MOD: &str = "beatlayer.gate_mod";
+/// The Strike Mod's device type: Beatlayer's equivalent of a Shaper MIDI
+/// device.
+pub const STRIKE_MOD: &str = "beatlayer.strike_mod";
+/// The Play Mod's device type: Beatlayer's equivalent of an Expression
+/// Control device.
+pub const PLAY_MOD: &str = "beatlayer.play_mod";
 
 /// How many targets a modulator maps: the first slot is always shown, and
 /// Show Multimap shows the other seven (R17).
 pub const SLOTS: u8 = 8;
+/// How many targets the Play Mod maps: one on each of its five source tabs
+/// (R17).
+pub const PLAY_SLOTS: u8 = 5;
 /// The most breakpoints a Curve Mod's shape holds.
 pub const MAX_POINTS: usize = 64;
 
@@ -72,7 +87,44 @@ pub const fn max(slot: u8) -> ParamId {
 /// Whether `kind` is one of the modulator devices.
 #[must_use]
 pub fn is_modulator_kind(kind: &DeviceKind) -> bool {
-    matches!(kind, DeviceKind::Native { device_type } if device_type == WAVE_MOD || device_type == CURVE_MOD)
+    matches!(kind, DeviceKind::Native { device_type } if is_modulator_type(device_type))
+}
+
+/// Whether `device_type` is one of the modulator devices' types.
+#[must_use]
+pub fn is_modulator_type(device_type: &str) -> bool {
+    matches!(
+        device_type,
+        WAVE_MOD | CURVE_MOD | LEVEL_MOD | GATE_MOD | STRIKE_MOD | PLAY_MOD
+    )
+}
+
+/// Whether `kind` is a modulator driven by the audio, notes or MIDI of its
+/// own place in a chain (R28): it works its output out while its track runs,
+/// not before any track does.
+#[must_use]
+pub fn is_signal_kind(kind: &DeviceKind) -> bool {
+    matches!(
+        kind,
+        DeviceKind::Native { device_type }
+            if matches!(device_type.as_str(), LEVEL_MOD | GATE_MOD | STRIKE_MOD | PLAY_MOD)
+    )
+}
+
+/// Whether `kind` keeps a breakpoint shape: the Curve Mod and the Strike
+/// Mod (R23, R26).
+#[must_use]
+pub fn has_shape_kind(kind: &DeviceKind) -> bool {
+    matches!(kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD || device_type == STRIKE_MOD)
+}
+
+/// How many slots a modulator of `kind` has (R17).
+#[must_use]
+pub fn slots_of(kind: &DeviceKind) -> u8 {
+    match kind {
+        DeviceKind::Native { device_type } if device_type == PLAY_MOD => PLAY_SLOTS,
+        _ => SLOTS,
+    }
 }
 
 /// A parameter a modulator maps (R17): a mixer control or a send of any
@@ -132,10 +184,18 @@ pub struct ShapePoint {
     /// automation spec's curve law; 0 is straight.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub bend: f64,
+    /// Whether it is the Strike Mod's sustain breakpoint (R26): at most one
+    /// in a shape.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sustain: bool,
 }
 
 fn is_zero(value: &f64) -> bool {
     *value == 0.0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// How close two breakpoints may sit along the cycle.
@@ -165,7 +225,12 @@ pub fn shape_value(points: &[ShapePoint], x: f64) -> f64 {
 /// `None` for another number.
 #[must_use]
 pub fn shape_preset(number: u8) -> Option<Vec<ShapePoint>> {
-    let p = |x, y, bend| ShapePoint { x, y, bend };
+    let p = |x, y, bend| ShapePoint {
+        x,
+        y,
+        bend,
+        sustain: false,
+    };
     Some(match number {
         1 => vec![p(0.0, 0.0, 0.0), p(1.0, 1.0, 0.0)],
         2 => vec![p(0.0, 1.0, 0.0), p(1.0, 0.0, 0.0)],
@@ -206,7 +271,15 @@ pub fn with_point_added(points: &[ShapePoint], x: f64, y: f64) -> Vec<ShapePoint
     }
     let at = points.partition_point(|p| p.x < x);
     let mut out = points.to_vec();
-    out.insert(at, ShapePoint { x, y, bend: 0.0 });
+    out.insert(
+        at,
+        ShapePoint {
+            x,
+            y,
+            bend: 0.0,
+            sustain: false,
+        },
+    );
     out
 }
 
@@ -240,6 +313,19 @@ pub fn with_bend(points: &[ShapePoint], index: usize, bend: f64) -> Vec<ShapePoi
     out
 }
 
+/// `points` with breakpoint `index` made the sustain breakpoint (R26), or,
+/// if it already is, made an ordinary one; no other breakpoint keeps the
+/// flag.
+#[must_use]
+pub fn with_sustain(points: &[ShapePoint], index: usize) -> Vec<ShapePoint> {
+    let mut out = points.to_vec();
+    let on = out.get(index).is_some_and(|p| !p.sustain);
+    for (i, point) in out.iter_mut().enumerate() {
+        point.sustain = on && i == index;
+    }
+    out
+}
+
 /// `points` without breakpoint `index` (R23).
 #[must_use]
 pub fn without_point(points: &[ShapePoint], index: usize) -> Vec<ShapePoint> {
@@ -256,12 +342,35 @@ pub fn default_shape() -> Vec<ShapePoint> {
     shape_preset(3).unwrap_or_default()
 }
 
+/// The shape a new device of `kind` plays: the triangle, or for the Strike
+/// Mod a rise that holds at its top while the note is held and falls after
+/// (R26, Beatlayer's own).
+#[must_use]
+pub fn default_shape_of(kind: &DeviceKind) -> Vec<ShapePoint> {
+    if matches!(kind, DeviceKind::Native { device_type } if device_type == STRIKE_MOD) {
+        let p = |x, y, sustain| ShapePoint {
+            x,
+            y,
+            bend: 0.0,
+            sustain,
+        };
+        vec![p(0.0, 0.0, false), p(0.1, 1.0, true), p(1.0, 0.0, false)]
+    } else {
+        default_shape()
+    }
+}
+
 /// Why `points` isn't a shape: too many, one out of the cycle or the range,
 /// or two that aren't in order with a gap between them.
 pub(crate) fn check_shape(points: &[ShapePoint]) -> Result<(), ModelError> {
     if points.len() > MAX_POINTS {
         return Err(ModelError::InvalidInput(
             "a shape holds at most 64 breakpoints",
+        ));
+    }
+    if points.iter().filter(|p| p.sustain).count() > 1 {
+        return Err(ModelError::InvalidInput(
+            "a shape has at most one sustain breakpoint",
         ));
     }
     for (index, point) in points.iter().enumerate() {
@@ -295,10 +404,10 @@ pub(crate) fn check_mappings(device: &Device) -> Result<(), ModelError> {
         let repeated = device.mappings[..i]
             .iter()
             .any(|m| m.slot == mapping.slot || m.target == mapping.target);
-        if mapping.slot >= SLOTS || own || repeated {
+        if mapping.slot >= slots_of(&device.kind) || own || repeated {
             return Err(ModelError::InvalidInput(
-                "a mapping has a slot from 0 to 7 used once, a parameter mapped once, and not \
-                 the modulator's own",
+                "a mapping has a slot of the modulator used once, a parameter mapped once, and \
+                 not the modulator's own",
             ));
         }
     }
@@ -379,11 +488,16 @@ impl Document {
         if !is_modulator_kind(&current.kind) {
             return Err(ModelError::InvalidInput("only a modulator maps parameters"));
         }
-        if slot >= SLOTS {
-            return Err(ModelError::InvalidInput("a modulator's slots are 0 to 7"));
+        if slot >= slots_of(&current.kind) {
+            return Err(ModelError::InvalidInput(
+                "that slot isn't one of the modulator's",
+            ));
         }
         if !self.has_target(target) {
             return Err(ModelError::InvalidInput("the parameter isn't in the set"));
+        }
+        if is_signal_kind(&current.kind) {
+            self.check_signal_target(device, target)?;
         }
         if matches!(target, ModTarget::Device { device: d, .. } if d == device) {
             return Err(ModelError::InvalidInput(
@@ -414,6 +528,41 @@ impl Document {
         Ok(())
     }
 
+    /// The track a mapping to `target` is worked on: its mixer's track, the
+    /// return track a send runs in, or the track holding a device (R28).
+    #[must_use]
+    pub fn target_track(&self, target: ModTarget) -> Option<TrackId> {
+        match target {
+            ModTarget::Mixer { track, .. } => Some(track),
+            ModTarget::Send { to, .. } => Some(to),
+            ModTarget::Device { device, .. } => self.device_track(device),
+        }
+    }
+
+    /// Why the modulator `device`, driven by audio, notes or MIDI, can't
+    /// map `target` (R17, R28): it is a modulator's parameter, or on a track
+    /// that feeds the modulator's, so the two tracks would wait on each
+    /// other.
+    fn check_signal_target(&self, device: DeviceId, target: ModTarget) -> Result<(), ModelError> {
+        if matches!(target, ModTarget::Device { device: d, .. } if self.device(d).is_some_and(|d| is_modulator_kind(&d.kind)))
+        {
+            return Err(ModelError::InvalidInput(
+                "a modulator driven by audio, notes or MIDI doesn't map another modulator's \
+                 parameters",
+            ));
+        }
+        let (Some(from), Some(to)) = (self.device_track(device), self.target_track(target)) else {
+            return Ok(());
+        };
+        if from != to && crate::graph::Graph::of(self).runs_before(self, to, from) {
+            return Err(ModelError::InvalidInput(
+                "that parameter is on a track that feeds the modulator's track, so the two \
+                 tracks would wait on each other",
+            ));
+        }
+        Ok(())
+    }
+
     /// Removes the mapping of `slot` of the modulator `device`, if it has one.
     pub(crate) fn unmap_modulator(&mut self, device: DeviceId, slot: u8) -> Result<(), ModelError> {
         let current = self.device_ref(device)?;
@@ -423,19 +572,25 @@ impl Document {
         Ok(())
     }
 
-    /// Replaces the shape of the Curve Mod `device` (R23).
+    /// Replaces the shape of the Curve Mod or Strike Mod `device` (R23, R26).
     pub(crate) fn set_shape(
         &mut self,
         device: DeviceId,
         points: &[ShapePoint],
     ) -> Result<(), ModelError> {
         let current = self.device_ref(device)?;
-        let is_curve =
-            matches!(&current.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
-        if !is_curve {
-            return Err(ModelError::InvalidInput("only a Curve Mod has a shape"));
+        if !has_shape_kind(&current.kind) {
+            return Err(ModelError::InvalidInput(
+                "only a Curve Mod or a Strike Mod has a shape",
+            ));
         }
         check_shape(points)?;
+        let strike = matches!(&current.kind, DeviceKind::Native { device_type } if device_type == STRIKE_MOD);
+        if !strike && points.iter().any(|p| p.sustain) {
+            return Err(ModelError::InvalidInput(
+                "only a Strike Mod has a sustain breakpoint",
+            ));
+        }
         if current.shape.as_deref() != Some(points) {
             self.device_mut(device)?.shape = Some(points.to_vec());
         }
@@ -494,11 +649,13 @@ mod tests {
                 x: 0.0,
                 y: 0.0,
                 bend: 1.0,
+                sustain: false,
             },
             ShapePoint {
                 x: 1.0,
                 y: 1.0,
                 bend: 0.0,
+                sustain: false,
             },
         ];
         assert!(
@@ -529,7 +686,12 @@ mod tests {
 
     #[test]
     fn a_shape_out_of_order_or_range_is_refused() {
-        let p = |x, y| ShapePoint { x, y, bend: 0.0 };
+        let p = |x, y| ShapePoint {
+            x,
+            y,
+            bend: 0.0,
+            sustain: false,
+        };
         assert!(check_shape(&[p(0.5, 0.0), p(0.4, 1.0)]).is_err());
         assert!(check_shape(&[p(0.0, 1.5)]).is_err());
         assert!(check_shape(&[p(0.0, 0.0), p(1.0, 1.0)]).is_ok());
@@ -707,6 +869,107 @@ mod document_tests {
             set.editor.document().device(wave).unwrap().mappings.len(),
             8
         );
+        // The Play Mod has one on each of its five source tabs.
+        let play = device(&mut set.editor, set.audio, PLAY_MOD);
+        for slot in 0..PLAY_SLOTS {
+            map(
+                &mut set.editor,
+                play,
+                slot,
+                ModTarget::Device {
+                    device: set.target,
+                    param: ParamId(u32::from(slot)),
+                },
+            )
+            .unwrap();
+        }
+        let sixth = map(
+            &mut set.editor,
+            play,
+            PLAY_SLOTS,
+            ModTarget::Device {
+                device: set.target,
+                param: ParamId(9),
+            },
+        );
+        assert!(sixth.is_err(), "no sixth slot");
+    }
+
+    // Spec: modulation R28
+    #[test]
+    fn a_signal_modulator_maps_no_modulator_and_no_track_that_feeds_it() {
+        use crate::track::Output;
+
+        let mut set = set();
+        let level = device(&mut set.editor, set.audio, LEVEL_MOD);
+        let on = |device, param| ModTarget::Device {
+            device,
+            param: ParamId(param),
+        };
+        // Not another modulator's parameters: it is worked out after them.
+        let refused = map(&mut set.editor, level, 0, on(set.wave, 3)).unwrap_err();
+        assert!(refused.contains("another modulator"), "{refused}");
+        map(&mut set.editor, level, 0, on(set.target, 1)).unwrap();
+        // The other way round it is fine: the Wave Mod runs first.
+        map(&mut set.editor, set.wave, 0, on(level, 0)).unwrap();
+
+        // The track holding the target feeds the follower's: refused.
+        set.editor
+            .apply(Command::SetOutput {
+                track: set.other,
+                output: Output::Track { track: set.audio },
+            })
+            .unwrap();
+        let refused = map(&mut set.editor, level, 1, on(set.target, 2)).unwrap_err();
+        assert!(refused.contains("wait on each other"), "{refused}");
+        // A mapping on the same track, or one on a track the follower's
+        // track feeds, is fine, and so is a modulator that waits for none.
+        let mine = device(&mut set.editor, set.audio, "beatlayer.eq");
+        map(&mut set.editor, level, 1, on(mine, 2)).unwrap();
+        let wave = set.wave;
+        map(&mut set.editor, wave, 1, on(set.target, 2)).unwrap();
+    }
+
+    // Spec: modulation R26
+    #[test]
+    fn a_strike_mod_has_one_sustain_breakpoint_and_a_curve_mod_none() {
+        let mut set = set();
+        let strike = device(&mut set.editor, set.audio, STRIKE_MOD);
+        let curve = device(&mut set.editor, set.audio, CURVE_MOD);
+        let p = |x, sustain| ShapePoint {
+            x,
+            y: 0.5,
+            bend: 0.0,
+            sustain,
+        };
+        let one = vec![p(0.0, false), p(0.5, true), p(1.0, false)];
+        let apply = |editor: &mut Editor, device, points: Vec<ShapePoint>| {
+            editor
+                .apply(Command::SetShape { device, points })
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        };
+        apply(&mut set.editor, strike, one.clone()).unwrap();
+        assert_eq!(
+            set.editor
+                .document()
+                .device(strike)
+                .unwrap()
+                .shape
+                .as_deref(),
+            Some(one.as_slice())
+        );
+        let two = vec![p(0.0, true), p(0.5, true), p(1.0, false)];
+        assert!(apply(&mut set.editor, strike, two).is_err(), "only one");
+        assert!(
+            apply(&mut set.editor, curve, one).is_err(),
+            "a Curve Mod has none"
+        );
+        apply(&mut set.editor, curve, vec![p(0.0, false), p(1.0, false)]).unwrap();
+        // A new Strike Mod plays a shape with its sustain at the top.
+        let default = default_shape_of(&set.editor.document().device(strike).unwrap().kind);
+        assert_eq!(default.iter().filter(|p| p.sustain).count(), 1);
+        assert!(check_shape(&default).is_ok());
     }
 
     // Spec: modulation R19

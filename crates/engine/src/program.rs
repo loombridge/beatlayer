@@ -87,6 +87,11 @@ pub struct EngineProgram {
     pub(crate) sidechains: Vec<DeviceSidechain>,
     /// What each sidechain sums into its buffer.
     pub(crate) sidechain_inputs: Vec<Input>,
+    /// The MIDI sidechains of the devices each task runs (WP-5.27).
+    pub(crate) midi_sidechains: Vec<DeviceMidiSidechain>,
+    /// The notes of each MIDI track a MIDI sidechain listens to, kept for
+    /// the block: what its clips and input played, before its devices.
+    pub(crate) midi_kept: Shared<NoteBuffer>,
     /// One buffer per sidechain, holding what its device's detector
     /// hears.
     pub(crate) sidechain_pool: Shared<f32>,
@@ -156,10 +161,21 @@ pub struct EngineProgram {
     /// The slots of the modulators, in the order their rows sit on the bus:
     /// run before any task, each over the block's frames (WP-5.10).
     pub(crate) modulators: Vec<u32>,
-    /// The modulators' rows: [`ROWS`] per modulator, one value per frame,
-    /// `max_frames` apart. Worked out before the tasks run, and only read
-    /// while they do.
-    pub(crate) bus: Vec<f32>,
+    /// Which of the modulators work their output out while their tracks run
+    /// (WP-5.11): their places among `modulators`, in order. After the
+    /// modulators' rows the bus holds, for each, the rows of what it wrote
+    /// 32 frames ago.
+    pub(crate) signals: Vec<u32>,
+    /// Whether a target reads such a late row, so the program runs in parts
+    /// of at most 32 frames (R28).
+    pub(crate) lagged: bool,
+    /// The modulators' rows: [`ROWS`] per modulator, then per signal
+    /// modulator, one value per frame, `max_frames` apart. The rows of the
+    /// modulators that work before the tasks run, and the late rows, are
+    /// written then and only read while the tasks do. A signal modulator's
+    /// direct rows are written by its own task alone, and read by the
+    /// tasks that wait for it.
+    pub(crate) bus: Shared<f32>,
     /// The note-offs of devices that were removed or moved when this program
     /// replaced the last, waiting for the first block.
     pub(crate) releases: Releases,
@@ -167,6 +183,10 @@ pub struct EngineProgram {
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
 }
+
+/// The frames a late row (WP-5.11) lags its modulator's by, and the longest
+/// part a program with one runs in.
+pub(crate) const LAG_FRAMES: usize = 32;
 
 /// How many note-offs a program swap holds for the devices it removed or
 /// moved; more are dropped and counted.
@@ -348,10 +368,22 @@ pub(crate) struct NodeSlot {
     /// The frames a parameter change aimed at this node is held back, so
     /// automation lines up with the compensated audio (WP-2.11).
     pub(crate) delay: u32,
-    /// Whether the node is a modulator: [`EngineProgram::run`] works its
-    /// output out before the tasks (WP-5.10), and it leaves the chain's
-    /// signal as it is.
-    pub(crate) modulator: bool,
+    /// Whether the node is a modulator, and how it works its output out.
+    pub(crate) modulator: ModKind,
+}
+
+/// How a modulator node works its rows out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModKind {
+    /// Not a modulator.
+    None,
+    /// [`EngineProgram::run`] works its output out before the tasks
+    /// (WP-5.10), and it leaves the chain's signal as it is.
+    Control,
+    /// It works its output out while its track runs, hearing the audio,
+    /// notes or MIDI at its place in the chain (WP-5.11); its rows sit at
+    /// this place among the bus's modulators.
+    Signal(u32),
 }
 
 /// A node that moves from the program before into this one.
@@ -547,6 +579,20 @@ pub(crate) struct DeviceSidechain {
     pub(crate) before: u32,
 }
 
+/// A device's MIDI sidechain in a task's chain (WP-5.27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeviceMidiSidechain {
+    /// The device's slot.
+    pub(crate) device: u32,
+    /// The task whose notes it hears, or [`NO_TASK`].
+    pub(crate) from: u32,
+    /// The source's notes in `midi_kept`, or [`NO_TASK`] with no source.
+    pub(crate) kept: u32,
+}
+
+/// No source task: a MIDI sidechain at No Input.
+pub(crate) const NO_TASK: u32 = u32::MAX;
+
 /// One track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Task {
@@ -561,6 +607,11 @@ pub(crate) struct Task {
     pub(crate) chain: Span,
     /// The sidechains of its devices, in `sidechains`.
     pub(crate) sidechains: Span,
+    /// The MIDI sidechains of its devices, in `midi_sidechains`.
+    pub(crate) midi_sidechains: Span,
+    /// Where it keeps the notes it plays for the MIDI sidechains that
+    /// listen to it, in `midi_kept`.
+    pub(crate) midi_keep: Option<u32>,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The delay line its clips are held back through so they line up with
@@ -1008,7 +1059,8 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
                     session,
-                    modulation: Bus::new(&self.bus, stride, frames),
+                    modulation: turn.bus(frames),
+                    rows: None,
                 });
             }
         }
@@ -1016,6 +1068,16 @@ impl EngineProgram {
         // Spec: midi-io R12. What the track's input played merges with
         // its clips' notes, on its own frames.
         self.midi.play(task.track, from, until, turn.notes(notes));
+
+        // Spec: routing R32. What the track played, kept for the MIDI
+        // sidechains that listen to it.
+        if let Some(kept) = task.midi_keep {
+            let to = turn.keep_notes(kept);
+            to.clear();
+            for &note in turn.notes(notes).notes() {
+                to.push(note);
+            }
+        }
 
         // Its clips, held back to line up with its inputs.
         if task.clip_delay != NO_DELAY {
@@ -1089,10 +1151,10 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
-                let bus = Bus::new(&self.bus, stride, frames);
+                let bus = turn.bus(frames);
                 route.mix(turn.buffer(t), held, shape, song, bus, &lane.events);
             } else {
-                let bus = Bus::new(&self.bus, stride, frames);
+                let bus = turn.bus(frames);
                 route.mix(turn.buffer(t), theirs, shape, song, bus, &lane.events);
             }
         }
@@ -1140,7 +1202,8 @@ impl EngineProgram {
                 notes: &[],
                 notes_out: None,
                 session,
-                modulation: Bus::new(&self.bus, stride, frames),
+                modulation: turn.bus(frames),
+                rows: None,
             });
         }
         delivered
@@ -1163,16 +1226,22 @@ impl EngineProgram {
         let mut delivered = 0;
         for m in 0..self.modulators.len() {
             let slot = self.modulators[m];
-            delivered += gather(events, slot, from, until, scratch);
-            let (earlier, rest) = self.bus.split_at_mut(m * ROWS * stride);
+            let signal = matches!(self.slots[slot as usize].modulator, ModKind::Signal(_));
+            if !signal {
+                delivered += gather(events, slot, from, until, scratch);
+            }
+            let at = m * ROWS * stride;
             let mut ctl = Control {
                 frames,
-                events: scratch.as_slice(),
+                events: if signal { &[] } else { scratch.as_slice() },
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
-                earlier: Bus::new(earlier, stride, frames),
-                out: &mut rest[..ROWS * stride],
+                // SAFETY: no task runs yet, and the bus reads only the rows
+                // before the ones `out` holds.
+                earlier: unsafe { Bus::new(&self.bus, stride, frames) }.below(m * ROWS),
+                // SAFETY: as above; nothing else reaches these rows.
+                out: unsafe { self.bus.elements(at..at + ROWS * stride) },
                 stride,
             };
             let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
@@ -1180,10 +1249,37 @@ impl EngineProgram {
                 ctl.idle();
                 continue;
             };
-            if *bypass {
+            if signal {
+                ctl.idle();
+            } else if *bypass {
                 node.flush(ctl.events);
                 ctl.idle();
             } else if !node.control(&mut ctl) {
+                ctl.idle();
+            }
+        }
+        // What a signal modulator wrote 32 frames ago, for the targets that
+        // run before it.
+        for k in 0..self.signals.len() {
+            let slot = self.modulators[self.signals[k] as usize];
+            let at = (self.modulators.len() + k) * ROWS * stride;
+            let mut ctl = Control {
+                frames,
+                events: &[],
+                transport,
+                sample_rate: self.sample_rate,
+                tempo: &self.tempo,
+                earlier: Bus::EMPTY,
+                // SAFETY: no task runs yet, and nothing else reads these rows.
+                out: unsafe { self.bus.elements(at..at + ROWS * stride) },
+                stride,
+            };
+            let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
+            let wrote = match node.as_mut().and_then(Instance::as_node) {
+                Some(node) if !*bypass => node.control(&mut ctl),
+                _ => false,
+            };
+            if !wrote {
                 ctl.idle();
             }
         }
@@ -1382,8 +1478,8 @@ pub(crate) struct Blk<'a> {
 /// sidechains and clip player; its buffer, its rack chains' buffers, the
 /// copies it keeps of its signal, and its sidechains' buffers; the delay
 /// lines of its inputs, its clips and its rack chains; its pair of note
-/// buffers and its rack chains'; its rack chains' merge cursors; and its
-/// track's MIDI input. The compiler gives each part to one task and one
+/// buffers and its rack chains', and the notes it keeps for MIDI
+/// sidechains; its rack chains' merge cursors; and its track's MIDI input. The compiler gives each part to one task and one
 /// place in it, so two threads running different tasks, or different chains
 /// of one rack, never reach the same part. What a task reads from another
 /// is that task's finished output, or the copy it kept, which the
@@ -1429,6 +1525,27 @@ impl<'p> Turn<'p> {
         // SAFETY: the task owns this buffer, and the turn's callers use the
         // returned reference before asking for another to the same one.
         unsafe { self.program.pool.elements(index * size..(index + 1) * size) }
+    }
+
+    /// The modulators' rows over `frames` frames, for the nodes of the task
+    /// to read.
+    pub(crate) fn bus(&self, frames: usize) -> Bus<'p> {
+        // SAFETY: a target reads a signal modulator's direct row only if
+        // its track waits for the modulator's task, or its place in the
+        // chain comes after the modulator's, in a chain no thread runs at
+        // once with the modulator's; any other target reads the late row,
+        // which only the thread before the tasks writes (R28).
+        unsafe { Bus::new(&self.program.bus, self.program.max_frames, frames) }
+    }
+
+    /// The direct rows of the signal modulator at place `m` among the
+    /// modulators, to write.
+    fn signal_rows(&self, m: u32) -> &'p mut [f32] {
+        let len = ROWS * self.program.max_frames;
+        let at = m as usize * len;
+        // SAFETY: only the task that holds the modulator's node writes its
+        // rows, and the compiler gives the node to one task.
+        unsafe { self.program.bus.elements(at..at + len) }
     }
 
     /// Task `index`'s buffer once the task has finished its mixer.
@@ -1492,6 +1609,26 @@ impl<'p> Turn<'p> {
     fn notes(&self, index: usize) -> &'p mut NoteBuffer {
         // SAFETY: the pairs are the task's and its chains' alone.
         unsafe { self.program.note_buffers.element(index) }
+    }
+
+    /// Kept-notes buffer `index`, to write the notes the task played.
+    fn keep_notes(&self, index: u32) -> &'p mut NoteBuffer {
+        // SAFETY: only the task that is the source of the MIDI sidechains
+        // that read it writes it.
+        unsafe { self.program.midi_kept.element(index as usize) }
+    }
+
+    /// Kept-notes buffer `index`, read: the notes a source task played,
+    /// finished before this task started or the task's own.
+    fn kept_notes(&self, index: u32) -> &'p NoteBuffer {
+        // SAFETY: the task that keeps it wrote it before it finished, or
+        // is this one and isn't writing it now.
+        unsafe {
+            &self
+                .program
+                .midi_kept
+                .view(index as usize..index as usize + 1)[0]
+        }
     }
 
     /// Two different note buffers of the task, in the order asked.
@@ -1607,9 +1744,20 @@ impl EngineProgram {
                 }
             }
             let [in_buf, out_buf] = turn.note_pair(pair + note_idx, pair + 1 - note_idx);
+            // Spec: routing R32. A device with a MIDI sidechain hears its
+            // source's notes, or none at No Input, in place of the chain's.
+            let heard_notes = match self.midi_sidechains[task.midi_sidechains.range()]
+                .iter()
+                .find(|m| m.device == slot)
+            {
+                Some(m) if m.kept == NO_TASK => Some(&[][..]),
+                Some(m) => Some(turn.kept_notes(m.kept).notes()),
+                None => None,
+            };
             // A modulator worked out its rows before the tasks ran and
             // leaves the chain's audio and notes as they are.
-            if turn.slot(slot).modulator {
+            let modulator = turn.slot(slot).modulator;
+            if modulator == ModKind::Control {
                 out_buf.clear();
                 for &note in in_buf.notes() {
                     out_buf.push(note);
@@ -1643,10 +1791,19 @@ impl EngineProgram {
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
-                notes: in_buf.notes(),
+                notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: block.session,
-                modulation: Bus::new(&self.bus, stride, frames),
+                // A modulator driven by the signal writes its own rows, and
+                // hears the rows of the modulators before it.
+                modulation: match modulator {
+                    ModKind::Signal(m) => turn.bus(frames).below(m as usize * ROWS),
+                    _ => turn.bus(frames),
+                },
+                rows: match modulator {
+                    ModKind::Signal(m) => Some(turn.signal_rows(m)),
+                    _ => None,
+                },
             });
             note_idx = 1 - note_idx;
             // Sidechain Listen: the device's output is what it heard.
@@ -1834,7 +1991,8 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: None,
                     session: block.session,
-                    modulation: Bus::new(&self.bus, stride, frames),
+                    modulation: turn.bus(frames),
+                    rows: None,
                 });
             } else {
                 mixer.flush(pass.scratch);

@@ -71,6 +71,7 @@ mod editor;
 mod error;
 pub mod fader;
 mod follow;
+pub mod graph;
 mod ids;
 mod launch;
 mod layers;
@@ -103,8 +104,8 @@ pub use clip::{
 };
 pub use command::Command;
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, PluginFormat, PluginState,
-    Sidechain, WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain, PluginFormat,
+    PluginState, Sidechain, WindowFrame,
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;

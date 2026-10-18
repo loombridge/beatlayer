@@ -2292,6 +2292,100 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
+// agent inserts Veer by its type with its MIDI sidechain, sets its
+// parameters by ID, points its MIDI source at a MIDI track and reads both
+// back; the source goes when that track does.
+#[test]
+fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_track() {
+    use bl_devices::shifter::{COARSE, MODE, PITCH_SOURCE, SHIFT, SHIFTER};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("veer-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Veer", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": SHIFTER } },
+                                    "name": "Veer", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Veer", "commands": [
+            set(MODE, 1.0),
+            set(SHIFT, 123.0),
+            set(COARSE, -7.0),
+            set(PITCH_SOURCE, 1.0),
+            { "command": "device.set_midi_sidechain_source",
+              "args": { "device": device, "track": keys } },
+        ] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 34, "every parameter is listed");
+    let value = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))["value"]
+            .clone()
+    };
+    assert_eq!(
+        [MODE, SHIFT, COARSE, PITCH_SOURCE].map(value),
+        [json!(1.0), json!(123.0), json!(-7.0), json!(1.0)]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+
+    // The source reads back from the device, and goes with its track.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+    // An audio track isn't a source.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                    "args": { "device": device, "track": audio } }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
+}
+
 // Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
 // reads its parameters with its two menu options, switches one by ID, and
 // swaps it to Snapshot, by command ID.

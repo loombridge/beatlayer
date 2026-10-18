@@ -1191,6 +1191,34 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The Test MIDI Sidechain on audio track 3, the selected track, its
+/// sidechain section shown, no device selected (WP-5.27).
+fn a_midi_sidechained_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::hear_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.show_sidechain",
+            json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A Wave Mod and a test utility on the selected audio track (WP-5.10),
 /// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
@@ -2333,6 +2361,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "device.set_midi_sidechain_source",
+            main(
+                a_midi_sidechained_device,
+                device_view,
+                "MIDI Sidechain Source",
+                Key::ArrowUp,
+            ),
+        ),
+        (
             "device.set_sidechain_mix",
             main(a_sidechained_device, device_view, "Mix", Key::ArrowDown),
         ),
@@ -2572,16 +2609,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the plug-in device panel's configure mode (Phase 5)",
             )),
         ),
-        // WP-2.9's scanner and settings: the Plug-Ins label lists what the
-        // scanner found, but the button that scans (Live's Rescan) and the
-        // hide-plug-ins controls are later views.
+        // WP-2.9b: Settings ▸ Plug-Ins' Rescan and Plug-In Sources
+        // switches. The app scans by itself at start; a scan of named paths
+        // is an agent's.
         (
             "plugin.scan",
-            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+            Exception(AgentOnly(
+                "scanning named files or folders; the app scans the system folders itself",
+            )),
         ),
         (
             "plugin.rescan",
-            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+            settings("plug-ins", nothing, "Rescan Plug-Ins", Key::Enter),
         ),
         (
             "plugin.list",
@@ -2589,9 +2628,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "plugin.settings",
-            Exception(LaterView(
-                "the browser's hide-plug-ins and format controls (Phase 6, IMP-07)",
-            )),
+            settings(
+                "plug-ins",
+                nothing,
+                "Use VST3 Plug-In System Folders",
+                Key::Enter,
+            ),
         ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.

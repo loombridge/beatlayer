@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-439 commands in 35 areas.
+440 commands in 35 areas.
 
 ## Permission classes
 
@@ -242,6 +242,7 @@ Each command has:
 | [`device.set_layer_options`](#deviceset_layer_options) | Change Sample Options | `edit` |  |  |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | Replace Sample | `external` |  |  |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | Set MIDI Sidechain Source | `edit` |  |  |
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
@@ -1834,7 +1835,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
 
 Default keys:
 
@@ -1850,7 +1851,7 @@ Result: [`AddResult`](#addresult).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -1933,7 +1934,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Select in Browser**. Permission: `external`. Contexts: `browser`.
 
-Selects items in the browser's content pane by path, replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
+Selects items in the browser's content pane by path (or, in the Plug-Ins label, by the row's key), replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
 
 Default keys: none.
 
@@ -4299,6 +4300,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_midi_sidechain_source`
+
+**Set MIDI Sidechain Source**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track whose notes and channel messages the device hears (its own track too), or `None` for No Input. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_multisampler_view`
 
 **Set Multisampler View**. Permission: `read`. Contexts: `device-view`.
@@ -4518,7 +4536,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Show Sidechain**. Permission: `read`. Contexts: `device-view`.
 
-Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`.
+Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI sidechain's, `device.set_midi_sidechain_source`.
 
 Default keys: none.
 
@@ -5473,7 +5491,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Map Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+Maps one of a modulator's slots (`slot`, 0 to 7; the Play Mod's are 0 to 4) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. A modulator driven by audio, notes or MIDI (the Level Mod, Gate Mod, Strike Mod and Play Mod) doesn't map another modulator's parameters, nor one on a track that feeds its own track, which would make the two tracks wait on each other. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
 
 Default keys: none.
 
@@ -5491,7 +5509,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Shape**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+Replaces the breakpoint shape of a Curve Mod or a Strike Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Strike Mod's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
 
 Default keys: none.
 
@@ -5508,7 +5526,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Play Mod's are 0 to 4), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
 
 Default keys: none.
 
@@ -5792,7 +5810,7 @@ Result: [`PluginLoaded`](#pluginloaded).
 
 **Rescan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report.
+Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report; with `background`, returns at once and the browser lists what was found when the scan is done.
 
 Default keys: none.
 
@@ -5800,6 +5818,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5808,7 +5827,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Scan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths`, or each format's own system plug-in folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') when `paths` is left out. Plug-ins of every hosted format are scanned. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
+Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
 
 Default keys: none.
 
@@ -5816,6 +5835,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5859,7 +5879,7 @@ Result: [`PluginInfo`](#plugininfo).
 
 **Plug-In Settings**. Permission: `edit`. Contexts: `global`.
 
-Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
+Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and `vst3_system_folders`, all off in a new install; the browser lists a format's plug-ins only while its switch is on (CLAP has none and is always listed), and turning one on scans that format in the background. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
 
 Default keys: none.
 
@@ -5870,6 +5890,9 @@ Arguments:
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The format to prefer when a plug-in exists in several. |
 | `hidden` | array or null | no | The hidden plug-ins to remember, as `format/plugin_id` keys (IMP-07); empty hides none. |
 | `show_hidden` | boolean or null | no | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean or null | no | Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units on macOS. Turning it on scans them. |
+| `use_audio_units_v3` | boolean or null | no | Use Audio Units v3 (Settings ▸ Plug-Ins). Kept; app-extension Audio Units aren't scanned yet. |
+| `vst3_system_folders` | boolean or null | no | Use VST3 Plug-In System Folders (Settings ▸ Plug-Ins): scan and list the VST3 plug-ins in the format's system folders. Turning it on scans them. |
 
 Result: [`PluginSettings`](#pluginsettings).
 
@@ -8326,6 +8349,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_layer_options`](#deviceset_layer_options) | the query tool's `device` | `layers` |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -11996,6 +12020,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
+| `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -12062,6 +12087,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         ]
       },
       "type": "array"
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechain"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -12366,6 +12402,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
@@ -12423,6 +12460,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechainSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27)."
     },
     "modulator": {
       "anyOf": [
@@ -14927,12 +14975,13 @@ One row of the content pane.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | Its path on disk. |
+| `path` | string | yes | Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11). |
 | `name` | string | yes | Its name, as the Name column shows it. |
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
+| `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
 <details><summary>JSON Schema</summary>
 
@@ -14954,6 +15003,17 @@ One row of the content pane.
         "null"
       ]
     },
+    "format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginFormat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -14968,7 +15028,7 @@ One row of the content pane.
       "type": "boolean"
     },
     "path": {
-      "description": "Its path on disk.",
+      "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
     }
   },
@@ -17148,6 +17208,72 @@ What `midi.ports` returns.
 
 </details>
 
+### `MidiSidechain`
+
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MidiSidechainSection`
+
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
+| `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "properties": {
+    "shown": {
+      "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
+      "type": "boolean"
+    },
+    "source": {
+      "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shown",
+    "source"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MixerOf`
 
 Which view's mixer: the Session View's or the Arrangement View's.
@@ -17769,6 +17895,7 @@ The device `device.add` adds.
 |---|---|---|---|
 | `kind` | [`DeviceKind`](#devicekind) | yes | What it is: a native device's type ID or a plug-in's format and ID. |
 | `name` | string | yes | Its own name, such as the browser lists it. |
+| `midi_sidechain` | boolean | no | Whether it has a MIDI sidechain input, as its type declares (WP-5.27). |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain. |
 | `sidechain` | boolean | no | Whether it has a sidechain input, as its type declares (WP-2.19b). |
 
@@ -17782,6 +17909,10 @@ The device `device.add` adds.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is: a native device's type ID or a plug-in's format and ID."
+    },
+    "midi_sidechain": {
+      "description": "Whether it has a MIDI sidechain input, as its type declares (WP-5.27).",
+      "type": "boolean"
     },
     "name": {
       "description": "Its own name, such as the browser lists it.",
@@ -18929,6 +19060,9 @@ What `plugin.settings` returns.
 |---|---|---|---|
 | `hidden` | array of string | yes | The hidden plug-ins, as `format/plugin_id` keys. |
 | `show_hidden` | boolean | yes | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean | yes | Use Audio Units v2. |
+| `use_audio_units_v3` | boolean | yes | Use Audio Units v3. |
+| `vst3_system_folders` | boolean | yes | Use VST3 Plug-In System Folders. |
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The preferred format, if one is chosen. |
 
 <details><summary>JSON Schema</summary>
@@ -18958,11 +19092,26 @@ What `plugin.settings` returns.
     "show_hidden": {
       "description": "Whether the browser shows hidden plug-ins.",
       "type": "boolean"
+    },
+    "use_audio_units_v2": {
+      "description": "Use Audio Units v2.",
+      "type": "boolean"
+    },
+    "use_audio_units_v3": {
+      "description": "Use Audio Units v3.",
+      "type": "boolean"
+    },
+    "vst3_system_folders": {
+      "description": "Use VST3 Plug-In System Folders.",
+      "type": "boolean"
     }
   },
   "required": [
     "hidden",
-    "show_hidden"
+    "show_hidden",
+    "use_audio_units_v2",
+    "use_audio_units_v3",
+    "vst3_system_folders"
   ],
   "type": "object"
 }
@@ -21576,6 +21725,7 @@ One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output th
 | `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
 | `y` | number | yes | The output there, from 0 to 1. |
 | `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+| `sustain` | boolean | no | Whether it is the Strike Mod's sustain breakpoint (R26): at most one in a shape. |
 
 <details><summary>JSON Schema</summary>
 
@@ -21587,6 +21737,10 @@ One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output th
       "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
       "format": "double",
       "type": "number"
+    },
+    "sustain": {
+      "description": "Whether it is the Strike Mod's sustain breakpoint (R26): at most one in a shape.",
+      "type": "boolean"
     },
     "x": {
       "description": "Where in the cycle, from 0 (its start) to 1 (its end).",

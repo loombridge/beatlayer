@@ -226,6 +226,11 @@ pub struct ScanArgs {
     /// if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
+    /// Scan the system folders in the background and return at once, with
+    /// an empty report, as the Settings window's Rescan button does; the
+    /// browser lists what was found when it's done.
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// A plug-in the scanner found.
@@ -329,6 +334,19 @@ pub struct PluginSettingsArgs {
     /// The format to prefer when a plug-in exists in several.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format_preference: Option<PluginFormat>,
+    /// Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units
+    /// on macOS. Turning it on scans them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_audio_units_v2: Option<bool>,
+    /// Use Audio Units v3 (Settings ▸ Plug-Ins). Kept; app-extension Audio
+    /// Units aren't scanned yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_audio_units_v3: Option<bool>,
+    /// Use VST3 Plug-In System Folders (Settings ▸ Plug-Ins): scan and list
+    /// the VST3 plug-ins in the format's system folders. Turning it on scans
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vst3_system_folders: Option<bool>,
 }
 
 /// What `plugin.settings` returns.
@@ -341,6 +359,12 @@ pub struct PluginSettings {
     /// The preferred format, if one is chosen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format_preference: Option<PluginFormat>,
+    /// Use Audio Units v2.
+    pub use_audio_units_v2: bool,
+    /// Use Audio Units v3.
+    pub use_audio_units_v3: bool,
+    /// Use VST3 Plug-In System Folders.
+    pub vst3_system_folders: bool,
 }
 
 /// Adds the plug-in commands to a registry.
@@ -451,9 +475,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
-                 Scans the files or folders in `paths`, or each format's own system plug-in \
-                 folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') \
-                 when `paths` is left out. Plug-ins of every hosted format are scanned. Each \
+                 Scans the files or folders in `paths` for every hosted format, or, when \
+                 `paths` is left out, the system plug-in folders of CLAP and of the formats \
+                 the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, \
+                 and on macOS `use_audio_units_v2`). The app also runs this at start, in the \
+                 background, and when one of those switches turns on. Each \
                  one is loaded in a separate process with a timeout, so a plug-in that crashes \
                  or hangs is put on a blocklist with the reason instead of taking Beatlayer \
                  down; a file whose size and modification time are unchanged is answered from \
@@ -469,7 +495,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Scans the plug-ins in `paths` (or each format's system plug-in folders) \
                  again, ignoring the cache and clearing the blocklist for them, as the Rescan \
-                 button does. Returns `plugin.scan`'s report.",
+                 button does. Returns `plugin.scan`'s report; with `background`, returns at \
+                 once and the browser lists what was found when the scan is done.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -496,8 +523,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the \
                  plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden \
                  plug-ins still show; and `format_preference` the format to prefer when a \
-                 plug-in exists in several. Fields left out are unchanged. Returns the \
-                 settings. A set that uses a hidden plug-in still loads it.",
+                 plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ \
+                 Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and \
+                 `vst3_system_folders`, all off in a new install; the browser lists a format's \
+                 plug-ins only while its switch is on (CLAP has none and is always listed), \
+                 and turning one on scans that format in the background. Fields left out are \
+                 unchanged. Returns the settings. A set that uses a hidden plug-in still loads \
+                 it.",
             )
             .permission(Permission::Edit)
             .context(Global)

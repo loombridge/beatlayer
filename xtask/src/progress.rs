@@ -807,8 +807,16 @@ fn parse_improvements(text: &str, phases: &[Phase], unknown: &mut Vec<String>) -
             .filter_map(|r| WpId::parse(r).map(|id| id.phase))
             .chain(later.iter().copied())
             .min();
+        let decision = plain(&row[5]);
         let status = if refs.is_empty() {
-            Status::Planned
+            // Built outside the phases' packages (IMP-11, ahead of Phase 9):
+            // the status column says so, and a later phase may still owe a
+            // part.
+            match decision.split_whitespace().next() {
+                Some("Built") if later.is_empty() => Status::Done,
+                Some("Built") => Status::InProgress,
+                _ => Status::Planned,
+            }
         } else {
             let statuses: Vec<Status> = refs
                 .iter()
@@ -825,7 +833,7 @@ fn parse_improvements(text: &str, phases: &[Phase], unknown: &mut Vec<String>) -
             id: row[0].clone(),
             title: plain(&row[1]),
             built_in,
-            decision: plain(&row[5]),
+            decision,
             phase,
             status,
             packages: refs,
@@ -1048,6 +1056,20 @@ mod tests {
             ]
         );
         assert_eq!(unknown.len(), 1, "{unknown:?}");
+    }
+
+    #[test]
+    fn an_improvement_built_outside_the_phases_reads_its_status_column() {
+        let text = "| IMP-90 | A | B | C | Built ahead of Phase 9 in #1; the rest in Phase 9 | Built in part |\n\
+                    | IMP-91 | A | B | C | Built in #2 | Built |\n\
+                    | IMP-92 | A | B | C | Phase 9 | Planned |\n";
+        let mut unknown = Vec::new();
+        let list = parse_improvements(text, &[], &mut unknown);
+        let status: Vec<Status> = list.iter().map(|i| i.status).collect();
+        assert_eq!(status, [Status::InProgress, Status::Done, Status::Planned]);
+        assert!(unknown.is_empty());
+        // It joins no phase's packages.
+        assert!(list.iter().all(|i| i.packages.is_empty()));
     }
 
     #[test]

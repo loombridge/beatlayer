@@ -83,17 +83,25 @@
 bl_rt::install_trap!();
 
 mod automation;
+pub mod capture;
+mod clip_source;
 pub mod clips;
 mod compiler;
+pub mod controller_take;
+mod disjoint;
 pub mod display;
+pub mod drum;
 mod engine;
 mod gc;
 mod input;
+mod layers;
 mod message;
 mod metronome;
 mod midi;
 pub mod midi_clips;
+pub mod midi_controllers;
 pub mod mixer;
+pub mod modbus;
 mod node;
 pub mod nodes;
 mod offline;
@@ -103,24 +111,36 @@ mod program;
 pub mod recording;
 mod registry;
 pub mod routing;
+mod sched;
 pub mod session;
 pub mod sidechain;
 mod sources;
 mod state;
 pub mod transport;
+mod warped;
+mod zones;
 
 #[doc(hidden)]
 pub mod testing;
 
 use bl_core::time::SampleRate;
 
-pub use automation::{AutomationList, clip_envelope_value_at, target_node};
-pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
+pub use automation::{
+    AutomationList, SessionNow, clip_envelope_value_at, session_content_tick, session_pass_end,
+    target_node,
+};
+pub use capture::{CAPTURE_RING, CapturedMidi};
+pub use clips::{
+    Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
+    SourceCues, media_edits,
+};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
+pub use drum::ChainHits;
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
+pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
 pub use message::{
     Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
 };
@@ -140,8 +160,10 @@ pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
+pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
+    StoppedClip,
 };
 pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
 
@@ -163,6 +185,17 @@ pub struct EngineConfig {
     /// The audio device's output channels, for tracks whose Audio To is
     /// Ext. Out (WP-2.13). Zero — no Ext. Out plays — until a device opens.
     pub output_channels: usize,
+    /// Frames between the engine handing the audio device a sound and it
+    /// coming out, as the device reports (zero when it reports none): MIDI
+    /// to hardware is sent this much after its frame's block starts, so it
+    /// is heard with the audio (`docs/specs/external-devices.md`, R4).
+    pub output_latency: u32,
+    /// The frames an external device's sound takes to come back through the
+    /// interface, which delay compensation holds the rest of the set back
+    /// by: the device's reported output and input latency plus Driver
+    /// Error Compensation, never less than zero (R13). A device's own
+    /// Hardware Latency adds to it.
+    pub round_trip_latency: u32,
     /// Messages the queue to the audio thread holds. More wait on the
     /// sending side ([`Sender::backlog`]).
     pub queue_capacity: usize,
@@ -181,6 +214,8 @@ pub struct EngineConfig {
     pub report_capacity: usize,
     /// Modulated parameters in [`EngineState::modulated`].
     pub max_modulated: usize,
+    /// Rack chains in [`EngineState::processing`].
+    pub max_processing: usize,
 }
 
 impl EngineConfig {
@@ -204,6 +239,8 @@ impl EngineConfig {
             channels: 2,
             input_channels: 0,
             output_channels: 0,
+            output_latency: 0,
+            round_trip_latency: 0,
             queue_capacity: 4096,
             max_pending_events: 4096,
             max_scheduled: 256,
@@ -211,6 +248,7 @@ impl EngineConfig {
             max_slots: 2048,
             report_capacity: 1024,
             max_modulated: 1024,
+            max_processing: 1024,
         }
     }
 

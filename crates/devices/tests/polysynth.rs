@@ -1,4 +1,4 @@
-//! Cascade, the native polysynth (WP-2.17, part 1; the polysynth spec): the
+//! Drift, the native polysynth (WP-2.17, part 1; the polysynth spec): the
 //! oscillators' aliasing, the low-pass filters against their prototypes,
 //! the envelopes' timing, polyphony and stealing, and the voice budget.
 //!
@@ -43,7 +43,7 @@ fn cascade() -> DeviceType {
         .find(|device_type| {
             matches!(&device_type.kind, DeviceKind::Native { device_type } if device_type == POLYSYNTH)
         })
-        .expect("Cascade is registered")
+        .expect("Drift is registered")
 }
 
 fn on(offset: u32, key: u8, velocity: f32) -> NoteEvent {
@@ -622,6 +622,18 @@ fn expression(offset: u32, key: u8, id: u32, expression: NoteExpression, value: 
     }
 }
 
+/// A channel message on channel 0 (WP-5.44).
+fn message(offset: u32, kind: NoteKind) -> NoteEvent {
+    NoteEvent {
+        offset,
+        kind,
+        channel: 0,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    }
+}
+
 /// The RMS of `signal`'s first difference: a crude high-frequency energy.
 fn difference_rms(signal: &[f32]) -> f64 {
     let energy: f64 = signal
@@ -763,6 +775,75 @@ fn mpe_pitch_bend_bends_one_note_only() {
         amplitude_at(after, c5_bent) < 0.1 * amplitude_at(after, c5),
         "C5 didn't bend"
     );
+}
+
+// Spec: polysynth R22, device-framework R39. The pitch wheel moves every
+// note on its frame, by the PB Range.
+#[test]
+fn the_pitch_wheel_bends_every_note_by_the_pb_range() {
+    let registry = registry();
+    let params = [
+        (OSC1_WAVE, 0.0),
+        (OSC1_GAIN, db_to_gain(-6.0)),
+        (PB_RANGE, 12.0),
+    ];
+    let mut node = node(&registry, &device_with(&params), 8_192);
+    // Two notes, C4 and C5, a half-way bend up at 1 s and a full bend down
+    // at 2 s.
+    let notes = [
+        on(0, 60, 1.0),
+        on(0, 72, 1.0),
+        message(48_000, NoteKind::PitchBend { value: 0.5 }),
+        message(96_000, NoteKind::PitchBend { value: -1.0 }),
+    ];
+    let signal = play_blocks(node.as_mut(), 144_000, 8_192, &notes);
+    let (before, up, down) = (
+        &signal[9_600..38_400],
+        &signal[57_600..86_400],
+        &signal[105_600..134_400],
+    );
+    let strongest = |part: &[f32], hz: f64| amplitude_at(part, hz);
+    let (c4, c5) = (261.63, 523.25);
+    // Six semitones up from each, then an octave down from each.
+    let (c4_up, c5_up) = (369.99, 739.99);
+    let (c4_down, c5_down) = (130.81, 261.63);
+    assert!(strongest(before, c4) > 0.05 && strongest(before, c5) > 0.05);
+    assert!(strongest(before, c4_up) < 0.1 * strongest(before, c4));
+    assert!(strongest(up, c4_up) > 10.0 * strongest(up, c4), "C4 up");
+    assert!(strongest(up, c5_up) > 10.0 * strongest(up, c5), "C5 up");
+    assert!(
+        strongest(down, c4_down) > 10.0 * strongest(down, c4_up),
+        "C4 down"
+    );
+    assert!(
+        strongest(down, c5_down) > 10.0 * strongest(down, c5_up),
+        "C5 down"
+    );
+}
+
+// Spec: polysynth R21, device-framework R39. A change of the mod wheel
+// (controller 1) moves the Modwheel source, from the frame it lands on.
+#[test]
+fn the_mod_wheel_moves_the_modwheel_source() {
+    let registry = registry();
+    let params = [
+        (OSC1_WAVE, 0.0),
+        (OSC1_GAIN, db_to_gain(-6.0)),
+        (MOD1_SOURCE, choice(&MOD_SOURCES, "Modwheel")),
+        (MOD1_DEST, choice(&MOD_DESTINATIONS, "Main Volume")),
+        (MOD1_AMOUNT, 100.0),
+    ];
+    let mut node = node(&registry, &device_with(&params), 24_000);
+    let wheel = NoteKind::Control {
+        controller: 1,
+        value: 1.0,
+    };
+    let notes = [on(0, 60, 1.0), message(12_000, wheel)];
+    let signal = play_blocks(node.as_mut(), 24_000, 24_000, &notes);
+    let before = rms(&signal[4_800..11_000]);
+    let after = rms(&signal[14_000..23_000]);
+    println!("mod wheel: {before:.5} then {after:.5}");
+    assert!(after > 4.0 * before, "the mod wheel raised the level");
 }
 
 // Spec: polysynth R21 (MPE's pressure and slide as sources)

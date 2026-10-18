@@ -26,9 +26,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use bl_core::time::SampleRate;
-use bl_media::AudioSource;
 use bl_model::{ClipId, ContentHash, TrackId};
 
+use crate::clip_source::ClipSource;
 use crate::clips::{Geometry, MediaLibrary, OpenedSource, SourceCues};
 
 /// A value that one thread puts in and another takes out, once, without a
@@ -88,16 +88,18 @@ unsafe impl<T: Send> Sync for Handoff<T> {}
 unsafe impl<T: Send> Send for Handoff<T> {}
 
 /// A clip's source slot in a player: the source, while the clip has one.
-pub(crate) type Slot = Option<Box<dyn AudioSource>>;
+pub(crate) type Slot = Option<Box<ClipSource>>;
 
 /// A list's sources, one slot per clip in the list's order.
 pub(crate) type Bank = Box<[Slot]>;
 
-/// What a source was opened for: a clip's media at the engine's rate.
+/// What a source was opened for: a clip's media at the engine's rate, held
+/// in memory or not (the clip's RAM switch, the warp modes spec, R11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Key {
     media: ContentHash,
     rate: SampleRate,
+    ram: bool,
 }
 
 /// The cue slots a clip's source keeps: its start, its loop's start, and
@@ -125,12 +127,17 @@ impl Held {
         let (Some(cues), Some(geometry)) = (&self.cues, &self.geometry) else {
             return;
         };
+        // A warped clip reads a little before the point it plays at.
+        let back = geometry.reach_back();
         let wanted = [
-            Some(geometry.region_start),
-            geometry.looping.then_some(geometry.loop_start),
+            Some(geometry.region_start.saturating_sub(back)),
+            geometry
+                .looping
+                .then_some(geometry.loop_start.saturating_sub(back)),
             loop_start
                 .filter(|&at| geometry.start <= at && at < geometry.end)
-                .and_then(|at| geometry.file_frame(at)),
+                .and_then(|at| geometry.file_frame(at))
+                .map(|frame| frame.saturating_sub(back)),
         ];
         for (slot, (want, had)) in wanted.into_iter().zip(&mut self.cued).enumerate() {
             if let Some(frame) = want
@@ -163,6 +170,16 @@ struct Job {
     ticket: u64,
     key: Key,
     start: u64,
+}
+
+/// Opens the source `key` names: the whole file in memory if its RAM switch
+/// is on, otherwise as the library chooses.
+fn open(library: &dyn MediaLibrary, key: Key, start: u64) -> Option<OpenedSource> {
+    if key.ram {
+        library.open_in_memory(key.media, key.rate)
+    } else {
+        library.open(key.media, key.rate, start)
+    }
 }
 
 /// The loader's answer: the source it opened for a clip, or `None` if the
@@ -203,8 +220,7 @@ impl Loader {
             .name("bl-engine-loader".into())
             .spawn(move || {
                 for job in queue {
-                    let opened = media
-                        .open(job.key.media, job.key.rate, job.start)
+                    let opened = open(&*media, job.key, job.start)
                         .filter(|opened| opened.source.channels() > 0);
                     deliver(Loaded {
                         clip: job.clip,
@@ -243,7 +259,11 @@ pub(crate) enum Supply {
     /// The player carries over the source it has for the clip.
     Carry,
     /// A source opened for it.
-    Fresh(Box<dyn AudioSource>),
+    Fresh(Box<ClipSource>),
+    /// The player carries over the source it has, and hands it over to this
+    /// one once this one is ready: the clip's RAM switch changed while it
+    /// played (the warp modes spec, R11).
+    Switch(Box<ClipSource>),
 }
 
 /// A clip's source in a list being built, and what the list needs to know
@@ -315,23 +335,31 @@ impl ClipSources {
         clip: ClipId,
         media: ContentHash,
         rate: SampleRate,
+        ram: bool,
         start: u64,
         library: Option<&dyn MediaLibrary>,
         missing: &mut Vec<ContentHash>,
     ) -> Option<Sourced> {
-        let key = Key { media, rate };
-        if let Some(held) = self
+        let key = Key { media, rate, ram };
+        let held = self
             .held
             .get_mut(&track)
-            .and_then(|clips| clips.remove(&clip))
-            .filter(|held| held.key == key)
-        {
-            let frames = held.frames;
-            self.building.insert(clip, held);
-            return Some(Sourced {
-                supply: Supply::Carry,
-                frames,
-            });
+            .and_then(|clips| clips.remove(&clip));
+        // Only the RAM switch differs: the clip goes on playing the source
+        // it has until the new one is ready, then hands over to it.
+        let mut playing = None;
+        if let Some(held) = held {
+            if held.key == key {
+                let frames = held.frames;
+                self.building.insert(clip, held);
+                return Some(Sourced {
+                    supply: Supply::Carry,
+                    frames,
+                });
+            }
+            if held.key.media == media && held.key.rate == rate && self.loader.is_some() {
+                playing = Some(held);
+            }
         }
         let ready = match self.ready.remove(&clip) {
             Some(ready) if ready.key == key => Some(ready),
@@ -341,7 +369,7 @@ impl ClipSources {
             (Some(ready), _) => ready,
             (None, None) => {
                 let Some(opened) = library
-                    .and_then(|library| library.open(media, rate, start))
+                    .and_then(|library| open(library, key, start))
                     .filter(|opened| opened.source.channels() > 0)
                 else {
                     missing.push(media);
@@ -366,10 +394,18 @@ impl ClipSources {
                         start,
                     });
                 }
-                return None;
+                // The clip plays on, from the source it has, meanwhile.
+                let held = playing?;
+                let frames = held.frames;
+                self.building.insert(clip, held);
+                return Some(Sourced {
+                    supply: Supply::Carry,
+                    frames,
+                });
             }
         };
         let frames = ready.opened.source.frames();
+        let streamed = ready.opened.cues.is_some();
         let mut cued = [None; CUE_SLOTS];
         cued[0] = Some(ready.start);
         self.building.insert(
@@ -382,8 +418,13 @@ impl ClipSources {
                 geometry: None,
             },
         );
+        let source = Box::new(ClipSource::new(ready.opened.source, streamed));
         Some(Sourced {
-            supply: Supply::Fresh(ready.opened.source),
+            supply: if playing.is_some() {
+                Supply::Switch(source)
+            } else {
+                Supply::Fresh(source)
+            },
             frames,
         })
     }
@@ -392,7 +433,7 @@ impl ClipSources {
     /// asks it to preload the points a jump will land on there.
     pub(crate) fn cue(&mut self, clip: ClipId, geometry: &Geometry, loop_start: Option<i64>) {
         if let Some(held) = self.building.get_mut(&clip) {
-            held.geometry = Some(*geometry);
+            held.geometry = Some(geometry.clone());
             held.cue(loop_start);
         }
     }

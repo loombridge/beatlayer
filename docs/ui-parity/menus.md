@@ -144,7 +144,7 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-007 | Consolidate Time to New Scene | | | disabled | |
 | | — | | | | |
 | M-CREATE-008 | Insert Empty MIDI Clip | ⇧⌘M | S-SES-007, S-ARR-037 | disabled | Enabled in the empty slot's and time selection's context menus. A new clip is one bar long in the time signature in force at the time (observed in 12.4.3 (macOS), 15 October 2026) |
-| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026) |
+| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026). Runs `midi.capture` ([capture MIDI](../specs/capture-midi.md)) |
 | | — | | | | |
 | M-CREATE-010 | Create Fade | ⌥⌘F | S-ARR-008 | disabled | The manual names it Create Fade In/Out or Create Crossfade depending on the selection |
 | | — | | | | |
@@ -230,7 +230,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-026 | Show Similar Files | ⇧⌘F | S-BRW-010 | disabled | |
 | M-VIEW-027 | Show Filter View | ⌥⌘G | S-BRW-013 | disabled | |
 | | — | | | | |
-| M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b) |
+| M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b), with every plug-in editor window the device's window button opens (L-DEV-010, WP-2.10) |
 | M-VIEW-029 | Video Window | ⌥⇧⌘V | S-VIEW-009 | ticked, disabled | Not the manual's ⌥⌘V, which Live shows for Paste Bounced Audio (M-EDIT-031) |
 | | — | | | | |
 | M-VIEW-030 | Show the Max for Live Window | ⌥⇧⌘M | S-VIEW-023 | | Max-specific; Beatlayer's extension host takes this place in M9 or drops it. Left out of Beatlayer's menu (D21) |
@@ -340,7 +340,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-021 | MIDI Envelope Auto-Reset | | | | |
 | M-OPT-022 | Retune Set On Loading Tuning Systems | | | | |
 | | — | | | | |
-| M-OPT-023 | Solo Switches | | | disabled | One of two choices with M-OPT-024 |
+| M-OPT-023 | Solo Switches | | | disabled | One of two choices with M-OPT-024, and one setting with the Main strip's Solo/Cue button; both are greyed while Cue Out and Main Out share a channel, with this one ticked |
 | M-OPT-024 | Cue Switches | | | disabled | |
 | M-OPT-025 | Solo in Place | | | | |
 | | — | | | | |
@@ -645,6 +645,10 @@ Other states:
 | C-CLIP-ARR-025 | Split | manual 6.12 |
 | C-CLIP-ARR-026 | Consolidate | manual 6.13 |
 | C-CLIP-ARR-027 | Slice and Convert to New MIDI Track commands, Separate Stems to New Audio Tracks (audio clips) | manual 13, 22 |
+| C-CLIP-ARR-027a | Convert Harmony to New MIDI Track (audio clips) | observed in Live 12 on macOS, 18 October 2026: an audio clip's menu, after a separator below Reverse Clip(s) |
+| C-CLIP-ARR-027b | Convert Melody to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
+| C-CLIP-ARR-027c | Convert Drums to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
+| C-CLIP-ARR-027d | Separate Stems to New Audio Tracks (audio clips) | observed, as C-CLIP-ARR-027a, last in that group, before the clip colours |
 
 ### Arrangement time selection (C-TIME)
 
@@ -718,7 +722,7 @@ Other states:
 |---|---|---|
 | C-DEVICE-013 | Group to Drum Rack (several devices selected) | manual 25.2 |
 | C-DEVICE-014 | Lock to (a control surface) | manual 34 |
-| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device, MPE settings on MPE plug-ins) | manual 23.2.1, 12.6 |
+| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device, MPE settings on MPE plug-ins; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad) | manual 23.2.1, 12.6, 31.4.5 |
 
 ### Crossfader (C-XFADE)
 

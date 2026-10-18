@@ -192,14 +192,54 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
             "{left_out} (D21)"
         );
     }
-    // A Library label without content says what fills it.
-    let sounds: BrowserState = run(
-        &mut shell,
-        ids::OPEN_PLACE,
-        json!({ "label": "instruments" }),
-    );
+    // A Library label without content says what fills it (Instruments lists
+    // the instrument rack since WP-5.8, so Sounds stands for it).
+    let sounds: BrowserState = run(&mut shell, ids::OPEN_PLACE, json!({ "label": "sounds" }));
     assert!(sounds.rows.is_empty());
     assert!(sounds.note.unwrap().contains("M2"));
+}
+
+// Spec: modulation R12.
+#[test]
+fn the_modulators_label_lists_the_six_modulators() {
+    let mut shell = Shell::headless();
+    let state: BrowserState = run(
+        &mut shell,
+        ids::OPEN_PLACE,
+        json!({ "label": "modulators" }),
+    );
+    let names: Vec<&str> = state.rows.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "LFO",
+            "Shaper",
+            "Envelope Follower",
+            "Envelope MIDI",
+            "Shaper MIDI",
+            "Expression Control"
+        ]
+    );
+    assert!(
+        state
+            .rows
+            .iter()
+            .all(|row| row.kind == bl_shell_spec::browser::ItemKind::Device)
+    );
+    assert!(state.note.is_none());
+    // The search narrows the list by name.
+    let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "follower" }));
+    assert_eq!(found.rows.len(), 1);
+    // Loading the selected device adds it to the selected track's chain.
+    let path = found.rows[0].path.clone();
+    run::<Value>(&mut shell, ids::SELECT, json!({ "paths": [path] }));
+    let track = shell.editor().document().top_level().next().unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let before = shell.editor().document().device_count();
+    shell.invoke(ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(shell.editor().document().device_count(), before + 1);
 }
 
 // Spec: browser R3.
@@ -1151,4 +1191,51 @@ fn drop_targets_follow_the_rows_and_the_grid() {
     // Outside the lanes.
     assert_eq!(at(-1.0, 200.0, false), None);
     assert_eq!(at(10.0, 600.0, false), None);
+}
+
+// Spec: multisampler R47. The browser lists `.sfz` files with the samples,
+// and Load Selected makes a multisampler of one: on the selected MIDI track,
+// otherwise on a new one.
+#[test]
+fn the_browser_lists_sfz_files_and_loads_one_as_a_multisampler() {
+    let scratch = Scratch::new("sfz");
+    let kits = scratch.path("Banks");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sfz");
+    std::fs::create_dir_all(kits.join("samples")).unwrap();
+    for entry in std::fs::read_dir(fixtures.join("samples")).unwrap() {
+        let file = entry.unwrap().path();
+        std::fs::copy(&file, kits.join("samples").join(file.file_name().unwrap())).unwrap();
+    }
+    std::fs::copy(fixtures.join("Sine Bank.sfz"), kits.join("Sine Bank.sfz")).unwrap();
+    let mut shell = Shell::headless();
+    let listed: BrowserState = run(&mut shell, ids::ADD_FOLDER, json!({ "path": text(&kits) }));
+    let sfz = kits.join("Sine Bank.sfz");
+    let row = listed
+        .rows
+        .iter()
+        .find(|row| row.name == "Sine Bank.sfz")
+        .expect("the SFZ file is listed");
+    assert_eq!(row.kind, ItemKind::Sfz);
+    shell.set_focused_area(Area::Browser);
+    run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&sfz)] }));
+    assert!(shell.can_invoke(ids::LOAD_SELECTED, &json!({})));
+    // A MIDI track is selected in a new set: the multisampler goes on it.
+    let midi = shell.editor().document().top_level().next().unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let loaded = shell.run(ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(loaded["track"], json!(midi));
+    let device = serde_json::from_value(loaded["device"].clone()).unwrap();
+    let held = shell.editor().document().device(device).unwrap();
+    assert_eq!(held.layers.list.len(), 5);
+    // An audio track selected: a new MIDI track.
+    let audio = audio_tracks(&shell)[0];
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    let tracks = shell.editor().document().top_level().count();
+    let again = shell.run(ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_ne!(again["track"], json!(audio));
+    assert_eq!(shell.editor().document().top_level().count(), tracks + 1);
 }

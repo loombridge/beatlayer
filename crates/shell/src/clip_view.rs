@@ -35,6 +35,7 @@ use serde_json::Value;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
 use crate::arrangement::grid::{Step, snap};
+use crate::sample_editor::SampleView;
 
 fn invalid(message: impl Into<String>) -> EditFailure {
     EditFailure::InvalidArgs(message.into())
@@ -66,7 +67,7 @@ fn to_value<T: Serialize>(value: &T) -> Value {
 /// stored in.
 #[must_use]
 pub fn notes_in_order(midi: &MidiData) -> Vec<Note> {
-    let mut notes: Vec<Note> = midi.notes.iter().copied().collect();
+    let mut notes: Vec<Note> = midi.notes.iter().cloned().collect();
     notes.sort_by_key(|note| (note.start, note.key));
     notes
 }
@@ -172,6 +173,9 @@ pub struct ClipView {
     /// The Session slot's clip most recently selected, which the Clip View
     /// shows until an Arrangement selection replaces it.
     session_clip: Option<ClipId>,
+    /// What the Sample Editor has selected and shows for the audio clip the
+    /// Clip View shows (WP-4.10).
+    sample: SampleView,
 }
 
 impl ClipView {
@@ -296,21 +300,71 @@ impl ClipView {
     }
 
     /// The clip the Clip View shows: the Session clip most recently
-    /// selected, or else the Arrangement's first selected clip, if it holds
-    /// MIDI notes.
+    /// selected, or else the Arrangement's first selected clip, of either
+    /// kind.
+    #[must_use]
+    pub fn shown_any_clip(&self, doc: &Document, arrangement: &ArrangementView) -> Option<ClipId> {
+        let exists = |id: &ClipId| doc.clip(*id).is_some();
+        self.session_clip
+            .filter(exists)
+            .or_else(|| arrangement.selected_clips().iter().copied().find(exists))
+    }
+
+    /// The clip the Clip View shows when it holds MIDI notes: the Session
+    /// clip most recently selected, or else the Arrangement's first selected
+    /// clip.
     #[must_use]
     pub fn shown_clip(&self, doc: &Document, arrangement: &ArrangementView) -> Option<ClipId> {
-        let holds_notes = |id: &ClipId| {
+        self.shown_any_clip(doc, arrangement).filter(|id| {
             doc.clip(*id)
                 .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)))
-        };
-        self.session_clip.filter(holds_notes).or_else(|| {
-            arrangement
-                .selected_clips()
-                .iter()
-                .copied()
-                .find(holds_notes)
         })
+    }
+
+    /// The clip the Clip View shows when it is an audio clip, whose editor
+    /// is the Sample Editor (WP-4.10).
+    #[must_use]
+    pub fn shown_audio_clip(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> Option<ClipId> {
+        self.shown_any_clip(doc, arrangement).filter(|id| {
+            doc.clip(*id)
+                .is_some_and(|clip| matches!(clip.data, ClipData::Audio(_)))
+        })
+    }
+
+    /// What the Sample Editor has selected and shows.
+    #[must_use]
+    pub fn sample(&self) -> &SampleView {
+        &self.sample
+    }
+
+    /// The Sample Editor's state, ready for `clip`, which it starts afresh
+    /// for if it isn't the clip it was last for.
+    pub(crate) fn sample_mut(
+        &mut self,
+        clip: ClipId,
+        audio: &bl_model::AudioData,
+    ) -> &mut SampleView {
+        self.sample.bind_to(clip, audio);
+        &mut self.sample
+    }
+
+    /// Lets the Sample Editor follow the set's changes.
+    pub(crate) fn sync_sample(&mut self, doc: &Document) {
+        self.sample.sync(doc);
+    }
+
+    /// Lets the Sample Editor follow playback again, or stop until the song
+    /// starts or stops.
+    pub(crate) fn sample_follow(&mut self, paused: bool) {
+        if paused {
+            self.sample.pause_follow();
+        } else {
+            self.sample.resume_follow();
+        }
     }
 
     /// The shown clip when it sits in a Session slot, which is when the
@@ -321,7 +375,7 @@ impl ClipView {
         doc: &Document,
         arrangement: &ArrangementView,
     ) -> Option<ClipId> {
-        self.shown_clip(doc, arrangement)
+        self.shown_any_clip(doc, arrangement)
             .filter(|clip| self.session_clip == Some(*clip))
     }
 
@@ -364,6 +418,7 @@ impl ClipView {
         self.selected.clear();
         self.session_clip = None;
         self.envelope = None;
+        self.sample = SampleView::default();
     }
 }
 
@@ -442,8 +497,8 @@ fn set_notes(
 
 /// The place of `note` among `ordered`: the first equal note, which is
 /// the note itself when no identical one is already there.
-fn place_of(ordered: &[Note], note: Note) -> u32 {
-    let place = ordered.iter().position(|other| *other == note).unwrap_or(0);
+fn place_of(ordered: &[Note], note: &Note) -> u32 {
+    let place = ordered.iter().position(|other| other == note).unwrap_or(0);
     u32::try_from(place).unwrap_or(u32::MAX)
 }
 
@@ -536,9 +591,9 @@ pub fn run(
             let note = Note::new(key, start, length, velocity);
             let (place, recorded) = transaction(editor, "Add note", |editor| {
                 let mut ordered = notes_in_order(&midi);
-                ordered.push(note);
+                ordered.push(note.clone());
                 ordered.sort_by_key(|note| (note.start, note.key));
-                let place = place_of(&ordered, note);
+                let place = place_of(&ordered, &note);
                 set_notes(editor, clip, &midi, ordered)?;
                 Ok(place)
             })?;
@@ -586,16 +641,16 @@ pub fn run(
                 let mut moved = ordered.clone();
                 let mut moved_notes = Vec::with_capacity(places.len());
                 for place in &places {
-                    let mut note = moved[*place as usize];
-                    note.start = note_start(note, by)?;
-                    note.key = note_key(note, semitones)?;
-                    moved[*place as usize] = note;
+                    let mut note = moved[*place as usize].clone();
+                    note.start = note_start(&note, by)?;
+                    note.key = note_key(&note, semitones)?;
+                    moved[*place as usize] = note.clone();
                     moved_notes.push(note);
                 }
                 moved.sort_by_key(|note| (note.start, note.key));
                 let places: Vec<u32> = moved_notes
                     .iter()
-                    .map(|note| place_of(&moved, *note))
+                    .map(|note| place_of(&moved, note))
                     .collect();
                 set_notes(editor, clip, &midi, moved)?;
                 Ok(places)
@@ -616,13 +671,15 @@ pub fn run(
                 let mut resized = ordered.clone();
                 let mut places_after = Vec::with_capacity(places.len());
                 for place in &places {
-                    let mut note = resized[*place as usize];
+                    let mut note = resized[*place as usize].clone();
                     note.length += by;
                     if note.length <= Ticks::ZERO {
                         return Err(refused("a note would be shorter than a tick"));
                     }
-                    resized[*place as usize] = note;
-                    places_after.push(place_of(&resized, note));
+                    // Pressure past the note's new end goes with that part.
+                    note.pressure.retain(|point| point.at < note.length);
+                    resized[*place as usize] = note.clone();
+                    places_after.push(place_of(&resized, &note));
                 }
                 set_notes(editor, clip, &midi, resized)?;
                 Ok(places_after)
@@ -672,19 +729,19 @@ pub fn run(
                 let mut moved = Vec::with_capacity(places.len());
                 for place in &places {
                     let note = quantize_note(
-                        quantized[*place as usize],
+                        &quantized[*place as usize],
                         target,
                         step,
                         signatures,
                         amount,
                     )?;
-                    quantized[*place as usize] = note;
+                    quantized[*place as usize] = note.clone();
                     moved.push(note);
                 }
                 quantized.sort_by_key(|note| (note.start, note.key));
                 let places_after: Vec<u32> = moved
                     .iter()
-                    .map(|note| place_of(&quantized, *note))
+                    .map(|note| place_of(&quantized, note))
                     .collect();
                 set_notes(editor, clip, &midi, quantized)?;
                 Ok(places_after)
@@ -798,13 +855,13 @@ fn quantize_step(grid: Ticks, signature: TimeSignature) -> Step {
 /// nearest grid line. The other end stays where it is; an end that would
 /// leave a note shorter than a tick is refused.
 fn quantize_note(
-    note: Note,
+    note: &Note,
     target: QuantizeTarget,
     step: Step,
     signatures: &TimeSignatureMap,
     amount: u8,
 ) -> Result<Note, EditFailure> {
-    let mut quantized = note;
+    let mut quantized = note.clone();
     match target {
         QuantizeTarget::NoteStart => {
             quantized.start = toward(note.start, snap(signatures, step, note.start), amount);
@@ -816,6 +873,9 @@ fn quantize_note(
             if quantized.length <= Ticks::ZERO {
                 return Err(refused("a note would be shorter than a tick"));
             }
+            quantized
+                .pressure
+                .retain(|point| point.at < quantized.length);
         }
     }
     Ok(quantized)
@@ -836,7 +896,7 @@ fn toward(at: Ticks, to: Ticks, amount: u8) -> Ticks {
 
 /// The note's start after moving `by` ticks, if it stays inside the clip's
 /// contents.
-fn note_start(note: Note, by: Ticks) -> Result<Ticks, EditFailure> {
+fn note_start(note: &Note, by: Ticks) -> Result<Ticks, EditFailure> {
     note.start
         .checked_add(by)
         .filter(|start| !start.is_negative())
@@ -849,7 +909,7 @@ fn note_start(note: Note, by: Ticks) -> Result<Ticks, EditFailure> {
 }
 
 /// The note's key after moving `semitones`, if it stays a MIDI key.
-fn note_key(note: Note, semitones: i32) -> Result<u8, EditFailure> {
+fn note_key(note: &Note, semitones: i32) -> Result<u8, EditFailure> {
     let key = i32::from(note.key) + semitones;
     u8::try_from(key)
         .ok()
@@ -859,4 +919,35 @@ fn note_key(note: Note, semitones: i32) -> Result<u8, EditFailure> {
                 "a note would leave the range of MIDI keys 0 to 127 (key {key})"
             ))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use bl_model::PressurePoint;
+
+    use super::*;
+
+    // Spec: midi-controller-data R2. A note made shorter loses the pressure
+    // points past its new end, so the edit isn't refused for them.
+    #[test]
+    fn shortening_a_note_drops_the_pressure_past_its_new_end() {
+        let point = |at: Ticks, value| PressurePoint { at, value };
+        let note = Note {
+            pressure: vec![
+                point(Ticks::ZERO, 10),
+                point(Ticks::QUARTER - Ticks(1), 20),
+                point(Ticks::QUARTER + Ticks(50_000), 30),
+            ],
+            ..Note::new(60, Ticks::ZERO, Ticks::QUARTER + Ticks(100_000), 100)
+        };
+        let step = quantize_step(Ticks::QUARTER, TimeSignature::new(4, 4).unwrap());
+        let signatures = TimeSignatureMap::default();
+        let quantized =
+            quantize_note(&note, QuantizeTarget::NoteEnd, step, &signatures, 100).unwrap();
+        assert_eq!(quantized.length, Ticks::QUARTER);
+        assert_eq!(
+            quantized.pressure,
+            vec![point(Ticks::ZERO, 10), point(Ticks::QUARTER - Ticks(1), 20)]
+        );
+    }
 }

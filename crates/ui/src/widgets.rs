@@ -27,6 +27,9 @@ pub struct Look {
     /// Whether a value is being typed into the element, which it draws as
     /// an entry.
     pub entry: bool,
+    /// Whether a live element can't be used now: it is drawn quieter and
+    /// assistive technology reads it as disabled.
+    pub disabled: bool,
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
@@ -93,7 +96,7 @@ fn paint(
         };
         painter.rect_filled(rect, corner, face);
     }
-    let ink = if !live {
+    let ink = if !live || look.disabled {
         c.pending.0
     } else if look.on {
         c.accent_text.0
@@ -116,6 +119,14 @@ fn paint(
             ink
         };
         painter.text(pos, anchor, text, font, ink);
+    } else if placement.element == Element::MidiIndicators && live {
+        lamps(
+            &painter,
+            rect,
+            look.number.unwrap_or_default() as u8,
+            c.accent.0,
+            ink,
+        );
     } else {
         icon(&painter, placement.element, rect, ink, theme);
     }
@@ -323,6 +334,24 @@ fn icon(painter: &egui::Painter, element: Element, rect: Rect, ink: Color32, the
     }
 }
 
+/// The MIDI track indicators' two lamps, the input's above the output's,
+/// each in the accent colour while `lit` (bit 0 and bit 1) says so.
+fn lamps(painter: &Painter, rect: Rect, lit: u8, on: Color32, off: Color32) {
+    let c = rect.center();
+    let lamp = Rect::from_center_size(pos2(c.x, c.y - 2.5), vec2(rect.width().min(8.0) - 2.0, 3.0));
+    for (n, lamp) in [lamp, lamp.translate(vec2(0.0, 5.0))]
+        .into_iter()
+        .enumerate()
+    {
+        let colour = if lit & (1 << n) != 0 {
+            on
+        } else {
+            off.gamma_multiply(0.6)
+        };
+        painter.rect_filled(lamp, 1.0, colour);
+    }
+}
+
 /// Tells assistive technology what the element is, what it's called, its
 /// value, and, for a pending element, which package brings it.
 fn describe(ui: &Ui, placement: &Placement, look: &Look, response: &Response) {
@@ -369,6 +398,9 @@ fn describe(ui: &Ui, placement: &Placement, look: &Look, response: &Response) {
         if !live {
             node.remove_action(accesskit::Action::Click);
             node.remove_action(accesskit::Action::Focus);
+        }
+        if look.disabled {
+            node.set_disabled();
         }
     });
 }

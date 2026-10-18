@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Stack builds a chord from each note that reaches it by adding up to six notes, each a set number of semitones above or below it. Each added note has its own velocity, as a share of the note's, and its own chance of sounding. Strum spreads the chord over a time, the note first and then the shifts in order, or the other way round when negative; Tension makes the spread start slowly or quickly, and Crescendo ramps the velocity along it. A shift of 0, or one that an earlier shift already has, adds nothing. The context menu's two options in Live, to let a strum play a key that is already sounding and to send per-note events to the added notes, are two switches.
+Chord builds a chord from each note that reaches it by adding up to six notes, each a set number of semitones above or below it. Each added note has its own velocity, as a share of the note's, and its own chance of sounding. Strum spreads the chord over a time, the note first and then the shifts in order, or the other way round when negative; Tension makes the spread start slowly or quickly, and Crescendo ramps the velocity along it. A shift of 0, or one that an earlier shift already has, adds nothing. The context menu's two options in Live, to let a strum play a key that is already sounding and to send per-note events to the added notes, are two switches.
 
-Each note and the notes it made end together: when the key comes up, every added note that is sounding ends, and every one still waiting for the strum never sounds. Beatlayer's own name for the device is Stack; its look is the device framework's generic controls. Chance comes from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch, which would read the shifts in scale degrees, is carried and does nothing until Phase 6's scales. This spec covers the device only.
+Each note and the notes it made end together: when the key comes up, every added note that is sounding ends, and every one still waiting for the strum never sounds. The device takes Live's name, Chord; its look is the device framework's generic controls. Chance comes from a generator seeded from the device, so an offline render repeats. The Use Current Scale switch, which would read the shifts in scale degrees, is carried and does nothing until Phase 6's scales. This spec covers the device only.
 
 ## Sources
 
@@ -35,8 +35,8 @@ Each note and the notes it made end together: when the key comes up, every added
 - **R11.** Two renders with Chance are bit for bit the same. (S4)
 - **R12.** Several hundred notes in one block, each bringing six, go through without allocating; notes past the device's room (1,024 sounding or waiting) are dropped and counted, and a note-off for a note that was dropped passes through. (S2, S4)
 - **R13.** While Learn is on, the keys played set the shifts: the first key down after all keys were up is the root, and the other keys held with it become Shift 1 to 6 in the order they went down, each as its distance from the root in semitones; shifts past the chord go to 0; a key added while the chord is held sets the next shift. Each change of the chord is one undo step, "Learn Chord". With Learn off, playing changes nothing. (S1)
-- **R14.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Stack/`. (S3)
-- **R15.** Every parameter is automatable and has a description, and nothing Stack does on the audio thread allocates, locks, or blocks. (S3, S4)
+- **R14.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Chord/`. (S3)
+- **R15.** Every parameter is automatable and has a description, and nothing Chord does on the audio thread allocates, locks, or blocks. (S3, S4)
 
 ## Tests
 
@@ -60,9 +60,9 @@ Each note and the notes it made end together: when the key comes up, every added
 
 ## Defaults, ranges and details
 
-- A new Stack starts with Shift 1 at +4 and Shift 2 at +7 (a major triad) and the other shifts at 0, every Velocity 100 %, every Chance 100 %, Strum 0, Tension 0, Crescendo 0, and every switch off. The manual doesn't state the defaults.
+- A new Chord starts with Shift 1 at +4 and Shift 2 at +7 (a major triad) and the other shifts at 0, every Velocity 100 %, every Chance 100 %, Strum 0, Tension 0, Crescendo 0, and every switch off. The manual doesn't state the defaults.
 - Strum runs from −400 to +400 ms and is the time from the first note of the chord to the last. The manual says "up to 400 ms between the notes" without saying whether that is each gap or the whole; the whole is used here. Note k of n sounds at |Strum| times (1 − (1 − k/(n − 1))^q) after the first, with q = 2^(2 × Tension), Tension from −1 to 1.
 - Crescendo multiplies note k of n by 1 + Crescendo × (k/(n − 1) − ½), Crescendo from −1 to 1.
-- Learn is heard on the main thread, not in the device: the MIDI input queue copies note messages for the shell while any Stack device has Learn on (`bl_midi_io::InputSender::set_tap`), and the shell sets the shifts. The chord is learned from the keys the computer keyboard and the MIDI inputs send, whichever track they play.
+- Learn is heard on the main thread, not in the device: the MIDI input queue copies note messages for the shell while any Chord device has Learn on (`bl_midi_io::InputSender::set_tap`), and the shell sets the shifts. The chord is learned from the keys the computer keyboard and the MIDI inputs send, whichever track they play.
 - The six lights beside the shifts are not drawn: they need the engine to publish a device's display state.
 - The context menu's two options are switches among the device's parameters, `Play Duplicate Notes` and `Per-Note Events`.

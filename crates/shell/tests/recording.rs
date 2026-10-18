@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};
-use bl_core::time::{SampleRate, Ticks};
+use bl_core::time::{Bpm, SampleRate, TempoMap, TempoSegment, Ticks};
 use bl_media::MediaStore;
 use bl_model::TrackId;
 use bl_shell::Shell;
@@ -841,7 +841,9 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
     let seconds = 1.0 / 8.0;
     for n in 1..lanes.len() - 1 {
         assert_eq!(pass(n).start, Ticks::QUARTER, "every pass sits on the loop");
-        let by = pass(n).data.start - pass(n - 1).data.start;
+        // Recorded audio is warped, so a pass's place in the file is where
+        // its Start marker's beat maps to.
+        let by = pass(n).data.in_seconds().start - pass(n - 1).data.in_seconds().start;
         assert!(
             (by - seconds).abs() < 1e-3,
             "pass {n} follows the one before: {by}"
@@ -856,7 +858,7 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
         .find(|clip| clip.start == Ticks::QUARTER)
         .expect("a clip on the loop");
     let last = pass(lanes.len() - 1);
-    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data));
+    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data.clone()));
     assert_eq!(latest.length, last.length);
 
     // The whole path stayed off the heap.
@@ -891,4 +893,97 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
     let track_now = shell.editor().document().track(track).unwrap();
     assert_eq!(track_now.take_lanes().len(), 0);
     assert_eq!(track_now.clips().len(), 0, "the recording is undone");
+}
+
+/// Records for `millis` from `start` on a new armed track, with the set saved
+/// first so recording has a folder, and gives the clip it made.
+fn record_take(shell: &mut Shell, dir: &TestDir, start: Ticks, millis: u64) -> bl_model::Clip {
+    shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    let track = armed_track(shell, 3, "Guitar");
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell
+        .run("transport.locate", json!({ "position": start }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(shell, millis);
+    shell.run("transport.stop", json!({})).unwrap();
+    wait_for_clip(shell, track)
+}
+
+fn audio_of(clip: &bl_model::Clip) -> bl_model::AudioData {
+    match &clip.data {
+        bl_model::ClipData::Audio(audio) => audio.clone(),
+        bl_model::ClipData::Midi(_) => unreachable!("a recorded audio clip"),
+    }
+}
+
+// Spec: warping R37
+#[test]
+fn recorded_audio_is_warped_as_the_setting_says() {
+    // On, as it is in a new install: a marker at the take's start, and the
+    // set's tempo as the clip's.
+    let dir = TestDir::new("warped");
+    let (mut shell, _control) = duplex_shell();
+    let start = Ticks::QUARTER * 2;
+    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    assert!(audio.warp && audio.start == 0.0, "{audio:?}");
+    assert_eq!(audio.warp_markers.len(), 1);
+    assert_eq!(audio.warp_markers[0].time, 0.0);
+    assert_eq!(audio.warp_markers[0].beat, Ticks::ZERO);
+    assert_eq!(audio.tempo, Some(120.0));
+    assert_eq!(audio.warp_mode, bl_model::WarpMode::Beats);
+
+    // Default Warp Mode is the warp mode of a new warped clip (R33).
+    let dir = TestDir::new("warped-mode");
+    let (mut shell, _control) = duplex_shell();
+    shell
+        .run(
+            "settings.set_default_warp_mode",
+            json!({ "mode": "texture" }),
+        )
+        .unwrap();
+    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    assert_eq!(audio.warp_mode, bl_model::WarpMode::Texture, "{audio:?}");
+
+    // A tempo change inside the take gets a marker, at the time and beat the
+    // file reaches it, and the take's last tempo is the clip's.
+    let dir = TestDir::new("warped-change");
+    let (mut shell, _control) = duplex_shell();
+    let change = Ticks::QUARTER * 3;
+    let tempo = TempoMap::new([
+        TempoSegment::Constant {
+            start: Ticks::ZERO,
+            bpm: Bpm::new(120.0).unwrap(),
+        },
+        TempoSegment::Constant {
+            start: change,
+            bpm: Bpm::new(60.0).unwrap(),
+        },
+    ])
+    .unwrap();
+    shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": serde_json::to_value(tempo).unwrap() }),
+        )
+        .unwrap();
+    let audio = audio_of(&record_take(&mut shell, &dir, start, 900));
+    assert_eq!(audio.warp_markers.len(), 2, "{audio:?}");
+    let second = audio.warp_markers[1];
+    assert!((second.time - 0.5).abs() < 0.005, "{second:?}");
+    assert!((second.beat.get() - Ticks::QUARTER.get()).abs() < Ticks::QUARTER.get() / 50);
+    assert_eq!(audio.tempo, Some(60.0));
+
+    // Off, a recorded clip is unwarped.
+    let dir = TestDir::new("unwarped");
+    let (mut shell, _control) = duplex_shell();
+    shell
+        .run("settings.set_warp_recorded_audio", json!({ "on": false }))
+        .unwrap();
+    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    assert!(!audio.warp && audio.warp_markers.is_empty(), "{audio:?}");
 }

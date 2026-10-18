@@ -176,11 +176,31 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: clip_fades,
     },
     Fixture {
+        name: "beat-repeat",
+        about: "A drum loop of two bars through Beat Repeat, in \
+                Insert mode: a capture of a sixteenth on beat three of each bar repeats for \
+                half a bar, each repeat quieter and lower than the last, the grid varied by \
+                the device's seeded source.",
+        build: beat_repeat,
+    },
+    Fixture {
         name: "clip-tempo-change",
         about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
                 unbroken while its end lands where the tempo map puts it, and a looped clip \
                 placed after the ramp.",
         build: clip_tempo_change,
+    },
+    Fixture {
+        name: "warped-loop-120",
+        about: "A one-bar loop warped at 90 BPM, looping over three 2/4 bars of a 120 BPM song \
+                in Re-Pitch through the HiQ interpolator: it plays at four thirds of its speed \
+                and wraps on every bar line.",
+        build: warped_loop_120,
+    },
+    Fixture {
+        name: "warped-loop-140",
+        about: "The same loop in a 140 BPM song, through the cheaper interpolator (HiQ off).",
+        build: warped_loop_140,
     },
 ];
 
@@ -444,6 +464,21 @@ fn bpm(bpm: f64) -> Bpm {
     Bpm::new(bpm).expect("a fixture's tempos are valid")
 }
 
+/// `frames` frames at `rate` of a sine at `level` for each of `hertz` in
+/// turn, each for an equal share of them and starting afresh (so each beat
+/// of a loop made of them is plain to hear, and the file takes little room as
+/// a FLAC reference). Its sine is `libm`'s.
+fn beat_tones(frames: usize, rate: u32, hertz: &[f64], level: f64) -> Vec<f32> {
+    let each = frames / hertz.len();
+    (0..frames)
+        .map(|i| {
+            let (beat, within) = ((i / each).min(hertz.len() - 1), i % each);
+            let phase = std::f64::consts::TAU * hertz[beat] * within as f64 / f64::from(rate);
+            (libm::sin(phase) * level) as f32
+        })
+        .collect()
+}
+
 /// A sine at `level` whose frequency moves in a straight line from `from` to
 /// `to` hertz over `frames` frames at `rate`. Its sine is `libm`'s, so it's
 /// the same to the bit on every platform.
@@ -459,6 +494,83 @@ fn chirp(frames: usize, rate: u32, from: f64, to: f64, level: f64) -> Vec<f32> {
         }
     }
     samples
+}
+
+/// A bar of drums at 120 BPM, mono at 48 kHz, made from `libm`'s sine and
+/// exponential, so it is the same to the bit on every platform: a kick on
+/// beats one and three, a snare (three inharmonic tones) on two and four,
+/// and a hat (two high tones) on the eighth notes. There is no noise: the
+/// reference's FLAC encoder expands on it.
+fn drum_bar() -> Vec<f32> {
+    let rate = 48_000.0;
+    let tau = std::f64::consts::TAU;
+    let mut bar = vec![0.0f32; 96_000];
+    let mut add = |at: usize, length: usize, voice: &mut dyn FnMut(f64) -> f64| {
+        for n in 0..length {
+            bar[at + n] += voice(n as f64 / rate) as f32;
+        }
+    };
+    for beat in [0, 2] {
+        let mut phase = 0.0;
+        add(beat * 24_000, 12_000, &mut |t| {
+            phase += (45.0 + 75.0 * libm::exp(-t * 30.0)) / rate;
+            libm::sin(phase * tau) * libm::exp(-t * 12.0) * 0.5
+        });
+    }
+    for beat in [1, 3] {
+        add(beat * 24_000, 9_000, &mut |t| {
+            let tones = libm::sin(190.0 * t * tau)
+                + 0.7 * libm::sin(327.0 * t * tau)
+                + 0.5 * libm::sin(511.0 * t * tau);
+            tones * 0.15 * libm::exp(-t * 20.0)
+        });
+    }
+    for eighth in 0..8 {
+        add(eighth * 12_000, 1_800, &mut |t| {
+            let tones = libm::sin(5_200.0 * t * tau) + libm::sin(7_300.0 * t * tau);
+            tones * 0.06 * libm::exp(-t * 90.0)
+        });
+    }
+    bar
+}
+
+/// Spec: beat-repeat R1 to R10. A drum loop through Beat Repeat in Insert mode.
+fn beat_repeat() -> Scene {
+    use bl_devices::beat_repeat::{
+        BEAT_REPEAT, DECAY, GATE, GRID, INTERVAL, MODE, OFFSET, PITCH_DECAY, VARIATION,
+    };
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Beat Repeat",
+        DeviceKind::Native {
+            device_type: BEAT_REPEAT.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (INTERVAL, 5.0),
+        (OFFSET, 8.0),
+        (GRID, 4.0),
+        (GATE, 8.0),
+        (MODE, 1.0),
+        (VARIATION, 50.0),
+        (PITCH_DECAY, 30.0),
+        (DECAY, 25.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(4.25)
 }
 
 fn single_tone() -> Scene {
@@ -788,6 +900,7 @@ fn modulated_clip(
     });
     for &(at, value) in envelope {
         song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at,
@@ -1062,4 +1175,65 @@ fn clip_tempo_change() -> Scene {
     song.audio_clip(after, at, Ticks::QUARTER * 2, looped);
     let seconds = song.to_last_clip();
     song.finish(seconds)
+}
+
+/// Spec: warping R13, warp-modes R9, R12. A loop of one 2/4 bar at 90 BPM
+/// (a tone for each of its two beats, a different one in each channel),
+/// warped with a marker at each end, looping its whole length over three
+/// bars of a song at `song_bpm`: Re-Pitch reads it `song_bpm / 90` times as
+/// fast, and every bar of the song starts it again.
+fn warped_loop(song_bpm: f64, high_quality: bool) -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(song_bpm)),
+    });
+    let time_signatures = TimeSignatureMap::new([TimeSignatureChange {
+        at: Ticks::ZERO,
+        signature: TimeSignature::new(2, 4).expect("the time signature is valid"),
+    }])
+    .expect("the time-signature map is valid");
+    song.apply(Command::SetTimeSignatures { time_signatures });
+    // Two beats at 90 BPM are 4/3 of a second.
+    let frames = 64_000;
+    let file = song.file(
+        "loop.wav",
+        48_000,
+        &[
+            beat_tones(frames, 48_000, &[330.0, 440.0], 0.0625),
+            beat_tones(frames, 48_000, &[660.0, 495.0], 0.046_875),
+        ],
+    );
+    let track = song.track(TrackKind::Audio, "Loop", None);
+    let bar = Ticks::QUARTER * 2;
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            bl_model::WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            bl_model::WarpMarker {
+                time: frames as f64 / 48_000.0,
+                beat: bar,
+            },
+        ],
+        tempo: Some(90.0),
+        warp_mode: bl_model::WarpMode::RePitch,
+        high_quality,
+        looping: true,
+        loop_start: 0.0,
+        loop_end: Some(bar.get() as f64),
+        ..AudioData::new(file)
+    };
+    song.audio_clip(track, Ticks::ZERO, bar * 3, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+fn warped_loop_120() -> Scene {
+    warped_loop(120.0, true)
+}
+
+fn warped_loop_140() -> Scene {
+    warped_loop(140.0, false)
 }

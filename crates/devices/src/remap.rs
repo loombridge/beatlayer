@@ -1,4 +1,4 @@
-//! Remap, the scale-map MIDI effect (WP-5.30; the MIDI scale map spec): sends
+//! Scale, the scale-map MIDI effect (WP-5.30; the MIDI scale map spec): sends
 //! each note of an octave to a note of your choosing, as a grid from the
 //! notes that come in to the notes that go out, then transposes the result.
 //! Notes mapped to nothing play nothing.
@@ -11,7 +11,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, value};
 
-/// The Remap device type's id.
+/// The Scale device type's id.
 pub const REMAP: &str = "beatlayer.remap";
 
 /// The key the grid's first column is counted from, as a pitch class.
@@ -45,7 +45,7 @@ pub const fn map(column: u32) -> ParamId {
     ParamId(MAP.0 + column)
 }
 
-/// Remap's device type.
+/// Scale's device type.
 #[must_use]
 pub fn remap_type() -> DeviceType {
     let mut params = vec![
@@ -75,11 +75,11 @@ pub fn remap_type() -> DeviceType {
         )
         .describe("Where this note of the octave goes: its row in the grid, or -1 for nowhere.")
     }));
-    DeviceType::native(REMAP, "Remap", DeviceRole::MidiEffect)
+    DeviceType::native(REMAP, "Scale", DeviceRole::MidiEffect)
         .with_description(DeviceDescription::new(params))
 }
 
-/// Adds Remap to `registry`.
+/// Adds Scale to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, remap_type(), |_, _| Remap {
         router: Router::new(),
@@ -90,7 +90,7 @@ struct Remap {
     router: Router,
 }
 
-/// What a block of Remap's notes is mapped by.
+/// What a block of Scale's notes is mapped by.
 struct Grid {
     base: i32,
     rows: [i32; COLUMNS as usize],
@@ -154,6 +154,8 @@ impl NativeDevice for Remap {
                 }
                 NoteKind::Off | NoteKind::Choke => self.router.end(audio, &note, note.velocity),
                 NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: device-framework R39. A channel message passes through.
+                _ => audio.send(note),
             }
         }
         self.router.finish(audio);

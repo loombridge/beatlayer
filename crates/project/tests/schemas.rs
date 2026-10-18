@@ -12,7 +12,10 @@
 //! scenes and the clips in their slots; a set saved before it opens with the
 //! default eight scenes, whose IDs sit after the set's largest. Version 4
 //! added the global launch quantisation. Version 5 (WP-5.9) made a clip
-//! envelope's values modulation rather than parameter units.
+//! envelope's values modulation rather than parameter units. Version 6
+//! (WP-5.13) added a multisampler's layers and what its views show; a set
+//! saved before it opens with none. Version 7 (T197) renamed the native
+//! devices to Live's names; a set saved before it opens with the new names.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -255,8 +258,10 @@ fn fixture_project() -> Project {
         ids: editor.ids(),
         media,
         windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     }
 }
 
@@ -370,6 +375,52 @@ fn every_fixture_loads_as_the_fixture_song() {
     }
 }
 
+/// The name of the fixture song's Utility, after its type and name are made
+/// `device_type` and `name` in the version 6 fixture and the set is loaded.
+fn utility_loaded_as(device_type: &str, name: &str) -> String {
+    fn change(value: &mut Value, device_type: &str, name: &str) -> bool {
+        match value {
+            Value::Object(map) => {
+                if map.get("name") == Some(&json!("Utility")) && map.contains_key("kind") {
+                    map["name"] = json!(name);
+                    map["kind"]["native"]["device_type"] = json!(device_type);
+                    return true;
+                }
+                map.values_mut().any(|v| change(v, device_type, name))
+            }
+            Value::Array(items) => items.iter_mut().any(|v| change(v, device_type, name)),
+            _ => false,
+        }
+    }
+    let mut value: Value = serde_json::from_slice(&read("schema-6.json")).unwrap();
+    assert!(change(&mut value, device_type, name));
+    let (project, _) = decode_json(
+        &serde_json::to_vec(&value).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    let id = project.document.device_ids().next().unwrap();
+    project.document.device(id).unwrap().name.clone()
+}
+
+// Spec: device-chains R1
+/// T197: a set saved before the devices took Live's names opens with the
+/// new name on a device still called what Beatlayer first called it, and
+/// keeps the name the user gave one.
+#[test]
+fn a_set_saved_before_the_devices_took_live_names_opens_with_them() {
+    assert_eq!(
+        utility_loaded_as("beatlayer.squeeze", "Squeeze"),
+        "Compressor"
+    );
+    assert_eq!(utility_loaded_as("bl.device.reprise", "Reprise"), "Delay");
+    assert_eq!(
+        utility_loaded_as("beatlayer.squeeze", "Vocal comp"),
+        "Vocal comp"
+    );
+    assert_eq!(utility_loaded_as("beatlayer.utility", "Squeeze"), "Squeeze");
+}
+
 /// The version 1 set file, compressed as version 1 wrote it, loads.
 #[test]
 fn the_schema_1_set_file_loads() {
@@ -463,6 +514,8 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[1],
     MIGRATIONS[2],
     MIGRATIONS[3],
+    MIGRATIONS[4],
+    MIGRATIONS[5],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

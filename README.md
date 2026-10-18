@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/beatlayer.png" alt="Beatlayer's icon" width="160" height="160">
-</p>
-
-<h1 align="center">Beatlayer</h1>
+<img src="assets/beatlayer.png" alt="Beatlayer" width="100%">
 
 <p align="center">An open-source, clean-room reimplementation of Ableton Live, rebuilt in pure Rust. If you know Ableton, you know Beatlayer.</p>
 

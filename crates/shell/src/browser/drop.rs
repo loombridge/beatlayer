@@ -10,8 +10,9 @@ use crate::arrangement::ArrangementView;
 /// Where dropped files land.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DropTarget {
-    /// The audio track they go on, or `None` for the drop area under the
-    /// last track, which makes a new audio track.
+    /// The audio track they go on (a MIDI track for an SFZ instrument), or
+    /// `None` for the drop area under the last track, which makes a new
+    /// track.
     pub track: Option<TrackId>,
     /// Where the first clip starts.
     pub at: Ticks,
@@ -29,6 +30,22 @@ pub struct DropTarget {
 /// `ignore_snap` (Cmd on macOS, Alt on Windows, held during the drag).
 #[must_use]
 pub fn drop_target(
+    view: &ArrangementView,
+    doc: &Document,
+    height: f32,
+    x: f32,
+    y: f32,
+    ignore_snap: bool,
+) -> Option<DropTarget> {
+    drop_target_on(TrackKind::Audio, view, doc, height, x, y, ignore_snap)
+}
+
+/// As [`drop_target`], for files that go on tracks of kind `kind`: audio
+/// files on audio tracks, an SFZ instrument (multisampler R47) on a MIDI
+/// track.
+#[must_use]
+pub fn drop_target_on(
+    kind: TrackKind,
     view: &ArrangementView,
     doc: &Document,
     height: f32,
@@ -62,7 +79,7 @@ pub fn drop_target(
     let row = rows
         .iter()
         .find(|row| row.top <= content_y && content_y < row.bottom())?;
-    (row.kind == TrackKind::Audio).then_some(DropTarget {
+    (row.kind == kind).then_some(DropTarget {
         track: Some(row.track),
         at,
         top: row.top - scroll,

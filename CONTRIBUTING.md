@@ -15,7 +15,7 @@ Beatlayer matches what Ableton Live does, not how Live's code does it. Every con
 
 - **Learn only from what Live shows any user:** its public reference manual, release notes and product pages; running Live and watching what it does; measuring its output from your own material; and projects you made yourself in Live, for the importer. Paraphrase the manual; never copy its text.
 - **Never copy Ableton's content:** no samples, presets, wavetables, impulse responses, grooves, packs, artwork, icons, fonts, colour themes or manual text, in the repository or in Beatlayer's bundled content, and no audio Live rendered from Ableton's own content.
-- **Never use Ableton's trademarks as Beatlayer's names.** Beatlayer's devices and features have their own names. "Imports Ableton Live sets" is a statement of fact; "Ableton Live clone" isn't.
+- **Never use Ableton's trademarks as Beatlayer's own name or brand.** Devices, modulators and features take the same functional names as Live's, such as Gate, Saturator or Beat Repeat, so a Live user finds them where they expect. "Imports Ableton Live sets" is a statement of fact; "Ableton Live clone" isn't.
 - **Cite your sources.** A change that reproduces Live's behaviour says in its pull request what it rests on: a manual section, an observation of Live running (with its version and platform), or a measurement with its method.
 
 Placement, menus, gestures and keyboard shortcuts match Live's, which is functional parity; the look is Beatlayer's own.

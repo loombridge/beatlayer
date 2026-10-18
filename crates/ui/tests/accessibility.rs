@@ -255,7 +255,7 @@ fn a_modulated_control_reads_its_base_and_played_value() {
         played
             .iter()
             .map(|&(target, base, played)| {
-                let (node, param) = bl_engine::target_node(t, &target);
+                let (node, param) = bl_engine::target_node(t, &target).unwrap();
                 bl_engine::PlayedParam {
                     node,
                     param,
@@ -1111,6 +1111,169 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// As [`a_rack`], with its chain select editor shown (WP-5.3).
+fn a_rack_with_the_zone_editor(h: &mut Harness) {
+    a_rack(h);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    let rack = h
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .devices()
+        .last()
+        .unwrap()
+        .id;
+    h.shell
+        .run(
+            "rack.set_zone_editor",
+            json!({ "rack": rack, "editor": "select" }),
+        )
+        .unwrap();
+}
+
+/// The test plug-in on audio track 3, the selected track, once it offers
+/// its editor, with no device selected (WP-2.10).
+fn a_plugin(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let loaded = h
+        .shell
+        .run(
+            "plugin.load",
+            json!({ "path": bl_test_clap::bundle(), "track": track }),
+        )
+        .unwrap();
+    let device: bl_model::DeviceId = serde_json::from_value(loaded["device"].clone()).unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !h.shell.plugin_info(device).is_some_and(|i| i.has_window) {
+        assert!(
+            std::time::Instant::now() < until,
+            "the plug-in never offered its editor"
+        );
+        h.shell.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// An audio effect rack with two chains, Pad and Lead, on audio track 3, the
+/// selected track, with no device selected (WP-5.2).
+fn a_rack(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "name": "Rack",
+                "role": "audio_effect",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    for (index, name) in ["Pad", "Lead"].into_iter().enumerate() {
+        let id: bl_model::ChainId = h.shell.new_id();
+        h.shell
+            .run(
+                "chain.add",
+                json!({ "rack": rack, "index": index, "chain": { "id": id, "name": name, "devices": [] } }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A drum rack on the first MIDI track, the selected track, with a pad on C1
+/// (a chain named Gain), a return chain named Reverb, and the rack's
+/// Input/Output, Send and Return switches on, no device selected (WP-5.6).
+fn a_drum_rack(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "drum" } },
+                "name": "Drum Rack",
+                "role": "instrument",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let t = bl_engine::testing::gain_type();
+    let effect = json!({ "kind": t.kind, "name": t.name, "role": t.role });
+    h.shell
+        .run(
+            "pad.drop",
+            json!({ "rack": rack, "note": 36, "device": effect }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "pad.rename",
+            json!({ "rack": rack, "note": 36, "name": "Gain" }),
+        )
+        .unwrap();
+    let made = h
+        .shell
+        .run(
+            "chain.create",
+            json!({ "rack": rack, "device": effect, "returns": true }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "chain.rename",
+            json!({ "chain": made["chain"], "name": "Reverb" }),
+        )
+        .unwrap();
+    for view in ["input_output", "send", "returns"] {
+        h.shell
+            .run(
+                "rack.set_view",
+                json!({ "rack": rack, "view": view, "shown": true }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// The eight-slot drum sampler on the third track, the selected track, no
+/// device selected (WP-5.17).
+fn a_drum_sampler(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::kitbag_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 fn a_sidechained_device(h: &mut Harness) {
@@ -1139,7 +1302,126 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
-/// A Squeeze, whose display has views, on the selected audio track.
+/// The Test MIDI Sidechain on audio track 3, the selected track, its
+/// sidechain section shown, no device selected (WP-5.27).
+fn a_midi_sidechained_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::hear_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.show_sidechain",
+            json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// An External Instrument on a new MIDI track, its section showing, no
+/// device selected (WP-5.34).
+fn a_hardware_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::hardware_instrument_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// An LFO and a test utility on the selected audio track (WP-5.10),
+/// with the LFO's slot 1 mapped to the utility's gain when `mapped`
+/// and its Map button lit when `lit`.
+fn modulators_on_track(h: &mut Harness, mapped: bool, lit: bool) {
+    let mut types = bl_devices::testing::device_types();
+    types.extend(bl_devices::device_types());
+    h.shell.set_device_types(types);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let add = |h: &mut Harness, t: &bl_engine::DeviceType| -> serde_json::Value {
+        h.shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+            )
+            .unwrap()["device"]
+            .clone()
+    };
+    let utility = add(h, &bl_devices::testing::utility_type());
+    let wave = add(h, &bl_devices::modulator::wave_mod_type());
+    if mapped {
+        h.shell
+            .run(
+                "modulator.map",
+                json!({ "device": wave, "slot": 0,
+                        "target": { "type": "device", "device": utility, "param": 0 } }),
+            )
+            .unwrap();
+    }
+    if lit {
+        h.shell
+            .run("modulator.arm_map", json!({ "device": wave, "slot": 0 }))
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+fn a_wave_mod(h: &mut Harness) {
+    modulators_on_track(h, false, false);
+}
+
+fn a_mapped_wave_mod(h: &mut Harness) {
+    modulators_on_track(h, true, false);
+}
+
+fn a_lit_map_button(h: &mut Harness) {
+    modulators_on_track(h, false, true);
+}
+
+/// A Shaper on the selected audio track.
+fn a_curve_mod(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::modulator::curve_mod_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A Compressor, whose display has views, on the selected audio track.
 fn a_squeeze(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1149,7 +1431,7 @@ fn a_squeeze(h: &mut Harness) {
     let types = bl_devices::device_types();
     let t = types
         .iter()
-        .find(|t| t.name == "Squeeze")
+        .find(|t| t.name == "Compressor")
         .expect("the compressor is offered");
     h.shell
         .run(
@@ -1183,6 +1465,69 @@ fn an_expandable_device(h: &mut Harness) {
         .unwrap();
     h.shell
         .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A multisampler with a layer on a MIDI track, selected, its zone editor
+/// open (WP-5.13).
+fn a_multisampler(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let midi = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let t = bl_devices::multisampler_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("bl-access-multi-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // The second layer's name is its own: the first one names the device's
+    // title.
+    let files: Vec<String> = ["Alpha", "Tone"]
+        .iter()
+        .map(|name| {
+            let file = dir.join(format!("{name}.wav"));
+            std::fs::write(
+                &file,
+                bl_media::wav_bytes(
+                    &[0.5; 4800],
+                    1,
+                    48_000,
+                    bl_media::BitDepth::Int16,
+                    bl_media::Dither::None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            file.to_string_lossy().into_owned()
+        })
+        .collect();
+    h.shell
+        .run(
+            "device.add_layers",
+            json!({ "device": added["device"], "paths": files }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": added["device"] }))
+        .unwrap();
+    h.shell
+        .run(
+            "device.set_multisampler_view",
+            json!({ "device": added["device"], "zone_editor": true }),
+        )
         .unwrap();
 }
 
@@ -1269,6 +1614,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
+    let audio_panel = LaterView("the Audio Utilities panel's warp controls (WP-4.10b)");
+    let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
+    let auto_warp = LaterView(
+        "the Sample Editor's context menu's Set 1.1.1 Here and Warp items, drawn disabled \
+         until they run auto-warp's commands",
+    );
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
@@ -1514,6 +1865,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_loop_warp_short_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Loop/Warp Short Samples",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "settings.set_auto_warp_long_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Auto-Warp Long Samples",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_default_warp_mode",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Default Warp Mode",
+                Key::ArrowDown,
+            ),
+        ),
+        (
             "settings.set_default_launch_mode",
             settings(
                 "record-warp-launch",
@@ -1556,6 +1934,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 nothing,
                 "Start Recording on Scene Launch",
                 Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_record_session_automation_in",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Record Session automation in",
+                Key::ArrowDown,
             ),
         ),
         (
@@ -1802,7 +2189,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
         ("clip.set_midi_region", Exception(clip_view)),
-        ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
@@ -1827,6 +2213,71 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 Key::ArrowDown,
             ),
         ),
+        (
+            "clip.set_follow_actions",
+            Exception(Unobserved(
+                "the follow controls in the Launch Properties panel, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
+        ("clip.set_warp", Exception(audio_panel)),
+        ("clip.set_warp_mode", Exception(audio_panel)),
+        ("clip.set_warp_settings", Exception(audio_panel)),
+        ("clip.set_ram_mode", Exception(audio_panel)),
+        ("clip.set_high_quality", Exception(audio_panel)),
+        (
+            "clip.insert_warp_markers",
+            Exception(Equivalent(
+                "Insert Warp Marker (Cmd+I, S-SAMPLE-009) with a time selection in the Sample \
+                 Editor, which puts a marker at each transient in it (the sample editor spec, \
+                 R10)",
+            )),
+        ),
+        (
+            "clip.reset_transients",
+            Exception(Equivalent(
+                "the Sample Editor's context menu, opened from the keyboard with Shift+F10 \
+                 (Ctrl+Option+Shift+M on macOS): its Reset Transients item",
+            )),
+        ),
+        (
+            "clip.move_transient",
+            Exception(Live(
+                "the manual's Sample Editor keys (42.11) have none for moving a transient; \
+                 Shift-dragging a pseudo-warp marker is the mouse's way",
+            )),
+        ),
+        ("clip.transients", Exception(Query)),
+        (
+            "clip.shift_warp_marker",
+            Exception(Live(
+                "the manual's Sample Editor keys (42.11) have none for moving the waveform \
+                 under a marker; Shift-dragging the marker is the mouse's way",
+            )),
+        ),
+        ("clip.set_segment_bpm", Exception(audio_panel)),
+        ("clip.scale_tempo", Exception(audio_panel)),
+        ("clip_view.sample_editor", Exception(Query)),
+        (
+            "clip_view.select_transients",
+            Exception(Equivalent(
+                "an agent's form of clicking a transient's pseudo-warp marker; Shift+Left and \
+                 Shift+Right select a span, and Delete Transient (Cmd+Shift+Delete) acts on the \
+                 transients in it",
+            )),
+        ),
+        (
+            "browser.show_file",
+            Exception(Equivalent(
+                "the Sample Editor's context menu, opened from the keyboard with Shift+F10 \
+                 (Ctrl+Option+Shift+M on macOS): its Show in Browser item",
+            )),
+        ),
+        ("clip.set_1_1_1_here", Exception(auto_warp)),
+        ("clip.warp_from_here", Exception(auto_warp)),
+        ("clip.warp_as_loop", Exception(auto_warp)),
+        ("clip.warp_selection_as_loop", Exception(auto_warp)),
+        ("clip.save_default", Exception(clip_title_bar)),
+        ("clip.defaults", Exception(clip_title_bar)),
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
@@ -1859,10 +2310,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(a_device, device_view, "Device Activator", Key::Enter),
         ),
         (
-            "device.hot_swap",
-            main(a_device, device_view, "Hot-Swap Presets", Key::Enter),
-        ),
-        (
             "device.save_preset",
             main(a_device, device_view, "Save Preset", Key::Enter),
         ),
@@ -1872,6 +2319,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
+        ("device.swap_to_snapshot", Exception(device_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(
@@ -1928,67 +2376,254 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "device.set_enabled_all",
-            Exception(LaterView(
-                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            Exception(Equivalent(
+                "Option-Enter (Alt-Enter) on the rack's Device Activator, as Option-click does \
+                 (I-CLICK-024)",
+            )),
+        ),
+        // The rack's frame (WP-5.2): the chain list's rows and their
+        // controls are in the Device View's Tab order, and its keys are
+        // the rack-chains context's.
+        (
+            "chain.add",
+            Exception(Equivalent(
+                "the chain list's drop area (`chain.create`), or Paste there (`chain.paste`, \
+                 Cmd-V)",
             )),
         ),
         (
-            "chain.add",
-            Exception(LaterView(
-                "the rack's chain list and its drop area (WP-5.2)",
+            "chain.create",
+            Exception(Equivalent(
+                "a drag onto the chain list's drop area; the keyboard pastes a chain \
+                 (`chain.paste`, Cmd-V)",
+            )),
+        ),
+        (
+            "chain.save_preset",
+            Exception(Gap(
+                "a drag of the chain's row into the browser has no keyboard form yet (racks R46)",
+            )),
+        ),
+        (
+            "chain.load_preset",
+            Exception(Equivalent(
+                "Enter on a chain preset in the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "device.add_preset",
+            Exception(Equivalent(
+                "Enter on a preset in the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "device.replace",
+            Exception(Equivalent(
+                "Enter on a preset or device in the browser while hot-swapping \
+                 (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "chain.drop_on_track",
+            Exception(Equivalent(
+                "a drag onto the track's own chain; the keyboard cuts the chain's devices and \
+                 pastes them (`device.cut`, `device.paste`)",
             )),
         ),
         (
             "chain.remove",
-            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+            Exception(Equivalent("Delete in the chain list (`chain.delete`)")),
         ),
         (
             "chain.move",
-            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
-        ),
-        (
-            "chain.rename",
-            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+            Exception(Equivalent(
+                "a drag in the chain list; the keyboard cuts the chain and pastes it \
+                 (`chain.cut`, `chain.paste`)",
+            )),
         ),
         (
             "chain.set_colour",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's context menu, from its row with Shift-F10 (S-CTX-002)",
+            )),
         ),
         (
             "chain.set_info",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(LaterView(
+                "the chain's Edit Info Text, which waits for the Info View (WP-2.24)",
+            )),
         ),
         (
             "chain.set_gain",
-            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Volume of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_pan",
-            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Pan of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_enabled",
-            Exception(LaterView("the chain list's activator (WP-5.2)")),
+            main(a_rack, device_view, "Chain Activator of Pad", Key::Enter),
         ),
         (
             "chain.set_solo",
-            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's Solo button, or S in the chain list (`chain.solo`)",
+            )),
         ),
         (
-            "chain.copy",
-            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+            "chain.set_zone",
+            main(
+                a_rack_with_the_zone_editor,
+                device_view,
+                "Pad 0 to 0, body",
+                Key::ArrowRight,
+            ),
         ),
         (
-            "chain.cut",
-            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
+            "rack.set_zone_editor",
+            main(a_rack, device_view, "Chain", Key::Enter),
         ),
         (
-            "chain.paste",
-            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
+            "rack.set_auto_select",
+            main(a_rack, device_view, "Auto Select", Key::Enter),
         ),
         (
-            "chain.duplicate",
-            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+            "chain.select",
+            main(a_rack, device_view, "Chain Pad", Key::Enter),
+        ),
+        (
+            "chain.hot_swap",
+            main(a_rack, device_view, "Hot-Swap of Pad", Key::Enter),
+        ),
+        // WP-5.6: a drum rack's pad view and the chain list's columns.
+        (
+            "pad.select",
+            main(a_drum_rack, device_view, "Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "rack.move_pads",
+            main(a_drum_rack, device_view, "Pad C1: Gain", Key::ArrowDown),
+        ),
+        (
+            "pad.set_mute",
+            main(a_drum_rack, device_view, "Mute of Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "pad.set_solo",
+            main(a_drum_rack, device_view, "Solo of Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "pad.preview",
+            main(
+                a_drum_rack,
+                device_view,
+                "Preview of Pad C1: Gain",
+                Key::Enter,
+            ),
+        ),
+        (
+            "pad.hot_swap",
+            main(
+                a_drum_rack,
+                device_view,
+                "Hot-Swap of Pad C1: Gain",
+                Key::Enter,
+            ),
+        ),
+        (
+            "chain.preview",
+            main(a_drum_rack, device_view, "Preview of Gain", Key::Enter),
+        ),
+        (
+            "chain.set_receive",
+            main(a_drum_rack, device_view, "Receive of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_play",
+            main(a_drum_rack, device_view, "Play of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_choke",
+            main(a_drum_rack, device_view, "Choke of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_send",
+            main(
+                a_drum_rack,
+                device_view,
+                "Send of Gain to Reverb",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "chain.set_audio_to",
+            main(
+                a_drum_rack,
+                device_view,
+                "Audio To of Reverb",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "device.group_to_drum_rack",
+            Exception(Equivalent(
+                "the device's context menu (Group to Drum Rack, C-DEVICE-013), from its Show \
+                 Options button (Enter, then the arrows), as in Live",
+            )),
+        ),
+        (
+            "pad.hot_swap_sample",
+            Exception(Equivalent(
+                "the pad's Hot-Swap button (`pad.hot_swap`) and the browser: the Hot-Swap \
+                 Sample button shows only while the pointer is over the pad (drum racks R19)",
+            )),
+        ),
+        (
+            "pad.drop",
+            Exception(Equivalent(
+                "a drag from the browser or the desktop onto a pad; the keyboard hot-swaps the \
+                 pad (`pad.hot_swap`) and loads from the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "pad.swap",
+            Exception(Equivalent(
+                "a drag from one pad to another; changing a chain's Receive moves it to \
+                 another pad (`chain.set_receive`)",
+            )),
+        ),
+        (
+            "pad.rename",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002)",
+            )),
+        ),
+        (
+            "pad.delete",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002), or Delete in \
+                 the chain list (`chain.delete`)",
+            )),
+        ),
+        (
+            "pad.save_default",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002)",
+            )),
+        ),
+        (
+            "chain.extract",
+            Exception(LaterView(
+                "the Session mixer's chain strips, from which a chain is dragged out (WP-5.19)",
+            )),
+        ),
+        (
+            "chain.extract_return",
+            Exception(LaterView(
+                "the Session mixer's chain strips, from which a return chain is dragged onto \
+                 the returns (WP-5.19)",
+            )),
         ),
         (
             "device.load_sample",
@@ -2001,6 +2636,31 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
+        // WP-5.10: a modulator's Map and Unmap buttons, the controls it
+        // maps while Map is lit (Enter on one), and the Shaper's preset
+        // buttons, which draw its shape.
+        (
+            "modulator.arm_map",
+            main(a_wave_mod, device_view, "Map 1", Key::Enter),
+        ),
+        (
+            "modulator.unmap",
+            main(a_mapped_wave_mod, device_view, "Unmap 1", Key::Enter),
+        ),
+        (
+            "modulator.map",
+            main(a_lit_map_button, device_view, "Gain", Key::Enter),
+        ),
+        (
+            "modulator.set_shape",
+            main(a_curve_mod, device_view, "Shape preset 1", Key::Enter),
+        ),
+        // The drum sampler's slot cells (WP-5.17): Tab to one, then Enter
+        // selects the slot.
+        (
+            "device.select_slot",
+            main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
         ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
@@ -2036,12 +2696,213 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "device.set_midi_sidechain_source",
+            main(
+                a_midi_sidechained_device,
+                device_view,
+                "MIDI Sidechain Source",
+                Key::ArrowUp,
+            ),
+        ),
+        // Down on the external instrument's channel chooser.
+        (
+            "device.set_external",
+            main(
+                a_hardware_device,
+                device_view,
+                "External MIDI Channel",
+                Key::ArrowDown,
+            ),
+        ),
+        (
             "device.set_sidechain_mix",
             main(a_sidechained_device, device_view, "Mix", Key::ArrowDown),
         ),
         (
             "device.set_sidechain_gain",
             main(a_sidechained_device, device_view, "SC Gain", Key::ArrowDown),
+        ),
+        // The multisampler (WP-5.13): the zone editor's header buttons and
+        // layer rows, and the Sample tab's fields, are in the Device View's
+        // Tab order.
+        (
+            "device.set_multisampler_view",
+            main(a_multisampler, device_view, "Auto", Key::Enter),
+        ),
+        (
+            "device.hot_swap_layer",
+            main(a_multisampler, device_view, "Hot-Swap Sample", Key::Enter),
+        ),
+        (
+            "device.select_layers",
+            main(a_multisampler, device_view, "Tone", Key::Enter),
+        ),
+        (
+            "device.delete_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet, and the \
+                 Delete key, which deletes the selected device (multisampler R11)",
+            )),
+        ),
+        (
+            "device.set_layer",
+            main(a_multisampler, device_view, "Root", Key::ArrowUp),
+        ),
+        (
+            "device.set_layer_options",
+            main(a_multisampler, device_view, "Snap", Key::Enter),
+        ),
+        (
+            "device.insert_layers",
+            Exception(Equivalent(
+                "`device.add_layers`, which reads the files; this form takes layers whose \
+                 samples are already in the set's media",
+            )),
+        ),
+        (
+            "device.update_layers",
+            Exception(Equivalent(
+                "`device.set_layer`, which sets the same settings and snaps the markers",
+            )),
+        ),
+        (
+            "device.set_layer_media",
+            Exception(Equivalent(
+                "`device.set_layer_sample`, which reads the file",
+            )),
+        ),
+        (
+            "device.set_layer_sample",
+            Exception(Equivalent(
+                "Hot-Swap Sample (`device.hot_swap_layer`), then Enter in the browser \
+                 (`browser.load_selected`) on the file",
+            )),
+        ),
+        (
+            "device.import_sfz",
+            Exception(Equivalent(
+                "`browser.load_selected`, which Enter runs on a selected SFZ instrument in the \
+                 browser and loads as a multisampler (multisampler R47); this form names the \
+                 file, the track or the device",
+            )),
+        ),
+        (
+            "device.add_layers",
+            Exception(Gap(
+                "adding samples to the layer list is a drop of files on the zone editor; the \
+                 keyboard has no way to name files yet (multisampler R3)",
+            )),
+        ),
+        (
+            "device.set_layer_zone",
+            Exception(Gap(
+                "dragging a zone's edge, body or fade in the zone editor has no keyboard \
+                 form yet (multisampler R10)",
+            )),
+        ),
+        // Sample editing in the sampler devices (WP-5.15): the display's
+        // context menu, which the keyboard doesn't open yet, and gestures
+        // on the waveform.
+        (
+            "device.edit_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R55)",
+            )),
+        ),
+        (
+            "device.crop_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.reverse_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.audition_sample",
+            Exception(Gap(
+                "a click on the sample display, which has no keyboard form yet (multisampler R54)",
+            )),
+        ),
+        (
+            "device.convert",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R62)",
+            )),
+        ),
+        (
+            "device.add_sample_edit",
+            Exception(Equivalent(
+                "`device.edit_sample`, which checks the selection against the sample",
+            )),
+        ),
+        (
+            "device.clear_sample_edits",
+            Exception(Equivalent(
+                "`device.edit_sample` with `revert`, which reads the unedited length itself",
+            )),
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Exception(Equivalent(
+                "`device.crop_sample` and `device.reverse_sample`, which write the copy",
+            )),
+        ),
+        (
+            "device.snap_layer_markers",
+            Exception(Gap(
+                "the loop marker's context menu, which the keyboard doesn't open yet \
+                 (multisampler R20)",
+            )),
+        ),
+        (
+            "device.duplicate_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.rename_layer",
+            Exception(Gap(
+                "the layer list's context menu and a double-click, which the keyboard doesn't \
+                 reach yet (multisampler R11)",
+            )),
+        ),
+        (
+            "device.move_layers",
+            Exception(Gap(
+                "no control moves layers by hand yet: the list's sorts reorder it (multisampler \
+                 R11)",
+            )),
+        ),
+        (
+            "device.sort_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.distribute_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.normalize_layers",
+            Exception(Gap(
+                "the layer list's and the waveform's context menus, which the keyboard \
+                 doesn't open yet (multisampler R11)",
+            )),
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
@@ -2062,8 +2923,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         // Plug-ins (WP-2.6): loaded by path until the browser lists them
-        // (WP-2.9); the window's button is the plug-in device panel's
-        // (WP-2.10).
+        // (WP-2.9); the window's button is in the plug-in device's title
+        // bar (WP-2.10, L-DEV-010).
         ("plugin.info", Exception(Query)),
         (
             "plugin.load",
@@ -2078,7 +2939,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "plugin.show_window",
-            Exception(LaterView("the plug-in device panel (WP-2.10)")),
+            main(
+                a_plugin,
+                device_view,
+                "Show/Hide Plug-In Window",
+                Key::Enter,
+            ),
         ),
         (
             "plugin.set_window",
@@ -2093,16 +2959,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the plug-in device panel's configure mode (Phase 5)",
             )),
         ),
-        // WP-2.9's scanner and settings: the Plug-Ins label lists what the
-        // scanner found, but the button that scans (Live's Rescan) and the
-        // hide-plug-ins controls are later views.
+        // WP-2.9b: Settings ▸ Plug-Ins' Rescan and Plug-In Sources
+        // switches. The app scans by itself at start; a scan of named paths
+        // is an agent's.
         (
             "plugin.scan",
-            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+            Exception(AgentOnly(
+                "scanning named files or folders; the app scans the system folders itself",
+            )),
         ),
         (
             "plugin.rescan",
-            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+            settings("plug-ins", nothing, "Rescan Plug-Ins", Key::Enter),
         ),
         (
             "plugin.list",
@@ -2110,9 +2978,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "plugin.settings",
-            Exception(LaterView(
-                "the browser's hide-plug-ins and format controls (Phase 6, IMP-07)",
-            )),
+            settings(
+                "plug-ins",
+                nothing,
+                "Use VST3 Plug-In System Folders",
+                Key::Enter,
+            ),
         ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.
@@ -2162,6 +3033,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "mixer.set_send_tap",
             main(nothing, session_main, "Return A Pre/Post", Key::Enter),
+        ),
+        // Main's Cue Volume knob (WP-3.18): Up and Down step it.
+        (
+            "mixer.set_cue_volume",
+            main(nothing, session_main, "Cue Volume", Key::ArrowDown),
         ),
         // The Crossfader section (WP-3.17): Main's crossfader and each
         // track's A and B buttons. Live's own key for them and their place
@@ -2233,6 +3109,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "scene.set_follow_actions",
+            Exception(Unobserved(
+                "the follow controls in the Scene View, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
+        (
+            "session.set_follow_actions_enabled",
+            Exception(Unobserved(
+                "the switch in Main's status row, which Tab reaches with the grid's buttons; its place in Live's Tab order",
+            )),
+        ),
+        (
             "scene.set_time_signature",
             Exception(Unobserved(
                 "the scene's Signature fields, which a click focuses and Up, Down, digits, and Delete edit; their place in Live's Tab order",
@@ -2245,6 +3133,30 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "clip.move_to_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        // Separate Stems' dialog (IMP-11).
+        ("stems.status", Exception(Query)),
+        (
+            "stems.install",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Download Required Packages Now, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.separate",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Separate, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.cancel",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.close",
+            Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
         ),
         // Gaps.
         (
@@ -2328,7 +3240,7 @@ fn on_menus(keymap: &Keymap) -> BTreeMap<String, String> {
         for menu in menu_bar(platform) {
             for item in menu.walk().filter(|item| item.is_shown()) {
                 let ids: Vec<String> = match item.action {
-                    Action::Command(id) => vec![id.to_owned()],
+                    Action::Command(id) | Action::Choice(id, _) => vec![id.to_owned()],
                     Action::Shortcut(shortcuts) => shortcuts
                         .iter()
                         .filter_map(|s| keymap.command_for(s, &every_context))
@@ -2458,14 +3370,30 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "chain.save_preset",
+            "device.add_layers",
+            "device.audition_sample",
+            "device.convert",
+            "device.crop_sample",
+            "device.delete_layers",
+            "device.distribute_layers",
+            "device.duplicate_layers",
+            "device.edit_sample",
             "device.load_sample",
+            "device.move_layers",
+            "device.normalize_layers",
+            "device.rename_layer",
+            "device.reverse_sample",
+            "device.set_layer_zone",
+            "device.snap_layer_markers",
+            "device.sort_layers",
             "export.audio",
             "set.discard_recovery",
             "set.recover",
             "settings.set_continuous_save",
             "track.move",
         ],
-        "the M1 gaps the accessibility spec lists"
+        "the gaps the accessibility spec lists"
     );
 }
 
@@ -2638,4 +3566,93 @@ fn the_keys_open_a_sidebar_place_s_context_menu() {
             .any(|e| matches!(e, UiEvent::Invoke(i) if i.id == "browser.remove_folder"))
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_sample_editors_markers_reach_assistive_technology() {
+    // Spec: sample-editor R20 (accessibility R4).
+    use bl_ui::arrangement::peaks::MemoryPeaks;
+    let (mut h, _tracks, clip) = set();
+    let mut peaks = MemoryPeaks::new();
+    peaks.insert(
+        benchmark::media_hash(0),
+        std::sync::Arc::new(
+            bl_media::Peaks::from_samples(&benchmark::media_samples(
+                &mut benchmark::Random::new(1),
+                16.0,
+            ))
+            .unwrap(),
+        ),
+    );
+    h.main
+        .arrangement_mut()
+        .set_peak_source(Box::new(peaks), None);
+    h.shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    h.shell
+        .run(
+            "clip.insert_warp_marker",
+            json!({ "clips": [clip], "time": 8.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": 4.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("clip_view.select_warp_markers", json!({ "markers": [1] }))
+        .unwrap();
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let view = Harness::node(&nodes, "Clip View").bounds.unwrap();
+    let inside = |node: &common::Node| {
+        let b = node.bounds.unwrap();
+        b.x0 >= view.x0 - 1.0 && b.x1 <= view.x1 + 1.0 && b.y0 >= view.y0 && b.y1 <= view.y1 + 1.0
+    };
+    // The waveform is a region naming the clip.
+    let wave = nodes
+        .iter()
+        .find(|n| n.label.starts_with("Waveform of Kick"))
+        .expect("the waveform is a region naming the clip");
+    assert_eq!(wave.role, Role::Group);
+    // Each marker is an item with its name, its value, and whether it is
+    // selected.
+    let first = Harness::node(&nodes, "Warp Marker 1");
+    let second = Harness::node(&nodes, "Warp Marker 2");
+    assert_eq!(first.role, Role::ListItem);
+    assert_eq!(first.selected, Some(false));
+    assert_eq!(second.selected, Some(true));
+    assert!(
+        second.value.contains("8.000 s in the file"),
+        "{}",
+        second.value
+    );
+    assert!(second.value.contains("beat 5.1.1"), "{}", second.value);
+    let transient = Harness::node(&nodes, "Transient 1");
+    assert!(
+        transient.value.contains("4.000 s in the file"),
+        "{}",
+        transient.value
+    );
+    for name in ["Start Marker", "End Marker", "Loop Brace"] {
+        let node = Harness::node(&nodes, name);
+        assert_eq!(node.role, Role::ListItem, "{name}");
+        assert!(!node.value.is_empty(), "{name}");
+    }
+    for node in [
+        wave,
+        first,
+        second,
+        transient,
+        Harness::node(&nodes, "Start Marker"),
+    ] {
+        assert!(inside(node), "{} lies outside the Clip View", node.label);
+    }
 }

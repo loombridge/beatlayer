@@ -109,22 +109,26 @@ pub(crate) mod core_audio {
         };
         let mut value = T::default();
         let mut size = size_of::<T>() as u32;
-        let (qualifier_size, qualifier) = match qualifier {
+        // The qualifier is a pointer to a CFStringRef, so it points at the
+        // reference held in the argument, which lives until the function
+        // returns. A pointer to a binding made inside the match would
+        // dangle by the call, and release builds crashed reading it.
+        let (qualifier_size, qualifier_data) = match &qualifier {
             Some(string) => (
                 size_of::<*const CFString>() as u32,
-                std::ptr::from_ref(&string).cast::<c_void>(),
+                std::ptr::from_ref(string).cast::<c_void>(),
             ),
             None => (0, std::ptr::null()),
         };
         // SAFETY: the address, size and value are live locals, `T` is the
         // size of the property's value, and the qualifier, when there is
-        // one, is a pointer to a CFStringRef that outlives the call.
+        // one, points at `qualifier`'s CFStringRef, which outlives the call.
         let status = unsafe {
             AudioObjectGetPropertyData(
                 object,
                 NonNull::from(&mut address),
                 qualifier_size,
-                qualifier,
+                qualifier_data,
                 NonNull::from(&mut size),
                 NonNull::from(&mut value).cast(),
             )

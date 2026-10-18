@@ -14,6 +14,9 @@
 //! | [`THROUGH`] | passes its input through untouched (WP-2.4) | none |
 //! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
 //! | [`DELAY`] | delays every sample by its frames, and reports that latency (WP-2.11) | the frames |
+//! | [`EXTERNAL`] | replaces its input with what an external device brings back from the interface (WP-5.34) | none |
+//! | [`HEAR`] | writes the last key its block's notes played, over 127, from the frame it played on (WP-5.27) | none |
+//! | [`SPIN`] | passes its input through after busy-waiting, and notes which thread ran it (WP-5.37) | the microseconds to wait |
 //!
 //! [`GAIN`] and [`THROUGH`] are offered as device types ([`gain_type`],
 //! [`through_type`]), audio effects named "Test Gain" and "Test
@@ -49,12 +52,20 @@ pub const GAIN: &str = "test.gain";
 pub const THROUGH: &str = "test.through";
 /// The sidechain probe's device type.
 pub const KEY: &str = "test.key";
+/// The MIDI sidechain probe's device type (WP-5.27).
+pub const HEAR: &str = "test.hear";
 /// The test instrument device type (WP-2.1).
 pub const INSTRUMENT: &str = "test.instrument";
 /// The delay node's device type (WP-2.11).
 pub const DELAY: &str = "test.delay";
+/// The external instrument stand-in's device type (WP-5.34).
+pub const EXTERNAL: &str = "test.external";
 /// The transposing MIDI effect's device type (WP-5.1).
 pub const TRANSPOSE: &str = "test.transpose";
+/// The busy-waiting node's device type (WP-5.37).
+pub const SPIN: &str = "test.spin";
+/// The busy-waiting node's wait, in microseconds.
+pub const SPIN_MICROS: ParamId = ParamId(0);
 /// The transposing MIDI effect's shift, in semitones.
 pub const SEMITONES: ParamId = ParamId(0);
 /// The DC node's value.
@@ -90,6 +101,20 @@ pub fn key_type() -> DeviceType {
     DeviceType::native(KEY, "Test Sidechain", DeviceRole::AudioEffect).with_sidechain()
 }
 
+/// The external instrument stand-in as a device type: an instrument named
+/// "Test External", with routing to hardware.
+#[must_use]
+pub fn external_type() -> DeviceType {
+    DeviceType::native(EXTERNAL, "Test External", DeviceRole::Instrument).with_external()
+}
+
+/// The MIDI sidechain probe as a device type: an audio effect named "Test
+/// MIDI Sidechain", with a MIDI sidechain input.
+#[must_use]
+pub fn hear_type() -> DeviceType {
+    DeviceType::native(HEAR, "Test MIDI Sidechain", DeviceRole::AudioEffect).with_midi_sidechain()
+}
+
 /// A note event recorded by the test instrument with its song frame position.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RecordedNote {
@@ -112,9 +137,31 @@ pub struct Probe {
     /// The consumers of recorded notes, one per test instrument made, in
     /// that order.
     pub note_consumers: std::sync::Mutex<Vec<rtrb::Consumer<RecordedNote>>>,
+    /// The threads that have run a [`SPIN`] node, by `bl-rt`'s thread number.
+    spun_on: [AtomicU64; 16],
 }
 
 impl Probe {
+    /// How many different threads have run a [`SPIN`] node.
+    #[must_use]
+    pub fn threads_spun_on(&self) -> usize {
+        self.spun_on
+            .iter()
+            .filter(|thread| thread.load(Relaxed) != 0)
+            .count()
+    }
+
+    fn spun(&self) {
+        let me = bl_rt::thread::serial();
+        for thread in &self.spun_on {
+            match thread.compare_exchange(0, me, Relaxed, Relaxed) {
+                Ok(_) => return,
+                Err(was) if was == me => return,
+                Err(_) => {}
+            }
+        }
+    }
+
     /// Drains all recorded notes, from every test instrument in the order
     /// they were made: a song with one instrument reads its notes in the
     /// order it played them.
@@ -174,6 +221,13 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         })
     });
     let p = Arc::clone(probe);
+    registry.add_device(hear_type(), move |_, _| {
+        Box::new(Hear {
+            key: 0,
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
     registry.add_device(instrument_type(), move |_, _| {
         let (producer, consumer) = rtrb::RingBuffer::new(4096);
         p.note_consumers.lock().unwrap().push(consumer);
@@ -183,9 +237,17 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         })
     });
     let p = Arc::clone(probe);
+    registry.add_native(EXTERNAL, move |_, _| {
+        Box::new(External {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
     registry.add_native(TRANSPOSE, move |device, _| {
         Box::new(Transpose::new(device, &p))
     });
+    let p = Arc::clone(probe);
+    registry.add_native(SPIN, move |device, _| Box::new(Spin::new(device, &p)));
     let p = Arc::clone(probe);
     registry.add_native(DELAY, move |device, config| {
         Box::new(DelayNode::new(device, config, &p))
@@ -220,6 +282,33 @@ fn add(block: &mut Block<'_>, range: std::ops::Range<usize>, value: f32) {
     for channel in block.channels_mut() {
         for sample in &mut channel[range.clone()] {
             *sample += value;
+        }
+    }
+}
+
+/// Writes the last key its notes played, over 127, from the frame it
+/// played on.
+#[derive(Debug)]
+struct Hear {
+    key: u8,
+    _tracked: Tracked,
+}
+
+impl Node for Hear {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let notes = block.notes();
+        let mut next = 0;
+        for i in 0..block.frames() {
+            while let Some(note) = notes.get(next).filter(|n| n.offset as usize <= i) {
+                if note.kind == crate::node::NoteKind::On {
+                    self.key = note.key;
+                }
+                next += 1;
+            }
+            let value = f32::from(self.key) / 127.0;
+            for channel in block.channels_mut() {
+                channel[i] = value;
+            }
         }
     }
 }
@@ -403,6 +492,36 @@ impl Node for Gain {
     }
 }
 
+/// Passes its input through after busy-waiting for a while each block, so
+/// that work running on several threads overlaps, and notes the thread it
+/// ran on in its probe.
+#[derive(Debug)]
+struct Spin {
+    micros: u64,
+    probe: Arc<Probe>,
+    _tracked: Tracked,
+}
+
+impl Spin {
+    fn new(device: &Device, probe: &Arc<Probe>) -> Self {
+        Self {
+            micros: device.params.get(&SPIN_MICROS).copied().unwrap_or(0.0) as u64,
+            probe: Arc::clone(probe),
+            _tracked: Tracked::new(probe),
+        }
+    }
+}
+
+impl Node for Spin {
+    fn process(&mut self, _block: &mut Block<'_>) {
+        self.probe.spun();
+        let until = std::time::Instant::now() + std::time::Duration::from_micros(self.micros);
+        while std::time::Instant::now() < until {
+            std::hint::spin_loop();
+        }
+    }
+}
+
 /// Passes its input through.
 #[derive(Debug)]
 struct Through {
@@ -411,6 +530,24 @@ struct Through {
 
 impl Node for Through {
     fn process(&mut self, _block: &mut Block<'_>) {}
+}
+
+/// Plays what comes back from the interface: the channels its routing names,
+/// mapped by the program.
+#[derive(Debug)]
+struct External {
+    _tracked: Tracked,
+}
+
+impl Node for External {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for c in 0..block.channels() {
+            match block.external(c) {
+                Some(returned) => block.channel_mut(c).copy_from_slice(returned),
+                None => block.channel_mut(c).fill(0.0),
+            }
+        }
+    }
 }
 
 /// Multiplies its input by what its detector hears while its sidechain is

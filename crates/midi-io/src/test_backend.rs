@@ -46,8 +46,9 @@ struct Port {
     direction: Direction,
     /// The connection that has it open, and an input's handler.
     open: Option<(u64, Option<InputHandler>)>,
-    /// What was sent to an output.
-    sent: Vec<Vec<u8>>,
+    /// What was sent to an output, with the moment a scheduled message was
+    /// stamped for.
+    sent: Vec<(Option<Instant>, Vec<u8>)>,
     /// Refuse to open, with this message.
     refuse: Option<String>,
 }
@@ -130,7 +131,25 @@ impl TestBackend {
             .ports
             .iter()
             .find(|p| p.direction == Direction::Output && p.name == name)
-            .map(|p| p.sent.clone())
+            .map(|p| p.sent.iter().map(|(_, bytes)| bytes.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// What was sent to an output with a time stamp
+    /// ([`OutputConnection::send_at`]): the moment each message was handed
+    /// over for, and its bytes.
+    #[must_use]
+    pub fn sent_at(&self, name: &str) -> Vec<(Instant, Vec<u8>)> {
+        self.lock()
+            .ports
+            .iter()
+            .find(|p| p.direction == Direction::Output && p.name == name)
+            .map(|p| {
+                p.sent
+                    .iter()
+                    .filter_map(|(at, bytes)| Some((((*at)?), bytes.clone())))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -232,16 +251,26 @@ struct Connection {
 
 impl InputConnection for Connection {}
 
-impl OutputConnection for Connection {
-    fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError> {
+impl Connection {
+    fn record(&self, at: Option<Instant>, bytes: &[u8]) -> Result<(), MidiError> {
         let mut shared = self.backend.lock();
         let port = shared
             .ports
             .iter_mut()
             .find(|p| p.direction == Direction::Output && p.name == self.name)
             .ok_or_else(|| MidiError::NoSuchPort(self.name.clone()))?;
-        port.sent.push(bytes.to_vec());
+        port.sent.push((at, bytes.to_vec()));
         Ok(())
+    }
+}
+
+impl OutputConnection for Connection {
+    fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError> {
+        self.record(None, bytes)
+    }
+
+    fn send_at(&mut self, bytes: &[u8], at: Instant) -> Result<(), MidiError> {
+        self.record(Some(at), bytes)
     }
 }
 

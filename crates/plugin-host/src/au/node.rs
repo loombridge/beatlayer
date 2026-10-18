@@ -404,8 +404,7 @@ fn collect(
             status.dropped.fetch_add(1, Relaxed);
         }
     };
-    let transport = block.transport();
-    processor.drive.prepare(list, transport);
+    processor.drive.prepare(list, block);
     let mut change = |events: &mut Vec<(u32, In)>, offset: u32, param: u32, value: ParamValue| {
         let value = match value {
             ParamValue::Set(value) => Some(value),
@@ -424,11 +423,9 @@ fn collect(
     for event in block.events() {
         change(events, event.offset, event.param.0, event.value);
     }
-    processor
-        .drive
-        .play(list, transport, block.frames(), |play| {
-            push(events, play.offset, In::Param(play.id, play.played));
-        });
+    processor.drive.play(list, block, |play| {
+        push(events, play.offset, In::Param(play.id, play.played));
+    });
     for note in block.notes() {
         push(events, note.offset, In::Note(*note));
     }
@@ -586,12 +583,29 @@ impl Processor {
         if self.midi.is_null() {
             return false;
         }
+        // Spec: au-hosting R18. A channel message goes in as its MIDI bytes.
+        if let Some(message) = note.message() {
+            let mut bytes = message.padded();
+            let length = message.bytes().len() as isize;
+            let data = NonNull::from(&mut bytes[0]);
+            // SAFETY: the MIDI block belongs to this unit and takes the
+            // message's valid bytes, which it copies before it returns; the
+            // call is made between render calls, where Apple's
+            // documentation allows it.
+            unsafe {
+                (&*self.midi).call((AUEventSampleTimeImmediate, 0, length, data));
+            }
+            return true;
+        }
         let channel = note.channel.min(15);
         let key = note.key.min(127);
         let mut bytes = match note.kind {
             // Per-note expressions wait for MPE hosting (the parity
             // matrix's note): a plug-in's note port takes them then.
-            NoteKind::Expression { .. } => return false,
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => return false,
             NoteKind::On => {
                 #[expect(
                     clippy::cast_possible_truncation,

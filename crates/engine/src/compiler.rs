@@ -11,22 +11,29 @@ use bl_model::{
 
 use crate::EngineConfig;
 use crate::automation;
-use crate::clips::{ClipList, ClipPlayer};
+use crate::clips::{ClipList, ClipPlayer, SlotSample};
+use crate::disjoint::Shared;
 use crate::display::Displays;
+use crate::drum::{self, ChainHits, DrumNotes};
 use crate::gc::{GcHandle, Program};
+use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
+    Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_SLOT, NO_TASK, NodeSlot,
+    Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::sched::Sched;
+use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
+use crate::zones::{self, ChainSelector, ZoneFilter};
 
 /// What the audio thread needs after an edit: a new program if the edit
 /// changed the song's structure, and parameter changes for nodes that keep
@@ -71,18 +78,27 @@ impl Update {
     }
 }
 
+/// A layer longer than this many seconds is read in the background with its
+/// start held, unless RAM Mode is on (the multisampler spec, R23).
+const LONG_LAYER_SECONDS: u64 = 10;
+
 /// What a node is, beyond its key: a node migrates only if this matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
     /// A device. Its media is part of what it is (WP-2.16): a device whose
     /// sample changed is a new node, and one the set keeps gets its audio
     /// sent again.
-    Device(DeviceKind, Option<ContentHash>),
+    Device(DeviceKind, Vec<Option<ContentHash>>),
     Player,
     MidiPlayer,
     Mixer,
     Route,
     Sidechain,
+    /// A rack's chain selector (WP-5.3).
+    Selector,
+    /// The zone filter of a rack's chain (WP-5.3).
+    Zones,
+    Drum,
 }
 
 /// Which clip players a compile sends their clips to, besides the new ones
@@ -152,8 +168,17 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// The long layers being read in the background (WP-5.13, R23), by
+    /// media, so an edit that sends the layers again shares them rather
+    /// than reading each file again. A sample goes when no node holds it.
+    progressive: BTreeMap<ContentHash, std::sync::Weak<bl_media::ProgressiveSample>>,
+    /// Where each modulator's rows sit on the last program's bus
+    /// (WP-5.10).
+    modulator_rows: crate::modbus::ModRows,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
+    /// The counters of the notes that reach drum chains.
+    hits: ChainHits,
 }
 
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
@@ -188,8 +213,18 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            progressive: BTreeMap::new(),
+            modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
+            hits: ChainHits::default(),
         }
+    }
+
+    /// The counters of the notes that reach the drum chains this compiler's
+    /// programs have, which the shell reads (the drum racks spec, R20).
+    #[must_use]
+    pub fn chain_hits(&self) -> ChainHits {
+        self.hits.clone()
     }
 
     /// The readers of the displays of the nodes this compiler makes, which
@@ -295,7 +330,11 @@ impl Compiler {
         };
         let changes = ChangeSet::between(&old, document);
         let mut params = Vec::new();
-        let recompile = needs_program(&changes, &old, document, &mut params);
+        // Spec: modulation R28. A mapping of a modulator driven by audio,
+        // notes or MIDI changes which track waits for which, and which rows
+        // its target reads.
+        let recompile = needs_program(&changes, &old, document, &mut params)
+            || signal_mappings(&old) != signal_mappings(document);
         route_events(&changes, &old, document, &mut params);
         // Tracks that held or hold a clip that changed: their players get
         // their clips again, and their nodes their envelopes again, since a
@@ -337,6 +376,26 @@ impl Compiler {
             }
             update
         };
+        // A multisampler whose layers changed gets them again as node data:
+        // a zone or layer edit never recompiles (WP-5.13, R31).
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.layers != after.layers
+            {
+                self.send_layers(document, id, &mut update);
+            }
+            // A sampler whose sample's edits changed gets the edited sample
+            // again as node data, with no new program (R57).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.sample_edits != after.sample_edits
+                && before.media == after.media
+                && let Some(media) = after.media_at(0)
+            {
+                self.send_slot_sample(id, 0, media, &after.sample_edits, &mut update);
+            }
+        }
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
         // A track whose envelopes changed sends its nodes their lists again,
@@ -345,6 +404,25 @@ impl Compiler {
         // have gone the same way. A new tempo map moved every envelope, so
         // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
+        // Spec: modulation R15, R19. A mapping made, removed or taken away
+        // with its target, or a modulator that came or went, changes the
+        // lists of the nodes it reaches, and the rows they name.
+        let mapped = modulator_mappings(&old) != modulator_mappings(document);
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.shape != after.shape
+            {
+                let shape = after
+                    .shape
+                    .clone()
+                    .unwrap_or_else(|| bl_model::modulator::default_shape_of(&after.kind));
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::modbus::Shape(shape)),
+                ));
+            }
+        }
         for track in document.tracks() {
             let id = track.id();
             let differs = match (old.track(id), document.track(id)) {
@@ -354,11 +432,16 @@ impl Compiler {
                 _ => false,
             };
             let clips_changed = tracks.contains(&id);
-            if all || differs || clips_changed {
+            if all || differs || clips_changed || mapped {
                 // The track whose envelopes or clips changed gets every
                 // list, so an empty one clears what a node had; a tempo map
                 // that moved them only sends the ones that drive something.
-                self.send_automation(document, id, !differs && !clips_changed, &mut update);
+                self.send_automation(
+                    document,
+                    id,
+                    !differs && !clips_changed && !mapped,
+                    &mut update,
+                );
             }
         }
         update
@@ -396,6 +479,124 @@ impl Compiler {
         };
         // The clips stay with their players: nothing about them changed.
         self.compile_with(&document, &Resend::default())
+    }
+
+    /// Reports the audio interface's round trip now (the device's reported
+    /// input and output latency, and Driver Error Compensation), as
+    /// the device reports it after a measurement or the compensation
+    /// changes: external devices report it to delay compensation (the
+    /// external devices spec, R13), so the last document is compiled again
+    /// with the new figure. Nothing if it is unchanged, or the set holds no
+    /// external device.
+    pub fn round_trip(&mut self, frames: u32) -> Update {
+        if self.config.round_trip_latency == frames {
+            return Update::default();
+        }
+        self.config.round_trip_latency = frames;
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        if !document
+            .tracks()
+            .any(|track| track.devices_deep().any(|d| d.external.is_some()))
+        {
+            return Update::default();
+        }
+        self.compile_with(&document, &Resend::default())
+    }
+
+    /// Sends a sampler's node the audio of one of its sample slots, with
+    /// `edits` applied (WP-2.16, R57): the media library decodes and renders
+    /// here, on the compiler's thread, and shares the result with every
+    /// other reader of the same source and list; media it can't supply is
+    /// reported missing and plays silence.
+    fn send_slot_sample(
+        &mut self,
+        device: DeviceId,
+        slot: usize,
+        media: ContentHash,
+        edits: &[bl_model::SampleEdit],
+        update: &mut Update,
+    ) {
+        let rate = self.config.sample_rate;
+        match self
+            .registry
+            .media()
+            .and_then(|library| library.edited_sample(media, rate, edits))
+        {
+            Some(sample) => update.data.push((
+                NodeKey::Device(device),
+                self.gc.data(SlotSample { slot, sample }),
+            )),
+            None => update.missing.push(media),
+        }
+    }
+
+    /// Sends a multisampler's node its layers, each with its decoded audio
+    /// (WP-5.13, R31): the media library decodes here, on the compiler's
+    /// thread, and shares each file with every other reader; a layer whose
+    /// media it can't supply plays silence and is reported missing. The data
+    /// reaches the node after the program, never as a new program.
+    fn send_layers(&mut self, document: &Document, device: DeviceId, update: &mut Update) {
+        let Some(device) = document.device(device) else {
+            return;
+        };
+        let rate = self.config.sample_rate;
+        let library = self.registry.media();
+        let mut fresh = Vec::new();
+        let layers = device
+            .layers
+            .list
+            .iter()
+            .map(|layer| {
+                // R23: with RAM Mode off, a layer over ten seconds is read
+                // in the background behind its held start; the rest decode
+                // whole.
+                // The edits are applied to the whole decoded sample (R57), so
+                // a layer that has some is read whole.
+                let long = !device.layers.ram_mode
+                    && layer.edits.is_empty()
+                    && layer.length > u64::from(layer.sample_rate) * LONG_LAYER_SECONDS;
+                let held = self
+                    .progressive
+                    .get(&layer.media)
+                    .and_then(std::sync::Weak::upgrade)
+                    .filter(|_| long);
+                let progressive = held.or_else(|| {
+                    let head = (LONG_LAYER_SECONDS * u64::from(rate.hz())) as usize;
+                    let made = library
+                        .filter(|_| long)
+                        .and_then(|library| library.progressive(layer.media, rate, head))?;
+                    fresh.push((layer.media, std::sync::Arc::downgrade(&made)));
+                    Some(made)
+                });
+                let sample = match progressive {
+                    Some(sample) => Some(LayerSample::Progressive(sample)),
+                    None => library
+                        .and_then(|library| library.edited_sample(layer.media, rate, &layer.edits))
+                        .map(LayerSample::Whole),
+                };
+                if sample.is_none() {
+                    update.missing.push(layer.media);
+                }
+                LayerAudio {
+                    layer: layer.clone(),
+                    sample,
+                }
+            })
+            .collect::<Vec<_>>();
+        self.progressive.retain(|_, held| held.strong_count() > 0);
+        self.progressive.extend(fresh);
+        update.missing.sort_unstable();
+        update.missing.dedup();
+        let data = DeviceLayers::new(
+            layers,
+            device.layers.ram_mode,
+            device.layers.linear_loop_fades,
+        );
+        update
+            .data
+            .push((NodeKey::Device(device.id), self.gc.data(data)));
     }
 
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
@@ -454,29 +655,68 @@ impl Compiler {
             .enumerate()
             .map(|(i, &id)| (id, i as u32))
             .collect();
-        let mut build = Build::default();
+        let build_midi_sources = graph
+            .midi_links
+            .iter()
+            .filter_map(|link| Some((link.device, *task_of.get(&link.from)?)))
+            .collect();
+        let mut build = Build {
+            midi_sources: build_midi_sources,
+            ..Build::default()
+        };
 
         // Each track's inputs, in the order the graph lists them.
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
         let mut sidechain_inputs: BTreeMap<DeviceId, Vec<Input>> = BTreeMap::new();
         let mut taps: BTreeSet<(TrackId, Tap)> = BTreeSet::new();
+        // The inputs that tap a rack chain: the track they feed, their
+        // place among its inputs, and the chain, which is found once the
+        // tasks have added their racks.
+        let mut chain_taps: Vec<(TrackId, usize, ChainId)> = Vec::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
             let route = self.route(&mut build, document, &solo, edge, to);
-            if edge.tap != Tap::PostMixer {
+            if edge.tap != Tap::PostMixer && edge.chain.is_none() {
                 taps.insert((edge.from, edge.tap));
             }
             let input = Input {
                 route,
                 from,
                 tap: edge.tap,
+                chain: NO_CHAIN,
                 delay: NO_DELAY,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
-                None => inputs.entry(edge.to).or_default().push(input),
+                None => {
+                    let to_inputs = inputs.entry(edge.to).or_default();
+                    if let Some(chain) = edge.chain {
+                        chain_taps.push((edge.to, to_inputs.len(), chain));
+                    }
+                    to_inputs.push(input);
+                }
+            }
+        }
+
+        // Cue mode (WP-3.18): every track's signal after its devices and
+        // before its mixer reaches the Cue Out's task through its Cue
+        // switch.
+        let mut cue_inputs = Vec::new();
+        if document.cue_active() {
+            for track in order.iter().filter_map(|&id| document.track(id)) {
+                if track.kind() == TrackKind::Main {
+                    continue;
+                }
+                cue_inputs.push(Input {
+                    route: self.cue_route(&mut build, track),
+                    from: task_of[&track.id()],
+                    tap: Tap::PostFx,
+                    chain: NO_CHAIN,
+                    delay: NO_DELAY,
+                });
+                taps.insert((track.id(), Tap::PostFx));
             }
         }
 
@@ -494,6 +734,15 @@ impl Compiler {
                 clips_audible(track),
             );
         }
+        // The Cue Out's task comes last, and plays on the device channels
+        // Cue Out names, as an Ext. Out track does.
+        let cue_out = document.cue_active().then(|| {
+            self.add_cue_task(&mut build, document, cue_inputs);
+            ExtOut {
+                task: build.tasks.len() as u32 - 1,
+                channel: document.main().routing().cue_out,
+            }
+        });
 
         // Tasks that are tapped before their devices or their mixer keep a
         // copy there.
@@ -511,10 +760,40 @@ impl Compiler {
             }
         }
 
+        // Tasks whose notes a MIDI sidechain hears keep a copy of them.
+        let mut midi_kept = 0;
+        for at in 0..build.midi_sidechains.len() {
+            let from = build.midi_sidechains[at].from;
+            if from == NO_TASK {
+                continue;
+            }
+            let keep = &mut build.tasks[from as usize].midi_keep;
+            let index = *keep.get_or_insert_with(|| {
+                midi_kept += 1;
+                midi_kept - 1
+            });
+            build.midi_sidechains[at].kept = index;
+        }
+
+        // The chains that routes tap keep a copy at each tap too.
+        for (to, at, chain) in chain_taps {
+            let task = build.tasks[task_of[&to] as usize];
+            let Some(&index) = build.chain_index.get(&chain) else {
+                continue;
+            };
+            let input = &mut build.inputs[task.inputs.start as usize + at];
+            input.chain = index;
+            let slot = &mut build.rack_chains[index as usize].taps[RackChain::tap_index(input.tap)];
+            if slot.is_none() {
+                *slot = Some(kept);
+                kept += 1;
+            }
+        }
+
         let generation = self.generation + 1;
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
-        let midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
+        let mut midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
         let size = self.config.channels * self.config.max_frames;
         let ext_outs = document
             .track_order()
@@ -527,9 +806,30 @@ impl Compiler {
                 }),
                 _ => None,
             })
+            .chain(cue_out)
             .collect();
-        let (order, dependents) = run_order(&build);
+        // Spec: modulation R28. A track holding a parameter a modulator
+        // driven by audio, notes or MIDI maps waits for the modulator's.
+        let waits = graph.modulator_edges(document);
+        let wait_tasks: Vec<(u32, u32)> = waits
+            .iter()
+            .filter_map(|(from, to)| Some((*task_of.get(from)?, *task_of.get(to)?)))
+            .collect();
+        for &(_, to) in &wait_tasks {
+            build.tasks[to as usize].dependencies += 1;
+        }
+        let (order, dependents) = run_order(&build, &wait_tasks);
         compensate(&mut build, &order);
+        // Spec: external-devices R4. A track's MIDI to a port waits as long
+        // as its audio would be held back on the way into Main.
+        for track in document.tracks() {
+            if track.kind() == TrackKind::Midi {
+                midi.set_compensation(
+                    track.id(),
+                    main_compensation(&build, document, &task_of, track.id()),
+                );
+            }
+        }
         // Automation is placed with each node's delay in it (WP-2.11), so
         // remember what every node's turned out to be.
         for slot in &build.slots {
@@ -571,34 +871,63 @@ impl Compiler {
             || document.settings().time_signatures.clone(),
             |(_, map)| map.clone(),
         );
+        let modulators = build.modulators.len();
+        let mod_rows = crate::modbus::ModRows {
+            rows: build
+                .modulators
+                .iter()
+                .enumerate()
+                .map(|(m, &(_, device))| {
+                    let late = build
+                        .signals
+                        .iter()
+                        .position(|&s| s as usize == m)
+                        .map(|k| ((modulators + k) * crate::modbus::ROWS) as u32);
+                    let row = crate::modbus::ModRow {
+                        direct: crate::modbus::row(m as u32, 0),
+                        late,
+                    };
+                    (device, row)
+                })
+                .collect(),
+            waits: waits.iter().copied().collect(),
+        };
         let program = EngineProgram {
             generation,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
-            slots: build.slots,
+            slots: Shared::new(build.slots),
             migrations: build.migrations,
             order,
             task_dependents: dependents.iter().flatten().copied().collect(),
+            sched: Sched::new(tasks, build.racks.len(), build.rack_chains.len()),
             tasks: with_dependents(build.tasks, &dependents),
             task_inputs: build.inputs,
             steps: build.steps,
-            merge: Vec::with_capacity(build.rack_chains.len()),
+            merge: Shared::new(vec![MergeCursor::default(); build.rack_chains.len()]),
+            selects: Shared::new(vec![0.0; build.racks.len() * self.config.max_frames]),
             racks: build.racks,
             rack_chains: build.rack_chains,
-            sidechain_pool: vec![0.0; build.sidechains.len() * size],
+            chain_sends: build.chain_sends,
+            sidechain_pool: Shared::new(vec![0.0; build.sidechains.len() * size]),
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
-            pool: vec![0.0; (tasks + build.chain_buffers as usize) * size],
-            tap_pool: vec![0.0; kept as usize * size],
+            midi_sidechains: build.midi_sidechains,
+            midi_kept: Shared::new(
+                (0..midi_kept)
+                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .collect(),
+            ),
+            pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
+            tap_pool: Shared::new(vec![0.0; kept as usize * size]),
             delay_lines,
             delay_pool,
-            delay_scratch: vec![0.0; size],
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
-            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
+            cue: cue_out.map(|out| out.task),
             ext_outs,
             tempo,
             time_signatures,
@@ -609,21 +938,36 @@ impl Compiler {
             override_signatures,
             sample_rate: self.config.sample_rate,
             scene_slots: scene_slots(document),
+            follow: FollowTable::of(document),
             session_tracks: document
                 .track_order()
                 .into_iter()
                 .filter(|&id| document.track(id).is_some_and(|t| t.kind().holds_clips()))
                 .collect(),
-            note_buffers: (0..2 + 2 * build.chain_buffers)
-                .map(|_| NoteBuffer::with_capacity(1024))
-                .collect(),
+            note_buffers: Shared::new(
+                (0..2 * (tasks as u32 + build.chain_buffers))
+                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .collect(),
+            ),
             releases: crate::program::Releases::new(),
             midi,
+            modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
+            lagged: mod_rows.any_late(document),
+            bus: Shared::new(vec![
+                0.0;
+                (build.modulators.len() + build.signals.len())
+                    * crate::modbus::ROWS
+                    * self.config.max_frames
+            ]),
+            signals: build.signals,
         };
+        self.modulator_rows = mod_rows;
         self.generation = generation;
         self.layout = build.layout;
         self.displays
             .retain(|device| self.layout.contains_key(&NodeKey::Device(device)));
+        self.hits
+            .retain(|chain| self.layout.contains_key(&NodeKey::ChainNotes(chain)));
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
@@ -642,18 +986,11 @@ impl Compiler {
         // (WP-2.16). The update reaches the node after the program that
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
-        let rate = self.config.sample_rate;
-        for &(device, media) in &build.media {
-            match self
-                .registry
-                .media()
-                .and_then(|library| library.sample(media, rate))
-            {
-                Some(sample) => update
-                    .data
-                    .push((NodeKey::Device(device), self.gc.data(sample))),
-                None => update.missing.push(media),
-            }
+        for (device, slot, media, edits) in &build.media {
+            self.send_slot_sample(*device, *slot, *media, edits, &mut update);
+        }
+        for &device in &build.layered {
+            self.send_layers(document, device, &mut update);
         }
         // Players that went hold no sources now, nor do new ones yet; open
         // sources of clips that went are closed.
@@ -699,9 +1036,13 @@ impl Compiler {
             return;
         };
         let rate = self.config.sample_rate;
-        for (key, list) in automation::lists(document, track.id(), rate, |key| {
-            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
-        }) {
+        for (key, list) in automation::lists(
+            document,
+            track.id(),
+            rate,
+            |key| i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay)),
+            &self.modulator_rows,
+        ) {
             if driving_only && list.is_empty() {
                 continue;
             }
@@ -807,6 +1148,67 @@ impl Compiler {
         })
     }
 
+    /// The slot of `track`'s cue switch: a route that is closed while the
+    /// track's Solo switch, which Cue mode makes the Cue switch, is off.
+    fn cue_route(&self, build: &mut Build, track: &Track) -> u32 {
+        let key = NodeKey::Cue(track.id());
+        let muted = !track.mixer().solo;
+        if self.previous(key, &Identity::Route).is_some() {
+            build
+                .restate
+                .push(ParamEvent::now(key, route::SOLO_MUTE, switch(muted)));
+        }
+        let config = self.config.node_config();
+        self.place(build, key, Identity::Route, 0, || {
+            Instance::Route(Box::new(Route::new(1.0, muted, &config)))
+        })
+    }
+
+    /// Adds the Cue Out's task: it sums `inputs`, the cue-switched tracks,
+    /// and its mixer sets the Cue Volume. It has no devices, and stands in
+    /// Main's place in the track list, which it doesn't add to.
+    fn add_cue_task(&self, build: &mut Build, document: &Document, inputs: Vec<Input>) {
+        let dependencies = inputs.len() as u32;
+        let start = build.inputs.len() as u32;
+        build.inputs.extend(inputs);
+        let inputs = Span {
+            start,
+            end: build.inputs.len() as u32,
+        };
+        let config = self.config.node_config();
+        let volume = document.settings().cue_volume;
+        if self.previous(NodeKey::CueMixer, &Identity::Mixer).is_some() {
+            build.restate.push(ParamEvent::now(
+                NodeKey::CueMixer,
+                mixer::track::VOLUME,
+                volume,
+            ));
+        }
+        let mixer = self.place(build, NodeKey::CueMixer, Identity::Mixer, 0, || {
+            let mixer = Mixer {
+                volume,
+                ..Mixer::default()
+            };
+            Instance::Mixer(Box::new(TrackMixer::new(&mixer, 0.5, &config)))
+        });
+        build.tasks.push(Task {
+            track: document.main_id(),
+            inputs,
+            device_input: None,
+            player: None,
+            chain: Span::default(),
+            sidechains: Span::default(),
+            midi_sidechains: Span::default(),
+            mixer,
+            clip_delay: NO_DELAY,
+            pre_fx: None,
+            post_fx: None,
+            midi_keep: None,
+            dependents: Span::default(),
+            dependencies,
+        });
+    }
+
     /// Adds the task for one track, fed by `inputs` and, into its devices'
     /// sidechains, by what `sidechain_inputs` holds for them; its clips
     /// heard or not.
@@ -889,10 +1291,15 @@ impl Compiler {
             _ => None,
         };
         let sidechain_start = build.sidechains.len() as u32;
+        let midi_start = build.midi_sidechains.len() as u32;
         let chain = self.add_flow(build, track.devices(), sidechain_inputs, &mut dependencies);
         let sidechains = Span {
             start: sidechain_start,
             end: build.sidechains.len() as u32,
+        };
+        let midi_sidechains = Span {
+            start: midi_start,
+            end: build.midi_sidechains.len() as u32,
         };
         let mixer = self.place(
             build,
@@ -914,6 +1321,8 @@ impl Compiler {
             player,
             chain,
             sidechains,
+            midi_sidechains,
+            midi_keep: None,
             mixer,
             clip_delay: NO_DELAY,
             pre_fx: None,
@@ -947,7 +1356,7 @@ impl Compiler {
                 continue;
             }
             let key = NodeKey::Device(device.id);
-            let identity = Identity::Device(device.kind.clone(), device.media);
+            let identity = Identity::Device(device.kind.clone(), device.media.clone());
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
@@ -957,8 +1366,20 @@ impl Compiler {
                         }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
-                        if let Some(media) = device.media {
-                            build.media.push((device.id, media));
+                        for (slot, media) in device.media.iter().enumerate() {
+                            if let Some(media) = *media {
+                                // Only slot 0 has edits (the sampler's one
+                                // sample).
+                                let edits = if slot == 0 {
+                                    device.sample_edits.clone()
+                                } else {
+                                    Vec::new()
+                                };
+                                build.media.push((device.id, slot, media, edits));
+                            }
+                        }
+                        if !device.layers.is_default() {
+                            build.layered.push(device.id);
                         }
                         let latency = node.latency();
                         (Ok(Instance::Device(node)), latency)
@@ -969,12 +1390,48 @@ impl Compiler {
                     }
                 },
             };
+            let mut latency = latency;
+            // Spec: external-devices R13. An external instrument reports the
+            // interface's round trip and its Hardware Latency, which delay
+            // compensation lines the rest of the set up with.
+            if let Some(external) = &device.external {
+                latency = self.config.round_trip_latency.saturating_add(
+                    external
+                        .hardware_latency
+                        .frames(self.config.sample_rate.hz()),
+                );
+            }
             let slot = claim(build, key, identity, !device.enabled, latency, node);
+            if let Some(external) = &device.external {
+                build.slots[slot as usize].external = Some(external.audio_from);
+            }
+            // Spec: modulation R20. A modulator works its rows out before
+            // any task runs.
+            if bl_model::modulator::is_modulator_kind(&device.kind) {
+                let row = build.modulators.len() as u32;
+                build.slots[slot as usize].modulator =
+                    if bl_model::modulator::is_signal_kind(&device.kind) {
+                        build.signals.push(row);
+                        ModKind::Signal(row)
+                    } else {
+                        ModKind::Control
+                    };
+                build.modulators.push((slot, device.id));
+            }
             steps.push(Step::Node(slot));
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
                 *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
                 self.add_sidechain(build, device.id, settings, slot, sources);
+            }
+            if device.midi_sidechain.is_some() {
+                let from = build.midi_sources.get(&device.id).copied();
+                *dependencies += u32::from(from.is_some_and(|from| from != own));
+                build.midi_sidechains.push(DeviceMidiSidechain {
+                    device: slot,
+                    from: from.unwrap_or(NO_TASK),
+                    kept: NO_TASK,
+                });
             }
         }
         let start = build.steps.len() as u32;
@@ -986,9 +1443,11 @@ impl Compiler {
     }
 
     /// Adds a rack's chains (the racks spec, R3): each one's devices, its
-    /// mixer node keyed by the chain, and a buffer of its own. A rack with no
-    /// chains passes its input through, so it adds nothing. Returns the
-    /// rack's place in `build.racks`.
+    /// mixer node keyed by the chain, and a buffer of its own. A drum rack's
+    /// drum chains also get their note routing and their sends to its return
+    /// chains (the drum racks spec). A rack with no chains passes its input
+    /// through, so it adds nothing. Returns the rack's place in
+    /// `build.racks`.
     fn add_rack(
         &self,
         build: &mut Build,
@@ -1001,10 +1460,10 @@ impl Compiler {
             return None;
         }
         let config = self.config.node_config();
-        let solo = device.chains.iter().any(|chain| chain.mixer.solo);
         let mut chains = Vec::with_capacity(device.chains.len());
         for chain in &device.chains {
             let steps = self.add_flow(build, chain.devices.iter(), sidechain_inputs, dependencies);
+            let silenced = silenced_by_solo(device, chain);
             let mixer = self.place(
                 build,
                 NodeKey::ChainMixer(chain.id),
@@ -1012,36 +1471,126 @@ impl Compiler {
                 0,
                 || {
                     Instance::Mixer(Box::new(TrackMixer::new(
-                        &chain_mixer(chain, solo),
+                        &chain_mixer(chain, silenced),
                         0.5,
                         &config,
                     )))
                 },
             );
+            let zones = self.place(
+                build,
+                NodeKey::ChainZones(chain.id),
+                Identity::Zones,
+                0,
+                || Instance::Zones(Box::new(ZoneFilter::new(&chain.zones, &config))),
+            );
+            let notes = if kind == RackKind::Drum && !chain.is_return {
+                self.add_drum_notes(build, chain)
+            } else {
+                NO_SLOT
+            };
             chains.push(RackChain {
                 steps,
                 mixer,
+                zones,
                 buffer: build.chain_buffers,
                 delay: NO_DELAY,
+                taps: [None; 3],
+                notes,
+                sends: Span::default(),
+                sum_delay: NO_DELAY,
+                summed: !chain.is_return || chain.audio_to.is_none(),
             });
             build.chain_buffers += 1;
         }
+        let selector = self.place(
+            build,
+            NodeKey::Device(device.id),
+            Identity::Selector,
+            0,
+            || Instance::Selector(Box::new(ChainSelector::new(device, &config))),
+        );
         let start = build.rack_chains.len() as u32;
+        let drum_chains = device.chains.iter().take_while(|c| !c.is_return).count();
+        let end = start + device.chains.len() as u32;
+        let middle = start + drum_chains as u32;
+        // A drum chain's send to each return chain, whose place is known
+        // now: a route with the send's level, from −∞ dB in a new send.
+        for (at, chain) in device.chains.iter().enumerate().take(drum_chains) {
+            let sends_start = build.chain_sends.len() as u32;
+            if kind == RackKind::Drum {
+                for (to, ret) in device.chains.iter().enumerate().skip(drum_chains) {
+                    let route = self.add_chain_send(build, chain, ret);
+                    build.chain_sends.push(ChainSendRef {
+                        route,
+                        to: start + to as u32,
+                    });
+                }
+            }
+            chains[at].sends = Span {
+                start: sends_start,
+                end: build.chain_sends.len() as u32,
+            };
+        }
         build.rack_chains.extend(chains);
+        for (at, chain) in device.chains.iter().enumerate() {
+            build.chain_index.insert(chain.id, start + at as u32);
+        }
         build.racks.push(Rack {
+            // The task is pushed once its chain is built, in this place.
+            task: build.tasks.len() as u32,
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
-                RackKind::Instrument | RackKind::Drum => RackMode::Instrument,
+                RackKind::Instrument => RackMode::Instrument,
+                RackKind::Drum => RackMode::Drum,
                 RackKind::MidiEffect => RackMode::Midi,
             },
-            chains: Span {
-                start,
-                end: build.rack_chains.len() as u32,
-            },
+            chains: Span { start, end: middle },
+            returns: Span { start: middle, end },
             bypass: !device.enabled,
             latency: 0,
+            selector,
         });
         Some(build.racks.len() as u32 - 1)
+    }
+
+    /// The slot of a drum chain's note routing, made or migrated and told
+    /// the chain's Receive, Play and Choke now.
+    fn add_drum_notes(&self, build: &mut Build, chain: &Chain) -> u32 {
+        let key = NodeKey::ChainNotes(chain.id);
+        let settings = drum_settings(chain);
+        if self.previous(key, &Identity::Drum).is_some() {
+            for (param, value) in settings {
+                build.restate.push(ParamEvent::now(key, param, value));
+            }
+        }
+        self.place(build, key, Identity::Drum, 0, || {
+            Instance::Drum(Box::new(DrumNotes::new(
+                settings[0].1 as u8,
+                settings[1].1 as u8,
+                settings[2].1 as u8,
+                self.hits.counter(chain.id),
+            )))
+        })
+    }
+
+    /// The slot of the route that carries a drum chain's send to the return
+    /// chain `ret`.
+    fn add_chain_send(&self, build: &mut Build, chain: &Chain, ret: &Chain) -> u32 {
+        let config = self.config.node_config();
+        let key = NodeKey::ChainSend {
+            chain: chain.id,
+            to: ret.id,
+        };
+        let level = chain.send(ret.id);
+        if self.previous(key, &Identity::Route).is_some() {
+            build
+                .restate
+                .push(ParamEvent::now(key, route::LEVEL, level));
+        }
+        self.place(build, key, Identity::Route, 0, || {
+            Instance::Route(Box::new(Route::new(level, false, &config)))
+        })
     }
 
     /// Adds the sidechain of the device in `slot`: its settings, made or
@@ -1142,6 +1691,8 @@ fn claim(
         // device is switched on again.
         latency: if bypass { 0 } else { latency },
         delay: 0,
+        modulator: ModKind::None,
+        external: None,
     });
     build.layout.insert(
         key,
@@ -1177,14 +1728,31 @@ struct Build {
     steps: Vec<Step>,
     racks: Vec<Rack>,
     rack_chains: Vec<RackChain>,
+    /// The sends of drum chains to their racks' return chains.
+    chain_sends: Vec<ChainSendRef>,
     /// How many rack chains have a buffer of their own so far.
     chain_buffers: u32,
+    /// Each rack chain's place in `rack_chains`.
+    chain_index: BTreeMap<ChainId, u32>,
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
+    /// The task each device's MIDI sidechain listens to (WP-5.27).
+    midi_sources: BTreeMap<DeviceId, u32>,
+    midi_sidechains: Vec<DeviceMidiSidechain>,
     unhosted: Vec<DeviceId>,
+    /// The modulators' slots and devices, in the order their rows sit on the
+    /// bus (WP-5.10).
+    modulators: Vec<(u32, DeviceId)>,
+    /// Which of the modulators are driven by the signal (WP-5.11): their
+    /// places among `modulators`.
+    signals: Vec<u32>,
     /// Devices new in this program that play media, with the media they
-    /// name: their decoded audio goes with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, ContentHash)>,
+    /// name, one entry per filled sample slot: their decoded audio goes
+    /// with this compile's update (WP-2.16).
+    media: Vec<(DeviceId, usize, ContentHash, Vec<bl_model::SampleEdit>)>,
+    /// Devices new in this program that hold layers (WP-5.13): their layers,
+    /// with each one's decoded audio, go with this compile's update.
+    layered: Vec<DeviceId>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may
@@ -1205,6 +1773,7 @@ fn route_key(edge: &Edge) -> NodeKey {
         },
         Via::Input => NodeKey::Input(edge.to),
         Via::Sidechain(device) => NodeKey::SidechainInput(device),
+        Via::Chain(chain) => NodeKey::ChainOutput(chain),
     }
 }
 
@@ -1228,7 +1797,7 @@ fn clips_audible(track: &Track) -> bool {
 /// The order to run the tasks in, each after every task that feeds it and
 /// otherwise in display order (Kahn's algorithm, taking the first ready
 /// task each time), and the tasks waiting on each task.
-fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
+fn run_order(build: &Build, waits: &[(u32, u32)]) -> (Vec<u32>, Vec<Vec<u32>>) {
     let tasks = &build.tasks;
     let mut dependents: Vec<Vec<u32>> = vec![Vec::new(); tasks.len()];
     let mut waiting: Vec<u32> = vec![0; tasks.len()];
@@ -1243,6 +1812,18 @@ fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
             dependents[input.from as usize].push(t as u32);
             waiting[t] += 1;
         }
+        // A MIDI sidechain waits for the track whose notes it hears, unless
+        // that is its own track.
+        for midi in &build.midi_sidechains[task.midi_sidechains.range()] {
+            if midi.from != NO_TASK && midi.from as usize != t {
+                dependents[midi.from as usize].push(t as u32);
+                waiting[t] += 1;
+            }
+        }
+    }
+    for &(from, to) in waits {
+        dependents[from as usize].push(to);
+        waiting[to as usize] += 1;
     }
     let mut left = waiting;
     let mut ready: BTreeSet<u32> = (0..tasks.len() as u32)
@@ -1271,6 +1852,19 @@ fn tap_latency(arrival: &[u32], chain: &[u32], from: usize, tap: Tap) -> u32 {
     }
 }
 
+/// The same for an input that may tap a rack chain, whose `(start, length)`
+/// within its task's chain `rack_chains` holds: the signal at the rack's
+/// input has the chain's start behind it, and after the chain's devices the
+/// chain's length too (the racks spec, R40).
+fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], input: &Input) -> u32 {
+    if input.chain == NO_CHAIN {
+        return tap_latency(arrival, chain, input.from as usize, input.tap);
+    }
+    let (start, length) = rack_chains[input.chain as usize];
+    let after = if input.tap == Tap::PreFx { 0 } else { length };
+    arrival[input.from as usize] + start + after
+}
+
 /// Works out and records delay compensation (WP-2.11): how far each track's
 /// clips and each route are held back so every path into a track lines up,
 /// each sidechain's source lines up with its device's own input, and each
@@ -1288,10 +1882,32 @@ fn compensate(build: &mut Build, order: &[u32]) {
             .map(|chain| flow_latency(build, chain.steps))
             .collect();
         let slowest = latencies.iter().copied().max().unwrap_or(0);
-        build.racks[r].latency = slowest;
         for (i, latency) in rack.chains.range().zip(latencies) {
             if slowest > latency {
                 let index = line(build, slowest - latency);
+                build.rack_chains[i].delay = index;
+            }
+        }
+        // A drum rack's sends take the chains at the slowest one's time,
+        // the return chains run from there, and the rack's output waits for
+        // the slowest return chain it sums (the drum racks spec, R22).
+        let returned: Vec<(usize, u32)> = rack
+            .returns
+            .range()
+            .filter(|&i| build.rack_chains[i].summed)
+            .map(|i| (i, flow_latency(build, build.rack_chains[i].steps)))
+            .collect();
+        let total = slowest + returned.iter().map(|&(_, l)| l).max().unwrap_or(0);
+        build.racks[r].latency = total;
+        if total > slowest {
+            for i in rack.chains.range() {
+                let index = line(build, total - slowest);
+                build.rack_chains[i].sum_delay = index;
+            }
+        }
+        for (i, latency) in returned {
+            if total > slowest + latency {
+                let index = line(build, total - slowest - latency);
                 build.rack_chains[i].delay = index;
             }
         }
@@ -1300,9 +1916,12 @@ fn compensate(build: &mut Build, order: &[u32]) {
     // node's own input is.
     let mut chain = vec![0u32; tasks];
     let mut offsets: Vec<Vec<(u32, u32)>> = vec![Vec::new(); tasks];
+    // Where each rack chain's input is in its task's chain, and what its
+    // devices add, for routes that tap it.
+    let mut rack_at = vec![(0u32, 0u32); build.rack_chains.len()];
     for (t, task) in build.tasks.clone().iter().enumerate() {
         chain[t] = flow_latency(build, task.chain);
-        offsets[t] = node_offsets(build, task.chain);
+        offsets[t] = node_offsets(build, task.chain, &mut rack_at);
         for &(slot, before) in &offsets[t] {
             for s in task.sidechains.range() {
                 if build.sidechains[s].device == slot {
@@ -1310,6 +1929,9 @@ fn compensate(build: &mut Build, order: &[u32]) {
                 }
             }
         }
+    }
+    for (at, rack_chain) in rack_at.iter_mut().zip(&build.rack_chains) {
+        at.1 = flow_latency(build, rack_chain.steps);
     }
     // The frames from song time to each track's input sum: what its inputs
     // and its devices' sidechain sources make it wait for.
@@ -1319,18 +1941,13 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let task = build.tasks[t];
         let mut arrived = 0u32;
         for input in &build.inputs[task.inputs.range()] {
-            arrived = arrived.max(tap_latency(
-                &arrival,
-                &chain,
-                input.from as usize,
-                input.tap,
-            ));
+            arrived = arrived.max(input_latency(&arrival, &chain, &rack_at, input));
         }
         for s in task.sidechains.range() {
             let sc = build.sidechains[s];
             for input in &build.sidechain_inputs[sc.inputs.range()] {
-                let need = tap_latency(&arrival, &chain, input.from as usize, input.tap)
-                    .saturating_sub(sc.before);
+                let need =
+                    input_latency(&arrival, &chain, &rack_at, input).saturating_sub(sc.before);
                 arrived = arrived.max(need);
             }
         }
@@ -1343,7 +1960,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let a = arrival[t];
         for i in task.inputs.range() {
             let input = build.inputs[i];
-            let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+            let lat = input_latency(&arrival, &chain, &rack_at, &input);
             let delay = a.saturating_sub(lat);
             if delay > 0 {
                 let index = line(build, delay);
@@ -1354,7 +1971,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
             let sc = build.sidechains[s];
             for i in sc.inputs.range() {
                 let input = build.sidechain_inputs[i];
-                let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+                let lat = input_latency(&arrival, &chain, &rack_at, &input);
                 let delay = (a + sc.before).saturating_sub(lat);
                 if delay > 0 {
                     let index = line(build, delay);
@@ -1376,6 +1993,39 @@ fn compensate(build: &mut Build, order: &[u32]) {
     }
 }
 
+/// The frames `track`'s audio is held back on its way into Main: the delay
+/// lines of the inputs that carry it from one track to the next (the delay
+/// compensation spec, R2).
+fn main_compensation(
+    build: &Build,
+    document: &Document,
+    task_of: &BTreeMap<TrackId, u32>,
+    track: TrackId,
+) -> u32 {
+    let mut total = 0u32;
+    let mut at = track;
+    // A routing may make a loop, which the engine plays as silence; the
+    // walk is bounded by the number of tracks.
+    for _ in 0..task_of.len() {
+        let Some(to) = document.output_of(at) else {
+            break;
+        };
+        let (Some(&from_task), Some(&to_task)) = (task_of.get(&at), task_of.get(&to)) else {
+            break;
+        };
+        let task = build.tasks[to_task as usize];
+        if let Some(input) = build.inputs[task.inputs.range()]
+            .iter()
+            .find(|i| i.from == from_task && i.tap == Tap::PostMixer)
+            && input.delay != NO_DELAY
+        {
+            total = total.saturating_add(build.delays[input.delay as usize]);
+        }
+        at = to;
+    }
+    total
+}
+
 /// The frames a chain of steps adds: its devices' latencies and its racks'.
 fn flow_latency(build: &Build, steps: Span) -> u32 {
     build.steps[steps.range()]
@@ -1395,9 +2045,16 @@ fn flow_latency(build: &Build, steps: Span) -> u32 {
 /// which its input is, given the chain starts `start` frames in (the racks
 /// spec, R16): what the audio it acts on is behind song time by, and so what
 /// its parameter changes are held back by. A switched-off rack's contents
-/// don't run, so they aren't listed.
-fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
-    fn walk(build: &Build, steps: Span, start: u32, out: &mut Vec<(u32, u32)>) {
+/// don't run, so they aren't listed. Each rack chain's start is recorded in
+/// `rack_at`, by its place in `rack_chains`.
+fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(u32, u32)> {
+    fn walk(
+        build: &Build,
+        steps: Span,
+        start: u32,
+        out: &mut Vec<(u32, u32)>,
+        rack_at: &mut [(u32, u32)],
+    ) {
         let mut before = start;
         for &step in &build.steps[steps.range()] {
             match step {
@@ -1410,9 +2067,30 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
                     if rack.bypass {
                         continue;
                     }
-                    for chain in &build.rack_chains[rack.chains.range()] {
-                        walk(build, chain.steps, before, out);
-                        out.push((chain.mixer, before + flow_latency(build, chain.steps)));
+                    // A drum rack's return chains start where its slowest
+                    // drum chain ends, which is where its sends take them.
+                    let sent = rack
+                        .chains
+                        .range()
+                        .map(|i| flow_latency(build, build.rack_chains[i].steps))
+                        .max()
+                        .unwrap_or(0);
+                    for i in rack.all().range() {
+                        let chain = &build.rack_chains[i];
+                        let start = if i < rack.returns.start as usize {
+                            before
+                        } else {
+                            before + sent
+                        };
+                        rack_at[i].0 = start;
+                        walk(build, chain.steps, start, out, rack_at);
+                        out.push((chain.mixer, start + flow_latency(build, chain.steps)));
+                    }
+                    // A send's level acts on the audio at that time too.
+                    for i in rack.chains.range() {
+                        for send in &build.chain_sends[build.rack_chains[i].sends.range()] {
+                            out.push((send.route, before + sent));
+                        }
                     }
                     before += rack.latency;
                 }
@@ -1420,20 +2098,53 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
         }
     }
     let mut out = Vec::new();
-    walk(build, steps, 0, &mut out);
+    walk(build, steps, 0, &mut out, rack_at);
     out
 }
 
 /// A rack chain's mixer as a node's state: its Volume and Pan, and muted
-/// while its activator is off or, while any chain of its rack (`solo`) is
-/// soloed, it isn't (the racks spec, R5).
-fn chain_mixer(chain: &Chain, solo: bool) -> Mixer {
+/// while its activator is off or its rack's solo silences it
+/// ([`silenced_by_solo`]).
+fn chain_mixer(chain: &Chain, silenced: bool) -> Mixer {
     Mixer {
         volume: chain.mixer.volume,
         pan: chain.mixer.pan,
-        mute: !chain.mixer.enabled || (solo && !chain.mixer.solo),
+        mute: !chain.mixer.enabled || silenced,
         ..Mixer::default()
     }
+}
+
+/// Whether the solo of a chain of `rack` silences `chain`: while any chain
+/// is soloed, the others add nothing (the racks spec, R5). A drum rack's
+/// return chains stay audible while only drum chains are soloed, carrying
+/// just their sends (the drum racks spec, R9).
+fn silenced_by_solo(rack: &Device, chain: &Chain) -> bool {
+    let soloed = |returns: bool| {
+        rack.chains
+            .iter()
+            .any(|c| c.mixer.solo && c.is_return == returns)
+    };
+    !chain.mixer.solo
+        && if chain.is_return {
+            soloed(true)
+        } else {
+            soloed(false) || soloed(true)
+        }
+}
+
+/// The parameters of a drum chain's note routing that the document sets.
+fn drum_settings(chain: &Chain) -> [(ParamId, f64); 3] {
+    [
+        (
+            drum::param::RECEIVE,
+            match chain.receive {
+                bl_model::Receive::AllNotes => drum::param::ALL_NOTES,
+                bl_model::Receive::Note(note) => f64::from(note),
+            },
+        ),
+        (drum::param::PLAY, f64::from(chain.play)),
+        (drum::param::CHOKE, f64::from(chain.choke.unwrap_or(0))),
+    ]
 }
 
 /// A new delay line of `len` frames, returning its index in the program.
@@ -1511,7 +2222,21 @@ fn needs_program(
             .collect::<Vec<_>>()
     };
     let scenes = !changes.scenes.is_empty() && scene_maps(old) != scene_maps(new);
-    let mut recompile = settings || changes.layout || scenes;
+    // Cue mode (WP-3.18): switching it on or off, or moving the Cue Out,
+    // changes the program; the Cue Volume reaches the Cue Out's mixer as a
+    // parameter, and the Cue switches reach their routes (see
+    // `route_events`).
+    let cue = (old.cue_active(), new.cue_active());
+    let cue_moved =
+        cue.0 != cue.1 || (cue.1 && old.main().routing().cue_out != new.main().routing().cue_out);
+    if cue == (true, true) && before.cue_volume != after.cue_volume {
+        params.push(ParamEvent::now(
+            NodeKey::CueMixer,
+            mixer::track::VOLUME,
+            after.cue_volume,
+        ));
+    }
+    let mut recompile = settings || changes.layout || scenes || cue_moved;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
             (Change::Modified, Some(before), Some(after)) => {
@@ -1552,6 +2277,8 @@ fn needs_program(
                     || before.enabled != after.enabled
                     || before.media != after.media
                     || was.map(|s| &s.input) != is.map(|s| &s.input)
+                    || before.external != after.external
+                    || before.midi_sidechain != after.midi_sidechain
                 {
                     recompile = true;
                 }
@@ -1573,7 +2300,31 @@ fn needs_program(
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
-    recompile || scene_slots(old) != scene_slots(new)
+    recompile
+        || scene_slots(old) != scene_slots(new)
+        || FollowTable::of(old) != FollowTable::of(new)
+}
+
+/// Every modulator driven by audio, notes or MIDI with its mappings: what
+/// decides which tracks wait for which (WP-5.11).
+fn signal_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_signal_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
+}
+
+/// Every modulator in track and chain order with its mappings: what decides
+/// which rows the nodes' lists name (WP-5.10).
+fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_modulator_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
 }
 
 /// Parameter changes for the mixers of the chains of racks that changed
@@ -1582,15 +2333,39 @@ fn needs_program(
 /// has a mixer made with its state, so only chains in both documents count,
 /// wherever they sit in them.
 fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mut Vec<ParamEvent>) {
-    fn states(document: &Document, ids: &[DeviceId]) -> BTreeMap<ChainId, Mixer> {
+    /// A drum chain's note routing and the levels of its sends to the
+    /// rack's return chains.
+    type Drum = ([(ParamId, f64); 3], Vec<(ChainId, f64)>);
+    /// What a chain's nodes hold: its mixer, and for a drum chain its drum
+    /// settings.
+    struct State {
+        mixer: Mixer,
+        drum: Option<Drum>,
+    }
+    fn states(document: &Document, ids: &[DeviceId]) -> BTreeMap<ChainId, State> {
         let mut states = BTreeMap::new();
         for &id in ids {
             let Some(rack) = document.device(id) else {
                 continue;
             };
-            let solo = rack.chains.iter().any(|chain| chain.mixer.solo);
             for chain in &rack.chains {
-                states.insert(chain.id, chain_mixer(chain, solo));
+                let drum =
+                    (rack.rack_kind() == Some(RackKind::Drum) && !chain.is_return).then(|| {
+                        let sends = rack
+                            .chains
+                            .iter()
+                            .filter(|c| c.is_return)
+                            .map(|c| (c.id, chain.send(c.id)))
+                            .collect();
+                        (drum_settings(chain), sends)
+                    });
+                states.insert(
+                    chain.id,
+                    State {
+                        mixer: chain_mixer(chain, silenced_by_solo(rack, chain)),
+                        drum,
+                    },
+                );
             }
         }
         states
@@ -1613,7 +2388,37 @@ fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
         let Some(is) = after.get(&chain) else {
             continue;
         };
-        mixer_events_for(NodeKey::ChainMixer(chain), &was, is, params);
+        mixer_events_for(NodeKey::ChainMixer(chain), &was.mixer, &is.mixer, params);
+        if let (Some((then, sent)), Some((now, sends))) = (&was.drum, &is.drum) {
+            for (&(param, was), &(_, is)) in then.iter().zip(now) {
+                if was != is {
+                    params.push(ParamEvent::now(NodeKey::ChainNotes(chain), param, is));
+                }
+            }
+            for &(to, level) in sends {
+                // A send to a return chain that is new has a route made
+                // with its level.
+                if sent.iter().any(|&(t, l)| t == to && l != level) {
+                    let key = NodeKey::ChainSend { chain, to };
+                    params.push(ParamEvent::now(key, route::LEVEL, level));
+                }
+            }
+        }
+    }
+    // The zones of the chains in both documents (WP-5.3): each number that
+    // changed.
+    for &id in &racks {
+        for chain in new.device(id).into_iter().flat_map(|rack| &rack.chains) {
+            let Some(was) = old.chain(chain.id) else {
+                continue;
+            };
+            let then: Vec<_> = zones::zone_values(&was.zones).collect();
+            for (param, value) in zones::zone_values(&chain.zones) {
+                if !then.contains(&(param, value)) {
+                    params.push(ParamEvent::now(NodeKey::ChainZones(chain.id), param, value));
+                }
+            }
+        }
     }
 }
 
@@ -1695,6 +2500,20 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
     }
     let (was, is) = (Graph::of(old), Graph::of(new));
     let (before, after) = (Solo::with(old, &was), Solo::with(new, &is));
+    // In Cue mode the Solo switches are the Cue switches, which open and
+    // close their routes to the Cue Out.
+    if old.cue_active() && new.cue_active() {
+        for track in new.tracks().filter(|t| t.kind() != TrackKind::Main) {
+            let then = old.track(track.id()).map(|t| t.mixer().solo);
+            if then.is_some_and(|solo| solo != track.mixer().solo) {
+                params.push(ParamEvent::now(
+                    NodeKey::Cue(track.id()),
+                    route::SOLO_MUTE,
+                    switch(!track.mixer().solo),
+                ));
+            }
+        }
+    }
     let state = |document: &Document, solo: &Solo, edge: &Edge| {
         let closed = edge.monitored
             && document
@@ -2154,8 +2973,16 @@ mod tests {
                 program.order = program.ready_order();
                 assert_ne!(program.order, (0..5).collect::<Vec<_>>());
             }
-            let mut scratch = Vec::new();
-            program.run(64, 0, &[], &mut scratch, TransportInfo::default(), &[]);
+            let mut lane = crate::sched::Lane::new(f.compiler.config());
+            let block = crate::program::Blk {
+                frames: 64,
+                from: 0,
+                until: 64,
+                events: &[],
+                transport: TransportInfo::default(),
+                session: &[],
+            };
+            program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()
         };
         let in_order = render(&mut f, false);
@@ -2277,6 +3104,90 @@ mod tests {
         assert_eq!(clips_in(&update, other), Some(1));
         // 2 audio track players and 2 MIDI track players.
         assert_eq!(update.data.len(), 4);
+    }
+
+    // Spec: warping R17. A warp edit, and the warp mode's settings, send the
+    // track's player its clips with their tables, and never a program.
+    #[test]
+    fn warp_edits_send_node_data_and_never_a_program() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, BeatsUpdate, Clip, ClipData, ContentHash, WarpMarker, WarpMode};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 96_000]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        f.sync();
+        let id = f.editor.new_id();
+        let data = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(100.0),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let update = f.apply(Command::CreateClip {
+            track: audio,
+            clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+        for command in [
+            Command::InsertWarpMarker {
+                clips: vec![id],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+                pin_neighbours: false,
+                transients: None,
+            },
+            Command::SetSegmentBpm {
+                clip: id,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+            Command::SetClipWarpMode {
+                clip: id,
+                mode: WarpMode::RePitch,
+            },
+            Command::SetClipWarpSettings {
+                clip: id,
+                beats: Some(BeatsUpdate {
+                    transient_envelope: Some(50),
+                    ..BeatsUpdate::default()
+                }),
+                tones: None,
+                texture: None,
+                complex_pro: None,
+            },
+            Command::SetClipHighQuality {
+                clip: id,
+                high_quality: false,
+            },
+            Command::SetClipRamMode {
+                clip: id,
+                ram: true,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: false,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: true,
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.program.is_none(), "{command:?} built a program");
+            assert_eq!(clips_in(&update, audio), Some(1), "{command:?}");
+        }
+        // A tempo change recompiles, and sends the tables under the new map.
+        let update = f.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(90.0).unwrap()),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
     }
 
     // Spec: audio-clips R18, R19

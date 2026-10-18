@@ -80,7 +80,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view", "browser"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-007"
@@ -91,7 +94,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["D"]
 win = ["D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.switch_hot_swap_target", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-008"
@@ -644,7 +650,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Q"]
 win = ["Q"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.hot_swap", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-009"
@@ -697,6 +706,7 @@ win = ["Ctrl+X"]
 status = "bound"
 commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
+  { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
 ]
 
@@ -712,6 +722,7 @@ win = ["Ctrl+C"]
 status = "bound"
 commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
+  { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
 ]
 
@@ -727,6 +738,7 @@ win = ["Ctrl+V"]
 status = "bound"
 commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
+  { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
 ]
 
@@ -742,6 +754,7 @@ win = ["Ctrl+D"]
 status = "bound"
 commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement"] },
+  { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
 ]
 
@@ -757,6 +770,7 @@ win = ["Delete"]
 status = "bound"
 commands = [
   { id = "arrangement.delete", contexts = ["arrangement"] },
+  { id = "chain.delete", contexts = ["rack-chains"] },
   { id = "device.remove", contexts = ["device-view"] },
 ]
 
@@ -799,6 +813,7 @@ mac = ["Cmd+R"]
 win = ["Ctrl+R"]
 status = "bound"
 commands = [
+  { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
 ]
@@ -1263,7 +1278,7 @@ mac = ["Option+Shift+F"]
 win = ["Alt+Shift+F"]
 status = "bound"
 commands = [
-  { id = "arrangement.follow", contexts = ["global", "arrangement"] },
+  { id = "arrangement.follow", contexts = ["global", "arrangement", "sample-editor"] },
 ]
 
 [[shortcut]]
@@ -1434,7 +1449,8 @@ trigger = "press"
 milestone = "M4"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Left and Right move the selected warp markers by one step of the editing grid (`clip.move_warp_markers`)"
 
 [[shortcut]]
 id = "S-SAMPLE-004"
@@ -1445,7 +1461,8 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Cmd-Left and Cmd-Right select the previous or next warp marker (`clip_view.select_warp_markers`)"
 
 [[shortcut]]
 id = "S-SAMPLE-005"
@@ -1456,7 +1473,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Option+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.follow", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-006"
@@ -1467,7 +1487,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: with the Start marker selected, Shift-Left and Shift-Right move the clip's region by one step of the editing grid (`clip.set_region`)"
 
 [[shortcut]]
 id = "S-SAMPLE-007"
@@ -1478,7 +1499,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Z"]
 win = ["Z"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "selection" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-008"
@@ -1489,7 +1513,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["X"]
 win = ["X"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "back" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-009"
@@ -1500,7 +1527,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+I"]
 win = ["Ctrl+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.insert_warp_marker", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-010"
@@ -1511,7 +1541,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.delete_warp_markers", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-011"
@@ -1522,7 +1555,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+I"]
 win = ["Ctrl+Shift+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.insert_transient", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-012"
@@ -1533,7 +1569,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+Delete"]
 win = ["Ctrl+Shift+Delete"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.delete_transients", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-013"
@@ -1544,7 +1583,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["W"]
 win = ["W"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "whole" } },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-014"
@@ -1555,7 +1597,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["H"]
 win = ["H"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.sample_view", contexts = ["sample-editor"], args = { show = "height" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-001"
@@ -2301,7 +2346,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Shift+Enter"]
 win = ["Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.toggle_follow_actions", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-014"
@@ -2312,7 +2360,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+Enter"]
 win = ["Ctrl+Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.create_follow_action_chain", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-015"
@@ -2424,7 +2475,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["S"]
 win = ["S"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "chain.solo", contexts = ["rack-chains"] },
+]
 
 [[shortcut]]
 id = "S-ARR-001"
@@ -3974,7 +4028,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Left", "Option+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: Option-Left and Option-Right (Ctrl on Windows) move the insert marker by one step of the editing grid (`clip_view.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-013"
@@ -3985,7 +4040,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's Sample Editor: with nothing selected, Shift-Left and Shift-Right start or extend a time selection by one step of the editing grid (`clip_view.select_time`)"
 
 [[shortcut]]
 id = "S-A11Y-014"
@@ -4292,7 +4348,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Plus"]
 win = ["Plus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = true, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-013"
@@ -4303,7 +4362,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = false, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-014"

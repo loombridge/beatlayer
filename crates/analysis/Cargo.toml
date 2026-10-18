@@ -14,6 +14,18 @@ bl-media.workspace = true
 # version rubato's FFT resampler already brings in, so nothing new enters
 # the build.
 realfft = "3.5.0"
+# The background pool for the analysis cache, the version bl-media's peak
+# cache already uses.
+rayon = "1.12.0"
+# Stem separation's network (IMP-11): ONNX Runtime, whose shared library is
+# loaded at run time from the packages a person downloads on first use, so
+# nothing is fetched or linked at build time (`load-dynamic`, no default
+# features). API 28 is ONNX Runtime 1.28, the version the packages install.
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28"], optional = true }
+
+[features]
+# Stem separation through ONNX Runtime.
+stems = ["dep:ort"]
 
 [lints]
 workspace = true

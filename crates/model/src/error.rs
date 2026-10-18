@@ -7,6 +7,7 @@ use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::layers::LayerId;
 use crate::track::TrackKind;
 
 /// Why a command was rejected, or why a loaded document isn't valid.
@@ -23,8 +24,16 @@ pub enum ModelError {
     NoSuchDevice(DeviceId),
     /// No scene has this ID.
     NoSuchScene(SceneId),
+    /// The device has no layer with this ID (WP-5.13).
+    NoSuchLayer(LayerId),
+    /// The device isn't a multisampler, so it holds no layers.
+    NoLayers(DeviceId),
     /// The device has no sidechain input to set.
     NoSidechain(DeviceId),
+    /// The device has no routing to external hardware to set.
+    NoExternal(DeviceId),
+    /// The device has no MIDI sidechain input to set.
+    NoMidiSidechain(DeviceId),
     /// The device isn't in this track's chain, so the track has no such
     /// parameter to automate (WP-2.12).
     DeviceNotInTrack {
@@ -39,6 +48,9 @@ pub enum ModelError {
         /// The clip.
         clip: ClipId,
     },
+    /// A MIDI controller (a clip's MIDI Ctrl envelope) was named where a
+    /// track's parameter is needed, such as for track automation (WP-2.29).
+    MidiControllerNotAParameter,
     /// The device is a plug-in, which opens its own editor window rather
     /// than floating (IMP-14).
     CannotFloat(DeviceId),
@@ -90,6 +102,8 @@ pub enum ModelError {
     /// Main Out and Cue Out take a stereo pair of the audio interface's
     /// outputs, not a single channel.
     NotStereoPair,
+    /// Cue mode needs a Cue Out that shares no channel with Main Out.
+    CueOverlapsMain,
     /// Tracks of this kind can't go inside a group: only audio, MIDI, and
     /// group tracks can.
     CannotGroup {
@@ -231,6 +245,23 @@ pub enum ModelError {
     },
     /// The chain is a MIDI effect rack's, which has no volume or pan.
     ChainHasNoMixer(ChainId),
+    /// The chain's rack doesn't give its chains a zone of this kind: an audio
+    /// effect rack's chains have only a chain select zone, and a drum
+    /// rack's none.
+    ChainHasNoZone {
+        /// The chain.
+        chain: ChainId,
+        /// The zone.
+        kind: crate::layers::ZoneKind,
+    },
+    /// The chain has a note, choke group, send or output only a drum rack's
+    /// chains have, and isn't in a drum rack (or is a return chain with a
+    /// drum chain's settings).
+    NotADrumChain(ChainId),
+    /// A drum rack's return chains must come after its drum chains.
+    ReturnChainOrder(DeviceId),
+    /// A drum rack holds at most six return chains.
+    TooManyReturnChains(DeviceId),
     /// What was asked to group or ungroup can't be: the devices aren't all
     /// in one chain, or the rack isn't one new rack with one empty chain, or
     /// the rack to take apart holds several chains.
@@ -263,12 +294,32 @@ impl fmt::Display for ModelError {
             Self::ChainNotInTrack { chain, track } => {
                 write!(f, "{chain} isn't in {track}'s chain")
             }
+            Self::ChainHasNoZone { chain, kind } => write!(
+                f,
+                "{chain} belongs to a rack whose chains have no {} zone",
+                match kind {
+                    crate::layers::ZoneKind::Key => "key",
+                    crate::layers::ZoneKind::Velocity => "velocity",
+                    crate::layers::ZoneKind::Select => "chain select",
+                }
+            ),
+            Self::NotADrumChain(id) => write!(
+                f,
+                "{id} has a note, choke group, send or output that only a drum rack's chains \
+                 can have, in the way it has it"
+            ),
+            Self::ReturnChainOrder(id) => {
+                write!(f, "{id}'s return chains must come after its drum chains")
+            }
+            Self::TooManyReturnChains(id) => write!(f, "{id} holds at most six return chains"),
             Self::BadGroup(what) => f.write_str(what),
             Self::ChainHasNoMixer(id) => write!(
                 f,
                 "{id} belongs to a MIDI effect rack, whose chains have no volume or pan"
             ),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
+            Self::NoSuchLayer(id) => write!(f, "no layer {}", id.0),
+            Self::NoLayers(id) => write!(f, "{id} holds no layers: it isn't a multisampler"),
             Self::SlotOccupied { track, scene } => {
                 write!(f, "{track}'s slot in {scene} already holds a clip")
             }
@@ -288,6 +339,8 @@ impl fmt::Display for ModelError {
                 f.write_str("the document's object IDs leave no room for the objects it needs")
             }
             Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
+            Self::NoExternal(id) => write!(f, "{id} has no routing to external hardware"),
+            Self::NoMidiSidechain(id) => write!(f, "{id} has no MIDI sidechain input"),
             Self::DeviceNotInTrack { device, track } => {
                 write!(f, "{device} isn't in {track}'s chain")
             }
@@ -301,6 +354,9 @@ impl fmt::Display for ModelError {
             ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
+            Self::MidiControllerNotAParameter => f.write_str(
+                "a MIDI controller belongs to a MIDI clip's envelopes; it isn't a track parameter",
+            ),
             Self::DuplicateEnvelope { clip } => {
                 write!(f, "{clip} carries two envelopes for one parameter")
             }
@@ -312,6 +368,9 @@ impl fmt::Display for ModelError {
             ),
             Self::NotStereoPair => {
                 f.write_str("Main Out and Cue Out take a stereo pair of the interface's outputs")
+            }
+            Self::CueOverlapsMain => {
+                f.write_str("Cue mode needs a Cue Out that shares no output channel with Main Out")
             }
             Self::CannotGroup { kind } => write!(f, "a {kind} track can't go inside a group"),
             Self::GroupCycle { track, parent } => {
@@ -347,7 +406,8 @@ impl fmt::Display for ModelError {
             Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
             Self::NotSlotClip(id) => write!(
                 f,
-                "{id} isn't in a Session slot; launch settings belong to Session clips"
+                "{id} isn't in a Session slot; launch settings and automation envelopes belong to Session \
+                 clips"
             ),
             Self::CannotRoute { track, to } => write!(
                 f,

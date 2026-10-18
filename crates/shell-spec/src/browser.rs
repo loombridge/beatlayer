@@ -8,7 +8,9 @@
 //! through the audio device, are in the external class, so an agent asks the
 //! person first. The behaviour they follow is in the browser spec.
 
-use bl_commands::Context::{Arrangement, Browser, BrowserSearch, BrowserSidebar, Global};
+use bl_commands::Context::{
+    Arrangement, Browser, BrowserSearch, BrowserSidebar, ClipView, Global, SampleEditor,
+};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{ClipId, TrackId};
@@ -27,6 +29,8 @@ pub const OPEN_PLACE: &str = "browser.open_place";
 pub const OPEN_FOLDER: &str = "browser.open_folder";
 /// `browser.select`: select items in the content pane.
 pub const SELECT: &str = "browser.select";
+/// `browser.show_file`: show an audio file in the browser (Show in Browser).
+pub const SHOW_FILE: &str = "browser.show_file";
 /// `browser.add_folder`: add a folder to Places.
 pub const ADD_FOLDER: &str = "browser.add_folder";
 /// `browser.remove_folder`: take an added folder out of Places.
@@ -54,6 +58,7 @@ pub const IDS: &[&str] = &[
     OPEN_PLACE,
     OPEN_FOLDER,
     SELECT,
+    SHOW_FILE,
     ADD_FOLDER,
     REMOVE_FOLDER,
     PREVIEW,
@@ -177,15 +182,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Drums => Some("Drum kits arrive with the drum racks in milestone M5."),
-            Self::Instruments => {
-                Some("Beatlayer's instruments arrive in milestone M2 (WP-2.16 and WP-2.17).")
-            }
-            Self::AudioEffects => {
-                Some("Beatlayer's audio effects arrive in milestone M2 (WP-2.18a and WP-2.18b).")
-            }
-            Self::MidiEffects => Some("MIDI effects arrive in milestone M5."),
-            Self::Modulators => Some("Modulators arrive in milestone M5."),
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
@@ -241,6 +237,9 @@ pub enum ItemKind {
     Folder,
     /// An audio file Beatlayer can open.
     Audio,
+    /// An SFZ multisample instrument, which imports as a multisampler
+    /// (WP-5.14).
+    Sfz,
     /// A Beatlayer set.
     Set,
     /// A Beatlayer device preset, which loads into the device being
@@ -248,12 +247,17 @@ pub enum ItemKind {
     Preset,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
+    /// One of Beatlayer's own devices, listed under a device label (the
+    /// Modulators label, WP-5.10); its path is the device type's ID.
+    Device,
 }
 
 /// One row of the content pane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Item {
-    /// Its path on disk.
+    /// Its path on disk; in the Plug-Ins label, the row's key instead: a
+    /// vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its
+    /// file, `#`, and its identifier (the plug-in scanning spec, R11).
     pub path: String,
     /// Its name, as the Name column shows it.
     pub name: String,
@@ -267,6 +271,10 @@ pub struct Item {
     /// In search results, the folder it's in, relative to its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// For a plug-in, its format, which the row's badge shows (the plug-in
+    /// scanning spec, R11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<bl_model::PluginFormat>,
 }
 
 /// The preview: the switch, the volume, and what plays.
@@ -409,6 +417,18 @@ pub struct OpenFolderArgs {
     /// Otherwise opening a folder closes every open folder it isn't inside.
     #[serde(default)]
     pub keep_others: bool,
+}
+
+/// Arguments of `browser.show_file`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowFileArgs {
+    /// The file to show, by path. Give this or `clip`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// An audio clip whose file to show. Give this or `path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
 }
 
 /// Arguments of `browser.select`.
@@ -567,7 +587,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(OPEN_FOLDER, "Open Folder")
             .description(
                 "Opens or closes a folder in the browser's content pane, listing its folders \
-                 and audio files indented under it. Opening a folder closes the other open \
+                 and audio files indented under it (in the Plug-Ins label, a vendor's folder \
+                 and its plug-ins). Opening a folder closes the other open \
                  folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and \
                  Left do this on the selected folder. Changes nothing, but reads folders outside \
                  the project.",
@@ -578,7 +599,8 @@ fn specs() -> Vec<CommandSpec> {
             .result::<BrowserState>(),
         CommandSpec::new(SELECT, "Select in Browser")
             .description(
-                "Selects items in the browser's content pane by path, replacing the selection \
+                "Selects items in the browser's content pane by path (or, in the Plug-Ins label, \
+                 by the row's key), replacing the selection \
                  or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. \
                  While the Preview switch is on, selecting one audio file previews it through \
                  the audio device; selecting anything else stops the preview. Changes nothing in \
@@ -587,6 +609,19 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::External)
             .context(Browser)
             .args::<SelectArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SHOW_FILE, "Show in Browser")
+            .description(
+                "Shows an audio file in the browser, as Show in Browser does in the Sample \
+                 Editor: shows the browser, chooses the place the file lies in, opens the \
+                 folders down to it and selects it. Name the file by `path`, or by the `clip` \
+                 that plays it. Refused if the file lies in none of the browser's places; \
+                 `browser.add_folder` adds one. Changes nothing in the set, but reads folders \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Browser, ClipView, SampleEditor])
+            .args::<ShowFileArgs>()
             .result::<BrowserState>(),
         CommandSpec::new(ADD_FOLDER, "Add Folder to Browser...")
             .description(
@@ -648,7 +683,20 @@ fn specs() -> Vec<CommandSpec> {
                  audio track, otherwise onto a new audio track below the last one, one after \
                  another, as one undo step. A clip placed over part of another replaces that \
                  part, so when a clip on that track ends after the insert marker it's \
-                 destructive as well as external. Reads the files, outside the project.",
+                 destructive as well as external. A selected preset file, or a device or \
+                 rack listed under a label (Drums, Instruments, Audio Effects, MIDI Effects \
+                 or Modulators), is added to the shown track as `device.add_preset` and \
+                 `device.add` add it, and a chain preset to the chain list's rack \
+                 (`chain.load_preset`). While a device is being hot-swapped \
+                 (`device.hot_swap`), a selected preset or device replaces it instead \
+                 (`device.replace`), as does a chain preset the chain armed by its Hot-Swap \
+                 button (`chain.load_preset`); a selected audio file loads into it if the \
+                 device plays samples (the sampler, or the eight-slot drum sampler, into its \
+                 selected slot: `device.load_sample`). With one plug-in selected it loads \
+                 that plug-in instead, as `plugin.load` does: onto the selected track (a new \
+                 track when none is), an instrument onto a new MIDI track when the selected \
+                 track holds audio, or in place of the device being hot-swapped. Reads the \
+                 files, outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)
@@ -713,6 +761,7 @@ mod tests {
             OPEN_PLACE,
             OPEN_FOLDER,
             SELECT,
+            SHOW_FILE,
             ADD_FOLDER,
             PREVIEW,
             LOAD_SELECTED,

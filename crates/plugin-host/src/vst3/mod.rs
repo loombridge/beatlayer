@@ -466,6 +466,15 @@ impl Vst3Host {
         let main = guard.get()?;
         let module = module(main, path)?;
         let mut found = Vec::new();
+        // The factory's own vendor, for classes that name none: Live files
+        // such a plug-in under it (the plug-in scanning spec, R11).
+        // SAFETY: an all-zero factory info is valid; the factory fills it.
+        let mut factory_info: PFactoryInfo = unsafe { std::mem::zeroed() };
+        // SAFETY: the factory fills the info it's given.
+        let factory_vendor = (unsafe { module.factory.getFactoryInfo(&mut factory_info) }
+            == kResultOk)
+            .then(|| cstring(&factory_info.vendor))
+            .filter(|v| !v.is_empty());
         // SAFETY: the factory reports its own class count.
         let count = unsafe { module.factory.countClasses() }.max(0);
         for index in 0..count {
@@ -493,6 +502,7 @@ impl Vst3Host {
                     version = Some(cstring(&info2.version)).filter(|v| !v.is_empty());
                 }
             }
+            let vendor = vendor.or_else(|| factory_vendor.clone());
             let name = cstring(&info.name);
             let name = if name.is_empty() {
                 format_fuid(&cid)
@@ -517,6 +527,8 @@ impl Vst3Host {
                     role: describe::role(&subcategories),
                     description: DeviceDescription::new(params),
                     sidechain: false,
+                    external: false,
+                    midi_sidechain: false,
                 },
                 vendor,
                 version,
@@ -1656,6 +1668,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         in_channels,
         out_channels,
         params: instance.params.iter().map(|p| p.map).collect(),
+        midi: midi_map(&instance.controller),
         pending: std::mem::take(&mut instance.pending),
         drive: Driver::new(instance.params.iter().map(|p| {
             // Each control starts where the controller is: the set's values
@@ -1675,6 +1688,30 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
             (p.descriptor.clone(), false, control)
         })),
     })
+}
+
+/// What the controller's `IMidiMapping` maps each channel's MIDI controllers
+/// to: the parameter, at `channel * CONTROLLERS + controller`. Every
+/// assignment is asked once, here on the main thread, so the audio thread
+/// only looks it up. A controller without the interface maps nothing.
+fn midi_map(controller: &ComPtr<IEditController>) -> Vec<Option<u32>> {
+    let mut map = vec![None; 16 * node::CONTROLLERS];
+    let Some(mapping) = controller.cast::<IMidiMapping>() else {
+        return map;
+    };
+    for (at, slot) in map.iter_mut().enumerate() {
+        let (channel, number) = (at / node::CONTROLLERS, at % node::CONTROLLERS);
+        let mut id = 0;
+        // SAFETY: the controller answers for any channel and controller
+        // number, from the main thread, writing the ID where it's pointed.
+        let result = unsafe {
+            mapping.getMidiControllerAssignment(0, channel as i16, number as i16, &raw mut id)
+        };
+        if result == kResultOk {
+            *slot = Some(id);
+        }
+    }
+    map
 }
 
 /// Deactivates an instance, as VST3 asks: stop processing, then leave the

@@ -12,6 +12,8 @@ publish.workspace = true
 [dependencies]
 bl-commands.workspace = true
 bl-core.workspace = true
+# The multisampler's parameter IDs, for the zone editor's header (WP-5.13).
+bl-devices.workspace = true
 bl-model.workspace = true
 bl-engine.workspace = true
 bl-shell.workspace = true
@@ -33,6 +35,9 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
+# The test plug-in, built from source, for the plug-in device panel's tests
+# (WP-2.10).
+bl-test-clap = { path = "../test-clap" }
 # The null device and its channels, for the In/Out choosers' tests
 # (WP-2.13).
 bl-audio-io.workspace = true
@@ -40,7 +45,6 @@ bl-audio-io.workspace = true
 # tests can fill it through a real turn (WP-2.23, part 4).
 bl-assistant.workspace = true
 # The device framework's test devices, for the generic UI's tests (WP-2.5).
-bl-devices.workspace = true
 # The test MIDI backend, and the queue the computer MIDI keyboard fills, for
 # the MIDI input tests (WP-2.2).
 bl-midi-io.workspace = true

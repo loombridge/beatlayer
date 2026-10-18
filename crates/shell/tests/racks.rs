@@ -639,3 +639,829 @@ fn a_track_with_a_rack_duplicates_with_new_ids_inside_it() {
     assert_eq!(doc.device_track(rack), Some(audio));
     assert_eq!(doc.device_track(inner), Some(audio));
 }
+
+fn state(shell: &Shell) -> bl_shell::device_commands::DeviceViewState {
+    shell.device_view_state()
+}
+
+/// The rack's frame in the Device View.
+fn frame(shell: &Shell, rack: DeviceId) -> bl_shell::device_commands::RackFrame {
+    state(shell)
+        .devices
+        .into_iter()
+        .find(|d| d.id == rack)
+        .and_then(|d| d.rack)
+        .expect("the rack is on the shown track")
+}
+
+fn selected(shell: &Shell, rack: DeviceId) -> Vec<ChainId> {
+    frame(shell, rack).selected_chains
+}
+
+fn click(shell: &mut Shell, chain: ChainId, mode: &str) {
+    shell
+        .invoke("chain.select", json!({ "chain": chain, "mode": mode }))
+        .unwrap();
+}
+
+// Spec: racks R19
+#[test]
+fn showing_and_hiding_views_is_no_undo_step_and_is_kept() {
+    let Set { mut shell, .. } = set();
+    let (rack, _) = rack_with_chains(&mut shell, "audio_effect", 2);
+    let before = steps(&shell);
+    assert!(
+        frame(&shell, rack).views.chain_list,
+        "a new rack shows them all"
+    );
+    shell
+        .invoke(
+            "rack.set_view",
+            json!({ "rack": rack, "view": "chain_list", "shown": false }),
+        )
+        .unwrap();
+    shell
+        .invoke("rack.set_view", json!({ "rack": rack, "view": "macros" }))
+        .unwrap();
+    let views = frame(&shell, rack).views;
+    assert!(!views.chain_list && !views.macros && views.devices);
+    assert_eq!(steps(&shell), before, "no undo step");
+    assert!(shell.is_dirty(), "but the set has to be saved");
+
+    // Every view hidden folds the rack into its view column.
+    shell
+        .invoke(
+            "rack.set_view",
+            json!({ "rack": rack, "view": "devices", "shown": false }),
+        )
+        .unwrap();
+    let hidden = state(&shell)
+        .devices
+        .into_iter()
+        .find(|d| d.id == rack)
+        .unwrap();
+    assert!(hidden.rack.as_ref().unwrap().is_strip());
+    assert_eq!(
+        bl_shell::device_commands::frame_width(&hidden),
+        bl_shell::device_commands::TITLE_BAR_HEIGHT
+    );
+    shell
+        .invoke(
+            "rack.set_view",
+            json!({ "rack": rack, "view": "devices", "shown": true }),
+        )
+        .unwrap();
+
+    // Reopened, the rack shows the same views.
+    let folder = std::env::temp_dir().join(format!("bl-rack-views-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": folder.join("Views.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let mut reopened = Shell::headless();
+    reopened
+        .run("set.open", json!({ "path": saved["path"] }))
+        .unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    assert_eq!(reopened.devices().views_of(rack), views);
+    // A rack that was never changed has no entry in the file.
+    assert_eq!(reopened.devices().rack_views().len(), 1);
+    // A device that isn't a rack has no views.
+    let plain = add_to_track(&mut shell, effect("Gain")).device;
+    assert!(
+        shell
+            .invoke("rack.set_view", json!({ "rack": plain, "view": "macros" }))
+            .is_err()
+    );
+}
+
+// Spec: racks R20
+#[test]
+fn a_key_that_fixes_shown_acts_only_when_it_changes_the_view() {
+    let Set { mut shell, .. } = set();
+    let (rack, _) = rack_with_chains(&mut shell, "audio_effect", 1);
+    select(&mut shell, rack);
+    let hide = json!({ "view": "chain_list", "shown": false });
+    let show = json!({ "view": "chain_list", "shown": true });
+    assert!(shell.can_invoke("rack.set_view", &hide));
+    assert!(!shell.can_invoke("rack.set_view", &show));
+    shell.invoke("rack.set_view", hide.clone()).unwrap();
+    assert!(
+        !shell.can_invoke("rack.set_view", &hide),
+        "Minus falls back to Fold"
+    );
+    assert!(shell.can_invoke("rack.set_view", &show));
+    // Disabled while no rack is selected.
+    let plain = add_to_track(&mut shell, effect("Gain")).device;
+    select(&mut shell, plain);
+    assert!(!shell.can_invoke("rack.set_view", &show));
+}
+
+// Spec: racks R22
+#[test]
+fn chains_select_by_click_range_toggle_and_step() {
+    let Set { mut shell, .. } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 4);
+    let steps_before = steps(&shell);
+    assert_eq!(
+        selected(&shell, rack),
+        vec![chains[0]],
+        "the first while none is clicked"
+    );
+    click(&mut shell, chains[2], "replace");
+    assert_eq!(selected(&shell, rack), vec![chains[2]]);
+    click(&mut shell, chains[0], "range");
+    assert_eq!(selected(&shell, rack), chains[..3].to_vec());
+    click(&mut shell, chains[3], "toggle");
+    assert_eq!(
+        selected(&shell, rack),
+        vec![chains[0], chains[1], chains[2], chains[3]]
+    );
+    click(&mut shell, chains[1], "toggle");
+    assert_eq!(
+        selected(&shell, rack),
+        vec![chains[0], chains[2], chains[3]]
+    );
+    let shown = frame(&shell, rack);
+    assert!(shown.devices.is_empty(), "several chains show no devices");
+    assert_eq!(shown.note.as_deref(), Some("3 chains selected"));
+    assert!(shown.chain_list_focused);
+
+    click(&mut shell, chains[1], "replace");
+    shell
+        .invoke("chain.select", json!({ "mode": "next" }))
+        .unwrap();
+    assert_eq!(selected(&shell, rack), vec![chains[2]]);
+    shell
+        .invoke("chain.select", json!({ "mode": "previous" }))
+        .unwrap();
+    shell
+        .invoke("chain.select", json!({ "mode": "previous" }))
+        .unwrap();
+    shell
+        .invoke("chain.select", json!({ "mode": "previous" }))
+        .unwrap();
+    assert_eq!(
+        selected(&shell, rack),
+        vec![chains[0]],
+        "Up stops at the first"
+    );
+    for _ in 0..6 {
+        shell
+            .invoke("chain.select", json!({ "mode": "next" }))
+            .unwrap();
+    }
+    assert_eq!(
+        selected(&shell, rack),
+        vec![chains[3]],
+        "Down stops at the last"
+    );
+    assert_eq!(steps(&shell), steps_before, "selecting is no undo step");
+    assert!(
+        shell
+            .active_contexts()
+            .contains(&bl_commands::Context::RackChains)
+    );
+
+    // A device click takes the focus back.
+    let inside = add_to_chain(&mut shell, chains[1], effect("In")).device;
+    select(&mut shell, inside);
+    assert!(
+        !shell
+            .active_contexts()
+            .contains(&bl_commands::Context::RackChains)
+    );
+}
+
+// Spec: racks R22
+#[test]
+fn the_selected_chains_devices_show_and_selecting_a_device_reveals_its_chain() {
+    let Set { mut shell, .. } = set();
+    let (outer, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
+    let inner = add_to_chain(&mut shell, chains[1], rack_of("audio_effect")).device;
+    let inner_chains: Vec<ChainId> = (0..2)
+        .map(|n| {
+            let id: ChainId = shell.new_id();
+            shell
+                .invoke(
+                    "chain.add",
+                    json!({ "rack": inner, "index": n, "chain": { "id": id, "name": "", "devices": [] } }),
+                )
+                .unwrap();
+            id
+        })
+        .collect();
+    let deep = add_to_chain(&mut shell, inner_chains[1], effect("Deep")).device;
+    // Nothing is clicked yet: the first chains show.
+    assert!(frame(&shell, outer).devices.is_empty());
+
+    shell
+        .invoke(
+            "rack.set_view",
+            json!({ "rack": outer, "view": "devices", "shown": false }),
+        )
+        .unwrap();
+    shell
+        .invoke("device.fold", json!({ "device": inner, "folded": true }))
+        .unwrap();
+    select(&mut shell, deep);
+    let outer_frame = frame(&shell, outer);
+    assert_eq!(outer_frame.selected_chains, vec![chains[1]]);
+    assert!(outer_frame.views.devices, "the devices view is shown again");
+    let inner_frame = &outer_frame.devices[0];
+    assert!(!inner_frame.folded && inner_frame.id == inner);
+    let nested = inner_frame.rack.as_ref().unwrap();
+    assert_eq!(nested.selected_chains, vec![inner_chains[1]]);
+    assert_eq!(nested.devices[0].id, deep);
+    assert!(nested.devices[0].selected);
+}
+
+// Spec: racks R23
+#[test]
+fn chain_solo_is_exclusive_and_add_toggles() {
+    let Set { mut shell, .. } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 3);
+    let (other, other_chains) = rack_with_chains(&mut shell, "audio_effect", 1);
+    let solos = |shell: &Shell, rack| -> Vec<bool> {
+        frame(shell, rack).chains.iter().map(|c| c.solo).collect()
+    };
+    shell
+        .invoke(
+            "chain.set_solo",
+            json!({ "chain": other_chains[0], "solo": true }),
+        )
+        .unwrap();
+    let before = steps(&shell);
+    shell
+        .invoke("chain.solo", json!({ "chain": chains[0] }))
+        .unwrap();
+    shell
+        .invoke("chain.solo", json!({ "chain": chains[1] }))
+        .unwrap();
+    assert_eq!(
+        solos(&shell, rack),
+        [false, true, false],
+        "a click unsolos the others"
+    );
+    shell
+        .invoke("chain.solo", json!({ "chain": chains[2], "add": true }))
+        .unwrap();
+    assert_eq!(solos(&shell, rack), [false, true, true], "Cmd-click adds");
+    shell
+        .invoke("chain.solo", json!({ "chain": chains[1], "add": true }))
+        .unwrap();
+    assert_eq!(solos(&shell, rack), [false, false, true], "and removes");
+    shell
+        .invoke("chain.solo", json!({ "chain": chains[2] }))
+        .unwrap();
+    assert_eq!(
+        solos(&shell, rack),
+        [false, false, false],
+        "a click on the only soloed chain unsolos it"
+    );
+    assert_eq!(solos(&shell, other), [true], "other racks are left alone");
+    assert_eq!(steps(&shell), before + 5, "one undo step each");
+    assert_eq!(last_step(&shell), "Solo chain");
+
+    // S solos the selected chain while the chain list has the focus.
+    click(&mut shell, chains[1], "replace");
+    assert!(shell.can_invoke("chain.solo", &json!({})));
+    shell.invoke("chain.solo", json!({})).unwrap();
+    assert_eq!(solos(&shell, rack), [false, true, false]);
+}
+
+// Spec: racks R21
+#[test]
+fn the_drop_area_makes_chains_from_devices_presets_and_moved_devices() {
+    let Set { mut shell, .. } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 1);
+    let before = steps(&shell);
+    let new = shell
+        .invoke(
+            "chain.create",
+            json!({ "rack": rack, "device": effect("Reverb") }),
+        )
+        .unwrap();
+    let new: ChainAdded = serde_json::from_value(new).unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    let doc = shell.editor().document();
+    assert_eq!(
+        doc.device(rack).unwrap().chains[1].id,
+        new.chain,
+        "at the end of the list"
+    );
+    assert_eq!(
+        doc.chain(new.chain).unwrap().name,
+        "Reverb",
+        "named after its device"
+    );
+    assert_eq!(selected(&shell, rack), vec![new.chain]);
+
+    // A device from another chain moves in, keeping its identity.
+    let device = add_to_chain(&mut shell, chains[0], effect("Moved")).device;
+    let moved: ChainAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "chain.create",
+                json!({ "rack": rack, "move_device": device }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(chain_devices(&shell, moved.chain), vec![device]);
+    assert!(chain_devices(&shell, chains[0]).is_empty());
+
+    // An empty chain, and a mistake changes nothing.
+    shell
+        .invoke("chain.create", json!({ "rack": rack }))
+        .unwrap();
+    let steps_now = steps(&shell);
+    assert!(
+        shell
+            .invoke(
+                "chain.create",
+                json!({ "rack": rack, "device": effect("A"), "move_device": device }),
+            )
+            .is_err()
+    );
+    assert!(
+        shell
+            .invoke(
+                "chain.create",
+                json!({ "rack": rack, "device": midi_effect("Arp") })
+            )
+            .is_err(),
+        "an audio effect rack takes audio effects only"
+    );
+    assert_eq!(steps(&shell), steps_now);
+}
+
+// Spec: racks R22
+#[test]
+fn the_edit_keys_act_on_the_selected_chains() {
+    let Set { mut shell, .. } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 4);
+    click(&mut shell, chains[1], "replace");
+    click(&mut shell, chains[2], "toggle");
+    // Copy, then paste at the end.
+    shell.invoke("chain.copy", json!({})).unwrap();
+    assert!(state(&shell).can_paste_chain);
+    let pasted: ChainAdded =
+        serde_json::from_value(shell.invoke("chain.paste", json!({})).unwrap()).unwrap();
+    assert_eq!(pasted.chains.len(), 2);
+    assert_eq!(
+        shell.editor().document().device(rack).unwrap().chains.len(),
+        6
+    );
+    assert_eq!(
+        selected(&shell, rack),
+        pasted.chains,
+        "the pasted chains are selected"
+    );
+    // Duplicate puts each copy straight after its original.
+    click(&mut shell, chains[0], "replace");
+    click(&mut shell, chains[1], "toggle");
+    let before = steps(&shell);
+    let copies: ChainAdded =
+        serde_json::from_value(shell.invoke("chain.duplicate", json!({})).unwrap()).unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    let order: Vec<ChainId> = shell
+        .editor()
+        .document()
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(order[0], chains[0]);
+    assert_eq!(order[1], copies.chains[0]);
+    assert_eq!(order[2], chains[1]);
+    assert_eq!(order[3], copies.chains[1]);
+    // Cut, and Delete, remove the selected chains in one step each.
+    let count = order.len();
+    let before = steps(&shell);
+    shell.invoke("chain.cut", json!({})).unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    assert_eq!(
+        shell.editor().document().device(rack).unwrap().chains.len(),
+        count - 2
+    );
+    click(&mut shell, chains[3], "replace");
+    shell.invoke("chain.delete", json!({})).unwrap();
+    assert!(shell.editor().document().chain(chains[3]).is_none());
+    assert_eq!(last_step(&shell), "Delete Chain");
+    shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(shell.editor().document().chain(chains[3]).is_some());
+}
+
+// Spec: racks R10
+#[test]
+fn group_with_the_chain_list_in_focus_groups_the_selected_chains() {
+    let Set { mut shell, .. } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 3);
+    click(&mut shell, chains[0], "replace");
+    click(&mut shell, chains[1], "range");
+    assert!(shell.can_invoke("device.group", &json!({})));
+    let grouped: Grouped =
+        serde_json::from_value(shell.invoke("device.group", json!({})).unwrap()).unwrap();
+    let doc = shell.editor().document();
+    let inner = doc.device(grouped.rack).unwrap();
+    assert_eq!(
+        inner.chains.iter().map(|c| c.id).collect::<Vec<_>>(),
+        chains[..2].to_vec()
+    );
+    assert_eq!(doc.device(rack).unwrap().chains.len(), 2);
+}
+
+// Spec: racks R24
+#[test]
+fn a_chain_moves_between_racks_and_its_devices_drop_on_a_track() {
+    let Set {
+        mut shell, audio, ..
+    } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
+    let (other, _) = rack_with_chains(&mut shell, "audio_effect", 1);
+    let device = add_to_chain(&mut shell, chains[1], effect("Gain")).device;
+    let before = steps(&shell);
+    shell
+        .invoke(
+            "chain.move",
+            json!({ "chain": chains[1], "rack": other, "index": 0 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    assert_eq!(
+        shell.editor().document().chain_place(chains[1]).unwrap(),
+        (other, 0)
+    );
+    assert_eq!(selected(&shell, other).len(), 1);
+
+    // Dropped on a track's own chain, only the devices go there.
+    let before = steps(&shell);
+    shell
+        .invoke(
+            "chain.drop_on_track",
+            json!({ "chain": chains[1], "track": audio }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    assert!(shell.editor().document().chain(chains[1]).is_none());
+    assert!(track_devices(&shell, audio).contains(&device));
+    shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(
+        shell.editor().document().chain(chains[1]).is_some(),
+        "undone as one step"
+    );
+    assert_eq!(chain_devices(&shell, chains[1]), vec![device]);
+    let _ = rack;
+}
+
+// Spec: racks R25
+#[test]
+fn the_device_list_shows_racks_chain_by_chain() {
+    let Set { mut shell, .. } = set();
+    let (outer, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
+    add_to_chain(&mut shell, chains[0], effect("First"));
+    let inner = add_to_chain(&mut shell, chains[1], rack_of("audio_effect")).device;
+    let inner_chain: ChainId = shell.new_id();
+    shell
+        .invoke(
+            "chain.add",
+            json!({ "rack": inner, "index": 0, "chain": { "id": inner_chain, "name": "Deep chain", "devices": [] } }),
+        )
+        .unwrap();
+    let deep = add_to_chain(&mut shell, inner_chain, effect("Deep")).device;
+    let list = state(&shell).device_list;
+    let shape: Vec<(usize, &str)> = list.iter().map(|e| (e.depth, e.label.as_str())).collect();
+    assert_eq!(
+        shape,
+        [
+            (0, "Audio Effect Rack"),
+            (1, "Chain"),
+            (2, "First"),
+            (1, "Chain"),
+            (2, "Audio Effect Rack"),
+            (3, "Deep chain"),
+            (4, "Deep"),
+        ]
+        .map(|(depth, label)| (depth, label))
+    );
+    assert_eq!(list[0].device, Some(outer));
+    assert_eq!(list[1].chain, Some(chains[0]));
+    assert_eq!(list[6].device, Some(deep));
+}
+
+// Spec: racks R21
+#[test]
+fn chain_rows_carry_what_the_list_draws() {
+    let Set {
+        mut shell, midi, ..
+    } = set();
+    select_track(&mut shell, midi);
+    let (rack, chains) = rack_with_chains(&mut shell, "instrument", 2);
+    shell
+        .invoke(
+            "chain.set_gain",
+            json!({ "chain": chains[1], "volume": 0.5 }),
+        )
+        .unwrap();
+    shell
+        .invoke("chain.set_pan", json!({ "chain": chains[1], "pan": -0.25 }))
+        .unwrap();
+    shell
+        .invoke(
+            "chain.set_enabled",
+            json!({ "chain": chains[0], "enabled": false }),
+        )
+        .unwrap();
+    shell
+        .invoke("chain.hot_swap", json!({ "chain": chains[0] }))
+        .unwrap();
+    let rows = frame(&shell, rack).chains;
+    assert!(!rows[0].enabled && rows[0].hot_swap && !rows[1].hot_swap);
+    assert_eq!((rows[1].volume, rows[1].pan), (0.5, -0.25));
+    assert!(rows.iter().all(|r| r.has_mixer));
+    // Arming a device ends the chain's, and the other way round.
+    let device = add_to_chain(&mut shell, chains[1], effect("Gain")).device;
+    shell
+        .invoke("device.hot_swap", json!({ "device": device }))
+        .unwrap();
+    assert!(!frame(&shell, rack).chains[0].hot_swap);
+    shell
+        .invoke("chain.hot_swap", json!({ "chain": chains[1] }))
+        .unwrap();
+    assert!(state(&shell).hot_swap.is_none() && frame(&shell, rack).chains[1].hot_swap);
+    // A MIDI effect rack's chains have no Volume and Pan.
+    let midi_rack = add_to_track(
+        &mut shell,
+        json!({ "kind": { "rack": { "kind": "midi_effect" } }, "name": "Rack", "role": "midi_effect" }),
+    )
+    .device;
+    let id: ChainId = shell.new_id();
+    shell
+        .invoke(
+            "chain.add",
+            json!({ "rack": midi_rack, "index": 0, "chain": { "id": id, "name": "", "devices": [] } }),
+        )
+        .unwrap();
+    assert!(frame(&shell, midi_rack).chains.iter().all(|r| !r.has_mixer));
+}
+
+// Spec: modulation R19
+#[test]
+fn a_copied_rack_maps_its_own_copies_and_a_removed_chain_takes_its_mappings() {
+    use bl_model::modulator::{ModTarget, is_modulator_kind};
+    let Set {
+        mut shell, audio, ..
+    } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 2);
+    let wave = json!({
+        "kind": { "native": { "device_type": "beatlayer.wave_mod" } },
+        "name": "LFO",
+        "role": "audio_effect",
+    });
+    let wave = add_to_chain(&mut shell, chains[0], wave).device;
+    let gain = add_to_chain(&mut shell, chains[0], effect("Gain")).device;
+    let other = add_to_chain(&mut shell, chains[1], effect("Other")).device;
+    let map = |shell: &mut Shell, slot: u8, target: Value| {
+        shell
+            .invoke(
+                "modulator.map",
+                json!({ "device": wave, "slot": slot, "target": target }),
+            )
+            .unwrap();
+    };
+    let param = testing::GAIN_PARAM.0;
+    map(
+        &mut shell,
+        0,
+        json!({ "type": "device", "device": gain, "param": param }),
+    );
+    map(
+        &mut shell,
+        1,
+        json!({ "type": "device", "device": other, "param": param }),
+    );
+    map(
+        &mut shell,
+        2,
+        json!({ "type": "mixer", "track": audio, "param": "pan" }),
+    );
+    // The copy's modulator and its other devices, in chain order.
+    let copied = |shell: &Shell, devices: &[bl_model::Device]| {
+        let doc = shell.editor().document();
+        let wave = devices
+            .iter()
+            .flat_map(bl_model::Device::walk)
+            .find(|d| is_modulator_kind(&d.kind))
+            .unwrap();
+        let targets: Vec<ModTarget> = wave.mappings.iter().map(|m| m.target).collect();
+        doc.check_invariants().unwrap();
+        targets
+    };
+
+    let steps_before = steps(&shell);
+    let copy: DeviceAdded = serde_json::from_value(
+        shell
+            .invoke("device.duplicate", json!({ "device": rack }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(steps(&shell), steps_before + 1);
+    let doc = shell.editor().document();
+    let copy_rack = doc.device(copy.device).unwrap().clone();
+    let copy_gain = copy_rack.chains[0].devices[1].id;
+    let copy_other = copy_rack.chains[1].devices[0].id;
+    assert_eq!(
+        copied(&shell, std::slice::from_ref(&copy_rack)),
+        [
+            ModTarget::Device {
+                device: copy_gain,
+                param: testing::GAIN_PARAM
+            },
+            ModTarget::Device {
+                device: copy_other,
+                param: testing::GAIN_PARAM
+            },
+        ]
+    );
+
+    let steps_before = steps(&shell);
+    let copy: ChainAdded = serde_json::from_value(
+        shell
+            .invoke("chain.duplicate", json!({ "chain": chains[0] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(steps(&shell), steps_before + 1);
+    let chain = shell.editor().document().chain(copy.chain).unwrap().clone();
+    assert_eq!(
+        copied(&shell, &chain.devices),
+        [ModTarget::Device {
+            device: chain.devices[1].id,
+            param: testing::GAIN_PARAM
+        }]
+    );
+
+    shell
+        .invoke("chain.cut", json!({ "chain": chains[1] }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let targets: Vec<ModTarget> = doc
+        .device(wave)
+        .unwrap()
+        .mappings
+        .iter()
+        .map(|m| m.target)
+        .collect();
+    assert!(!targets.contains(&ModTarget::Device {
+        device: other,
+        param: testing::GAIN_PARAM
+    }));
+    assert_eq!(targets.len(), 2);
+}
+
+// Spec: racks R36
+#[test]
+fn zones_save_load_and_undo() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+    } = set();
+    select_track(&mut shell, midi);
+    let (rack, chains) = rack_with_chains(&mut shell, "instrument", 2);
+    let before = steps(&shell);
+    let zone = |kind: &str, low: u8, high: u8, fade_low: u8, fade_high: u8| {
+        json!({ "chain": chains[1], "kind": kind,
+            "zone": { "low": low, "high": high, "fade_low": fade_low, "fade_high": fade_high } })
+    };
+    for args in [
+        zone("key", 36, 72, 6, 0),
+        zone("velocity", 20, 127, 0, 10),
+        zone("select", 2, 8, 0, 3),
+    ] {
+        shell.invoke("chain.set_zone", args).unwrap();
+        assert_eq!(last_step(&shell), "Change Chain Zone");
+    }
+    // The selector and Chain Selector Filters MIDI Ctrl are the rack's
+    // parameters.
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": rack, "param": 0, "value": 5 }),
+        )
+        .unwrap();
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": rack, "param": 1, "value": 1 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), before + 5, "one undo step each");
+    let parameters = shell
+        .run("device.parameters", json!({ "device": rack }))
+        .unwrap();
+    let value = |name: &str| {
+        parameters["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {parameters}"))["value"]
+            .clone()
+    };
+    assert_eq!(value("Chain Selector"), json!(5.0));
+    assert_eq!(value("Chain Selector Filters MIDI Ctrl"), json!(1.0));
+    // The frame the Device View draws carries them.
+    let rack_frame = frame(&shell, rack);
+    assert_eq!(rack_frame.selector, 5);
+    assert!(rack_frame.filters_midi_ctrl);
+    assert_eq!(rack_frame.chains[1].zones.select.high, 8);
+    assert_eq!(rack_frame.chains[0].zones, bl_model::ChainZones::default());
+
+    // A zone the rack's kind doesn't give its chains is refused.
+    assert!(
+        shell
+            .invoke(
+                "chain.set_zone",
+                json!({
+        "chain": chains[1], "kind": "key", "zone": { "low": 50, "high": 40 } })
+            )
+            .is_err()
+    );
+
+    // Reopened, the zones, the selector and the switch are as they were.
+    let folder = std::env::temp_dir().join(format!("bl-zones-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": folder.join("Zones.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let mut reopened = Shell::headless();
+    reopened
+        .run("set.open", json!({ "path": saved["path"] }))
+        .unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    assert_eq!(
+        reopened.editor().document().device(rack),
+        shell.editor().document().device(rack)
+    );
+    let chain = reopened.editor().document().chain(chains[1]).unwrap().zones;
+    assert_eq!(chain.key.fade_low, 6);
+    assert_eq!(chain.velocity.fade_high, 10);
+    assert_eq!((chain.select.low, chain.select.high), (2, 8));
+
+    // Each undoes alone.
+    for _ in 0..5 {
+        shell.invoke("edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(steps(&shell), before);
+    assert_eq!(
+        shell.editor().document().chain(chains[1]).unwrap().zones,
+        bl_model::ChainZones::default()
+    );
+
+    // Which editor shows and Auto Select are view state: not undo steps, and
+    // the set keeps them.
+    shell
+        .invoke(
+            "rack.set_zone_editor",
+            json!({ "rack": rack, "editor": "velocity" }),
+        )
+        .unwrap();
+    shell
+        .invoke("rack.set_auto_select", json!({ "rack": rack }))
+        .unwrap();
+    assert_eq!(steps(&shell), before);
+    let views = frame(&shell, rack).views;
+    assert_eq!(views.zone_editor, Some(bl_model::ZoneKind::Velocity));
+    assert!(views.auto_select);
+    shell
+        .invoke("rack.set_zone_editor", json!({ "rack": rack }))
+        .unwrap();
+    assert_eq!(frame(&shell, rack).views.zone_editor, None);
+    // An audio effect rack has only the chain select editor.
+    select_track(&mut shell, audio);
+    let (effect_rack, _) = rack_with_chains(&mut shell, "audio_effect", 1);
+    assert!(
+        shell
+            .invoke(
+                "rack.set_zone_editor",
+                json!({ "rack": effect_rack, "editor": "key" })
+            )
+            .is_err()
+    );
+    shell
+        .invoke(
+            "rack.set_zone_editor",
+            json!({ "rack": effect_rack, "editor": "select" }),
+        )
+        .unwrap();
+}

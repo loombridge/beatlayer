@@ -43,6 +43,21 @@ pub trait OutputConnection: Send {
     ///
     /// [`MidiError`] if the port refused it.
     fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError>;
+
+    /// Hands the MIDI system one message to send at `at`, the moment its
+    /// frame is heard at the audio interface's output
+    /// (`docs/specs/external-devices.md`, R5). A backend that can schedule
+    /// does (Core MIDI with a time stamp, the ALSA sequencer's queue, a
+    /// timer thread on Windows); the default sends at once. A time already
+    /// past sends at once too.
+    ///
+    /// # Errors
+    ///
+    /// [`MidiError`] if the port refused it.
+    fn send_at(&mut self, bytes: &[u8], at: Instant) -> Result<(), MidiError> {
+        let _ = at;
+        self.send(bytes)
+    }
 }
 
 /// One MIDI system on this machine: it lists ports and opens them.

@@ -9,11 +9,13 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, AutomationTarget, Chain, ChainId, Change, ChangeSet, Channel, Clip,
-    ClipData, ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, EditError, Editor, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
-    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
-    SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Chain, ChainId, Change, ChangeSet,
+    Channel, Clip, ClipData, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash, CountIn,
+    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
+    FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
+    Monitor, Note, Output, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip,
+    TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -51,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        116,
+        165,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -62,8 +64,13 @@ fn every_document_command_is_registered() {
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
-         set_clip_launch_mode, WP-5.1 fifteen for racks and their chains, and WP-5.12 the two \
-         Compare commands"
+         set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
+         their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
+         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
+         three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
+         warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
+         four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
+         WP-3.18 the two for Cue mode and the Cue Volume, and WP-5.3 set_chain_zone"
     );
 
     for op in &ops {
@@ -186,6 +193,13 @@ fn every_command_runs_by_id() {
     let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
     assert!(changes.settings);
     agent.run("mixer.set_crossfader", json!({ "position": 0.75 }));
+    agent.run(
+        "routing.set_cue_out",
+        json!({ "channel": { "type": "pair", "channel": 3 } }),
+    );
+    let changes = agent.run("mixer.set_cue_mode", json!({ "enabled": true }));
+    assert!(changes.settings);
+    agent.run("mixer.set_cue_volume", json!({ "volume": 0.5 }));
     let changes = agent.run(
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
@@ -234,7 +248,8 @@ fn every_command_runs_by_id() {
         routing.input,
         Input::Track {
             track: reverb,
-            tap: Tap::PostFx
+            tap: Tap::PostFx,
+            chain: None,
         }
     );
     assert_eq!(routing.monitor, Monitor::In);
@@ -244,7 +259,30 @@ fn every_command_runs_by_id() {
     );
     assert_eq!(
         document.track(keys).unwrap().routing().midi_output,
-        Some(bass)
+        Some(MidiTo::Track(bass))
+    );
+    // Spec: external-devices R2. A port takes its name and channel, and the
+    // choice reads back as the agent gave it.
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": { "name": "Synth", "channel": 3 } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(keys)
+            .unwrap()
+            .routing()
+            .midi_output,
+        Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 3
+        })
+    );
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": bass }),
     );
     // Ext. In with a channel, and Main's Main Out (WP-2.13): the agent API
     // sets both, as an agent recording from an interface would.
@@ -467,16 +505,46 @@ fn every_command_runs_by_id() {
         "clip.set_loop",
         json!({ "clip": loop_clip, "start": 1.0, "end": 2.0 }),
     );
-    agent.run(
+    // Spec: warping R14. The Loop switch is refused for an unwarped clip,
+    // so an older set's looped clip is made with its data.
+    registry::run(
+        &mut agent.editor,
         "clip.set_loop_enabled",
         json!({ "clip": loop_clip, "enabled": true }),
-    );
+    )
+    .expect_err("an unwarped clip can't loop");
+    let mut looped = match agent
+        .editor
+        .document()
+        .clip(loop_clip)
+        .unwrap()
+        .data
+        .clone()
+    {
+        ClipData::Audio(audio) => audio,
+        ClipData::Midi(_) => panic!("an audio clip"),
+    };
+    looped.looping = true;
+    agent
+        .editor
+        .apply(Command::SetClipData {
+            clip: loop_clip,
+            data: ClipData::Audio(looped),
+        })
+        .unwrap();
     agent.run("clip.set_gain", json!({ "clip": loop_clip, "gain": 0.5 }));
     agent.run(
         "clip.set_fades",
         json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
     );
-    let ClipData::Audio(audio) = agent.editor.document().clip(loop_clip).unwrap().data else {
+    let ClipData::Audio(audio) = agent
+        .editor
+        .document()
+        .clip(loop_clip)
+        .unwrap()
+        .data
+        .clone()
+    else {
         panic!("an audio clip");
     };
     assert_eq!(
@@ -498,6 +566,182 @@ fn every_command_runs_by_id() {
         "clip.set_region",
         json!({ "clip": loop_clip, "start": 0.0, "end": null }),
     );
+    // The warp map (WP-4.1). The clip is looped over seconds 1 to 2 of its
+    // file, and switching Warp on starts it at the set's tempo.
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": true }));
+    let warped = |agent: &Agent| {
+        let ClipData::Audio(audio) = agent
+            .editor
+            .document()
+            .clip(loop_clip)
+            .unwrap()
+            .data
+            .clone()
+        else {
+            panic!("an audio clip");
+        };
+        audio
+    };
+    let audio = warped(&agent);
+    assert!(audio.warp);
+    let ticks_per_second = audio.tempo.unwrap() * quarter as f64 / 60.0;
+    assert_eq!(
+        (audio.loop_start, audio.loop_end),
+        (
+            ticks_per_second.round(),
+            Some((2.0 * ticks_per_second).round())
+        ),
+        "the brace converts to ticks"
+    );
+    // A warped clip's positions are ticks; seconds are refused, and so is
+    // the other way round.
+    let refused = |agent: &mut Agent, id: &str, args: Value| {
+        registry::run(&mut agent.editor, id, args).expect_err("refused")
+    };
+    refused(
+        &mut agent,
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0.0, "end": null }),
+    );
+    agent.run(
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0, "end": null, "ticks": true }),
+    );
+    agent.run(
+        "clip.set_loop",
+        json!({ "clip": loop_clip, "start": quarter, "end": bar, "ticks": true }),
+    );
+    agent.run(
+        "clip.insert_warp_marker",
+        json!({ "clips": [loop_clip], "beat": bar }),
+    );
+    agent.run(
+        "clip.insert_warp_marker",
+        json!({ "clips": [loop_clip], "time": 1.0 }),
+    );
+    agent.run(
+        "clip.shift_warp_marker",
+        json!({ "clips": [loop_clip], "marker": 1, "by": 0.01 }),
+    );
+    agent.run(
+        "clip.move_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [2], "by": quarter / 4 }),
+    );
+    agent.run(
+        "clip.set_segment_bpm",
+        json!({ "clip": loop_clip, "marker": 0, "bpm": 100.0 }),
+    );
+    agent.run(
+        "clip.scale_tempo",
+        json!({ "clip": loop_clip, "factor": 2.0 }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 3);
+    // Transients (WP-4.3): edits by hand, and markers over a range.
+    agent.run(
+        "clip.insert_transient",
+        json!({ "clip": loop_clip, "time": 0.4 }),
+    );
+    agent.run(
+        "clip.move_transient",
+        json!({ "clip": loop_clip, "from": 0.4, "to": 0.45 }),
+    );
+    agent.run(
+        "clip.delete_transients",
+        json!({ "clip": loop_clip, "times": [0.45, 0.9] }),
+    );
+    assert_eq!(warped(&agent).transient_edits.removed, [0.9]);
+    agent.run("clip.reset_transients", json!({ "clip": loop_clip }));
+    assert!(warped(&agent).transient_edits.is_empty());
+    agent.run(
+        "clip.insert_warp_markers",
+        json!({ "clip": loop_clip, "from": 3 * bar, "to": 4 * bar, "transients": [] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 5);
+    agent.run(
+        "clip.delete_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [2] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 4);
+    agent.run(
+        "clip.delete_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [3, 2] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 2);
+    // The loop switch works on a warped clip (WP-4.2).
+    agent.run(
+        "clip.set_loop_enabled",
+        json!({ "clip": loop_clip, "enabled": false }),
+    );
+    agent.run(
+        "clip.set_loop_enabled",
+        json!({ "clip": loop_clip, "enabled": true }),
+    );
+    assert!(warped(&agent).looping);
+    // The warp mode, its controls, and the RAM and HiQ switches (WP-4.2).
+    agent.run(
+        "clip.set_warp_mode",
+        json!({ "clip": loop_clip, "mode": "re_pitch" }),
+    );
+    agent.run(
+        "clip.set_warp_settings",
+        json!({
+            "clip": loop_clip,
+            "beats": { "preserve": "1_bar", "transient_envelope": 60 },
+            "texture": { "flux": 0.0 },
+        }),
+    );
+    agent.run(
+        "clip.set_ram_mode",
+        json!({ "clip": loop_clip, "ram": true }),
+    );
+    agent.run(
+        "clip.set_high_quality",
+        json!({ "clip": loop_clip, "high_quality": false }),
+    );
+    let audio = warped(&agent);
+    assert_eq!(audio.warp_mode, WarpMode::RePitch);
+    assert_eq!(
+        (
+            audio.warp_settings.beats.preserve,
+            audio.warp_settings.beats.transient_envelope,
+            audio.warp_settings.texture.flux,
+            audio.warp_settings.texture.grain_size,
+        ),
+        (Preserve::Bar, 60, 0.0, 65.0)
+    );
+    assert!(audio.ram && !audio.high_quality);
+    refused(
+        &mut agent,
+        "clip.set_warp_settings",
+        json!({ "clip": loop_clip, "tones": { "grain_size": 5.0 } }),
+    );
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": false }));
+    assert!(!warped(&agent).looping, "unwarping stops the loop");
+    let audio = warped(&agent);
+    assert!(
+        !audio.warp && audio.warp_markers.len() == 2,
+        "the map stays"
+    );
+    // Auto-warp's commands (WP-4.9).
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": true }));
+    agent.run(
+        "clip.set_1_1_1_here",
+        json!({ "clip": loop_clip, "marker": 0 }),
+    );
+    agent.run(
+        "clip.warp_from_here",
+        json!({ "clip": loop_clip, "marker": 0, "method": "bpm", "bpm": 100.0 }),
+    );
+    let file = json!({ "seconds": 4.0, "bpm": null, "beats": [] });
+    agent.run(
+        "clip.warp_as_loop",
+        json!({ "clip": loop_clip, "analysis": file }),
+    );
+    agent.run(
+        "clip.warp_selection_as_loop",
+        json!({ "clip": loop_clip, "from": 0.5, "to": 2.5 }),
+    );
+    assert!(warped(&agent).looping);
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -583,6 +827,11 @@ fn every_command_runs_by_id() {
         "clip.set_launch_mode",
         json!({ "clip": slot_riff, "mode": "gate" }),
     );
+    agent.run(
+        "clip.set_follow_actions",
+        json!({ "clip": slot_riff, "enabled": true, "action_b": "jump", "jump_b": 99,
+            "chance_a": 70 }),
+    );
     assert_eq!(
         agent.editor.document().clip(slot_riff).unwrap().launch,
         ClipLaunch {
@@ -590,12 +839,23 @@ fn every_command_runs_by_id() {
             quantization: Some(LaunchQuantization::Eighth),
             velocity_amount: 0.5,
             mode: LaunchMode::Gate,
+            follow: FollowActions {
+                enabled: true,
+                action_b: FollowAction::Jump,
+                jump_b: 8,
+                chance_a: 70,
+                ..FollowActions::default()
+            },
         }
     );
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
+    agent.run(
+        "scene.set_follow_actions",
+        json!({ "scene": first, "enabled": true, "linked": false, "time": 2822400 }),
+    );
     agent.run(
         "scene.set_time_signature",
         json!({ "scene": first, "signature": { "numerator": 7, "denominator": 8 } }),
@@ -707,10 +967,189 @@ fn every_command_runs_by_id() {
     assert_eq!((device.name.as_str(), device.enabled), ("Tone", false));
     assert_eq!(device.params.get(&ParamId(3)), Some(&-12.5));
     assert_eq!(device.params.get(&ParamId(1)), Some(&0.25));
-    let media = device.media.expect("the sample it plays");
+    let media = device.media_at(0).expect("the sample it plays");
     assert_eq!(media, ContentHash([3u8; 32]));
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
+
+    // WP-5.13: a multisampler's layers.
+    let layer = |name: &str| {
+        json!({ "id": 1, "name": name, "media": "0505050505050505050505050505050505050505050505050505050505050505",
+            "length": 48000, "sample_rate": 48000, "channels": 1,
+            "key": { "low": 0, "high": 127 }, "velocity": { "low": 1, "high": 127 },
+            "select": { "low": 0, "high": 127 }, "root_key": 60, "volume": 1.0,
+            "start": 0, "end": 48000, "loop_start": 0, "loop_end": 48000, "release_loop": 48000 })
+    };
+    agent.run(
+        "device.insert_layers",
+        json!({ "device": eq, "index": null, "layers": [layer("Low"), layer("Mid"), layer("High")] }),
+    );
+    let ids: Vec<u32> = agent
+        .editor
+        .document()
+        .device(eq)
+        .unwrap()
+        .layers
+        .list
+        .iter()
+        .map(|l| l.id.0)
+        .collect();
+    assert_eq!(ids, [1, 2, 3], "the device numbers its layers");
+    agent.run(
+        "device.rename_layer",
+        json!({ "device": eq, "layer": 2, "name": "Middle" }),
+    );
+    agent.run(
+        "device.duplicate_layers",
+        json!({ "device": eq, "layers": [2] }),
+    );
+    agent.run(
+        "device.move_layers",
+        json!({ "device": eq, "layers": [3], "index": 0 }),
+    );
+    agent.run(
+        "device.sort_layers",
+        json!({ "device": eq, "by": "name", "descending": false }),
+    );
+    agent.run(
+        "device.set_layer_zone",
+        json!({ "device": eq, "kind": "key", "zones": [
+            { "layer": 1, "zone": { "low": 0, "high": 40, "fade_high": 8 } },
+            { "layer": 2, "zone": { "low": 41, "high": 127 } }] }),
+    );
+    agent.run(
+        "device.update_layers",
+        json!({ "device": eq, "layers": [1, 2], "settings": { "root_key": 48, "pan": -10.0, "sustain": "loop" } }),
+    );
+    agent.run(
+        "device.set_layer_media",
+        json!({ "device": eq, "layer": 3,
+            "media": "0606060606060606060606060606060606060606060606060606060606060606",
+            "length": 96000, "sample_rate": 48000, "channels": 2 }),
+    );
+    agent.run(
+        "device.distribute_layers",
+        json!({ "device": eq, "layers": [], "how": "equally", "kind": "key" }),
+    );
+    // WP-5.15: a layer's edits, and a processed copy that holds them.
+    agent.run(
+        "device.add_sample_edit",
+        json!({ "device": eq, "layer": 3, "edit": { "kind": "cut", "range": { "from": 0, "to": 6000 } } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .layers
+            .get(bl_model::LayerId(3))
+            .unwrap()
+            .length,
+        90_000
+    );
+    agent.run(
+        "device.add_sample_edit",
+        json!({ "device": eq, "layer": null, "edit": { "kind": "reverse" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .sample_edits
+            .len(),
+        1
+    );
+    agent.run(
+        "device.clear_sample_edits",
+        json!({ "device": eq, "layer": null, "length": 0 }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .sample_edits
+            .is_empty()
+    );
+    agent.run(
+        "device.set_processed_layer_sample",
+        json!({ "device": eq, "layer": 3,
+            "media": "0707070707070707070707070707070707070707070707070707070707070707",
+            "length": 90000, "crop": null }),
+    );
+    agent.run(
+        "device.clear_sample_edits",
+        json!({ "device": eq, "layer": 3, "length": 96000 }),
+    );
+    agent.run(
+        "device.delete_layers",
+        json!({ "device": eq, "layers": [2] }),
+    );
+    agent.run(
+        "device.set_layer_options",
+        json!({ "device": eq, "ram_mode": true, "snap": true, "linear_loop_fades": null }),
+    );
+    let layers = &agent.editor.document().device(eq).unwrap().layers;
+    assert_eq!(layers.list.len(), 3);
+    assert!(layers.ram_mode && layers.snap && !layers.linear_loop_fades);
+    // WP-5.10: a modulator maps a parameter on another track, replaces its
+    // mapping, edits its shape and unmaps; deleting the target takes the
+    // mapping.
+    let wave: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": drums, "index": 0, "device": {
+            "id": wave, "name": "Shaper", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.curve_mod" } },
+        } }),
+    );
+    let victim: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": victim, "name": "Gone", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.eq" } },
+        } }),
+    );
+    agent.run(
+        "modulator.map",
+        json!({ "device": wave, "slot": 0,
+            "target": { "type": "device", "device": victim, "param": 3 } }),
+    );
+    agent.run(
+        "modulator.map",
+        json!({ "device": wave, "slot": 1,
+            "target": { "type": "mixer", "track": reverb, "param": "volume" } }),
+    );
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        2
+    );
+    agent.run(
+        "modulator.set_shape",
+        json!({ "device": wave, "points": [
+            { "x": 0.0, "y": 0.0 }, { "x": 0.5, "y": 1.0, "bend": 0.5 } ] }),
+    );
+    agent.run("modulator.unmap", json!({ "device": wave, "slot": 1 }));
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        1
+    );
+    agent.run("device.remove", json!({ "device": victim }));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(wave)
+            .unwrap()
+            .mappings
+            .is_empty()
+    );
+    agent.run("device.remove", json!({ "device": wave }));
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
@@ -742,6 +1181,71 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_sidechain_listen",
         json!({ "device": duck, "listen": true }),
+    );
+    // A device with a MIDI sidechain input, listening to a MIDI track.
+    let hear: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": hear, "name": "Hear", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.hear" } },
+            "midi_sidechain": {},
+        } }),
+    );
+    agent.run(
+        "device.set_midi_sidechain_source",
+        json!({ "device": hear }),
+    );
+    // An external device (WP-5.34): routed to a port, then to samples of
+    // latency; the choices read back.
+    let outboard: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": outboard, "name": "Outboard", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.outboard" } },
+            "external": {},
+        } }),
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "midi_to": { "type": "port", "name": "Synth" },
+            "channel": 5, "audio_from": { "type": "pair", "channel": 3 } }),
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "hardware_latency": { "unit": "samples", "value": 96 } }),
+    );
+    let external = agent
+        .editor
+        .document()
+        .device(outboard)
+        .unwrap()
+        .external
+        .clone()
+        .unwrap();
+    assert_eq!(external.port.as_deref(), Some("Synth"));
+    assert_eq!(external.channel, 5);
+    assert_eq!(external.audio_from, Channel::Pair(3));
+    assert_eq!(
+        external.hardware_latency,
+        HardwareLatency::Samples { value: 96 }
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": outboard, "midi_to": { "type": "none" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(outboard)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .port,
+        None
     );
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
@@ -805,6 +1309,57 @@ fn every_command_runs_by_id() {
         json!({ "chain": first, "enabled": false }),
     );
     agent.run("chain.set_solo", json!({ "chain": second, "solo": true }));
+    // WP-5.6: a drum rack's chain takes its notes, choke group and sends,
+    // and its return chain a place to send its output.
+    let drum: DeviceId = agent.editor.new_id();
+    let (pad, ret): (ChainId, ChainId) = (agent.editor.new_id(), agent.editor.new_id());
+    let midi: TrackId = agent.editor.new_id();
+    agent.run(
+        "track.create",
+        json!({ "id": midi, "kind": "midi", "name": "Drums", "parent": null, "index": 0 }),
+    );
+    let return_track: TrackId = agent.editor.new_id();
+    agent.run(
+        "track.create",
+        json!({ "id": return_track, "kind": "return", "name": "Reverb", "parent": null, "index": 0 }),
+    );
+    agent
+        .editor
+        .apply(Command::InsertDevice {
+            track: midi,
+            index: 0,
+            device: Device::rack(drum, RackKind::Drum)
+                .with_chain(Chain::for_pad(pad, "Kick", 36))
+                .with_chain(Chain::new_return(ret, "Room")),
+        })
+        .unwrap();
+    agent.run(
+        "chain.set_receive",
+        json!({ "chain": pad, "receive": { "note": 38 } }),
+    );
+    agent.run("chain.set_play", json!({ "chain": pad, "play": 62 }));
+    agent.run("chain.set_choke", json!({ "chain": pad, "choke": 2 }));
+    agent.run(
+        "chain.set_send",
+        json!({ "chain": pad, "to": ret, "level": 0.5 }),
+    );
+    agent.run(
+        "chain.set_audio_to",
+        json!({ "chain": ret, "track": return_track }),
+    );
+    let kick = agent.editor.document().chain(pad).unwrap();
+    assert_eq!(
+        (kick.receive, kick.play, kick.choke, kick.send(ret)),
+        (bl_model::Receive::Note(38), 62, Some(2), 0.5)
+    );
+    assert_eq!(
+        agent.editor.document().chain(ret).unwrap().audio_to,
+        Some(return_track)
+    );
+    agent.run(
+        "chain.set_zone",
+        json!({ "chain": first, "kind": "select", "zone": { "low": 1, "high": 9, "fade_high": 3 } }),
+    );
     agent.run(
         "chain.move",
         json!({ "chain": second, "rack": rack, "index": 0 }),
@@ -816,6 +1371,15 @@ fn every_command_runs_by_id() {
     );
     assert_eq!((direct.mixer.volume, direct.mixer.pan), (0.5, -0.25));
     assert!(!direct.mixer.enabled);
+    assert_eq!(
+        direct.zones.select,
+        bl_model::Zone {
+            low: 1,
+            high: 9,
+            fade_low: 0,
+            fade_high: 3
+        }
+    );
     let order: Vec<ChainId> = agent
         .editor
         .document()
@@ -872,7 +1436,8 @@ fn every_command_runs_by_id() {
             enabled: true,
             input: Input::Track {
                 track: drums,
-                tap: Tap::PostFx
+                tap: Tap::PostFx,
+                chain: None,
             },
             gain: 2.0,
             mix: 0.5,
@@ -1295,6 +1860,11 @@ fn schemas_match_what_commands_serialise() {
             "mixer.set_crossfader",
             Command::SetCrossfader { position: 0.25 },
         ),
+        ("mixer.set_cue_mode", Command::SetCueMode { enabled: true }),
+        (
+            "mixer.set_cue_volume",
+            Command::SetCueVolume { volume: 0.5 },
+        ),
         (
             "mixer.set_crossfade_assign",
             Command::SetCrossfadeAssign {
@@ -1369,6 +1939,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_breakpoint",
             Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Volume,
@@ -1380,6 +1951,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_curve",
             Command::SetClipEnvelopeCurve {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Device {
                     device,
@@ -1392,6 +1964,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.move_envelope_breakpoint",
             Command::MoveClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Pan,
@@ -1404,6 +1977,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.delete_envelope_breakpoint",
             Command::DeleteClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Mute,
@@ -1414,6 +1988,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.delete_envelope",
             Command::DeleteClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Send {
                     to: TrackId(fresh()),
@@ -1423,6 +1998,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_linked",
             Command::SetClipEnvelopeLinked {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Volume,
@@ -1437,6 +2013,7 @@ fn schemas_match_what_commands_serialise() {
                 input: Input::Track {
                     track: TrackId(fresh()),
                     tap: Tap::PreFx,
+                    chain: None,
                 },
                 channel: None,
             },
@@ -1562,6 +2139,7 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 start: 0.125,
                 end: Some(1.5),
+                ticks: false,
             },
         ),
         (
@@ -1570,6 +2148,7 @@ fn schemas_match_what_commands_serialise() {
                 clip,
                 start: 0.5,
                 end: None,
+                ticks: false,
             },
         ),
         (
@@ -1604,9 +2183,174 @@ fn schemas_match_what_commands_serialise() {
                 fade_out: 1.5,
             },
         ),
+        ("clip.set_warp", Command::SetClipWarp { clip, warp: true }),
+        (
+            "clip.set_warp_mode",
+            Command::SetClipWarpMode {
+                clip,
+                mode: WarpMode::ComplexPro,
+            },
+        ),
+        (
+            "clip.set_warp_settings",
+            Command::SetClipWarpSettings {
+                clip,
+                beats: Some(BeatsUpdate {
+                    preserve: Some(Preserve::Sixteenth),
+                    transient_loop_mode: None,
+                    transient_envelope: Some(50),
+                }),
+                tones: Some(TonesUpdate {
+                    grain_size: Some(40.0),
+                }),
+                texture: None,
+                complex_pro: Some(ComplexProUpdate {
+                    formants: Some(25.0),
+                    envelope: Some(256),
+                }),
+            },
+        ),
+        (
+            "clip.set_ram_mode",
+            Command::SetClipRamMode { clip, ram: true },
+        ),
+        (
+            "clip.set_high_quality",
+            Command::SetClipHighQuality {
+                clip,
+                high_quality: false,
+            },
+        ),
+        (
+            "clip.insert_warp_marker",
+            Command::InsertWarpMarker {
+                clips: vec![clip],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+                pin_neighbours: false,
+                transients: None,
+            },
+        ),
+        (
+            "clip.move_warp_markers",
+            Command::MoveWarpMarkers {
+                clips: vec![clip],
+                markers: vec![0, 1],
+                by: Ticks::SIXTEENTH,
+            },
+        ),
+        (
+            "clip.shift_warp_marker",
+            Command::ShiftWarpMarker {
+                clips: vec![clip],
+                marker: 1,
+                by: -0.25,
+            },
+        ),
+        (
+            "clip.delete_warp_markers",
+            Command::DeleteWarpMarkers {
+                clips: vec![clip],
+                markers: vec![1],
+            },
+        ),
+        (
+            "clip.insert_warp_markers",
+            Command::InsertWarpMarkers {
+                clip,
+                from: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+                transients: Some(vec![0.5, 1.0]),
+            },
+        ),
+        (
+            "clip.insert_transient",
+            Command::InsertTransient { clip, time: 0.5 },
+        ),
+        (
+            "clip.delete_transients",
+            Command::DeleteTransients {
+                clip,
+                times: vec![0.5],
+            },
+        ),
+        ("clip.reset_transients", Command::ResetTransients { clip }),
+        (
+            "clip.move_transient",
+            Command::MoveTransient {
+                clip,
+                from: 0.5,
+                to: 0.6,
+            },
+        ),
+        (
+            "clip.set_segment_bpm",
+            Command::SetSegmentBpm {
+                clip,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+        ),
+        (
+            "clip.scale_tempo",
+            Command::ScaleTempo { clip, factor: 0.5 },
+        ),
+        (
+            "clip.set_1_1_1_here",
+            Command::SetOneOneOneHere {
+                clip,
+                at: WarpPoint {
+                    marker: Some(0),
+                    ..WarpPoint::default()
+                },
+            },
+        ),
+        (
+            "clip.warp_from_here",
+            Command::WarpFromHere {
+                clip,
+                at: WarpPoint {
+                    beat: Some(Ticks::WHOLE),
+                    ..WarpPoint::default()
+                },
+                method: WarpFrom::StartAt,
+                bpm: Some(100.0),
+                analysis: Some(FileBeats {
+                    seconds: 4.0,
+                    bpm: Some(120.0),
+                    beats: vec![0.0, 0.5, 1.0],
+                }),
+            },
+        ),
+        (
+            "clip.warp_as_loop",
+            Command::WarpAsLoop {
+                clip,
+                analysis: None,
+            },
+        ),
+        (
+            "clip.warp_selection_as_loop",
+            Command::WarpSelectionAsLoop {
+                clip,
+                from: 0.5,
+                to: 2.5,
+            },
+        ),
         (
             "clip.set_legato",
             Command::SetClipLegato { clip, legato: true },
+        ),
+        (
+            "clip.set_follow_actions",
+            Command::SetClipFollowActions {
+                clip,
+                patch: FollowPatch {
+                    action_a: Some(FollowAction::Stop),
+                    chance_a: Some(25),
+                    ..FollowPatch::default()
+                },
+            },
         ),
         (
             "clip.set_launch_quantization",
@@ -1665,6 +2409,7 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
+                shape: None,
             },
         ),
         (
@@ -1687,6 +2432,171 @@ fn schemas_match_what_commands_serialise() {
             Command::SetDeviceSample {
                 device,
                 media: Some(ContentHash([3u8; 32])),
+                slot: 0,
+            },
+        ),
+        (
+            "device.insert_layers",
+            Command::InsertLayers {
+                device,
+                index: Some(0),
+                layers: vec![bl_model::Layer::new(
+                    bl_model::LayerId(1),
+                    "Kick",
+                    ContentHash([4u8; 32]),
+                    48_000,
+                    48_000,
+                    2,
+                )],
+            },
+        ),
+        (
+            "device.delete_layers",
+            Command::DeleteLayers {
+                device,
+                layers: vec![bl_model::LayerId(1)],
+            },
+        ),
+        (
+            "device.duplicate_layers",
+            Command::DuplicateLayers {
+                device,
+                layers: vec![bl_model::LayerId(1)],
+            },
+        ),
+        (
+            "device.rename_layer",
+            Command::RenameLayer {
+                device,
+                layer: bl_model::LayerId(1),
+                name: "Snare".to_owned(),
+            },
+        ),
+        (
+            "device.move_layers",
+            Command::MoveLayers {
+                device,
+                layers: vec![bl_model::LayerId(1)],
+                index: 2,
+            },
+        ),
+        (
+            "device.sort_layers",
+            Command::SortLayers {
+                device,
+                by: bl_model::LayerSort::Key,
+                descending: true,
+            },
+        ),
+        (
+            "device.set_layer_zone",
+            Command::SetLayerZones {
+                device,
+                kind: bl_model::ZoneKind::Velocity,
+                zones: vec![bl_model::LayerZone {
+                    layer: bl_model::LayerId(1),
+                    zone: bl_model::Zone {
+                        low: 1,
+                        high: 100,
+                        fade_low: 3,
+                        fade_high: 0,
+                    },
+                }],
+            },
+        ),
+        (
+            "device.update_layers",
+            Command::UpdateLayers {
+                device,
+                layers: vec![bl_model::LayerId(1)],
+                settings: bl_model::LayerSettings {
+                    root_key: Some(48),
+                    sustain: Some(bl_model::SustainMode::BackAndForth),
+                    ..Default::default()
+                },
+            },
+        ),
+        (
+            "modulator.map",
+            Command::MapModulator {
+                device,
+                slot: 3,
+                target: bl_model::modulator::ModTarget::Device {
+                    device,
+                    param: ParamId(2),
+                },
+            },
+        ),
+        (
+            "device.set_layer_media",
+            Command::SetLayerMedia {
+                device,
+                layer: bl_model::LayerId(1),
+                media: ContentHash([5u8; 32]),
+                length: 1000,
+                sample_rate: 44_100,
+                channels: 1,
+            },
+        ),
+        (
+            "device.distribute_layers",
+            Command::DistributeLayers {
+                device,
+                layers: vec![],
+                how: bl_model::Distribution::AroundRootKey,
+                kind: bl_model::ZoneKind::Key,
+            },
+        ),
+        (
+            "device.add_sample_edit",
+            Command::AddSampleEdit {
+                device,
+                layer: None,
+                edit: bl_model::SampleEdit {
+                    kind: bl_model::SampleEditKind::FadeOut,
+                    range: Some(bl_model::SampleRange { from: 10, to: 20 }),
+                },
+            },
+        ),
+        (
+            "device.clear_sample_edits",
+            Command::ClearSampleEdits {
+                device,
+                layer: Some(bl_model::LayerId(1)),
+                length: 1000,
+            },
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Command::SetProcessedLayerSample {
+                device,
+                layer: bl_model::LayerId(1),
+                media: ContentHash([6u8; 32]),
+                length: 900,
+                crop: Some(bl_model::SampleRange {
+                    from: 100,
+                    to: 1000,
+                }),
+            },
+        ),
+        (
+            "device.set_layer_options",
+            Command::SetLayerOptions {
+                device,
+                ram_mode: Some(true),
+                snap: None,
+                linear_loop_fades: Some(true),
+            },
+        ),
+        (
+            "modulator.unmap",
+            Command::UnmapModulator { device, slot: 3 },
+        ),
+        (
+            "modulator.set_shape",
+            Command::SetShape {
+                device,
+                points: bl_model::modulator::shape_preset(3).unwrap(),
             },
         ),
         (
@@ -1696,6 +2606,7 @@ fn schemas_match_what_commands_serialise() {
                 input: Input::Track {
                     track,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
             },
         ),
@@ -1719,6 +2630,25 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSidechainListen {
                 device,
                 listen: true,
+            },
+        ),
+        (
+            "device.set_midi_sidechain_source",
+            Command::SetMidiSidechainSource {
+                device,
+                track: None,
+            },
+        ),
+        (
+            "device.set_external",
+            Command::SetExternal {
+                device,
+                midi_to: Some(ExternalPort::Port {
+                    name: "Synth".to_owned(),
+                }),
+                channel: Some(2),
+                audio_from: Some(Channel::Pair(3)),
+                hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
             },
         ),
         (
@@ -1831,6 +2761,55 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "chain.set_zone",
+            Command::SetChainZone {
+                chain: ChainId(fresh_id),
+                kind: bl_model::ZoneKind::Select,
+                zone: bl_model::Zone {
+                    low: 0,
+                    high: 10,
+                    fade_low: 0,
+                    fade_high: 4,
+                },
+            },
+        ),
+        (
+            "chain.set_receive",
+            Command::SetChainReceive {
+                chain: ChainId(fresh_id),
+                receive: bl_model::Receive::Note(38),
+            },
+        ),
+        (
+            "chain.set_play",
+            Command::SetChainPlay {
+                chain: ChainId(fresh_id),
+                play: 62,
+            },
+        ),
+        (
+            "chain.set_choke",
+            Command::SetChainChoke {
+                chain: ChainId(fresh_id),
+                choke: Some(2),
+            },
+        ),
+        (
+            "chain.set_send",
+            Command::SetChainSend {
+                chain: ChainId(fresh_id),
+                to: ChainId(fresh_id),
+                level: 0.5,
+            },
+        ),
+        (
+            "chain.set_audio_to",
+            Command::SetChainAudioTo {
+                chain: ChainId(fresh_id),
+                track: Some(TrackId(fresh_id)),
+            },
+        ),
+        (
             "transport.set_punch_in",
             Command::SetPunchIn { enabled: true },
         ),
@@ -1927,6 +2906,17 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "scene.set_follow_actions",
+            Command::SetSceneFollowActions {
+                scene,
+                patch: FollowPatch {
+                    enabled: Some(true),
+                    time: Some(Ticks::WHOLE),
+                    ..FollowPatch::default()
+                },
+            },
+        ),
+        (
             "scene.set_time_signature",
             Command::SetSceneTimeSignature {
                 scene,
@@ -1979,7 +2969,7 @@ fn bad_requests_change_nothing() {
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 16] = [
+    let cases: [(&str, Value, Expected<'_>); 18] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -2046,6 +3036,19 @@ fn bad_requests_change_nothing() {
             matches!(
                 e,
                 RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        // Spec: mixer R24, R27
+        ("mixer.set_cue_volume", json!({ "volume": 2.5 }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        ("mixer.set_cue_mode", json!({ "enabled": true }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::CueOverlapsMain))
             )
         }),
         (
@@ -2200,8 +3203,21 @@ fn bindings_follow_the_spec() {
         "transport.set_metronome_enabled",
         // WP-5.1: Option-click on a rack's Device Activator (S-DEV-003).
         "device.set_enabled_all",
+        // WP-5.2: Rename in a rack's chain list (S-EDIT-008).
+        "chain.rename",
+        // WP-4.10: the Sample Editor's keys that name no argument but the
+        // clip (S-SAMPLE-009 to S-SAMPLE-012).
+        "clip.insert_warp_marker",
+        "clip.delete_warp_markers",
+        "clip.insert_transient",
+        "clip.delete_transients",
     ]
     .into_iter()
     .collect();
     assert_eq!(bound, expected, "only these commands have Live shortcuts");
+    // Spec: sample-editor R10
+    assert_eq!(bindings("clip.insert_warp_marker"), ["S-SAMPLE-009"]);
+    assert_eq!(bindings("clip.delete_warp_markers"), ["S-SAMPLE-010"]);
+    assert_eq!(bindings("clip.insert_transient"), ["S-SAMPLE-011"]);
+    assert_eq!(bindings("clip.delete_transients"), ["S-SAMPLE-012"]);
 }

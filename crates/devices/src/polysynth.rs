@@ -1,4 +1,4 @@
-//! Cascade, the native polysynth (WP-2.17): two band-limited oscillators
+//! Drift, the native polysynth (WP-2.17): two band-limited oscillators
 //! with their shapes, a noise source, a zero-delay-feedback low-pass and
 //! high-pass filter with drive and key tracking, the amplifier and
 //! modulation envelopes, an LFO with its shapes and time modes, the
@@ -40,7 +40,7 @@ use lspk_wavetable::{Cache, FRAME_SIZE, SharedTable, Wavetable};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Cascade's device type.
+/// Drift's device type.
 pub const POLYSYNTH: &str = "beatlayer.cascade";
 
 /// Oscillator 1's switch.
@@ -320,7 +320,7 @@ const MODE_RATIO: usize = 1;
 const MODE_TIME: usize = 2;
 const MODE_SYNC: usize = 3;
 
-/// The Cascade device type.
+/// The Drift device type.
 #[must_use]
 pub fn polysynth_type() -> DeviceType {
     let time = |id, name: &str, default: f64| {
@@ -603,16 +603,16 @@ pub fn polysynth_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(POLYSYNTH, "Cascade", DeviceRole::Instrument)
+    DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds Cascade to `registry`.
+/// Adds Drift to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, polysynth_type(), |_, config| make(config));
 }
 
-/// Makes a Cascade for `config`'s rate, channels, and block size. Every
+/// Makes a Drift for `config`'s rate, channels, and block size. Every
 /// buffer and table it needs is made here, off the audio thread.
 #[must_use]
 pub fn make(config: &NodeConfig) -> PolySynth {
@@ -761,7 +761,7 @@ struct Route {
 
 /// The modulation routes of a stretch: the Mod section's three slots and
 /// the dedicated Shape, Pitch, Freq and LFO slots. A slot whose source is
-/// Off, or whose amount is zero, is absent, so a fresh Cascade is inert.
+/// Off, or whose amount is zero, is absent, so a fresh Drift is inert.
 #[derive(Clone, Copy, Default)]
 struct Routes {
     all: [Option<Route>; 9],
@@ -924,7 +924,7 @@ impl Lfo {
     }
 }
 
-/// Cascade's audio-thread half.
+/// Drift's audio-thread half.
 pub struct PolySynth {
     voices: Voices,
     synth: Synth,
@@ -988,6 +988,20 @@ impl NativeDevice for PolySynth {
                     expression: NoteExpression::Bend,
                     ..
                 } if !self.synth.note_pb => continue,
+                // Spec: device-framework R39. The pitch wheel and the mod
+                // wheel reach the voice manager as the MIDI they are.
+                NoteKind::Control { .. }
+                | NoteKind::PitchBend { .. }
+                | NoteKind::ChannelPressure { .. } => {
+                    let Some(message) = note.message() else {
+                        continue;
+                    };
+                    Event::Midi {
+                        time: note.offset,
+                        port: 0,
+                        data: message.padded(),
+                    }
+                }
                 NoteKind::Expression { expression, value } => {
                     let (expression, value) = match expression {
                         // Beatlayer carries a bend as the kit's tuning
@@ -1016,6 +1030,9 @@ impl NativeDevice for PolySynth {
             // when an input path brings one.
             settings.mpe.enabled = self.synth.note_pb;
             settings.mpe.bend_range = self.synth.pb_range.clamp(1.0, 96.0);
+            // The pitch wheel moves every note by the same range.
+            settings.bend_up = settings.mpe.bend_range;
+            settings.bend_down = -settings.mpe.bend_range;
         }
         let (voices, synth) = (&mut self.voices, &mut self.synth);
         voices.process(self.events.iter().copied(), frames, synth);

@@ -326,7 +326,7 @@ impl View<'_> {
         if let ClipData::Midi(midi) = &clip.data
             && self.detail == Detail::Full
         {
-            let mut notes: Vec<_> = midi.notes.iter().copied().collect();
+            let mut notes: Vec<_> = midi.notes.iter().cloned().collect();
             notes.sort_by_key(|note| (note.start, note.key));
             value["content"]["notes"] = self.page.slice(notes);
         }
@@ -358,16 +358,35 @@ impl View<'_> {
             let chains: Vec<Value> = device
                 .chains
                 .iter()
+                .filter(|c| !c.is_return)
                 .map(|c| self.chain_summary(c))
                 .collect();
             value["chains"] = json!(chains);
+            // A drum rack's return chains (drum racks spec, R27).
+            if device.rack_kind() == Some(bl_model::RackKind::Drum) {
+                let returns: Vec<Value> = device
+                    .chains
+                    .iter()
+                    .filter(|c| c.is_return)
+                    .map(|c| self.chain_summary(c))
+                    .collect();
+                value["returns"] = json!(returns);
+            }
         }
         value
     }
 
     fn chain_summary(&self, chain: &Chain) -> Value {
+        let zone = |z: bl_model::Zone| {
+            json!({
+                "low": z.low,
+                "high": z.high,
+                "fade_low": z.fade_low,
+                "fade_high": z.fade_high,
+            })
+        };
         let mixer = &chain.mixer;
-        json!({
+        let mut value = json!({
             "id": chain.id,
             "name": chain.name,
             "colour": chain.colour,
@@ -379,8 +398,31 @@ impl View<'_> {
                 "enabled": mixer.enabled,
                 "solo": mixer.solo,
             },
+            "zones": {
+                "key": zone(chain.zones.key),
+                "velocity": zone(chain.zones.velocity),
+                "select": zone(chain.zones.select),
+            },
             "devices": chain.devices.iter().map(|d| self.device_summary(d)).collect::<Vec<_>>(),
-        })
+        });
+        // What only a drum rack's chains have (drum racks spec, R27); a
+        // chain of any other rack holds the defaults.
+        if self
+            .document
+            .chain_rack(chain.id)
+            .and_then(Device::rack_kind)
+            == Some(bl_model::RackKind::Drum)
+        {
+            if chain.is_return {
+                value["audio_to"] = json!(chain.audio_to);
+            } else {
+                value["receive"] = json!(chain.receive);
+                value["play"] = json!(chain.play);
+                value["choke"] = json!(chain.choke);
+                value["sends"] = json!(chain.sends);
+            }
+        }
+        value
     }
 
     fn chain(&self, chain: &Chain) -> Value {
@@ -402,6 +444,27 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // A multisampler's layers and the options of its layer list
+        // (WP-5.13, R30).
+        if !device.layers.is_default() {
+            let layers: Vec<Value> = device.layers.list.iter().map(|l| json!(l)).collect();
+            value["layers"] = json!({
+                "count": layers.len(),
+                "ram_mode": device.layers.ram_mode,
+                "snap": device.layers.snap,
+                "linear_loop_fades": device.layers.linear_loop_fades,
+                "list": self.page.slice(layers),
+            });
+        }
+        // Spec: modulation R18. A modulator's mappings, which
+        // `modulator.map` and `modulator.unmap` change, and a Shaper's
+        // shape.
+        if bl_model::modulator::is_modulator_kind(&device.kind) {
+            value["mappings"] = json!(device.mappings);
+            if let Some(shape) = &device.shape {
+                value["shape"] = json!(shape);
+            }
+        }
         if device.can_compare() {
             // Spec: device-compare R11.
             let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {
@@ -585,6 +648,12 @@ fn target_label(target: &AutomationTarget) -> String {
                 .and_then(|name| name.as_str().map(str::to_owned))
                 .unwrap_or_default()
         ),
+        AutomationTarget::ChainSend { chain, to } => {
+            format!("chain {} send {}", chain.0.get(), to.0.get())
+        }
+        AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
+        AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
+        AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),
     }
 }
 

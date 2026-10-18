@@ -16,8 +16,8 @@ use std::path::Path;
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, LaunchQuantization, MidiData,
-    SceneId, TrackId,
+    ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, LaunchQuantization, MidiData, SceneId,
+    TrackId,
 };
 use bl_shell_spec::session_view::{
     self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
@@ -56,6 +56,9 @@ pub struct Context<'a> {
     /// Whether a new clip's edges fade (Settings ▸ Create Fades on Clip
     /// Edges).
     pub edge_fades: bool,
+    /// What a new clip's warp settings are made from (the warping spec,
+    /// R33).
+    pub warping: crate::auto_warp::Warping<'a>,
     /// The launch mode a new clip starts with (Settings ▸ Default Launch
     /// Mode).
     pub launch_mode: LaunchMode,
@@ -431,6 +434,46 @@ impl SessionView {
                 })?;
                 Ok(edit_outcome(changes))
             }
+            ids::TOGGLE_FOLLOW_ACTIONS => {
+                no_args(args)?;
+                let selected: Vec<_> = self
+                    .slots
+                    .iter()
+                    .filter_map(|slot| ctx.editor.document().slot(slot.track, slot.scene))
+                    .map(|clip| (clip.id, clip.launch.follow.enabled))
+                    .collect();
+                if selected.is_empty() {
+                    return Ok(self.state_outcome());
+                }
+                // Spec: follow-actions R15. Mixed states go all on, and all
+                // on goes all off.
+                let enabled = selected.iter().any(|(_id, on)| !on);
+                let changes = self.edit(ctx.editor, "Toggle Follow Actions", |editor| {
+                    for (clip, _) in &selected {
+                        model(
+                            editor,
+                            "clip.set_follow_actions",
+                            &serde_json::json!({ "clip": clip, "enabled": enabled }),
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                Ok(edit_outcome(changes))
+            }
+            ids::CREATE_FOLLOW_ACTION_CHAIN => {
+                no_args(args)?;
+                let chain = self.follow_chain(ctx.editor, ctx.columns, ctx.scenes);
+                if chain.is_empty() {
+                    return Ok(self.state_outcome());
+                }
+                let changes = self.edit(ctx.editor, "Create Follow Action Chain", |editor| {
+                    for patch in &chain {
+                        model(editor, "clip.set_follow_actions", patch)?;
+                    }
+                    Ok(())
+                })?;
+                Ok(edit_outcome(changes))
+            }
             ids::DROP_FILES => {
                 let args: DropFilesArgs = serde_json::from_value(args).map_err(parse)?;
                 self.drop(ctx, args)
@@ -446,6 +489,52 @@ impl SessionView {
             value: serde_json::to_value(self.state()).unwrap_or(Value::Null),
             ..SessionOutcome::default()
         }
+    }
+
+    /// The `clip.set_follow_actions` arguments that chain the selected
+    /// clips (Spec: follow-actions R16): a chain for each track, in scene
+    /// order, each clip on to Next at 100 % unless the next selected clip
+    /// isn't the next slot, when it jumps there; the last jumps to the
+    /// first.
+    fn follow_chain(
+        &self,
+        editor: &Editor,
+        columns: &[TrackId],
+        doc_scenes: &[SceneId],
+    ) -> Vec<Value> {
+        let mut patches = Vec::new();
+        for &track in columns {
+            let held: Vec<(usize, ClipId)> = doc_scenes
+                .iter()
+                .enumerate()
+                .filter(|(_, scene)| {
+                    self.slots
+                        .iter()
+                        .any(|s| s.track == track && s.scene == **scene)
+                })
+                .filter_map(|(at, scene)| Some((at, editor.document().slot(track, *scene)?.id)))
+                .collect();
+            for (n, &(at, clip)) in held.iter().enumerate() {
+                let (next, wraps) = held
+                    .get(n + 1)
+                    .map_or((held[0].0, true), |&(next, _)| (next, false));
+                let jump = wraps || next != at + 1;
+                let mut patch = serde_json::json!({
+                    "clip": clip,
+                    "enabled": true,
+                    "action_a": if jump { "jump" } else { "next" },
+                    "action_b": "no_action",
+                    "chance_a": 100,
+                    "linked": true,
+                    "multiplier": 1,
+                });
+                if jump {
+                    patch["jump_a"] = (next + 1).into();
+                }
+                patches.push(patch);
+            }
+        }
+        patches
     }
 
     /// Runs `edit` as one undo step and returns what it changed.
@@ -725,8 +814,14 @@ impl SessionView {
         let before = ctx.editor.document().clone();
         ctx.editor.transact("Insert Clip", |editor| {
             for ((media, name, seconds), (track, scene)) in prepared.iter().zip(&targets) {
-                let length = arrange::length_at(editor.document(), Ticks::ZERO, *seconds);
-                let audio = AudioData::new(media.hash);
+                let new = crate::auto_warp::new_clip(
+                    media,
+                    *seconds,
+                    editor.document(),
+                    Ticks::ZERO,
+                    ctx.warping,
+                );
+                let (length, audio) = (new.length, new.audio);
                 let audio = if ctx.edge_fades {
                     audio.with_edge_fades()
                 } else {

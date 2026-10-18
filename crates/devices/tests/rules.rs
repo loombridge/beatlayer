@@ -13,8 +13,17 @@ use bl_engine::{
 };
 use bl_model::modulation::Travel;
 use bl_model::param::MINUS_INFINITY_DB;
-use bl_model::{AutomationTarget, Clip, ClipData, Command, DeviceId, Editor, MidiData, TrackKind};
+use bl_model::{
+    AutomationTarget, Clip, ClipData, Command, DeviceId, Editor, MidiData, ParamId, TrackKind,
+};
 use common::{RATE, config, device, node, run, run_at, set};
+
+/// The gains of EQ Three, each of which acts on one band.
+const BAND_GAINS: [ParamId; 3] = [
+    bl_devices::three_band_eq::GAIN_LOW,
+    bl_devices::three_band_eq::GAIN_MID,
+    bl_devices::three_band_eq::GAIN_HIGH,
+];
 
 /// Every native device type: the shipped ones and the test ones.
 fn every_type() -> Vec<DeviceType> {
@@ -48,9 +57,31 @@ fn every_gain_parameter_reaches_minus_infinity() {
             assert_eq!(param.denormalize(0.0), 0.0, "{who}: the control's bottom");
             assert_eq!(param.format(0.0), MINUS_INFINITY_DB, "{who}");
             assert_eq!(param.parse("-inf"), Some(0.0), "{who}");
-            // Where the gain acts on the audio, at −∞ the audio is silent.
+            // Where the gain acts on the audio, at −∞ the audio is silent. A
+            // gain that acts on one band of a device does so with the device's
+            // other band gains: all at −∞, the device is silent.
+            let band_gain = |p: &bl_model::ParamDescriptor| {
+                p.name.split_once(' ').map(|(_, gain)| gain.to_owned())
+            };
+            let group: Vec<_> = if device_type.name == "EQ Three" {
+                BAND_GAINS.to_vec()
+            } else if device_type.name == "Multiband Dynamics" && band_gain(param).is_some() {
+                let same = |p: &&bl_model::ParamDescriptor| {
+                    p.is_gain() && band_gain(p) == band_gain(param)
+                };
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(same)
+                    .map(|p| p.id)
+                    .collect()
+            } else {
+                vec![param.id]
+            };
+            let silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
             let mut at_default = node(&registry, &device(&device_type, &[]), 256);
-            let mut at_silence = node(&registry, &device(&device_type, &[(param.id, 0.0)]), 256);
+            let mut at_silence = node(&registry, &device(&device_type, &silenced), 256);
             let open = run(at_default.as_mut(), &input, &[]);
             let shut = run(at_silence.as_mut(), &input, &[]);
             if shut != open {
@@ -154,6 +185,7 @@ fn every_parameter_is_modulatable_to_the_frame() {
                 .unwrap();
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
                     clip,
                     target: AutomationTarget::Device {
                         device: id,

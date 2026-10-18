@@ -282,7 +282,7 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
             param: MixerParam::Mute,
             ..
         } => LaneScale::Switch,
-        AutomationTarget::Send { .. } => LaneScale::Send,
+        AutomationTarget::Send { .. } | AutomationTarget::ChainSend { .. } => LaneScale::Send,
         AutomationTarget::Device { device, param } => {
             let range = doc
                 .device(device)
@@ -293,6 +293,12 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
                 Some((min, max)) => LaneScale::Linear { min, max },
                 None => LaneScale::Linear { min: 0.0, max: 1.0 },
             }
+        }
+        AutomationTarget::MidiCc { .. }
+        | AutomationTarget::MidiPitchBend
+        | AutomationTarget::MidiChannelPressure => {
+            let (min, max) = target.midi_range().unwrap_or((0.0, 127.0));
+            LaneScale::Linear { min, max }
         }
     }
 }
@@ -305,6 +311,9 @@ pub enum AutomationDevice {
     Mixer,
     /// One of the track's devices.
     Device(DeviceId),
+    /// A MIDI clip's controllers: pitch bend, channel pressure and the
+    /// continuous controllers (WP-2.29). Only a clip's envelopes name them.
+    MidiCtrl,
     /// No envelope: the lane stays, with nothing drawn.
     None,
 }
@@ -315,8 +324,12 @@ pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
         AutomationTarget::Mixer { .. }
         | AutomationTarget::Send { .. }
         // The Device View's chain list picks chain controls (WP-5.2).
-        | AutomationTarget::Chain { .. } => AutomationDevice::Mixer,
+        | AutomationTarget::Chain { .. }
+        | AutomationTarget::ChainSend { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
+        AutomationTarget::MidiCc { .. }
+        | AutomationTarget::MidiPitchBend
+        | AutomationTarget::MidiChannelPressure => AutomationDevice::MidiCtrl,
     }
 }
 
@@ -410,6 +423,27 @@ pub fn control_choices(
                 );
             }
         }
+        AutomationDevice::MidiCtrl => {
+            let controls = [
+                ("Pitch Bend".to_owned(), AutomationTarget::MidiPitchBend),
+                (
+                    "Channel Pressure".to_owned(),
+                    AutomationTarget::MidiChannelPressure,
+                ),
+            ]
+            .into_iter()
+            .chain(AutomationTarget::clip_controllers().map(|number| {
+                (
+                    format!("{number} {}", AutomationTarget::controller_name(number)),
+                    AutomationTarget::MidiCc { number },
+                )
+            }));
+            choices.extend(controls.map(|(label, value)| Choice {
+                label,
+                value,
+                leds: NO_LEDS,
+            }));
+        }
         AutomationDevice::None => {}
     }
     choices
@@ -430,6 +464,7 @@ pub(crate) fn default_target(
             .into_iter()
             .next()
             .map(|choice| choice.value),
+        AutomationDevice::MidiCtrl => Some(AutomationTarget::MidiPitchBend),
         AutomationDevice::None => None,
     }
 }
@@ -912,6 +947,10 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
                 MixerParam::Mute => format!("{name} Activator"),
             }
         }
+        AutomationTarget::ChainSend { chain, to } => {
+            let name = |id| doc.chain(id).map_or("Chain", |chain| chain.name.as_str());
+            format!("{} Send to {}", name(chain), name(to))
+        }
         AutomationTarget::Device { device, param } => doc
             .device(device)
             .and_then(|device| {
@@ -922,5 +961,10 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
                     .map(|descriptor| descriptor.name.clone())
             })
             .unwrap_or_else(|| "Device parameter".to_owned()),
+        AutomationTarget::MidiCc { number } => {
+            format!("{number} {}", AutomationTarget::controller_name(number))
+        }
+        AutomationTarget::MidiPitchBend => "Pitch Bend".to_owned(),
+        AutomationTarget::MidiChannelPressure => "Channel Pressure".to_owned(),
     }
 }

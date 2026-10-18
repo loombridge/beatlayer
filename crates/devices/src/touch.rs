@@ -1,4 +1,4 @@
-//! Touch, the velocity MIDI effect (WP-5.30; the MIDI velocity spec): reshapes
+//! Velocity, the velocity MIDI effect (WP-5.30; the MIDI velocity spec): reshapes
 //! the velocity of each note, or its release velocity, along a curve from an
 //! input window to an output range.
 //!
@@ -11,7 +11,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, seed, value};
 
-/// The Touch device type's id.
+/// The Velocity device type's id.
 pub const TOUCH: &str = "beatlayer.touch";
 
 /// The lowest input velocity of the curve.
@@ -39,10 +39,10 @@ pub const OPERATIONS: [&str; 3] = ["Note On", "Release", "Both"];
 /// The Mode choices.
 pub const MODES: [&str; 3] = ["Clip", "Gate", "Fixed"];
 
-/// Touch's device type.
+/// Velocity's device type.
 #[must_use]
 pub fn touch_type() -> DeviceType {
-    DeviceType::native(TOUCH, "Touch", DeviceRole::MidiEffect).with_description(
+    DeviceType::native(TOUCH, "Velocity", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
             ParamDescriptor::integer(LOWEST, "Lowest", (0, 127), 0, ParamUnit::None)
                 .describe("The softest input velocity the curve starts from."),
@@ -80,7 +80,7 @@ pub fn touch_type() -> DeviceType {
     )
 }
 
-/// Adds Touch to `registry`.
+/// Adds Velocity to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, touch_type(), |device, _| Touch {
         router: Router::new(),
@@ -195,6 +195,8 @@ impl NativeDevice for Touch {
                     self.router.end(audio, &note, release);
                 }
                 NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: device-framework R39. A channel message passes through.
+                _ => audio.send(note),
             }
         }
         self.router.finish(audio);

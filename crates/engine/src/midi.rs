@@ -20,14 +20,22 @@
 //! Nothing here allocates, locks, or blocks: the routes' buffers are
 //! reserved when the program is compiled, and what doesn't fit is dropped
 //! and counted. The rules are in `docs/specs/midi-io.md`, R12 to R16.
+//!
+//! MIDI output (WP-5.34) leaves the same way it arrived. A track's MIDI To
+//! names a port, and an external instrument names one too: what reaches the
+//! end of the track's chain, or the device, is rewritten onto the channel
+//! and handed, stamped with the moment its frame is heard at the audio
+//! interface's output, to a lock-free queue whose other end the MIDI output
+//! thread reads (`docs/specs/external-devices.md`, R3 to R6, R10).
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
+use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};
 use bl_core::time::SampleRate;
-use bl_model::{Document, Input, TrackId, TrackKind};
-use rtrb::Consumer;
+use bl_model::{DeviceId, Document, Input, MidiTo, TrackId, TrackKind};
+use rtrb::{Consumer, Producer};
 
+use crate::disjoint::Shared;
 use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
 
@@ -48,6 +56,14 @@ const CLOCK_BANDWIDTH_HZ: f64 = 0.5;
 /// means a gap (the device stopped, the machine slept, or the engine
 /// skipped processing): the clock locks again from scratch.
 const RELOCK_NS: f64 = 50_000_000.0;
+
+/// The most messages one route sends to its port in a block. More are
+/// dropped and counted ([`MidiCounters::out_dropped`]).
+pub const MIDI_OUT_PER_ROUTE: usize = 1024;
+
+/// The most held notes a program swap can end at once, for routes the new
+/// program no longer has or sends elsewhere.
+const ORPHANS: usize = 256;
 
 /// A MIDI message at a frame of a block, on a track's input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +104,13 @@ pub struct MidiCounters {
     pub dropped: u64,
     /// Times the block clock locked again after a gap.
     pub relocks: u64,
+    /// Note messages Capture MIDI's ring had no room for (WP-3.14).
+    pub capture_dropped: u64,
+    /// Messages handed to the queue to the MIDI output ports (WP-5.34).
+    pub sent: u64,
+    /// Messages for a port that a route's buffer or the queue had no room
+    /// for, dropped.
+    pub out_dropped: u64,
 }
 
 /// Which source a route takes.
@@ -155,11 +178,121 @@ impl Route {
     }
 }
 
+/// What a route to a port belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OutOwner {
+    /// A MIDI track's MIDI To.
+    Track(TrackId),
+    /// An external instrument, wherever it sits in a chain.
+    Device(DeviceId),
+}
+
+/// A message on its way to a port, with the frame of the block it is heard
+/// on, compensation included.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Outgoing {
+    offset: u32,
+    message: MidiMessage,
+}
+
+/// One route to a MIDI output port in a program: the notes and messages of
+/// its owner leave on the port's channel (`docs/specs/external-devices.md`,
+/// R3). The task that owns the owner is the only one that reaches it in a
+/// block, so each route keeps its messages itself.
+#[derive(Debug)]
+struct OutRoute {
+    port: PortId,
+    /// The channel everything is rewritten onto, 0 to 15.
+    channel: u8,
+    /// The frames the route's messages are sent after their own frame,
+    /// which delay compensation holds the track's path into Main back by
+    /// (R4). Zero for an external instrument, whose own latency is what
+    /// compensation lines up (R10).
+    compensation: u32,
+    /// Which keys were sent a note-on and no note-off, one bit each.
+    held: u128,
+    /// Whether the held notes end in the next block (the transport stopped).
+    release: bool,
+    /// This block's messages, reserved when the program is compiled.
+    outgoing: Vec<Outgoing>,
+    /// Messages `outgoing` had no room for, since they were last counted.
+    dropped: u64,
+}
+
+impl OutRoute {
+    /// A route to the port called `name` on `channel` (1 to 16).
+    fn new(name: &str, channel: u8) -> Self {
+        Self {
+            port: PortId::from_name(name),
+            channel: channel.saturating_sub(1).min(15),
+            compensation: 0,
+            held: 0,
+            release: false,
+            outgoing: Vec::with_capacity(MIDI_OUT_PER_ROUTE),
+            dropped: 0,
+        }
+    }
+}
+
+/// Held notes of a route that went or moved in a program swap, waiting to be
+/// ended on the port and channel they were sent on (R6).
+#[derive(Clone, Copy, Debug)]
+struct Orphan {
+    port: PortId,
+    channel: u8,
+    compensation: u32,
+    held: u128,
+}
+
 /// The MIDI tracks' inputs in a program: what each takes, and what it took
-/// in the last block.
+/// in the last block; and the routes to output ports with what they send.
 #[derive(Debug, Default)]
 pub(crate) struct MidiRoutes {
-    routes: Vec<Route>,
+    routes: Shared<Route>,
+    /// Who each of `outs` belongs to, in the same order; fixed once the
+    /// program is made, so a task finds its route without reading the
+    /// routes others are writing.
+    owners: Vec<OutOwner>,
+    outs: Shared<OutRoute>,
+    orphans: Vec<Orphan>,
+}
+
+/// The MIDI message of a note event on `channel` (0 to 15), if the kind has
+/// one: notes, per-note pressure, and the channel messages of WP-5.44.
+/// Per-note bend and slide are MPE's, which a hardware synthesiser takes on
+/// channels of its own; they don't leave.
+fn out_message(note: &NoteEvent, channel: u8) -> Option<MidiMessage> {
+    let seven = |value: f32| (value.clamp(0.0, 1.0) * 127.0).round() as u8;
+    let key = note.key & 0x7F;
+    match note.kind {
+        NoteKind::On => Some(MidiMessage::note_on(
+            channel,
+            key,
+            seven(note.velocity).max(1),
+        )),
+        NoteKind::Off | NoteKind::Choke => {
+            MidiMessage::from_bytes(&[0x80 | channel, key, seven(note.velocity)])
+        }
+        NoteKind::Expression {
+            expression: NoteExpression::Pressure,
+            value,
+        } => MidiMessage::from_bytes(&[0xA0 | channel, key, seven(value)]),
+        NoteKind::Expression { .. } => None,
+        NoteKind::Control { .. }
+        | NoteKind::PitchBend { .. }
+        | NoteKind::ChannelPressure { .. } => NoteEvent { channel, ..*note }.message(),
+    }
+}
+
+/// The note-off of every key in `held` on `channel`.
+fn offs(channel: u8, mut held: u128) -> impl Iterator<Item = MidiMessage> {
+    std::iter::from_fn(move || {
+        (held != 0).then(|| {
+            let key = held.trailing_zeros() as u8;
+            held &= held - 1;
+            MidiMessage::note_off(channel, key)
+        })
+    })
 }
 
 impl MidiRoutes {
@@ -192,7 +325,118 @@ impl MidiRoutes {
                 })
             })
             .collect();
-        Self { routes }
+        let mut owners = Vec::new();
+        let mut outs = Vec::new();
+        for entry in tasks {
+            let Some(track) = document.track(entry.track) else {
+                continue;
+            };
+            // Spec: external-devices R2
+            if track.kind() == TrackKind::Midi
+                && let Some(MidiTo::Port { name, channel }) = &track.routing().midi_output
+            {
+                owners.push(OutOwner::Track(entry.track));
+                outs.push(OutRoute::new(name, *channel));
+            }
+            // Spec: external-devices R10
+            for device in track.devices_deep() {
+                if let Some(external) = &device.external
+                    && let Some(port) = &external.port
+                {
+                    owners.push(OutOwner::Device(device.id));
+                    outs.push(OutRoute::new(port, external.channel));
+                }
+            }
+        }
+        Self {
+            routes: Shared::new(routes),
+            owners,
+            outs: Shared::new(outs),
+            orphans: Vec::with_capacity(ORPHANS),
+        }
+    }
+
+    /// Sets the frames the messages of `track`'s MIDI To are sent after
+    /// their own frames: the delay compensation of its path into Main (R4).
+    pub(crate) fn set_compensation(&mut self, track: TrackId, frames: u32) {
+        if let Some(at) = self
+            .owners
+            .iter()
+            .position(|&o| o == OutOwner::Track(track))
+        {
+            self.outs[at].compensation = frames;
+        }
+    }
+
+    /// Queues what reached the end of `track`'s chain, or what `device`
+    /// was given, for the port it names, if it names one: `notes` are at
+    /// offsets counted from frame `from` of the block (R3).
+    ///
+    /// The tracks' tasks run at once on a pool of workers; a route belongs
+    /// to its owner's task, which is the one thread sending to it in a
+    /// block.
+    pub(crate) fn send(&self, owner: OutOwner, notes: &[NoteEvent], from: u32) {
+        let Some(at) = self.owners.iter().position(|&o| o == owner) else {
+            return;
+        };
+        // SAFETY: a route belongs to its owner's task, which is the one
+        // thread sending to it in this block.
+        let route = unsafe { self.outs.element(at) };
+        for note in notes {
+            let Some(message) = out_message(note, route.channel) else {
+                continue;
+            };
+            if route.outgoing.len() == route.outgoing.capacity() {
+                route.dropped += 1;
+                continue;
+            }
+            match note.kind {
+                NoteKind::On => route.held |= 1 << (note.key & 0x7F),
+                NoteKind::Off | NoteKind::Choke => route.held &= !(1 << (note.key & 0x7F)),
+                _ => {}
+            }
+            route.outgoing.push(Outgoing {
+                offset: from + note.offset + route.compensation,
+                message,
+            });
+        }
+    }
+
+    /// Ends the notes `owner` holds in the next block (R6): its device was
+    /// switched off, so nothing it is sent reaches the port.
+    pub(crate) fn release(&self, owner: OutOwner) {
+        let Some(at) = self.owners.iter().position(|&o| o == owner) else {
+            return;
+        };
+        // SAFETY: a route belongs to its owner's task, which is the one
+        // thread sending to it in this block.
+        let route = unsafe { self.outs.element(at) };
+        route.release |= route.held != 0;
+    }
+
+    /// Ends every held note in the next block (R6): the transport stopped.
+    pub(crate) fn release_all(&mut self) {
+        for route in self.outs.iter_mut() {
+            route.release = route.held != 0;
+        }
+    }
+
+    /// Every note the routes have sent and not ended, as a note-off each,
+    /// for a stream that stops (R6). Allocates: off the audio thread.
+    pub(crate) fn drain_held(&mut self) -> Vec<(PortId, MidiMessage)> {
+        let mut held: Vec<(PortId, u8, u128)> = self
+            .orphans
+            .drain(..)
+            .map(|o| (o.port, o.channel, o.held))
+            .collect();
+        held.extend(
+            self.outs
+                .iter_mut()
+                .map(|r| (r.port, r.channel, std::mem::take(&mut r.held))),
+        );
+        held.into_iter()
+            .flat_map(|(port, channel, keys)| offs(channel, keys).map(move |m| (port, m)))
+            .collect()
     }
 
     /// What `track`'s input received in the last block, if it's a MIDI
@@ -207,8 +451,16 @@ impl MidiRoutes {
             })
     }
 
+    /// What each monitoring track's input received in the last block.
+    pub(crate) fn monitored_inputs(&self) -> impl Iterator<Item = (TrackId, &[MidiEvent])> {
+        self.routes
+            .iter()
+            .filter(|route| route.monitored)
+            .map(|route| (route.track, route.events.as_slice()))
+    }
+
     fn clear(&mut self) {
-        for route in &mut self.routes {
+        for route in self.routes.iter_mut() {
             route.events.clear();
         }
     }
@@ -218,7 +470,7 @@ impl MidiRoutes {
     /// it took, or no longer monitors, ends them in its first block. Real-time
     /// safe: it swaps buffers.
     pub(crate) fn inherit(&mut self, old: &mut Self) {
-        for route in &mut self.routes {
+        for route in self.routes.iter_mut() {
             let Some(was) = old.routes.iter_mut().find(|r| r.track == route.track) else {
                 continue;
             };
@@ -226,16 +478,57 @@ impl MidiRoutes {
             route.release =
                 !route.monitored || route.filter != was.filter || route.channel != was.channel;
         }
+        // Spec: external-devices R6. A route that sends where it sent keeps
+        // the notes it holds; one that was removed or sends elsewhere ends
+        // them where they started.
+        for (owner, route) in self.owners.iter().zip(self.outs.iter_mut()) {
+            if let Some(at) = old.owners.iter().position(|o| o == owner) {
+                let was = &mut old.outs[at];
+                if was.port == route.port && was.channel == route.channel {
+                    route.held = std::mem::take(&mut was.held);
+                    route.release = was.release;
+                }
+            }
+        }
+        for was in old.outs.iter_mut() {
+            if was.held != 0 {
+                let orphan = Orphan {
+                    port: was.port,
+                    channel: was.channel,
+                    compensation: was.compensation,
+                    held: std::mem::take(&mut was.held),
+                };
+                self.orphan(orphan);
+            }
+        }
+        for orphan in old.orphans.drain(..) {
+            self.orphan(orphan);
+        }
+    }
+
+    fn orphan(&mut self, orphan: Orphan) {
+        // The orphans of a swap that comes too soon after another beyond the
+        // room made are dropped; 256 routes ending notes at once is more than
+        // a set has.
+        if self.orphans.len() < self.orphans.capacity() {
+            self.orphans.push(orphan);
+        }
     }
 
     /// Puts what `track`'s input received in the frames `from..until` of
     /// the block into `notes`, merged with the notes already there, at
     /// offsets counted from `from`; ends the held notes first if the route
     /// changed. A track that doesn't monitor adds nothing.
-    pub(crate) fn play(&mut self, track: TrackId, from: u32, until: u32, notes: &mut NoteBuffer) {
-        let Some(route) = self.routes.iter_mut().find(|r| r.track == track) else {
+    ///
+    /// The tracks' tasks run at once on a pool of workers, each playing its
+    /// own track's route, which no other task reaches.
+    pub(crate) fn play(&self, track: TrackId, from: u32, until: u32, notes: &mut NoteBuffer) {
+        let Some(at) = self.routes.iter().position(|r| r.track == track) else {
             return;
         };
+        // SAFETY: a route belongs to its track's task, which is the one
+        // thread playing it in this block.
+        let route = unsafe { self.routes.element(at) };
         if route.release {
             // Spec: midi-io R26
             route.release = false;
@@ -271,6 +564,9 @@ impl MidiRoutes {
                     value,
                 };
                 notes.insert(note(offset, pressure, channel, key, 0.0));
+            } else if let Some(message) = NoteEvent::from_message(offset, &event.message) {
+                // Spec: device-framework R39
+                notes.insert(message);
             }
         }
     }
@@ -356,10 +652,24 @@ impl BlockClock {
     }
 }
 
+/// When the current block starts: what the block clock estimated.
+#[derive(Clone, Copy, Debug)]
+struct Timing {
+    epoch: Instant,
+    /// The block's start, in nanoseconds after `epoch`.
+    start: f64,
+    ns_per_frame: f64,
+}
+
 /// The audio thread's MIDI input: the queue's consuming end, the block
-/// clock, and the counts.
+/// clock, and the counts; and the producing end of the queue to the MIDI
+/// output thread.
 pub(crate) struct MidiIn {
     queue: Option<Consumer<MidiInputEvent>>,
+    /// The queue to the MIDI output thread (WP-5.34), if there is one.
+    out: Option<Producer<MidiOutputEvent>>,
+    /// Where the current block sits on the monotonic clock.
+    timing: Option<Timing>,
     clock: BlockClock,
     /// What times are measured from: the first block's time.
     epoch: Option<Instant>,
@@ -372,6 +682,8 @@ impl MidiIn {
     pub(crate) fn new(rate: SampleRate) -> Self {
         Self {
             queue: None,
+            out: None,
+            timing: None,
             clock: BlockClock::new(rate),
             epoch: None,
             previous: None,
@@ -389,6 +701,15 @@ impl MidiIn {
         self.queue.replace(queue)
     }
 
+    /// Takes over the queue to the MIDI output thread, letting go of the one
+    /// before (off the audio thread, as [`set_queue`](Self::set_queue)).
+    pub(crate) fn set_out(
+        &mut self,
+        queue: Producer<MidiOutputEvent>,
+    ) -> Option<Producer<MidiOutputEvent>> {
+        self.out.replace(queue)
+    }
+
     /// Takes the messages due in the block that starts at `now`, at engine
     /// frame `clock`, `frames` long, and hands each to the routes it
     /// matches. Real-time safe.
@@ -402,10 +723,7 @@ impl MidiIn {
         if let Some(routes) = routes.as_deref_mut() {
             routes.clear();
         }
-        let Some(queue) = self.queue.as_mut() else {
-            return;
-        };
-        if frames == 0 {
+        if frames == 0 || (self.queue.is_none() && self.out.is_none()) {
             return;
         }
         let epoch = *self.epoch.get_or_insert(now);
@@ -416,6 +734,16 @@ impl MidiIn {
             self.previous = None;
         }
         let per_ns = self.clock.frames_per_ns();
+        // Spec: external-devices R4. The same estimate places the messages
+        // that leave for ports.
+        self.timing = Some(Timing {
+            epoch,
+            start,
+            ns_per_frame: 1.0 / per_ns,
+        });
+        let Some(queue) = self.queue.as_mut() else {
+            return;
+        };
         // Spec: midi-io R15. The window is the previous block's span; the
         // first block takes what arrived in the block's length before it.
         let (from, previous_call) = self.previous.unwrap_or_else(|| {
@@ -458,7 +786,7 @@ impl MidiIn {
             };
             let mut matched = false;
             if let Some(routes) = routes.as_deref_mut() {
-                for route in &mut routes.routes {
+                for route in routes.routes.iter_mut() {
                     if route.takes(&event) {
                         matched = true;
                         if route.push(placed) {
@@ -472,6 +800,86 @@ impl MidiIn {
             if !matched {
                 self.counters.unrouted += 1;
             }
+        }
+    }
+}
+
+impl MidiIn {
+    /// Hands the messages the program made for ports in this part of the
+    /// block to the MIDI output thread, each stamped with the moment its
+    /// frame is heard at the audio interface's output: the block's start,
+    /// plus its frame, plus `output_latency` (R4, R5). A full queue drops
+    /// the message and counts it. Without a queue (an offline render) they
+    /// go nowhere (R8). Real-time safe.
+    pub(crate) fn emit(&mut self, routes: &mut MidiRoutes, output_latency: u32) {
+        let Self {
+            out,
+            timing,
+            counters,
+            ..
+        } = self;
+        let mut push = |port: PortId, offset: u32, message: MidiMessage| {
+            let (Some(out), Some(timing)) = (out.as_mut(), *timing) else {
+                return;
+            };
+            let frames = f64::from(offset) + f64::from(output_latency);
+            let ns = timing.start + frames * timing.ns_per_frame;
+            let time = if ns >= 0.0 {
+                timing.epoch + Duration::from_nanos(ns as u64)
+            } else {
+                timing
+                    .epoch
+                    .checked_sub(Duration::from_nanos((-ns) as u64))
+                    .unwrap_or(timing.epoch)
+            };
+            let event = MidiOutputEvent {
+                port,
+                time,
+                message,
+            };
+            if out.push(event).is_ok() {
+                counters.sent += 1;
+            } else {
+                counters.out_dropped += 1;
+            }
+        };
+        // Spec: external-devices R6. The notes of routes that went or moved
+        // in a swap, and of routes whose transport stopped, end first.
+        for orphan in routes.orphans.drain(..) {
+            for message in offs(orphan.channel, orphan.held) {
+                push(orphan.port, orphan.compensation, message);
+            }
+        }
+        let mut dropped = 0;
+        for route in routes.outs.iter_mut() {
+            if std::mem::take(&mut route.release) {
+                for message in offs(route.channel, std::mem::take(&mut route.held)) {
+                    push(route.port, route.compensation, message);
+                }
+            }
+            for event in route.outgoing.drain(..) {
+                push(route.port, event.offset, event.message);
+            }
+            dropped += std::mem::take(&mut route.dropped);
+        }
+        self.counters.out_dropped += dropped;
+    }
+
+    /// Sends the note-offs for everything `routes` still holds, at once:
+    /// a stream that stops or restarts leaves no note hanging on the
+    /// hardware (R6). Allocates: off the audio thread.
+    pub(crate) fn release(&mut self, routes: &mut MidiRoutes) {
+        let held = routes.drain_held();
+        let Some(out) = self.out.as_mut() else {
+            return;
+        };
+        let time = Instant::now();
+        for (port, message) in held {
+            let _ = out.push(MidiOutputEvent {
+                port,
+                time,
+                message,
+            });
         }
     }
 }

@@ -12,11 +12,15 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING};
+use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
+
+/// The model's command that colours a chain.
+const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 
 /// The rows that hold the zoom-adaptive grid's settings.
 pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
@@ -156,6 +160,66 @@ pub fn device() -> Vec<MenuItem> {
     items(DEVICE)
 }
 
+/// The row of Group to Drum Rack (C-DEVICE-013), which a device's menu
+/// offers straight after Group wherever the selection could sit in one
+/// chain of a drum rack (the drum racks spec, R25).
+pub const GROUP_TO_DRUM_RACK_ROW: &str = "C-DEVICE-013";
+
+/// The Group to Drum Rack item, which the UI adds after Group while the
+/// command can run.
+#[must_use]
+pub fn group_to_drum_rack() -> MenuItem {
+    items(&[(
+        GROUP_TO_DRUM_RACK_ROW,
+        "Group to Drum Rack",
+        Cmd(crate::pads::GROUP_TO_DRUM_RACK),
+    )])
+    .remove(0)
+}
+
+/// The row of Beatlayer's own Ungroup in a rack's menu (racks spec, R26),
+/// straight after Group: not a row of menus.md.
+pub const R26_UNGROUP: &str = "R26-ungroup";
+
+/// The rows of a rack's menu that A/B compare doesn't apply to (racks spec,
+/// R26): the device menu's Compare items, disabled for a rack.
+pub const RACK_COMPARE_ROWS: [&str; 2] = ["C-DEVICE-010", "C-DEVICE-011"];
+
+/// The menu a rack's title bar opens: a device's (C-DEVICE) with Group
+/// working on the selection, Ungroup straight after it (Beatlayer's own
+/// place), and the two Compare items disabled, because A/B compare doesn't
+/// apply to racks (racks spec, R26).
+#[must_use]
+pub fn rack() -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(DEVICE.len() + 1);
+    for &row in DEVICE {
+        rows.push(row);
+        if row.0 == "C-DEVICE-007" {
+            rows.push((R26_UNGROUP, "Ungroup", Cmd(UNGROUP)));
+        }
+    }
+    items(&rows)
+}
+
+/// The row of a chain's menu that holds the colour palette, 5 rows of 14
+/// swatches (racks spec, R26; C-TRACK-015's palette, drawn by the UI).
+pub const CHAIN_COLOUR_ROW: &str = "R26-colour";
+
+const CHAIN: &[Row] = &[
+    ("R26-rename", "Rename", Key(&["S-EDIT-008"])),
+    ("R26-info", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    (CHAIN_COLOUR_ROW, "Colour", Cmd(SET_CHAIN_COLOUR)),
+];
+
+/// The menu a chain's row in a rack's chain list opens: Rename, Edit Info
+/// Text and the colour palette (racks spec, R26; Beatlayer's own rows, as
+/// menus.md records none for chains).
+#[must_use]
+pub fn chain() -> Vec<MenuItem> {
+    items(CHAIN)
+}
+
 const TRACK: &[Row] = &[
     ("C-TRACK-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-TRACK-002", "Copy", Key(&["S-EDIT-002"])),
@@ -262,7 +326,9 @@ pub fn track(state: TrackMenu) -> Vec<MenuItem> {
 #[must_use]
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
-        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" => Some("WP-2.24 (the Info View)"),
+        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
+            Some("WP-2.24 (the Info View)")
+        }
         "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
         "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-020" => Some("WP-4.13 (Crop Clip)"),
@@ -274,6 +340,9 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
+        "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
+            Some("Phase 9 (audio to MIDI, IMP-06)")
+        }
         _ => None,
     }
 }
@@ -282,6 +351,48 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 #[must_use]
 pub fn arrangement_clip() -> Vec<MenuItem> {
     items(CLIP)
+}
+
+/// The rows an audio clip's menu adds after Reverse Clip(s) (C-CLIP-ARR-027):
+/// the three Convert commands and Separate Stems to New Audio Tracks, in the
+/// order observed in Live 12 on macOS (18 October 2026, from a screenshot of
+/// an audio clip's menu).
+const AUDIO_CLIP: &[Row] = &[
+    SEPARATOR,
+    (
+        "C-CLIP-ARR-027a",
+        "Convert Harmony to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027b",
+        "Convert Melody to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027c",
+        "Convert Drums to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027d",
+        "Separate Stems to New Audio Tracks",
+        Cmd(SEPARATE_STEMS),
+    ),
+];
+
+/// The menu an audio clip in the Arrangement opens: the clip's menu with
+/// the rows only audio clips have (C-CLIP-ARR-027).
+#[must_use]
+pub fn arrangement_audio_clip() -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(CLIP.len() + AUDIO_CLIP.len());
+    for &row in CLIP {
+        rows.push(row);
+        if row.0 == "C-CLIP-ARR-018" {
+            rows.extend_from_slice(AUDIO_CLIP);
+        }
+    }
+    items(&rows)
 }
 
 /// The menu a time selection in the Arrangement opens (C-TIME).
@@ -348,6 +459,49 @@ mod tests {
         }
     }
 
+    // Spec: racks R26
+    #[test]
+    fn a_racks_menu_adds_ungroup_and_disables_compare() {
+        let rack = rack();
+        let rows: Vec<&str> = rack.iter().map(|i| i.row).collect();
+        let group = rows.iter().position(|r| *r == "C-DEVICE-007").unwrap();
+        assert_eq!(rows[group + 1], R26_UNGROUP, "straight after Group");
+        let device = device();
+        assert_eq!(
+            rack.iter().filter(|i| i.row != R26_UNGROUP).count(),
+            device.len(),
+            "the rest is the device menu"
+        );
+        // The Compare commands refuse a rack, so the shell shows them
+        // disabled (device compare R6).
+        for (row, command) in RACK_COMPARE_ROWS
+            .into_iter()
+            .zip([COMPARE_SWITCH, COMPARE_COPY])
+        {
+            let item = rack.iter().find(|i| i.row == row).unwrap();
+            assert_eq!(item.command(), Some(command), "{row}");
+        }
+        let ungroup = rack.iter().find(|i| i.row == R26_UNGROUP).unwrap();
+        assert_eq!(ungroup.command(), Some(UNGROUP));
+    }
+
+    // Spec: racks R26
+    #[test]
+    fn a_chains_menu_holds_rename_info_text_and_the_colours() {
+        let labels: Vec<&str> = chain()
+            .iter()
+            .filter(|i| !i.is_separator())
+            .map(|i| i.label)
+            .collect();
+        assert_eq!(labels, ["Rename", "Edit Info Text", "Colour"]);
+        assert!(chain().iter().all(|i| is_lives(i.row) == i.row.is_empty()));
+        for item in chain() {
+            if matches!(item.action, Pending(_)) {
+                assert!(pending_package(item.row).is_some(), "{}", item.row);
+            }
+        }
+    }
+
     #[test]
     fn the_track_menus_other_states_add_the_items_menus_md_lists() {
         let base = track(TrackMenu::default());
@@ -369,6 +523,39 @@ mod tests {
                 .lines()
                 .find(|l| l.starts_with(&format!("| {id} |")))
                 .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
+            assert!(line.contains(item.label), "{}: {line}", item.label);
+        }
+    }
+
+    #[test]
+    fn an_audio_clips_menu_adds_the_convert_and_stems_rows_after_reverse() {
+        let base = arrangement_clip();
+        let audio = arrangement_audio_clip();
+        let added: Vec<_> = audio
+            .iter()
+            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .collect();
+        assert_eq!(added.len(), 4);
+        let reverse = audio
+            .iter()
+            .position(|i| i.row == "C-CLIP-ARR-018")
+            .unwrap();
+        assert!(audio[reverse + 1].is_separator());
+        assert_eq!(
+            audio[reverse + 5].label,
+            "Separate Stems to New Audio Tracks"
+        );
+        let Some(text) = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md"),
+        )
+        .ok() else {
+            return;
+        };
+        for item in added {
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("| {} |", item.row)))
+                .unwrap_or_else(|| panic!("{} isn't in menus.md", item.row));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
     }

@@ -11,8 +11,9 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    LaunchPrefs, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS,
-    zoom_factor, zoom_percent, zoom_step,
+    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
+    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
+    zoom_percent, zoom_step,
 };
 
 use crate::agent::AgentSettings;
@@ -75,9 +76,16 @@ pub struct Preferences {
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode
+    /// (Record, Warp & Launch, L-SET-018; WP-4.9): what a new clip of a file
+    /// gets (the warping spec, R29 and R33).
+    pub warp: WarpPrefs,
     /// The Launch section of Record, Warp & Launch (L-SET-018; WP-3.4),
     /// with the defaults observed in Live 12.4.3.
     pub launch: LaunchPrefs,
+    /// Record Session automation in (Record, Warp & Launch, L-SET-018;
+    /// WP-3.12): Armed Tracks, as observed in Live 12.4.3.
+    pub record_session_automation_in: SessionAutomationTracks,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -92,6 +100,17 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// Use Audio Units v2 (Plug-Ins, Plug-In Sources, L-SET-017): Audio
+    /// Units in `.component` bundles are scanned and listed (WP-2.9b). Off
+    /// by default, as L-SET-017 records Live's default.
+    pub use_audio_units_v2: bool,
+    /// Use Audio Units v3 (L-SET-017): kept and shown; Beatlayer doesn't
+    /// scan app-extension Audio Units yet (WP-2.9b). Off by default.
+    pub use_audio_units_v3: bool,
+    /// Use VST3 Plug-In System Folders (L-SET-017): VST3 plug-ins in the
+    /// format's system folders are scanned and listed (WP-2.9b). Off by
+    /// default, as L-SET-017 records Live's default.
+    pub vst3_system_folders: bool,
     /// Which parameter each knob of a plug-in device's panel shows
     /// (WP-2.10, D19), by `format/plugin_id` and then by knob: absent
     /// entries keep the plug-in's own parameter at that place. Remembered
@@ -258,6 +277,30 @@ mod tests {
         let off: Preferences =
             serde_json::from_str(r#"{"auto_hide_plug_in_windows": false}"#).unwrap();
         assert!(!off.auto_hide_plug_in_windows.0);
+    }
+
+    // Spec: warping R29
+    #[test]
+    fn the_warp_settings_start_as_observed_and_are_kept() {
+        let defaults = Preferences::default().warp;
+        assert_eq!(defaults.loop_warp_short_samples, LoopWarpShortSamples::Auto);
+        assert!(defaults.auto_warp_long_samples);
+        assert_eq!(defaults.default_warp_mode, DefaultWarpMode::Beats);
+        // Preferences saved before the settings existed take the defaults.
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert_eq!(older.warp, defaults);
+        let dir = std::env::temp_dir().join(format!("bl-shell-warp-prefs-{}", std::process::id()));
+        let kept = Preferences {
+            warp: WarpPrefs {
+                loop_warp_short_samples: LoopWarpShortSamples::WarpedOneShot,
+                auto_warp_long_samples: false,
+                default_warp_mode: DefaultWarpMode::ComplexPro,
+            },
+            ..Preferences::default()
+        };
+        kept.save(&dir).unwrap();
+        assert_eq!(Preferences::load(&dir).unwrap(), kept);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

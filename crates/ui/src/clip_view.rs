@@ -48,6 +48,7 @@ use crate::arrangement::editing::EditKeys;
 use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::launch_panel;
 use crate::main_window::UiEvent;
+use crate::sample_editor::SampleEditorUi;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
 
@@ -595,7 +596,7 @@ fn grabbed(
 fn notes_at(notes: &[Note], places: &[u32]) -> Vec<Note> {
     places
         .iter()
-        .filter_map(|place| notes.get(*place as usize).copied())
+        .filter_map(|place| notes.get(*place as usize).cloned())
         .collect()
 }
 
@@ -618,12 +619,28 @@ enum GridChoice {
 /// Draws the toolbar: the Notes, Envelopes and MPE tabs, and the grid
 /// chooser (L-CLIP-010). A tab runs `view.clip_tab`, the grid chooser
 /// `arrangement.set_grid`.
-fn toolbar(ui: &mut Ui, shell: &Shell, theme: &Theme, view: Rect, events: &mut Vec<UiEvent>) {
+fn toolbar(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    view: Rect,
+    audio: bool,
+    events: &mut Vec<UiEvent>,
+) {
     let colours = &theme.colors;
     let shown = shell.clip_view().tab();
     ui.painter()
         .rect_filled(toolbar_rect(view), 0.0, colours.bar.0);
     for (index, (tab, name)) in TABS.iter().enumerate() {
+        // An audio clip has the Sample and Envelopes tabs (sample editor R1).
+        if audio && tab.is_none() {
+            continue;
+        }
+        let name = if audio && *tab == Some(ClipTab::Notes) {
+            &"Sample"
+        } else {
+            name
+        };
         let rect = tab_rect(view, index);
         let id = Id::new(("clip-view-tab", index));
         let enabled = tab.is_some();
@@ -747,6 +764,8 @@ pub struct ClipViewUi {
     marquee: Option<(Pos2, Pos2)>,
     /// The Envelopes tab's editor.
     envelope: EnvelopeEditor,
+    /// The Sample Editor, for an audio clip (WP-4.10).
+    sample: SampleEditorUi,
 }
 
 impl Default for ClipViewUi {
@@ -761,11 +780,18 @@ impl Default for ClipViewUi {
             lane_drag: None,
             marquee: None,
             envelope: EnvelopeEditor::default(),
+            sample: SampleEditorUi::default(),
         }
     }
 }
 
 impl ClipViewUi {
+    /// What the Sample Editor built in its last frame (R22).
+    #[must_use]
+    pub fn sample_stats(&self) -> crate::sample_editor::Stats {
+        self.sample.stats()
+    }
+
     /// The key at the note area's top edge, while unfolded.
     #[must_use]
     pub fn top(&self) -> f32 {
@@ -786,6 +812,7 @@ impl ClipViewUi {
         theme: &Theme,
         rect: Rect,
         events: &mut Vec<UiEvent>,
+        peaks: &mut dyn FnMut(bl_model::ContentHash) -> Option<std::sync::Arc<bl_media::Peaks>>,
     ) {
         let region = ui.interact(rect, Id::new("region-clip-view"), Sense::hover());
         ui.ctx().accesskit_node_builder(region.id, |node| {
@@ -801,6 +828,11 @@ impl ClipViewUi {
         ui.painter().rect_filled(rect, 0.0, theme.colors.panel.0);
 
         let doc = shell.editor().document();
+        if let Some(audio) = shell.clip_view().shown_audio_clip(doc, shell.arrangement()) {
+            self.show_audio(ui, shell, theme, rect, audio, events, peaks);
+            return;
+        }
+        self.sample.reset();
         let shown = shell.clip_view().shown_clip(doc, shell.arrangement());
         let editor = shown
             .and_then(|id| doc.clip(id))
@@ -854,7 +886,7 @@ impl ClipViewUi {
         if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
             return;
         }
-        toolbar(ui, shell, theme, rect, events);
+        toolbar(ui, shell, theme, rect, false, events);
         if shell.clip_view().tab() == ClipTab::Envelopes
             && let Some(value) = doc.clip(clip)
         {
@@ -918,6 +950,75 @@ impl ClipViewUi {
             &notes,
             events,
         );
+    }
+
+    /// Shows an audio clip's editor: the Sample Editor under the Sample tab
+    /// (WP-4.10), or the Envelopes tab (R1).
+    #[expect(clippy::too_many_arguments, reason = "the editor's whole frame")]
+    fn show_audio(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        rect: Rect,
+        clip: ClipId,
+        events: &mut Vec<UiEvent>,
+        peaks: &mut dyn FnMut(bl_model::ContentHash) -> Option<std::sync::Arc<bl_media::Peaks>>,
+    ) {
+        let doc = shell.editor().document();
+        let Some(value) = doc.clip(clip) else {
+            return;
+        };
+        let ClipData::Audio(audio) = &value.data else {
+            return;
+        };
+        // A Session clip's Launch Properties panel takes the left of the view.
+        let rect = if shell
+            .clip_view()
+            .shown_session_clip(doc, shell.arrangement())
+            .is_some()
+        {
+            launch_panel::show(
+                ui,
+                shell,
+                theme,
+                launch_panel::panel_rect(rect),
+                clip,
+                events,
+            );
+            launch_panel::editor_rect(rect)
+        } else {
+            rect
+        };
+        if self.shown != Some(clip) {
+            self.shown = Some(clip);
+            self.drag = None;
+            self.strip_drag = None;
+            self.lane_drag = None;
+            self.marquee = None;
+            self.envelope.reset();
+            self.sample.reset();
+        }
+        toolbar(ui, shell, theme, rect, true, events);
+        if shell.clip_view().tab() == ClipTab::Envelopes {
+            self.sample.reset();
+            // An audio clip's envelopes run from the clip's start, one tick
+            // per tick (the clip envelopes spec, R2).
+            let target = clip_envelope::shown_target(shell, doc, clip);
+            let stand_in = MidiData::new([]);
+            let frame = clip_envelope::Frame {
+                view: rect,
+                clip: value,
+                midi: &stand_in,
+                target,
+            };
+            self.envelope.show(ui, shell, theme, &frame, events);
+            return;
+        }
+        self.envelope.reset();
+        let ready = peaks(audio.media);
+        self.sample
+            .show(ui, shell, theme, rect, clip, ready, events);
     }
 
     /// Paints the marker strip with the clip's markers and loop brace, the
@@ -1226,7 +1327,7 @@ impl ClipViewUi {
                 // off.
                 Some((place, NoteZone::End)) => {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
-                    let note = notes[place as usize];
+                    let note = &notes[place as usize];
                     let end = note.start + note.length;
                     let shortest = if arrangement.grid().snap {
                         arrangement.grid_ticks(doc)
@@ -1245,7 +1346,7 @@ impl ClipViewUi {
                 // the selection it belongs to.
                 Some((place, NoteZone::Body)) => {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
-                    let note = notes[place as usize];
+                    let note = &notes[place as usize];
                     self.drag = Some(NoteDrag::Move {
                         clip,
                         limits: move_limits(&notes_at(notes, &places)),

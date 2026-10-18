@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::midi::MidiInputEvent;
+use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{LaunchMode, LaunchSettings, ParamId, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
@@ -10,6 +10,7 @@ use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
 
 use crate::EngineConfig;
+use crate::capture::CapturedMidi;
 use crate::gc::{Owned, Program};
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand,
@@ -17,9 +18,10 @@ use crate::message::{
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
-use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
-use crate::program::{EngineProgram, Resolved};
+use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
+use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
+use crate::sched::{Lane, Pool};
 use crate::session::{
     Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
     SlotState, SlotStatus,
@@ -274,8 +276,11 @@ pub struct Processor {
     pending: Vec<Pending>,
     /// This block's parameter changes, sorted by slot, frame, and arrival.
     resolved: Vec<Resolved>,
-    /// One node's changes, handed to it.
-    scratch: Vec<NodeEvent>,
+    /// What the audio thread keeps to itself while it runs tasks.
+    lane: Lane,
+    /// The workers that run tasks beside the audio thread, if the engine
+    /// has any (WP-5.37).
+    pool: Option<Pool>,
     scheduled: Vec<Scheduled>,
     seq: u64,
     swaps: u64,
@@ -293,6 +298,12 @@ pub struct Processor {
     log: Writer,
     /// MIDI input from the MIDI threads (WP-2.2).
     midi: MidiIn,
+    /// The frames MIDI to ports is sent after its block starts to be heard
+    /// with the audio (WP-5.34): the device's reported output latency.
+    output_latency: u32,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    captured: Producer<CapturedMidi>,
 }
 
 impl Processor {
@@ -301,6 +312,7 @@ impl Processor {
         queue: Consumer<Message>,
         reports: Producer<Report>,
         state: triple_buffer::Input<EngineState>,
+        captured: Producer<CapturedMidi>,
     ) -> Self {
         Self {
             queue,
@@ -330,7 +342,8 @@ impl Processor {
             timed: Vec::with_capacity(config.max_scheduled),
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
-            scratch: Vec::with_capacity(config.max_pending_events),
+            lane: Lane::new(&config),
+            pool: None,
             scheduled: Vec::with_capacity(config.max_scheduled),
             seq: 0,
             swaps: 0,
@@ -342,8 +355,25 @@ impl Processor {
             cpu_load_max: 0.0,
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
+            output_latency: config.output_latency,
+            captured,
             config,
         }
+    }
+
+    /// Gives the processor a pool of workers to run tasks with from the next
+    /// block on (the multicore scheduler, WP-5.37), and returns the pool it
+    /// had. The output is the same to the bit with or without one. Dropping
+    /// a pool stops its workers, so a caller on the audio thread hands the
+    /// old one to another thread to drop.
+    pub fn set_pool(&mut self, pool: Option<Pool>) -> Option<Pool> {
+        std::mem::replace(&mut self.pool, pool)
+    }
+
+    /// The pool of workers, if there is one.
+    #[must_use]
+    pub fn pool(&self) -> Option<&Pool> {
+        self.pool.as_ref()
     }
 
     /// The engine's settings.
@@ -398,6 +428,21 @@ impl Processor {
         queue: rtrb::Consumer<MidiInputEvent>,
     ) -> Option<rtrb::Consumer<MidiInputEvent>> {
         self.midi.set_queue(queue)
+    }
+
+    /// Gives the processor the producing end of the queue to the MIDI output
+    /// thread (`bl-midi-io`'s `MidiPorts::attach_output`), which the messages
+    /// for tracks' MIDI To ports and external instruments leave on, each
+    /// stamped with the moment its frame is heard at the audio interface's
+    /// output (`docs/specs/external-devices.md`, R4, R5). Call it before the
+    /// processor runs on the audio thread: it returns the queue it had, if
+    /// any, to be dropped there. A processor without one, such as an offline
+    /// render's, sends nothing (R8).
+    pub fn set_midi_output(
+        &mut self,
+        queue: rtrb::Producer<MidiOutputEvent>,
+    ) -> Option<rtrb::Producer<MidiOutputEvent>> {
+        self.midi.set_out(queue)
     }
 
     /// What a MIDI track's input received in the last block, and whether the
@@ -469,6 +514,7 @@ impl Processor {
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
             self.capture(done, length);
+            self.log_captured(done, length);
             self.render(done, length);
             done += length;
         }
@@ -501,6 +547,11 @@ impl Processor {
         // Spec: device-changes R1
         self.playing = false;
         self.metronome.stop();
+        // Spec: external-devices R6. No note stays held on the hardware when
+        // the stream stops or restarts.
+        if let Some(program) = self.program.as_mut() {
+            self.midi.release(&mut program.get_mut().midi);
+        }
         // The song stopped with the stream, so the Session View is at rest
         // too: nothing plays until a person launches again.
         self.session.clear();
@@ -616,6 +667,7 @@ impl Processor {
                     self.last_take = None;
                     self.plan = Some(plan);
                 }
+                Message::OutputLatency(frames) => self.output_latency = frames,
             }
         }
     }
@@ -850,6 +902,7 @@ impl Processor {
                 self.end_recordings();
                 if self.playing {
                     self.playing = false;
+                    self.release_midi();
                 } else {
                     self.insert_marker = Ticks::ZERO;
                     self.position = Frames::ZERO;
@@ -861,6 +914,7 @@ impl Processor {
             TransportCommand::PlayStop => {
                 if self.playing {
                     self.playing = false;
+                    self.release_midi();
                     self.metronome.stop();
                     self.end_recordings();
                 } else {
@@ -906,6 +960,14 @@ impl Processor {
                     self.end_recording();
                 }
             }
+        }
+    }
+
+    /// Spec: external-devices R6. Ends the notes sent to ports, at the start
+    /// of the next block: the transport stopped.
+    fn release_midi(&mut self) {
+        if let Some(program) = self.program.as_mut() {
+            program.get_mut().midi.release_all();
         }
     }
 
@@ -1293,6 +1355,12 @@ impl Processor {
                 self.config.sample_rate,
             );
             self.session.repeat(playhead);
+            // Spec: follow-actions R2. A follow due at this frame runs
+            // before the scene maps and the clips below read the launcher.
+            if let Some(program) = self.program.as_ref() {
+                self.session
+                    .run_follow(program.get(), playhead, self.position);
+            }
             // Spec: session-view R22. A launched scene's tempo and signature
             // apply on its launch frame.
             while let Some(scene) = self.session.take_due_scene(self.position) {
@@ -1445,6 +1513,13 @@ impl Processor {
             .filter(|&ahead| ahead > 0 && ahead < remaining as u64)
             .min()
             .map_or(remaining, |ahead| ahead as usize);
+        // Spec: modulation R28. A target that runs before the modulator
+        // driven by its signal takes the modulator's output from 32 frames
+        // before, which the modulator has written by the part's start only
+        // if the part is no longer than that.
+        if self.program.as_ref().is_some_and(|p| p.get().lagged) {
+            next = next.min(crate::program::LAG_FRAMES);
+        }
         if !self.playing {
             return next;
         }
@@ -1533,13 +1608,19 @@ impl Processor {
             Some(program) => {
                 let program = program.get_mut();
                 self.counters.events_applied += program.run(
-                    length,
-                    offset as u32,
-                    &self.resolved,
-                    &mut self.scratch,
-                    transport,
-                    &self.session_playback,
+                    self.pool.as_mut(),
+                    &mut self.lane,
+                    Blk {
+                        frames: length,
+                        from: offset as u32,
+                        until: offset as u32 + length as u32,
+                        events: &self.resolved,
+                        transport,
+                        session: &self.session_playback,
+                    },
                 );
+                // Spec: external-devices R4, R5
+                self.midi.emit(&mut program.midi, self.output_latency);
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
                     let from = c.min(program.channels - 1);
@@ -1680,6 +1761,38 @@ impl Processor {
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
             take.next = self.position + Frames(frames as i64);
+        }
+    }
+
+    /// Copies the notes and controllers the monitoring MIDI tracks received in
+    /// the frames `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// stamped with the engine clock and, while the song plays, the song
+    /// frame (WP-3.14).
+    fn log_captured(&mut self, offset: usize, frames: usize) {
+        let Some(program) = self.program.as_ref() else {
+            return;
+        };
+        let song = (self.playing && !self.metronome.is_counting_in()).then_some(self.position);
+        for (track, events) in program.get().midi.monitored_inputs() {
+            for event in events {
+                let at = event.offset as usize;
+                if !crate::recording::is_recorded(&event.message)
+                    || at < offset
+                    || at >= offset + frames
+                {
+                    continue;
+                }
+                let into = (at - offset) as i64;
+                let logged = CapturedMidi {
+                    track,
+                    clock: self.clock + at as u64,
+                    song: song.map(|position| position + Frames(into)),
+                    message: event.message,
+                };
+                if self.captured.push(logged).is_err() {
+                    self.midi.counters.capture_dropped += 1;
+                }
+            }
         }
     }
 
@@ -1825,9 +1938,13 @@ impl Processor {
         if let Some(program) = &self.program {
             program.get().modulated(&mut state.modulated);
         }
+        state.processing.clear();
+        if let Some(program) = &self.program {
+            program.get().processing(&mut state.processing);
+        }
         if let Some(program) = &self.program {
             let program = program.get();
-            for &task in &program.order {
+            for &task in program.order.iter().filter(|&&t| Some(t) != program.cue) {
                 let reading = program.meters(task);
                 let meter = TrackMeter {
                     track: program.tasks[task as usize].track,

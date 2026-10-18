@@ -47,6 +47,10 @@ fn every_item_reaches_a_command_or_is_pending() {
             for item in menu.walk() {
                 match item.action {
                     Action::Command(id) => assert!(registry.contains(id), "{}: {id}", item.row),
+                    Action::Choice(id, args) => {
+                        assert!(registry.contains(id), "{}: {id}", item.row);
+                        serde_json::from_str::<serde_json::Value>(args).expect(item.row);
+                    }
                     Action::Shortcut(ids) => {
                         assert!(!ids.is_empty());
                         for id in ids {
@@ -92,6 +96,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The same page's Warp recorded audio switch (the recording spec,
         // R13).
         commands::SETTINGS_SET_WARP_RECORDED_AUDIO,
+        commands::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
+        commands::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
+        commands::SETTINGS_SET_DEFAULT_WARP_MODE,
         // The same page's Launch section (the launch quantisation spec,
         // R15).
         commands::SETTINGS_SET_DEFAULT_LAUNCH_MODE,
@@ -99,6 +106,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_SELECT_ON_LAUNCH,
         commands::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
         commands::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+        // The same page's Record Session automation in chooser (the Session
+        // automation spec, R5).
+        commands::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).

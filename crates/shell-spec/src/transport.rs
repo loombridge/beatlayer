@@ -141,6 +141,11 @@ pub struct TransportState {
     /// What the last recording that ended came to; null until one has
     /// ended in this session.
     pub last_recording: Option<RecordingReport>,
+    /// Whether Capture MIDI has notes to bring back: a monitoring MIDI
+    /// track was played since the last capture or recording, so `midi.capture`
+    /// runs and the Control Bar's button and Create menu item are enabled.
+    #[serde(default)]
+    pub capture_midi_ready: bool,
 }
 
 /// The recording under way, in `transport.state`.
@@ -181,7 +186,7 @@ pub struct RecordingReport {
     pub clips_made: bool,
     /// The audio files it wrote, one per armed audio track that was played.
     pub files: Vec<RecordedFileReport>,
-    /// The MIDI tracks that received notes.
+    /// The MIDI tracks that received notes or controllers.
     pub midi_tracks: Vec<TrackId>,
     /// Frames and MIDI messages dropped: the recording ended early.
     pub dropped_frames: u64,

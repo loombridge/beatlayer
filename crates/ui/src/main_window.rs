@@ -69,6 +69,10 @@ pub enum UiEvent {
     /// A device's value control gained (true) or lost (false) the keyboard
     /// focus, for [`Shell::set_value_focused`] (WP-2.5).
     FocusValue(bool),
+    /// The pointer is over something with a line for the Status Bar, such
+    /// as a drum rack's pad (`Some`), or left it (`None`), for
+    /// [`Shell::set_hint`] (WP-5.6).
+    StatusHint(Option<String>),
 }
 
 /// What the Info View is showing: the control under the pointer, the
@@ -134,6 +138,9 @@ pub struct MainWindowUi {
     drawn: Option<ShellLayout>,
     /// The titles the last frame's Device View showed, for Rename.
     device_titles: Vec<(bl_model::DeviceId, String)>,
+    /// The names of the chains the last frame's Device View listed, for
+    /// Rename.
+    chain_names: Vec<(bl_model::ChainId, String)>,
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
@@ -210,6 +217,7 @@ impl MainWindowUi {
             menu_open: false,
             drawn: None,
             device_titles: Vec::new(),
+            chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
         }
     }
@@ -229,6 +237,16 @@ impl MainWindowUi {
             .iter()
             .find(|(id, _)| *id == device)
             .map(|(_, title)| title.clone())
+            .unwrap_or_default()
+    }
+
+    /// The name a chain's row shows, for renaming it; empty for a chain the
+    /// set no longer has.
+    fn chain_name(&self, chain: bl_model::ChainId) -> String {
+        self.chain_names
+            .iter()
+            .find(|(id, _)| *id == chain)
+            .map(|(_, name)| name.clone())
             .unwrap_or_default()
     }
 
@@ -297,6 +315,11 @@ impl MainWindowUi {
                 let title = self.device_title(*device);
                 self.devices.start_rename(*device, &title);
             }
+            Effect::RenameChain(chain) => {
+                // Spec: racks R22. Rename types the name in the chain's row.
+                let name = self.chain_name(*chain);
+                self.devices.start_chain_rename(*chain, &name);
+            }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
                 backwards,
@@ -331,6 +354,10 @@ impl MainWindowUi {
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
         crate::menus::menu_keys(ctx);
+        // Spec: modulation R15. A lit Map button tints the parameters it can
+        // map, and Esc puts it out.
+        crate::mapping::set_armed(ctx, shell.armed_map());
+        crate::mapping::escape(ctx, self.is_typing(), &mut events);
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
         if let Some(step) = self.focus_move.take() {
@@ -385,8 +412,17 @@ impl MainWindowUi {
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Files dragged from the browser, or from Finder or Explorer,
             // land in the Arrangement (WP-1.10).
-            self.browser
-                .drop_overlay(ui, shell, theme, layout.main_view, &mut events);
+            // The zone editor, which sits over the foot of the Arrangement,
+            // takes the files dropped on it itself.
+            let zone_editor =
+                crate::device_view::DeviceViewUi::zone_editor_rect(shell, layout.detail);
+            self.browser.drop_overlay(
+                ui,
+                shell,
+                theme,
+                (layout.main_view, zone_editor),
+                &mut events,
+            );
             // The Status Bar draws before the Info View, so the elements
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
@@ -398,18 +434,34 @@ impl MainWindowUi {
             } else if shell.clip_view().visible() {
                 // Spec: piano-roll. The Clip View takes the detail area in
                 // place of the Device View.
-                self.clip_view
-                    .show(ui, shell, theme, layout.device_view, &mut events);
+                let arrangement = &mut self.arrangement;
+                self.clip_view.show(
+                    ui,
+                    shell,
+                    theme,
+                    layout.device_view,
+                    &mut events,
+                    &mut |media| arrangement.peaks_of(media),
+                );
             } else {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
             }
-            self.device_titles = shell
-                .device_view_state()
-                .devices
-                .into_iter()
-                .map(|d| (d.id, d.title))
-                .collect();
+            if !shell.clip_view().visible() && shell.scene_view_scene().is_none() {
+                // Spec: multisampler R1. The zone editor sits above the
+                // Device View.
+                self.devices
+                    .show_zone_editor(ui, shell, theme, layout.detail, &mut events);
+            }
+            let shown = shell.device_view_state().devices;
+            self.chain_names.clear();
+            for device in &shown {
+                collect_chain_names(device, &mut self.chain_names);
+            }
+            self.device_titles.clear();
+            for device in &shown {
+                collect_titles(device, &mut self.device_titles);
+            }
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
@@ -417,8 +469,12 @@ impl MainWindowUi {
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
         });
+        // Spec: stem-separation R1. Separate Stems' dialog sits over the
+        // window while it's open.
+        crate::stems_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
-        self.menu_open = egui::Popup::is_any_open(ctx);
+        // An open menu, or Separate Stems' dialog, keeps the keys.
+        self.menu_open = egui::Popup::is_any_open(ctx) || shell.stems_dialog().is_some();
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);
@@ -689,6 +745,11 @@ impl MainWindowUi {
             }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
+            }
+            if *el == Element::DeviceSelector {
+                // Spec: racks R25 (S-DEV-005). A right-click lists every
+                // device on the track.
+                response.context_menu(|ui| device_list(ui, shell, events));
             }
         }
     }
@@ -1141,6 +1202,15 @@ fn look(element: Element, shell: &Shell) -> Look {
         ..Look::default()
     };
     match element {
+        // Spec: racks R25 (L-STAT-007). The selected track's name.
+        Element::DeviceSelector => {
+            let doc = shell.editor().document();
+            shell
+                .device_view_state()
+                .track
+                .and_then(|t| doc.track(t))
+                .map_or_else(Look::default, |t| text(t.name()))
+        }
         Element::BrowserToggle => Look {
             on: shell.browser_visible(),
             value: Some(
@@ -1270,13 +1340,39 @@ fn look(element: Element, shell: &Shell) -> Look {
             on: shell.main_view() == MainView::Arrangement,
             ..Look::default()
         },
-        Element::Message => match shell.message() {
-            Some(message) => Look {
+        Element::MidiIndicators => {
+            // Spec: midi-io R25; external-devices R7. The number holds the
+            // two lamps: 1 for the input's, 2 for the output's.
+            let (input, output) = shell.midi_indicators();
+            let lit = |on: bool, what: &str| if on { what.to_owned() } else { String::new() };
+            Look {
+                number: Some(f64::from(u8::from(input) | u8::from(output) << 1)),
+                value: Some(
+                    [lit(input, "receiving"), lit(output, "sending")]
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                description: Some(
+                    "The upper light flashes when MIDI reaches a track's input, the lower \
+                     when a track sends MIDI to a port."
+                        .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::Message => match (shell.message(), shell.hint()) {
+            (Some(message), _) => Look {
                 text: Some(message.text.clone()),
                 on: message.error,
                 ..Look::default()
             },
-            None => Look {
+            (None, Some(hint)) => Look {
+                text: Some(hint.to_owned()),
+                ..Look::default()
+            },
+            (None, None) => Look {
                 text: Some(String::new()),
                 ..Look::default()
             },
@@ -1371,4 +1467,62 @@ pub struct DrawnMenuBar<'a> {
     pub keymap: &'a crate::keymap::Keymap,
     /// Whose keys to show.
     pub platform: crate::keymap::Platform,
+}
+
+/// The names of the chains in `device`'s rack and the racks inside it.
+fn collect_chain_names(
+    device: &bl_shell::device_commands::DeviceFrame,
+    names: &mut Vec<(bl_model::ChainId, String)>,
+) {
+    if let Some(rack) = &device.rack {
+        names.extend(rack.chains.iter().map(|c| (c.id, c.name.clone())));
+        for child in &rack.devices {
+            collect_chain_names(child, names);
+        }
+    }
+}
+
+/// The titles of `device` and the devices inside its rack, at any depth.
+fn collect_titles(
+    device: &bl_shell::device_commands::DeviceFrame,
+    titles: &mut Vec<(bl_model::DeviceId, String)>,
+) {
+    titles.push((device.id, device.title.clone()));
+    for child in device.rack.iter().flat_map(|rack| &rack.devices) {
+        collect_titles(child, titles);
+    }
+}
+
+/// The Device View selector's list: every device on the selected track as a
+/// hierarchy, each rack's devices under it chain by chain; choosing one
+/// selects it (racks spec, R25).
+fn device_list(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    let list = shell.device_view_state().device_list;
+    if list.is_empty() {
+        ui.add_enabled(false, egui::Button::new("No devices"));
+    }
+    for entry in list {
+        ui.horizontal(|ui| {
+            ui.add_space(entry.depth as f32 * 12.0);
+            let response = ui.button(&entry.label);
+            crate::menus::register_item(ui.ctx(), &response);
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(format!("Level {}", entry.depth + 1));
+            });
+            if response.clicked() {
+                let invocation = match (entry.device, entry.chain) {
+                    (Some(device), _) => {
+                        Invocation::new("device.select", json!({ "device": device }))
+                    }
+                    (None, Some(chain)) => Invocation::new(
+                        "chain.select",
+                        json!({ "chain": chain, "mode": "replace" }),
+                    ),
+                    (None, None) => return,
+                };
+                events.push(UiEvent::Invoke(invocation));
+                ui.close();
+            }
+        });
+    }
 }

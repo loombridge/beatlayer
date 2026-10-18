@@ -80,6 +80,13 @@ impl MidiMessage {
         &self.bytes[..usize::from(self.len)]
     }
 
+    /// The status byte and two data bytes, with 0 for any the message
+    /// lacks.
+    #[must_use]
+    pub const fn padded(&self) -> [u8; 3] {
+        self.bytes
+    }
+
     /// The status byte.
     #[must_use]
     pub const fn status(&self) -> u8 {
@@ -207,6 +214,22 @@ pub struct MidiInputEvent {
     /// The port, or the computer keyboard.
     pub source: MidiSource,
     /// When it arrived.
+    pub time: Instant,
+    /// The message.
+    pub message: MidiMessage,
+}
+
+/// A message on its way from the engine to a MIDI output port: the port, the
+/// moment its frame is heard at the audio interface's output, and the
+/// message (`docs/specs/external-devices.md`, R4, R5).
+///
+/// `time` is on the same monotonic clock ([`Instant`]) as input times. The
+/// MIDI output thread hands the message to the MIDI system stamped with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MidiOutputEvent {
+    /// The port.
+    pub port: PortId,
+    /// When the message is due at the port.
     pub time: Instant,
     /// The message.
     pub message: MidiMessage,

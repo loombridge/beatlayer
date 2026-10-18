@@ -4,7 +4,7 @@ This is the definition of done for parity with Ableton Live 12. What Beatlayer a
 
 Live is sold in three editions (Intro, Standard, Suite). Beatlayer has one edition with everything, so edition limits such as Intro's 16 tracks don't apply.
 
-Device names in this page are Live's, used only to identify the parity target. Beatlayer's devices get their own names ([clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code)).
+Device names in this page are Live's, and Beatlayer's devices take the same names ([clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code)).
 
 Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP-1.8b"), and [the progress dashboard](../xtask/src/progress.rs) (`cargo xtask dashboard`) shows the row's status from theirs in the build plan's status table. In a row split across milestones, a package counts for the part in its own phase. A row in Phases 0 to 2 that names no package shows as unassigned, a gap in the plan; later phases are planned until they're broken into packages. When Ableton ships a release, add its features here first.
 
@@ -62,7 +62,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Scene tempo and time signature | M3 | Built in WP-3.5 |
 | Clip envelopes, linked and unlinked | M3 | ([spec](specs/clip-envelopes.md)). Built in WP-3.15 |
 | Capture and Insert Scene | M3 | Built in WP-3.5 |
-| Capture MIDI | M3 | Built in WP-3.14 (notes); its controller data in WP-2.29b |
+| Capture MIDI | M3 | ([spec](specs/capture-midi.md)). Built in WP-3.14 (notes); its controller data in WP-2.29b |
 | MIDI controller clip envelopes (MIDI Ctrl), per-note pressure, and recording controller data | M2 | ([spec](specs/midi-controller-data.md)). WP-2.29 and WP-2.29b |
 | Crossfader A/B | M3 | Built in WP-3.17 |
 
@@ -83,7 +83,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Consolidate | M4 | Built in WP-4.13 |
 | Slice to New MIDI Track (transients, warp markers, beat divisions, slicing presets) | M4 | Built in WP-4.16 |
 | Convert Drums, Melody, or Harmony to New MIDI Track | M9 | On-device ML, with measured accuracy targets (IMP-06) |
-| Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems) | M9 | On-device ML on the GPU, with a speed target (IMP-11) |
+| Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems) | M9 | On-device ML on the GPU, with a speed target (IMP-11). Arrangement clips, both modes and merging built ahead of Phase 9 in [#202](https://github.com/loombridge/beatlayer/pull/202), on the CPU; files, Session clips, time selections and the GPU later in Phase 9 |
 | Freeze Track | M4 | Built in WP-4.14 |
 | Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio | M4 | Mono sources bounce to mono files (IMP-10). Built in WP-4.15 |
 | REX files | Out | The REX SDK is proprietary; in scope only if its terms allow use in a GPL-3.0 application |
@@ -143,7 +143,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Resampling, MIDI track to MIDI track, multi-output instruments | M2 (resampling, track to track), M5 (multi-output instruments) | Built in WP-2.19 (resampling, track-to-track audio; MIDI routing kept and shown, carried once WP-2.1 plays MIDI); multi-output instruments in WP-5.45 |
 | Sidechain to devices and plug-ins | M2 | WP-2.19b: a device's sidechain section picks its source (Live 12 routes no Audio To into a sidechain), External, Mix, SC Gain, Listen ([routing](specs/routing.md) R22 to R31) |
 | Up to 256 mono inputs and outputs | M2 | Built in WP-2.13 |
-| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore", which the capacity target (128 tracks on an M1) needs; Phase 10 only tunes it. Built in WP-5.37 |
+| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore", which the capacity target (128 tracks on an M1) needs; Phase 10 only tunes it. Built in WP-5.37: a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains at once, with the same output to the bit as one thread; Live has no setting for it (the manual's 38.1), and neither has Beatlayer |
 | MIDI track output to external MIDI ports and channels (hardware synths) | M5 | Needs the scheduled MIDI output backend (architecture, MIDI I/O), shared with External Instrument and MIDI Clock. Built in WP-5.34 |
 | Surround mixing | Out | Live 12 is stereo apart from one Max device; revisit after 1.0 |
 

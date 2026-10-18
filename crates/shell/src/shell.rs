@@ -32,12 +32,14 @@ use crate::assistant::{
     SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetPanelWidthArgs, SetProviderArgs, keychain_account,
 };
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
+use crate::auto_warp;
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
-    DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
+    DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
+    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
     TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
     ViewState, ZoomArgs,
 };
@@ -47,10 +49,11 @@ use crate::midi::MidiHost;
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
+use crate::sample_editor;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
-    OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
-    zoom_factor, zoom_percent, zoom_step,
+    OnByDefault, Preferences, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
@@ -59,15 +62,19 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
+use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -75,12 +82,20 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+mod capture;
+mod multisampler;
 mod processed_files;
+mod sample_edits;
+mod sample_keys;
+pub use sample_keys::TransientList;
 mod session_recording;
+mod stems;
+mod warping;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -140,6 +155,7 @@ pub enum Area {
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
 /// switch (M-OPT-025).
 const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
+const CUE_MODE: &str = "mixer.set_cue_mode";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -217,6 +233,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a chain in its row of the chain list; Return runs
+    /// `chain.rename` with the new name (WP-5.2).
+    RenameChain(bl_model::ChainId),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -235,6 +254,14 @@ pub enum GesturePhase {
     Cancel,
 }
 
+/// What the browser's selection loads into the Device View.
+enum DevicesLoad {
+    /// A preset file.
+    Preset(PathBuf),
+    /// A device listed under a label.
+    Device(browser::BrowserDevice),
+}
+
 /// A gesture under way: what the selection was when it began, and the last
 /// command that ran, to fall back on when a frame's command is refused.
 #[derive(Debug)]
@@ -242,6 +269,10 @@ struct Gesture {
     view: ArrangementView,
     clip_view: ClipView,
     last: Option<Invocation>,
+    /// The step every later frame runs first, from where the gesture began:
+    /// the warp marker a pseudo-warp marker's drag makes, which the frames
+    /// that follow then move (sample editor R8).
+    base: Option<Invocation>,
 }
 
 /// A line for the Status Bar's message area (L-STAT-002).
@@ -324,7 +355,12 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
-    /// The chord Stack's Learn is hearing.
+    /// The counts of messages that reached tracks' inputs and left for
+    /// ports when [`Shell::poll`] last looked, and when each last changed
+    /// while the indicator still lit (external-devices R7).
+    midi_seen: (u64, u64),
+    midi_lit: [Option<std::time::Instant>; 2],
+    /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
@@ -344,6 +380,8 @@ pub struct Shell {
     value_focused: bool,
     effects: Vec<Effect>,
     message: Option<Message>,
+    /// What the pointer is over says about itself, while there's no message.
+    hint: Option<String>,
     revision: u64,
     agent_status: AgentServerStatus,
     /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
@@ -382,6 +420,18 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// Stem separation's download, separation, and dialog (IMP-11).
+    stems: stems::StemsState,
+    /// The sample being auditioned from a click in a display (WP-5.15,
+    /// R54): its device and layer, while the button is down. Not saved.
+    auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
+    /// How files are analysed (WP-4.3): in memory only until the app says
+    /// otherwise.
+    analysis_options: bl_analysis::cache::AnalysisOptions,
+    /// The analysis cache, made when first used.
+    analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The files whose analysis has been started this session.
+    analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -414,6 +464,9 @@ pub struct Shell {
     /// Whether `modulated` came from a running engine, so it clears when
     /// the engine stops while values a host set stay.
     modulating: bool,
+    /// The rack chains the engine found processing in its last block
+    /// (WP-5.3), which a rack's Auto Select selects.
+    processing: Vec<bl_model::ChainId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -438,8 +491,22 @@ pub struct Shell {
     /// The VST3 host: VST3 devices' instances, on this thread (WP-2.7).
     vst3: Vst3Host,
     /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
-    /// their blocklist, and their cache.
-    scanner: Scanner,
+    /// their blocklist, and their cache. Shared with the background scan
+    /// (WP-2.9b).
+    scanner: Arc<Scanner>,
+    /// The background plug-in scan under way, if any (WP-2.9b).
+    /// It says it's done just before it wakes the app, so the wake finds
+    /// it done.
+    plugin_scan: Option<(
+        std::thread::JoinHandle<()>,
+        Arc<std::sync::atomic::AtomicBool>,
+    )>,
+    /// Another background scan asked for while one ran: whether it ignores
+    /// the cache.
+    plugin_scan_again: Option<bool>,
+    /// Whether the app scans plug-ins by itself: at start, and when a
+    /// Plug-In Sources switch turns on ([`Shell::start_plugin_scan`]).
+    auto_scan: bool,
     /// Plug-ins built on the plug-in kit, compiled in as native devices:
     /// their instances, on this thread.
     kit: KitHost,
@@ -462,8 +529,15 @@ pub struct Shell {
     recorded_takes: u32,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// The control moves of the Session recording under way (WP-3.12).
+    session_automation: crate::automation_record::SessionTake,
+    /// The song frame the Session recording's take began on, once it has.
+    session_take_start: Option<Frames>,
     /// What the Session clips that played during the recording under way
     /// were (WP-3.13).
     session_watch: crate::session_capture::Watch,
@@ -533,19 +607,50 @@ fn automation_label(id: &str) -> &'static str {
     }
 }
 
-/// Whether `id` is one of the clip marker commands the Clip View's marker
-/// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
-/// document commands, but the strip's drags run them as gestures, so moving
-/// a marker or the loop brace however far is one undo step (piano-roll R11).
+/// Whether `id` is one of the document's clip commands the Clip View's
+/// drags run: the marker strip's (`clip.set_midi_region`,
+/// `clip.set_midi_loop` and the audio clips' `clip.set_region` and
+/// `clip.set_loop`) and the Sample Editor's (warp markers and transients).
+/// They are document commands, but the drags run them as gestures, so moving
+/// a marker or the loop brace however far is one undo step (piano-roll R11;
+/// sample editor R7).
 fn clip_marker_command(id: &str) -> bool {
-    matches!(id, model::SET_MIDI_REGION | model::SET_MIDI_LOOP)
+    matches!(
+        id,
+        model::SET_MIDI_REGION
+            | model::SET_MIDI_LOOP
+            | "clip.set_region"
+            | "clip.set_loop"
+            | "clip.insert_warp_marker"
+            | "clip.move_warp_markers"
+            | "clip.shift_warp_marker"
+            | "clip.move_transient"
+    )
 }
 
-/// The name of the undo step a marker-strip gesture makes.
+/// Whether `id` is an edit the Sample Editor makes to an audio clip's
+/// markers, transients or region.
+fn sample_edit_command(id: &str) -> bool {
+    clip_marker_command(id)
+        || matches!(
+            id,
+            "clip.delete_warp_markers"
+                | "clip.insert_warp_markers"
+                | "clip.insert_transient"
+                | "clip.delete_transients"
+                | "clip.reset_transients"
+        )
+}
+
+/// The name of the undo step a marker-strip or Sample Editor gesture makes.
 fn marker_label(id: &str) -> &'static str {
     match id {
-        model::SET_MIDI_REGION => "Change clip region",
-        _ => "Change clip loop",
+        model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
+        model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
+        "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
+        "clip.shift_warp_marker" => "Shift warp marker",
+        "clip.move_transient" => "Move transient",
+        _ => "Change clip",
     }
 }
 
@@ -601,6 +706,9 @@ fn snapshot(editor: &Editor) -> Editor {
 /// How often [`Shell::poll`] lists the MIDI ports again.
 const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long a MIDI indicator stays lit after a message.
+const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
+
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
     /// nowhere), playing through `audio`, and opening and saving sets
@@ -629,7 +737,14 @@ impl Shell {
         // hardware. The queue has no engine yet; each engine attaches its own.
         let (midi_sender, _) = bl_midi_io::input_queue(1);
         audio.set_midi(midi_sender.clone());
-        let midi = MidiHost::new(Box::new(bl_midi_io::NullBackend), midi_sender, &prefs.midi);
+        let midi_output = bl_midi_io::OutputBus::new();
+        audio.set_midi_output(midi_output.clone());
+        let midi = MidiHost::new(
+            Box::new(bl_midi_io::NullBackend),
+            midi_sender,
+            midi_output,
+            &prefs.midi,
+        );
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
@@ -650,10 +765,10 @@ impl Shell {
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
-        let scanner = match &config_dir {
+        let scanner = Arc::new(match &config_dir {
             Some(dir) => Scanner::new().with_store(dir.join(crate::settings::PLUGIN_SCAN_FILE)),
             None => Scanner::new(),
-        };
+        });
         // The kit's plug-ins compiled in, as native devices: its examples
         // with bl-devices' `kit-examples` feature, none otherwise.
         let kit = bl_devices::kit_host();
@@ -668,6 +783,11 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            stems: stems::StemsState::default(),
+            auditioning: None,
+            analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
+            analysis: None,
+            analysed: std::collections::HashSet::new(),
             registry,
             editor,
             saved,
@@ -677,6 +797,8 @@ impl Shell {
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
+            midi_seen: (0, 0),
+            midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
             settings_open: false,
             prefs,
@@ -691,6 +813,7 @@ impl Shell {
             value_focused: false,
             effects: Vec::new(),
             message: None,
+            hint: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
             keychain: Arc::new(OsKeychain::new()),
@@ -715,6 +838,7 @@ impl Shell {
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),
+            processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),
             metering: false,
@@ -723,7 +847,10 @@ impl Shell {
             last_recording: None,
             recorded_takes: 0,
             session_run: None,
+            capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
+            session_automation: crate::automation_record::SessionTake::default(),
+            session_take_start: None,
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -738,6 +865,9 @@ impl Shell {
             plugins,
             vst3,
             scanner,
+            plugin_scan: None,
+            plugin_scan_again: None,
+            auto_scan: false,
             kit,
             device_commands: std::collections::BTreeMap::new(),
             device_commands_key: Vec::new(),
@@ -752,12 +882,97 @@ impl Shell {
     /// format filters applied (WP-2.9, IMP-07), pushed into the browser's
     /// Plug-Ins label.
     fn publish_plugins(&mut self) {
-        let plugins = self.scanner.visible(
+        let formats = crate::plugins::listed_formats(&self.prefs);
+        let mut plugins = self.scanner.visible(
             self.prefs.show_hidden_plugins,
             &self.prefs.hidden_plugins,
             self.prefs.plugin_format_preference,
         );
+        // Spec: plugin-scanning R12. A format is listed only while its
+        // Plug-In Sources switch is on, as in Live.
+        plugins.retain(|p| formats.contains(&p.format));
         self.browser_view.set_plugins(plugins);
+    }
+
+    /// Starts scanning plug-ins by itself, as Live does at launch (WP-2.9b;
+    /// the plug-in scanning spec, R13): a scan of the system folders of the
+    /// formats switched on runs now in the background, answered from the
+    /// cache for unchanged files, and again whenever a Plug-In Sources
+    /// switch turns on. The browser lists what the cache knew until it
+    /// finishes. The app calls it once its window is up; tests and tools
+    /// that don't, scan only when asked.
+    pub fn start_plugin_scan(&mut self) {
+        self.auto_scan = true;
+        self.spawn_plugin_scan(false);
+    }
+
+    /// Whether a background plug-in scan is under way.
+    #[must_use]
+    pub fn plugin_scan_running(&self) -> bool {
+        self.plugin_scan.is_some()
+    }
+
+    fn spawn_plugin_scan(&mut self, fresh: bool) {
+        if self.plugin_scan.is_some() {
+            self.plugin_scan_again = Some(self.plugin_scan_again.unwrap_or(false) | fresh);
+            return;
+        }
+        let scanner = Arc::clone(&self.scanner);
+        let formats = crate::plugins::listed_formats(&self.prefs);
+        let waker = self.browser_view.waker().clone();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finished = Arc::clone(&done);
+        let spawned = std::thread::Builder::new()
+            .name("plugin-scan".to_owned())
+            .spawn(move || {
+                let _ = crate::plugins::scan_report(
+                    &scanner,
+                    None,
+                    fresh,
+                    &formats,
+                    &std::collections::BTreeSet::new(),
+                );
+                finished.store(true, std::sync::atomic::Ordering::Release);
+                waker.wake();
+            });
+        self.plugin_scan = spawned.ok().map(|handle| (handle, done));
+    }
+
+    /// Takes a finished background scan's results into the browser, and
+    /// starts the next one if one was asked for. Returns whether the
+    /// browser changed.
+    fn poll_plugin_scan(&mut self) -> bool {
+        if !self
+            .plugin_scan
+            .as_ref()
+            .is_some_and(|(_, done)| done.load(std::sync::atomic::Ordering::Acquire))
+        {
+            return false;
+        }
+        if let Some((scan, _)) = self.plugin_scan.take() {
+            let _ = scan.join();
+        }
+        self.publish_plugins();
+        if let Some(fresh) = self.plugin_scan_again.take() {
+            self.spawn_plugin_scan(fresh);
+        }
+        true
+    }
+
+    /// Waits for the background plug-in scan to finish, up to `timeout`,
+    /// for tests and tools. Returns whether it finished.
+    pub fn wait_for_plugin_scan(&mut self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            self.poll_plugin_scan();
+            if self.plugin_scan.is_none() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     /// Makes each allowed agent that has no token of its own one (an agent
@@ -1120,7 +1335,40 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            midi_outputs: self.midi.output_names(),
         }
+    }
+
+    /// Lights the Control Bar's MIDI indicators for a moment when messages
+    /// have reached tracks' inputs or left for ports since the last call;
+    /// returns whether either changed (midi-io R25; external-devices R7).
+    fn track_midi_activity(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let seen = (
+            self.midi.sender().stats().snapshot().to_tracks,
+            self.midi.output().stats().snapshot().sent,
+        );
+        let counts = [(seen.0, self.midi_seen.0), (seen.1, self.midi_seen.1)];
+        let mut changed = false;
+        for (lit, (new, old)) in self.midi_lit.iter_mut().zip(counts) {
+            if new != old {
+                *lit = Some(now);
+                changed = true;
+            } else if lit.is_some_and(|since| now.duration_since(since) >= MIDI_LAMP) {
+                *lit = None;
+                changed = true;
+            }
+        }
+        self.midi_seen = seen;
+        changed
+    }
+
+    /// Whether the Control Bar's MIDI track input and output indicators are
+    /// lit: a message reached a track's input, or left for a port, a moment
+    /// ago (L-CTRL-026).
+    #[must_use]
+    pub fn midi_indicators(&self) -> (bool, bool) {
+        (self.midi_lit[0].is_some(), self.midi_lit[1].is_some())
     }
 
     /// Plays MIDI through `backend` from now on: the platform's MIDI system
@@ -1128,7 +1376,8 @@ impl Shell {
     /// the preferences hold.
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
-        self.midi = MidiHost::new(backend, sender, &self.prefs.midi);
+        let output = self.midi.output().clone();
+        self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.
@@ -1153,7 +1402,7 @@ impl Shell {
         before != self.midi.ports()
     }
 
-    /// Spec: midi-chord R15. While a Stack device's Learn is on, the keys
+    /// Spec: midi-chord R15. While a Chord device's Learn is on, the keys
     /// played set its shifts: the first key down is the root and the other
     /// keys held become Shift 1 to 6 in order, one undo step each time the
     /// chord changes. Returns whether the set changed.
@@ -1319,6 +1568,13 @@ impl Shell {
         }
     }
 
+    /// Record Session automation in (Record, Warp & Launch; WP-3.12): which
+    /// tracks a Session recording writes control moves into the clips of.
+    #[must_use]
+    pub fn record_session_automation_in(&self) -> crate::settings::SessionAutomationTracks {
+        self.prefs.record_session_automation_in
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -1331,6 +1587,13 @@ impl Shell {
     #[must_use]
     pub fn create_fades_on_clip_edges(&self) -> bool {
         self.prefs.create_fades_on_clip_edges.0
+    }
+
+    /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
+    /// Mode (WP-4.9).
+    #[must_use]
+    pub fn warp_prefs(&self) -> WarpPrefs {
+        self.prefs.warp
     }
 
     /// The Launch section of Record, Warp & Launch (WP-3.4).
@@ -1361,10 +1624,12 @@ impl Shell {
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
             launch: self.prefs.launch,
+            record_session_automation_in: self.prefs.record_session_automation_in,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -1522,6 +1787,22 @@ impl Shell {
         self.touch();
     }
 
+    /// The line the Status Bar shows while it has no message: what the
+    /// pointer is over says about itself, such as a drum rack's pad
+    /// (WP-5.6).
+    #[must_use]
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
+
+    /// Sets, or with `None` clears, the Status Bar's hint.
+    pub fn set_hint(&mut self, hint: Option<String>) {
+        if self.hint != hint {
+            self.hint = hint;
+            self.touch();
+        }
+    }
+
     /// Clears the Status Bar's message.
     pub fn clear_message(&mut self) {
         if self.message.take().is_some() {
@@ -1558,10 +1839,12 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        self.clip_view.sync_sample(self.editor.document());
         // The kit plug-ins' instances first, so a node the engine makes at once
         // finds its device's.
         self.kit.sync(self.editor.document());
         self.audio.sync(self.editor.document());
+        self.start_analyses();
         self.refresh_device_commands(false);
     }
 
@@ -1858,6 +2141,7 @@ impl Shell {
                             name: device_type.name.clone(),
                             role: device_type.role,
                             sidechain: false,
+                            midi_sidechain: false,
                         },
                         track,
                         chain: None,
@@ -1918,6 +2202,7 @@ impl Shell {
                             name: device_type.name.clone(),
                             role: device_type.role,
                             sidechain: false,
+                            midi_sidechain: false,
                         },
                         track,
                         chain: None,
@@ -2081,13 +2366,35 @@ impl Shell {
                 Ok(to_value(&self.device_view_state()))
             }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
-                let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;
+                let plugin_ids::ScanArgs { paths, background } = Self::args(id, args)?;
+                if background {
+                    // The Settings window's Rescan button: the scan runs
+                    // while the app keeps drawing, and the browser lists
+                    // what it found when it's done.
+                    if paths.is_some() {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: "a background scan covers the system folders; leave \
+                                      `paths` out"
+                                .to_owned(),
+                        });
+                    }
+                    self.spawn_plugin_scan(id == plugin_ids::RESCAN);
+                    return Ok(to_value(&plugin_ids::PluginScan::default()));
+                }
                 let paths: Option<Vec<std::path::PathBuf>> =
                     paths.map(|paths| paths.into_iter().map(std::path::PathBuf::from).collect());
+                // Named paths are searched for every hosted format; the
+                // system folders only for the formats switched on.
+                let formats = match &paths {
+                    Some(_) => bl_plugin_host::scan::SCANNED_FORMATS.to_vec(),
+                    None => crate::plugins::listed_formats(&self.prefs),
+                };
                 let report = crate::plugins::scan_report(
                     &self.scanner,
                     paths.as_deref(),
                     id == plugin_ids::RESCAN,
+                    &formats,
                     &self.prefs.hidden_plugins,
                 );
                 self.publish_plugins();
@@ -2103,8 +2410,31 @@ impl Shell {
                     hidden,
                     show_hidden,
                     format_preference,
+                    use_audio_units_v2,
+                    use_audio_units_v3,
+                    vst3_system_folders,
                 } = Self::args(id, args)?;
                 let mut changed = false;
+                // Spec: plugin-scanning R12. Turning a format's switch on
+                // scans it, as Live does.
+                let mut scan = false;
+                if let Some(on) = use_audio_units_v2 {
+                    scan |= on && !self.prefs.use_audio_units_v2;
+                    self.prefs.use_audio_units_v2 = on;
+                    changed = true;
+                }
+                if let Some(on) = use_audio_units_v3 {
+                    self.prefs.use_audio_units_v3 = on;
+                    changed = true;
+                }
+                if let Some(on) = vst3_system_folders {
+                    scan |= on && !self.prefs.vst3_system_folders;
+                    self.prefs.vst3_system_folders = on;
+                    changed = true;
+                }
+                if scan && self.auto_scan {
+                    self.spawn_plugin_scan(false);
+                }
                 if let Some(hidden) = hidden {
                     self.prefs.hidden_plugins = hidden.into_iter().collect();
                     changed = true;
@@ -2127,12 +2457,25 @@ impl Shell {
         }
     }
 
-    /// How the Browser shows plug-ins: what `plugin.settings` returns.
-    fn plugin_settings(&self) -> plugin_ids::PluginSettings {
+    /// What `plugin.info` reports for a plug-in device, for the Device
+    /// View's window button (WP-2.10): whether it has an editor and whether
+    /// its window is open. None for a device that isn't a loaded plug-in.
+    #[must_use]
+    pub fn plugin_info(&self, device: bl_model::DeviceId) -> Option<plugin_ids::PluginInfo> {
+        crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
+    }
+
+    /// How the Browser shows plug-ins, and the Plug-In Sources switches:
+    /// what `plugin.settings` returns.
+    #[must_use]
+    pub fn plugin_settings(&self) -> plugin_ids::PluginSettings {
         plugin_ids::PluginSettings {
             hidden: self.prefs.hidden_plugins.iter().cloned().collect(),
             show_hidden: self.prefs.show_hidden_plugins,
             format_preference: self.prefs.plugin_format_preference,
+            use_audio_units_v2: self.prefs.use_audio_units_v2,
+            use_audio_units_v3: self.prefs.use_audio_units_v3,
+            vst3_system_folders: self.prefs.vst3_system_folders,
         }
     }
 
@@ -2142,6 +2485,15 @@ impl Shell {
         let doc = self.editor.document();
         self.devices
             .state(doc, devices::shown_track(&self.arrangement, doc))
+    }
+
+    /// The modulator slot whose Map button is lit, if one is (WP-5.10): a
+    /// click on any parameter's control maps it.
+    #[must_use]
+    pub fn armed_map(&self) -> Option<device_ids::ArmedMap> {
+        self.devices
+            .armed()
+            .map(|(device, slot)| device_ids::ArmedMap { device, slot })
     }
 
     /// Sets the display data a device's display draws, as
@@ -2226,9 +2578,20 @@ impl Shell {
         if id == device_ids::LOAD_SAMPLE {
             return self.load_sample(id, args);
         }
+        if id == pad_ids::PAD_DROP {
+            return self.pad_drop(args);
+        }
+        if id == pad_ids::PAD_HOT_SWAP_SAMPLE {
+            return self.pad_hot_swap_sample(args);
+        }
         if matches!(
             id,
-            device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
+            device_ids::CUT
+                | device_ids::COPY
+                | device_ids::DUPLICATE
+                | device_ids::SAVE_PRESET
+                | device_ids::SAVE_DEFAULT_PRESET
+                | device_ids::CHAIN_SAVE_PRESET
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
@@ -2255,15 +2618,30 @@ impl Shell {
                 editor: &mut self.editor,
                 arrangement: &mut self.arrangement,
                 user_library: user_library.as_deref(),
+                media: &self.media,
                 zoom,
                 auto_hide,
                 windows_shown: self.plug_in_windows,
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: drum-racks R5. A held Preview button plays its chain.
+        for &(chain, on) in &outcome.previews {
+            self.audio.send_param(
+                bl_engine::NodeKey::ChainNotes(chain),
+                bl_engine::drum::param::PREVIEW,
+                f64::from(u8::from(on)),
+            );
+        }
+        // Spec: racks R42. Samples a rack or chain preset brought in.
+        for file in &outcome.media {
+            self.store.add_media(file.hash, &file.path, file.size);
+        }
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
+        } else if outcome.view_changed {
+            self.dirty = true;
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
@@ -2286,12 +2664,81 @@ impl Shell {
         Ok(outcome.value)
     }
 
+    /// Drops samples, a device or a preset on a pad of a drum rack
+    /// (`pad.drop`, the drum racks spec, R14 to R16): the media store takes
+    /// the files, the set records where they are, and the pad's chains play
+    /// them. One undo step.
+    fn pad_drop(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_DROP;
+        let args: pad_ids::PadDropArgs = Self::args(id, args)?;
+        let mut samples = Vec::with_capacity(args.samples.len());
+        for path in &args.samples {
+            let path = PathBuf::from(path);
+            let hash = self
+                .media
+                .import(&path)
+                .map_err(|error| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!("{}: {error}", path.display()),
+                })?;
+            let entry = self.media.entry(hash).ok_or_else(|| ShellError::Failed {
+                command: id.to_owned(),
+                message: "the media store lost the file".to_owned(),
+            })?;
+            let media = bl_model::ContentHash(*hash.as_bytes());
+            self.store.add_media(media, &entry.path, entry.size);
+            samples.push(devices::PadSample {
+                media,
+                name: file_stem(&entry.path),
+            });
+        }
+        let user_library = self.browser_view.user_library().map(Path::to_path_buf);
+        let dropped = self
+            .devices
+            .pad_drop(&mut self.editor, user_library.as_deref(), args, &samples)
+            .map_err(|error| device_error(id, error))?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        Ok(to_value(&dropped))
+    }
+
+    /// A pad's Hot-Swap Sample button (`pad.hot_swap_sample`, the drum racks
+    /// spec, R19): the pad becomes the hot-swap target and the browser opens
+    /// the folder of the sample it plays.
+    fn pad_hot_swap_sample(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_HOT_SWAP_SAMPLE;
+        let args: pad_ids::PadHotSwapArgs = Self::args(id, args)?;
+        let media = self
+            .devices
+            .pad_sample_of(self.editor.document(), args.rack, args.note)
+            .map_err(|error| device_error(id, error))?
+            .ok_or_else(|| ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "the pad's chain plays no sample".to_owned(),
+            })?;
+        let state = self.run_devices(pad_ids::PAD_HOT_SWAP, to_value(&args))?;
+        let folder = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(media.0))
+            .and_then(|entry| entry.path.parent().map(Path::to_path_buf));
+        if let Some(folder) = folder {
+            self.browser = true;
+            self.run_browser(
+                browser_ids::OPEN_FOLDER,
+                json!({ "path": folder, "open": true, "keep_others": true }),
+            )
+            .ok();
+        }
+        Ok(state)
+    }
+
     /// Loads a file into a device that plays one sample
     /// (`device.load_sample`, WP-2.16): the media store takes the file, the
     /// set records where it is and the device names it by content hash, and
     /// the engine plays it. One undo step.
     fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device_ids::LoadSampleArgs { device, path, slot } = Self::args(id, args)?;
         let device =
             device
                 .or_else(|| self.devices.selected())
@@ -2299,23 +2746,37 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
-        let kind = self
+        let target = self
             .editor
             .document()
             .device(device)
-            .map(|device| device.kind.clone())
+            .cloned()
             .ok_or_else(|| ShellError::InvalidArgs {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
-        // Only the sampler plays a sample (the sampler spec, R11).
-        let sampler = bl_model::DeviceKind::Native {
-            device_type: bl_devices::sampler::SAMPLER.to_owned(),
-        };
-        if kind != sampler {
+        // Only the sampler and the drum sampler play samples (the sampler
+        // spec, R11).
+        let plays = matches!(
+            &target.kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
+        );
+        if !plays {
             return Err(ShellError::Failed {
                 command: id.to_owned(),
                 message: format!("{device} doesn't play a sample"),
+            });
+        }
+        // A device with several slots loads into the one selected unless
+        // told which.
+        let slot = slot.unwrap_or_else(|| self.devices.slot_of(&target) as u8);
+        let slots = self.devices.slot_count(&target.kind).max(1);
+        if u32::from(slot) >= slots {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!(
+                    "{device} has {slots} sample slots, counted from 0; there is no slot {slot}"
+                ),
             });
         }
         let path = PathBuf::from(path);
@@ -2338,6 +2799,7 @@ impl Shell {
             .apply(bl_model::Command::SetDeviceSample {
                 device,
                 media: Some(media),
+                slot,
             })
             .map_err(|error| ShellError::Failed {
                 command: id.to_owned(),
@@ -2353,6 +2815,7 @@ impl Shell {
         Ok(to_value(&device_ids::LoadSampleResult {
             device,
             media,
+            slot,
             name,
         }))
     }
@@ -2442,12 +2905,228 @@ impl Shell {
         }
     }
 
-    /// The browser's selection, if it's one preset file and a device is
-    /// being hot-swapped: what Enter or a double-click loads into it.
-    fn hot_swap_preset(&self) -> Option<PathBuf> {
-        self.devices.hot_swap()?;
+    /// Loads a plug-in the browser lists (WP-2.9b): onto the selected track
+    /// as `plugin.load` (or `plugin.load_au`) places it, or, while a device
+    /// is being hot-swapped, in its place, as one undo step.
+    fn load_browser_plugin(
+        &mut self,
+        id: &str,
+        plugin: &bl_plugin_host::scan::ScannedPlugin,
+    ) -> Result<Value, ShellError> {
+        let swapped = self.devices.hot_swap().and_then(|device| {
+            let doc = self.editor.document();
+            let track = doc.device_track(device)?;
+            let index = doc.track(track)?.device_position(device)?;
+            Some((device, track, index))
+        });
+        // An instrument replaces the selected track's instrument, as Live's
+        // browser does (the plug-in scanning spec, R11).
+        let swapped = swapped.or_else(|| {
+            if plugin.role != bl_model::DeviceRole::Instrument {
+                return None;
+            }
+            let doc = self.editor.document();
+            let track = devices::shown_track(&self.arrangement, doc)?;
+            let chain = doc.track(track)?;
+            let device = chain
+                .devices()
+                .find(|d| d.role == bl_model::DeviceRole::Instrument)?
+                .id;
+            Some((device, track, chain.device_position(device)?))
+        });
+        let (mut track, index) = swapped.map_or((None, None), |(_, t, i)| (Some(t), Some(i)));
+        self.editor.begin("Load Plug-In");
+        let loaded = (|| {
+            // Live always has a track selected; a set with none gets a new
+            // track for the plug-in: MIDI for an instrument or a MIDI
+            // effect, audio for an audio effect.
+            if track.is_none()
+                && devices::shown_track(&self.arrangement, self.editor.document()).is_none()
+            {
+                let kind = match plugin.role {
+                    bl_model::DeviceRole::AudioEffect => "audio",
+                    _ => "midi",
+                };
+                let before: std::collections::BTreeSet<TrackId> = self
+                    .editor
+                    .document()
+                    .tracks()
+                    .map(bl_model::Track::id)
+                    .collect();
+                self.invoke_inner("track.create", json!({ "kind": kind }))?;
+                track = self
+                    .editor
+                    .document()
+                    .tracks()
+                    .map(bl_model::Track::id)
+                    .find(|t| !before.contains(t));
+            }
+            // The device it replaces goes first, so the chain never holds
+            // two instruments.
+            if let Some((old, _, _)) = swapped {
+                self.editor
+                    .apply(bl_model::Command::RemoveDevice { device: old })
+                    .map_err(|e| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: e.to_string(),
+                    })?;
+            }
+            let loaded = match plugin.format {
+                bl_model::PluginFormat::AudioUnit => {
+                    let (kind, subtype, manufacturer) = bl_plugin_host::au::parse_description_id(
+                        &plugin.plugin_id,
+                    )
+                    .ok_or_else(|| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: format!("{} isn't an Audio Unit's identifier", plugin.plugin_id),
+                    })?;
+                    self.run_plugins(
+                        plugin_ids::LOAD_AU,
+                        to_value(&plugin_ids::LoadAudioUnitArgs {
+                            component_type: kind.to_owned(),
+                            subtype: subtype.to_owned(),
+                            manufacturer: manufacturer.to_owned(),
+                            track,
+                            index,
+                        }),
+                    )?
+                }
+                _ => self.run_plugins(
+                    plugin_ids::LOAD,
+                    to_value(&plugin_ids::LoadPluginArgs {
+                        path: plugin.path.to_string_lossy().into_owned(),
+                        plugin: Some(plugin.plugin_id.clone()),
+                        track,
+                        index,
+                    }),
+                )?,
+            };
+            Ok(loaded)
+        })();
+        match loaded {
+            Ok(loaded) => {
+                if self.editor.commit().unwrap_or(false) {
+                    self.dirty = true;
+                }
+                self.document_changed();
+                Ok(loaded)
+            }
+            Err(error) => {
+                self.editor.cancel().ok();
+                self.document_changed();
+                Err(error)
+            }
+        }
+    }
+
+    /// What the browser's selection loads into the Device View: one preset
+    /// file, or a device listed under a label (device chains R19, racks R43
+    /// and R45).
+    fn devices_load(&self) -> Option<DevicesLoad> {
         match self.browser_view.selected() {
-            [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            [one] if bl_project::preset::is_preset(one) => Some(DevicesLoad::Preset(one.clone())),
+            _ if self.browser_view.selected_audio_is_empty() => {
+                self.browser_view.selected_device().map(DevicesLoad::Device)
+            }
+            _ => None,
+        }
+    }
+
+    /// Loads what the browser has selected: added where `device.add` puts
+    /// a device, or, while a device, rack or chain is hot-swapped, in place
+    /// of it.
+    fn load_into_devices(&mut self, load: DevicesLoad) -> Result<Value, ShellError> {
+        let armed_chain = self.devices.hot_swap_chain();
+        let swapping = self.devices.hot_swap().is_some() || armed_chain.is_some();
+        match load {
+            DevicesLoad::Preset(path) => {
+                let path = path.to_string_lossy().into_owned();
+                if devices::is_chain_preset(Path::new(&path)) {
+                    self.run_devices(device_ids::CHAIN_LOAD_PRESET, json!({ "path": path }))
+                } else if swapping {
+                    self.run_devices(
+                        device_ids::REPLACE,
+                        json!({ "preset": path, "chain": armed_chain }),
+                    )
+                } else {
+                    self.run_devices(device_ids::ADD_PRESET, json!({ "path": path }))
+                }
+            }
+            DevicesLoad::Device(device) => {
+                let new = device_ids::NewDevice {
+                    kind: device.kind,
+                    name: device.name,
+                    role: device.role,
+                    sidechain: device.sidechain,
+                    midi_sidechain: device.midi_sidechain,
+                };
+                if swapping {
+                    self.run_devices(
+                        device_ids::REPLACE,
+                        json!({ "new_device": new, "chain": armed_chain }),
+                    )
+                } else {
+                    self.run_devices(
+                        device_ids::ADD,
+                        to_value(&device_ids::AddDeviceArgs {
+                            device: new,
+                            track: None,
+                            chain: None,
+                            index: None,
+                        }),
+                    )
+                }
+            }
+        }
+    }
+
+    /// The browser's selection, if it's one audio file and a device that
+    /// plays samples is being hot-swapped: what Enter or a double-click
+    /// loads into the device's selected slot (WP-5.17).
+    fn pad_hot_swap_drop(
+        &self,
+        rack: bl_model::DeviceId,
+        note: u8,
+    ) -> Option<pad_ids::PadDropArgs> {
+        let selected = self.browser_view.selected();
+        let samples: Vec<String> = selected
+            .iter()
+            .filter(|p| browser::arrange::is_audio(&p.to_string_lossy()))
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let preset = match selected {
+            [one]
+                if samples.is_empty()
+                    && one
+                        .extension()
+                        .is_some_and(|e| e == bl_project::preset::PRESET_EXTENSION) =>
+            {
+                Some(one.to_string_lossy().into_owned())
+            }
+            _ => None,
+        };
+        (!samples.is_empty() || preset.is_some()).then(|| pad_ids::PadDropArgs {
+            rack: Some(rack),
+            note,
+            samples,
+            preset,
+            ..Default::default()
+        })
+    }
+
+    fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
+        let device = self.devices.hot_swap()?;
+        let takes = self.editor.document().device(device).is_some_and(|d| {
+            matches!(
+                &d.kind,
+                bl_model::DeviceKind::Native { device_type }
+                    if bl_devices::plays_samples(device_type)
+            )
+        });
+        match self.browser_view.selected() {
+            [one] if takes && browser::arrange::is_audio(&one.to_string_lossy()) => {
+                Some((device, one.clone()))
+            }
             _ => None,
         }
     }
@@ -2579,14 +3258,16 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
-        let mut changed = polled.changed | self.poll_processed();
+        let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_chords();
+        changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
+        changed |= self.poll_plugin_scan();
         let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
         if plugins_changed {
             self.refresh_device_types();
@@ -2721,12 +3402,22 @@ impl Shell {
             .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
             .collect();
         self.store.relink(&found);
+        // A relinked file's failed analysis is made again (R20).
+        for (hash, _) in &found {
+            let hash = bl_media::ContentHash::from_bytes(hash.0);
+            if let Some(cache) = &self.analysis {
+                cache.forget(hash);
+            }
+            self.analysed.remove(&hash);
+        }
+        self.start_analyses();
         found.len()
     }
 
     /// Runs a browser command and carries out what it asks of the rest of
     /// the shell.
     fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.analysis_cache();
         let context = browser::Context {
             insert_marker: self.arrangement.insert_marker(),
             selected_track: self.arrangement.selected_tracks().first().copied(),
@@ -2734,6 +3425,10 @@ impl Shell {
             audio: &mut self.audio,
             media: &self.media,
             edge_fades: self.prefs.create_fades_on_clip_edges.0,
+            warping: auto_warp::Warping {
+                prefs: self.prefs.warp,
+                analysis: self.analysis.as_ref(),
+            },
         };
         let outcome = self
             .browser_view
@@ -2819,6 +3514,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
@@ -2937,12 +3633,21 @@ impl Shell {
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
+        // Sample editor R8: a frame that inserts a warp marker begins the
+        // gesture's base, on which the frames that follow move it.
+        let makes_base = invocation.id == "clip.insert_warp_marker";
+        let base = if makes_base {
+            None
+        } else {
+            self.edit_gesture.as_ref().and_then(|g| g.base.clone())
+        };
         match &self.edit_gesture {
             None => {
                 self.edit_gesture = Some(Gesture {
                     view: self.arrangement.clone(),
                     clip_view: self.clip_view.clone(),
                     last: None,
+                    base: None,
                 });
             }
             Some(gesture) => {
@@ -2992,34 +3697,100 @@ impl Shell {
                 )
             }
         };
-        let result = run(
-            &mut self.editor,
-            &mut self.arrangement,
-            &mut self.clip_view,
-            &mut self.clipboard,
-            invocation,
-        );
+        // The warp commands check the files' lengths and fill in the
+        // transients, which only the shell can (warping R11, R25, R26).
+        let mut steps = Vec::with_capacity(2);
+        for step in base.iter().chain(std::iter::once(invocation)) {
+            match self.prepare_gesture_step(step) {
+                Ok(step) => steps.push(step),
+                Err(error) => {
+                    let failure = EditFailure::Refused(error.to_string());
+                    return self.gesture_refused(&base, &invocation.id, label, failure);
+                }
+            }
+        }
+        let mut result = Ok(Value::Null);
+        for step in &steps {
+            result = run(
+                &mut self.editor,
+                &mut self.arrangement,
+                &mut self.clip_view,
+                &mut self.clipboard,
+                step,
+            );
+            if result.is_err() {
+                break;
+            }
+        }
         let Some(gesture) = self.edit_gesture.as_mut() else {
             return Ok(Value::Null);
         };
         match result {
             Ok(value) => {
                 gesture.last = Some(invocation.clone());
+                if makes_base {
+                    gesture.base = Some(invocation.clone());
+                }
+                if sample_edit_command(&invocation.id) {
+                    self.clip_view.sample_follow(true);
+                }
                 Ok(value)
             }
-            Err(failure) => {
-                if let Some(last) = gesture.last.clone() {
-                    let _ = run(
-                        &mut self.editor,
-                        &mut self.arrangement,
-                        &mut self.clip_view,
-                        &mut self.clipboard,
-                        &last,
-                    );
-                }
-                Err(edit_error(&invocation.id, failure))
+            Err(failure) => self.gesture_refused(&base, &invocation.id, label, failure),
+        }
+    }
+
+    /// A gesture frame that was refused: the set goes back to the last frame
+    /// that worked.
+    fn gesture_refused(
+        &mut self,
+        base: &Option<Invocation>,
+        id: &str,
+        label: &'static str,
+        failure: EditFailure,
+    ) -> Result<Value, ShellError> {
+        let Some(last) = self.edit_gesture.as_ref().and_then(|g| g.last.clone()) else {
+            return Err(edit_error(id, failure));
+        };
+        // Back to where the gesture began, then the last frame that worked.
+        self.editor.cancel().ok();
+        self.editor.begin(label);
+        for step in base.iter().chain(std::iter::once(&last)) {
+            let Ok(step) = self.prepare_gesture_step(step) else {
+                break;
+            };
+            let outcome = if clip_marker_command(&step.id) {
+                model::run(&mut self.editor, &step.id, step.args.clone())
+                    .map(|_| ())
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if note_ids::handles(&step.id) {
+                clip_view::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                )
+                .map(|_| ())
+            } else if is_automation_edit(&step.id) {
+                model::run(&mut self.editor, &step.id, step.args.clone())
+                    .map(|_| ())
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else {
+                editing::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.arrangement,
+                    &mut self.clipboard,
+                )
+                .map(|_| ())
+            };
+            if outcome.is_err() {
+                break;
             }
         }
+        Err(edit_error(id, failure))
     }
 
     /// Takes what the engine last published (the playhead, whether the song
@@ -3030,6 +3801,7 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        self.poll_capture();
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
@@ -3047,6 +3819,15 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+        }
+        // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
+        // list selects each chain a note reaches.
+        if running {
+            let mut hits = std::collections::BTreeMap::new();
+            self.audio.chain_hits_into(&mut hits);
+            if self.devices.auto_select(self.editor.document(), &hits) {
+                self.touch();
+            }
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
@@ -3072,10 +3853,24 @@ impl Shell {
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
         // Spec: modulation R7. What the modulated controls played in the
-        // last block: the rings and the fader marks draw from it.
+        // last block: the rings and the fader marks draw from it. Spec:
+        // racks R37. The chains processing, which Auto Select follows,
+        // clear with them when the engine stops.
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
+            self.audio.processing_into(&mut self.processing);
+        }
+        if self
+            .devices
+            .follow_processing(self.editor.document(), &self.processing)
+        {
+            self.touch();
+        }
+        // Spec: sample-editor R11. Starting or stopping playback lets the
+        // Sample Editor follow it again.
+        if engine.playing != self.arrangement.transport().playing {
+            self.clip_view.sample_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
@@ -3169,6 +3964,12 @@ impl Shell {
         )
     }
 
+    /// Sets the chains processing, for a host with no engine and for tests;
+    /// a running engine's replace them.
+    pub fn set_processing(&mut self, processing: Vec<bl_model::ChainId>) {
+        self.processing = processing;
+    }
+
     /// Sets the parameters under modulation, for a host with no engine and
     /// for tests; a running engine's replace them.
     pub fn set_modulated(&mut self, modulated: Vec<bl_engine::PlayedParam>) {
@@ -3181,7 +3982,7 @@ impl Shell {
     /// its base.
     #[must_use]
     pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
-        let (node, param) = bl_engine::target_node(track, target);
+        let (node, param) = bl_engine::target_node(track, target)?;
         self.modulated
             .iter()
             .find(|entry| entry.node == node && entry.param == param)
@@ -3405,6 +4206,8 @@ impl Shell {
         let start = tempo.frames_to_ticks(take.start + Frames((-delay).max(0)), rate);
         let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
+        let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         // shortcut: a take that went round the loop copies no Session
         // clips; upgrade when Live's behaviour there is observed.
@@ -3455,6 +4258,12 @@ impl Shell {
                         // on, a new recorded clip's edges fade over 4 ms, like a
                         // dropped file's.
                         let audio = AudioData::new(*hash);
+                        // Spec: warping R37.
+                        let audio = if warp_recorded {
+                            auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
+                        } else {
+                            audio
+                        };
                         let audio = if edge_fades {
                             audio.with_edge_fades()
                         } else {
@@ -3552,6 +4361,8 @@ impl Shell {
         // early; upgrade by moving each pass by it.
         let tempo = self.editor.document().settings().tempo.clone();
         let edge_fades = self.create_fades_on_clip_edges();
+        let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         let (lead_in, passes) = crate::recording::passes(take, frames);
         let seconds = |frames: u64| frames as f64 / rate.as_f64();
@@ -3567,6 +4378,14 @@ impl Shell {
                 loop_start: from,
                 loop_end: Some(to),
                 ..AudioData::new(hash)
+            };
+            // Spec: warping R37.
+            let audio = if warp_recorded {
+                let start = ticks(pass.song_start);
+                let end = ticks(pass.song_start + Frames(pass.frames as i64));
+                auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
+            } else {
+                audio
             };
             if edge_fades {
                 audio.with_edge_fades()
@@ -3625,7 +4444,7 @@ impl Shell {
                                     start,
                                     length: ticks(pass.song_start + Frames(pass.frames as i64))
                                         .saturating_sub(start),
-                                    data,
+                                    data: data.clone(),
                                 }],
                             },
                         })?;
@@ -3673,6 +4492,7 @@ impl Shell {
         // The control a drag moved is let go (automation R17).
         self.automation_take
             .release(self.arrangement.transport().position);
+        self.release_session_moves();
     }
 
     /// The effects commands have asked for since the last call.
@@ -3726,6 +4546,14 @@ impl Shell {
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
+                        } else if self
+                            .clip_view
+                            .shown_audio_clip(self.editor.document(), &self.arrangement)
+                            .is_some()
+                        {
+                            // Spec: sample-editor R1. An audio clip's editor
+                            // is the Sample Editor.
+                            contexts.push(Context::SampleEditor);
                         } else {
                             contexts.push(Context::NoteEditor);
                             if !self
@@ -3737,7 +4565,14 @@ impl Shell {
                             }
                         }
                     }
-                    Area::Detail => contexts.push(Context::DeviceView),
+                    Area::Detail => {
+                        // Spec: racks R22. A chain list with the focus
+                        // takes S and the edit keys.
+                        if self.devices.chain_list_focus() {
+                            contexts.push(Context::RackChains);
+                        }
+                        contexts.push(Context::DeviceView);
+                    }
                     Area::ControlBar | Area::StatusBar | Area::Assistant => {}
                 }
                 if self.prefs.tab_navigation {
@@ -3746,6 +4581,18 @@ impl Shell {
                 contexts.push(Context::Global);
                 contexts
             }
+        }
+    }
+
+    /// Whether a menu item that runs `id` with `args` is the chosen one of
+    /// its group now, for the radio pairs a menu shows with a check mark
+    /// (Options: Solo Switches and Cue Switches). `None` for commands that
+    /// aren't choices.
+    #[must_use]
+    pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
+        match id {
+            CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            _ => None,
         }
     }
 
@@ -3917,10 +4764,28 @@ impl Shell {
             }
             _ => {}
         }
+        if stems_ids::handles(id) {
+            return self.can_stems(id, args);
+        }
+        if id == CUE_MODE {
+            // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
+            // Main strip's button, are dimmed while Cue Out and Main Out
+            // share a channel.
+            return self.editor.document().cue_available();
+        }
+        if capture_ids::handles(id) {
+            // Spec: capture-midi R1. Nothing played, nothing to capture.
+            return self.capture_midi_ready() && self.audio.engine_running();
+        }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
-        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+        if id == browser_ids::LOAD_SELECTED
+            && (self.devices_load().is_some()
+                || self.hot_swapped_layer_file().is_some()
+                || self.hot_swap_sample().is_some()
+                || self.browser_view.selected_plugin().is_some())
+        {
             return true;
         }
         if device_ids::handles(id) {
@@ -3972,6 +4837,10 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "chain.rename" && args.get("name").is_none() {
+            // A person names the chain in its row.
+            return self.devices.selected_chains(self.editor.document()).len() == 1;
         }
         if id == "track.delete" && args.get("track").is_none() {
             return !self.deletable_tracks().is_empty();
@@ -4097,6 +4966,9 @@ impl Shell {
                 .args
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok());
+        }
+        if self.is_sample_key(id, args) {
+            return self.complete_sample_command(id, args.clone()).is_ok();
         }
         let Ok(args) = self.filled_args(id, args.clone()) else {
             return false;
@@ -4408,6 +5280,12 @@ impl Shell {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
             }
+            _ if self.is_sample_key(id, &args) => {
+                // Spec: sample-editor R10. A key or a menu item acts on what
+                // the Sample Editor has selected.
+                let (id, args) = self.complete_sample_command(id, args)?;
+                self.run(&id, args)
+            }
             _ if !has("track") && Switch::of_command(id).is_some() => {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
@@ -4462,6 +5340,24 @@ impl Shell {
                     }
                 })?;
                 self.effects.push(Effect::RenameDevice(device));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "chain.rename" if !has("name") => {
+                let chain = args
+                    .get("chain")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| {
+                        self.devices
+                            .selected_chains(self.editor.document())
+                            .first()
+                            .copied()
+                    })
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a chain first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameChain(chain));
                 self.touch();
                 Ok(Value::Null)
             }
@@ -4541,6 +5437,7 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let result = self.run_command(id, args);
@@ -4550,12 +5447,13 @@ impl Shell {
         result
     }
 
-    /// The MIDI clip in the Session slot selected first, if the slot holds
-    /// one.
+    /// The clip in the Session slot selected first, if the slot holds one.
     fn selected_slot_clip(&self) -> Option<bl_model::ClipId> {
         let slot = self.session.first_slot()?;
-        let clip = self.editor.document().slot(slot.track, slot.scene)?;
-        matches!(clip.data, ClipData::Midi(_)).then_some(clip.id)
+        self.editor
+            .document()
+            .slot(slot.track, slot.scene)
+            .map(|clip| clip.id)
     }
 
     /// Points the Clip View at the clip most recently selected, in the
@@ -4583,12 +5481,104 @@ impl Shell {
         }
     }
 
+    /// Checks a document edit against the media and fills in what only the
+    /// app knows, before it runs (the warping spec, R7, R11, R23 to R27 and
+    /// R39 to R41). [`Shell::run`] does it for every edit; an agent's batch,
+    /// which runs edits with the registry, calls it for each of its steps.
+    ///
+    /// # Errors
+    ///
+    /// If the edit names media it can't use, or needs an analysis that isn't
+    /// ready.
+    pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.check_warp_files(id, &args)?;
+        self.prepare_warping(id, args)
+    }
+
+    /// Spec: warping R7, R11. A warp marker edit on several clips needs
+    /// files as long as each other's, and a marker can't leave its file; the
+    /// document doesn't hold the media, so the check is made here, when the
+    /// media store knows the files' lengths.
+    fn check_warp_files(&self, id: &str, args: &Value) -> Result<(), ShellError> {
+        use bl_model::Command;
+        let refuse = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let Ok(command) = model::command_from_args(id, args.clone()) else {
+            return Ok(());
+        };
+        let document = self.editor.document();
+        // Each clip's file length in seconds, where the store knows it.
+        let length = |clip: &bl_model::ClipId| {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(*clip).map(|c| &c.data)
+            else {
+                return None;
+            };
+            self.file_seconds(audio)
+        };
+        let (clips, places) =
+            match &command {
+                Command::InsertWarpMarker { clips, .. }
+                | Command::ShiftWarpMarker { clips, .. } => (clips, true),
+                Command::MoveWarpMarkers { clips, .. }
+                | Command::DeleteWarpMarkers { clips, .. } => (clips, false),
+                _ => return Ok(()),
+            };
+        let lengths: Vec<Option<f64>> = clips.iter().map(length).collect();
+        let known: Vec<f64> = lengths.iter().flatten().copied().collect();
+        if known.len() == clips.len()
+            && known
+                .windows(2)
+                .any(|pair| (pair[0] - pair[1]).abs() > 1e-9)
+        {
+            return Err(refuse(
+                "the clips' files aren't all as long as each other's".to_owned(),
+            ));
+        }
+        if !places {
+            return Ok(());
+        }
+        for (&clip, length) in clips.iter().zip(lengths) {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(clip).map(|c| &c.data)
+            else {
+                continue;
+            };
+            let at = match &command {
+                // A shift moves a marker from where it is.
+                Command::ShiftWarpMarker { marker, by, .. } => {
+                    audio.warp_markers.get(*marker).map(|m| m.time + by)
+                }
+                Command::InsertWarpMarker {
+                    time: Some(time), ..
+                } => Some(*time),
+                // A marker put on a beat goes at the time the map places it.
+                Command::InsertWarpMarker {
+                    beat: Some(beat), ..
+                } => audio
+                    .warp_map()
+                    .ok()
+                    .map(|map| map.beat_to_time(beat.get() as f64)),
+                _ => None,
+            };
+            if let (Some(at), Some(length)) = (at, length)
+                && at > length + 1e-9
+            {
+                return Err(refuse(format!(
+                    "the marker would leave the file, which is {length} seconds long"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
@@ -4637,6 +5627,20 @@ impl Shell {
             self.touch();
             return result;
         }
+        if sample_ids::handles(id) {
+            // Spec: sample-editor R21. The Sample Editor's selections and
+            // view are the shell's, and change nothing in the set.
+            let result = sample_editor::run(
+                id,
+                args,
+                self.editor.document(),
+                &mut self.clip_view,
+                &self.arrangement,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            self.touch();
+            return result;
+        }
         if plugin_ids::handles(id) {
             return self.run_plugins(id, args);
         }
@@ -4646,6 +5650,7 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
+            let args = self.prepare_edit(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
@@ -4659,11 +5664,33 @@ impl Shell {
                 .and_then(|command| {
                     crate::automation_record::moved(self.editor.document(), &command)
                 });
+            // Spec: session-automation R1. With Automation Arm on and a
+            // Session recording running, a control move is noted for the
+            // clip it goes into.
+            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    let (track, target, value) =
+                        crate::automation_record::moved(self.editor.document(), &command)?;
+                    let before = crate::modulation::control_value(
+                        self.editor.document(),
+                        &self.devices,
+                        track,
+                        &target,
+                    )?;
+                    Some((track, target, before, value))
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
                     message: error.to_string(),
                 })?;
+            // Spec: sample-editor R11. An edit in the Sample Editor pauses
+            // Follow until playback starts or stops.
+            if sample_edit_command(id) {
+                self.clip_view.sample_follow(true);
+            }
             if let Some((track, target, value)) = moved {
                 self.automation_take.write(
                     track,
@@ -4671,6 +5698,9 @@ impl Shell {
                     self.arrangement.transport().position,
                     value,
                 );
+            }
+            if let Some((track, target, before, value)) = session_moved {
+                self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
                 // Spec: session-view R23. A launched scene's tempo and
@@ -4728,6 +5758,7 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            self.re_enable_launched_automation(command);
             if let engine_session::SessionCommand::LaunchScene(scene) = command {
                 // Spec: session-recording R10. Start Recording on Scene
                 // Launch.
@@ -4737,6 +5768,9 @@ impl Shell {
         }
         if session_record_ids::handles(id) {
             return self.run_session_record(id, args);
+        }
+        if capture_ids::handles(id) {
+            return self.run_capture_midi(id, args);
         }
         if session_launch_ids::handles(id) {
             // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's
@@ -4821,6 +5855,7 @@ impl Shell {
                 .map(|scene| scene.id)
                 .collect();
             let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            self.analysis_cache();
             // Spec: session-view R24. Capture and Insert Scene copies the
             // clips the engine plays, whichever scene they sit in.
             let capture = crate::session_view::Capture {
@@ -4845,6 +5880,10 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        warping: auto_warp::Warping {
+                            prefs: self.prefs.warp,
+                            analysis: self.analysis.as_ref(),
+                        },
                         launch_mode: self.prefs.launch.default_mode,
                         capture,
                         launch_quantization: self.prefs.launch.default_quantization,
@@ -4893,17 +5932,92 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
-            && let Some(path) = self.hot_swap_preset()
+            && let Some((rack, note)) = self.devices.hot_swap_pad_target()
+            && let Some(drop) = self.pad_hot_swap_drop(rack, note)
         {
-            // Spec: device-chains R19. Loading a preset while hot-swapping
-            // loads it into the device.
+            // Spec: drum-racks R18. With a pad the target, what the browser
+            // loads lands on the pad as a drop would.
             Self::args::<NoArgs>(id, args)?;
-            let loaded = devices::load_hot_swapped(&self.devices, &mut self.editor, &path)
-                .map_err(|error| device_error(id, error))?;
-            self.dirty = true;
-            self.document_changed();
+            return self.pad_drop(to_value(&drop));
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && self.devices.hot_swap_pad_target().is_some()
+            && self.browser_view.selected_plugin().is_some()
+        {
+            // Spec: drum-racks R18. A plug-in can't go onto a pad from here
+            // yet; loading it in the rack's place would lose the kit.
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: "a pad being hot-swapped takes samples and presets; drag the plug-in onto the pad".to_owned(),
+            });
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(plugin) = self.browser_view.selected_plugin().cloned()
+        {
+            // Spec: plugin-scanning R11. A plug-in chosen in the browser
+            // loads as `plugin.load` loads it.
+            Self::args::<NoArgs>(id, args)?;
+            let loaded = self.load_browser_plugin(id, &plugin)?;
             self.touch();
-            return Ok(to_value(&loaded));
+            return Ok(loaded);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_sfz()
+        {
+            // Spec: multisampler R47. A selected SFZ instrument loads as a
+            // multisampler onto the selected track if it is a MIDI track,
+            // otherwise onto a new one.
+            Self::args::<NoArgs>(id, args)?;
+            let doc = self.editor.document();
+            let track = self
+                .arrangement
+                .selected_tracks()
+                .first()
+                .copied()
+                .filter(|track| {
+                    doc.track(*track)
+                        .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi)
+                });
+            return self.run_multisampler(
+                multisampler_ids::IMPORT_SFZ,
+                json!({ "path": path.to_string_lossy(), "track": track }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((device, layer, path)) = self.hot_swapped_layer_file()
+        {
+            // Spec: multisampler R10. Loading a sample while hot-swapping a
+            // layer replaces the layer's.
+            Self::args::<NoArgs>(id, args)?;
+            self.devices.set_layer_hot_swap(None);
+            return self.run_multisampler(
+                multisampler_ids::SET_LAYER_SAMPLE,
+                json!({ "device": device, "layer": layer, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((device, path)) = self.hot_swap_sample()
+        {
+            // Spec: eight-slot-drum-sampler R17. Loading a sample while
+            // hot-swapping a device that plays samples loads it into the
+            // device's selected slot, as dropping it there does.
+            Self::args::<NoArgs>(id, args)?;
+            return self.load_sample(
+                device_ids::LOAD_SAMPLE,
+                json!({ "device": device, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(load) = self.devices_load()
+        {
+            // Spec: modulation R12, racks R43 and R45. A modulator, a rack
+            // or a preset selected in the browser loads as `device.add`
+            // adds a device, or replaces the one being hot-swapped.
+            Self::args::<NoArgs>(id, args)?;
+            return self.load_into_devices(load);
+        }
+        if multisampler_ids::handles(id) {
+            return self.run_multisampler(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
@@ -4917,6 +6031,9 @@ impl Shell {
         if perception_ids::handles(id) {
             return self.run_perception(id, args);
         }
+        if bl_shell_spec::warping::handles(id) {
+            return self.run_warping(id, args);
+        }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
             return Ok(to_value(&crate::modulation::state(
@@ -4926,6 +6043,9 @@ impl Shell {
                 self.arrangement.transport().position,
                 |track, target| self.played(track, target),
             )));
+        }
+        if stems_ids::handles(id) {
+            return self.run_stems(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time
@@ -5022,6 +6142,11 @@ impl Shell {
             midi_io_ids::COMPUTER_KEYBOARD_KEY => {
                 let args = Self::args::<midi_io_ids::KeyArgs>(id, args)?;
                 let result = self.midi.key(&args.key, args.pressed).map_err(failed)?;
+                // Spec: multisampler R7. Auto Select follows the note.
+                if let Some(note) = result.note {
+                    let velocity = self.midi.keyboard_info().velocity;
+                    self.follow_note(note, velocity, args.pressed);
+                }
                 to_value(&result)
             }
             _ => return Err(ShellError::UnknownCommand(id.to_owned())),
@@ -5265,6 +6390,14 @@ impl Shell {
                     ..current
                 }
             }
+            session_launch_ids::SET_FOLLOW_ACTIONS_ENABLED => {
+                let session_launch_ids::SetFollowActionsEnabledArgs { enabled } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    follow_actions: enabled.unwrap_or(!current.follow_actions),
+                    ..current
+                }
+            }
             session_launch_ids::STOP_SELECTED => {
                 Self::args::<NoArgs>(id, args)?;
                 // Spec: launch-quantisation R6. Every track with a selected
@@ -5339,6 +6472,9 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices.set_rack_views(bl_model::RackViewMap::new());
+                self.devices
+                    .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
@@ -5365,6 +6501,10 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: racks R19. So do the views each rack shows.
+                self.devices.set_rack_views(self.store.rack_views());
+                self.devices
+                    .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
@@ -5415,6 +6555,9 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -5432,6 +6575,9 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
@@ -5544,6 +6690,9 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
@@ -5707,12 +6856,13 @@ impl Shell {
                     let doc = self.editor.document();
                     let clip = self
                         .clip_view
-                        .shown_clip(doc, &self.arrangement)
+                        .shown_any_clip(doc, &self.arrangement)
                         .ok_or_else(|| unavailable("no clip is shown in the Clip View"))?;
                     let track = doc
                         .clip_track(clip)
                         .ok_or_else(|| failed("no track holds the clip".to_owned()))?;
-                    doc.check_automation_target(track, target)
+                    let shown = doc.clip(clip).ok_or_else(|| failed(format!("no {clip}")))?;
+                    doc.check_clip_target(track, shown, target)
                         .map_err(|error| failed(error.to_string()))?;
                 }
                 self.clip_view.set_envelope(target);
@@ -5866,6 +7016,24 @@ impl Shell {
                     path: self.temporary_folder().to_string_lossy().into_owned(),
                 }))
             }
+            ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES => {
+                let LoopWarpShortSamplesArgs { mode } = Self::args(id, args)?;
+                self.prefs.warp.loop_warp_short_samples = mode;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.warp.auto_warp_long_samples = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_DEFAULT_WARP_MODE => {
+                let DefaultWarpModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.warp.default_warp_mode = mode;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
             ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.warp_recorded_audio = OnByDefault(on);
@@ -5901,6 +7069,12 @@ impl Shell {
                 self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
+                let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
+                self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;

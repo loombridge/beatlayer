@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
-use crate::clip::{Clip, TakeLane};
+use crate::clip::{Clip, EnvelopeKind, TakeLane};
 use crate::device::Device;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::rack::Chain;
@@ -179,6 +179,18 @@ impl Channel {
         *self == Self::Pair(1)
     }
 
+    /// Whether the two choices share a channel: `1/2` overlaps `2` and
+    /// `2/3`, not `3/4`.
+    #[must_use]
+    pub fn overlaps(self, other: Self) -> bool {
+        let span = |c: Self| match c {
+            Self::Mono(c) => (c, c),
+            Self::Pair(c) => (c, c.saturating_add(1)),
+        };
+        let (a, b) = (span(self), span(other));
+        a.0 <= b.1 && b.0 <= a.1
+    }
+
     /// What Live's choosers show: `1` for one channel, `1/2` for a pair.
     #[must_use]
     pub fn label(self) -> String {
@@ -197,8 +209,10 @@ impl Channel {
 #[schemars(
     description = "Where a track takes its input from. Audio tracks: `external` (Ext. In, the \
                    audio interface's inputs, with its `channel`; a new audio track's), \
-                   `resampling` (the Main output), `track` (another audio track, a return, or \
-                   Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   `resampling` (the Main output), `track` (another audio track, a MIDI track with \
+                   an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
+                   instrument or audio effect rack on that track, that chain's signal at \
+                   `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
                    MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
                    by its name as the MIDI settings list it), `track` (another MIDI track), or \
                    `none`."
@@ -237,6 +251,11 @@ pub enum Input {
         /// out.
         #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
         tap: Tap,
+        /// A chain of an instrument or audio effect rack on that track, at
+        /// any depth, whose signal is taken at `tap` instead of the
+        /// track's own (the racks spec, R38 to R41).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain: Option<ChainId>,
     },
 }
 
@@ -331,6 +350,53 @@ pub enum Output {
     },
 }
 
+/// Where a MIDI track's MIDI goes: the In/Out section's MIDI To chooser and
+/// its channel (the routing spec, R4; the external devices spec, R1, R2).
+///
+/// A track is saved as its ID alone, as MIDI To has always been; a port as
+/// its name and channel.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[schemars(
+    description = "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output \
+                   port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's \
+                   name as the MIDI settings list it, and the channel to send on, 1 to 16."
+)]
+pub enum MidiTo {
+    /// Another MIDI track's Track In.
+    Track(TrackId),
+    /// A MIDI output port, by the name the MIDI system gives it, and the
+    /// channel everything is sent on. The track keeps the name while the
+    /// port is away and sends again when a port of that name returns.
+    Port {
+        /// The port's name, as the MIDI settings list it.
+        name: String,
+        /// The channel, 1 to 16.
+        channel: u8,
+    },
+}
+
+impl MidiTo {
+    /// A port with Beatlayer's first channel, 1: what choosing a port in
+    /// the chooser takes.
+    #[must_use]
+    pub fn port(name: impl Into<String>) -> Self {
+        Self::Port {
+            name: name.into(),
+            channel: 1,
+        }
+    }
+
+    /// The track it names, if it names one.
+    #[must_use]
+    pub const fn track(&self) -> Option<TrackId> {
+        match self {
+            Self::Track(track) => Some(*track),
+            Self::Port { .. } => None,
+        }
+    }
+}
+
 impl Output {
     /// Whether this is [`Output::Default`].
     #[must_use]
@@ -354,10 +420,10 @@ pub struct Routing {
     /// Audio To.
     #[serde(default, skip_serializing_if = "Output::is_default")]
     pub output: Output,
-    /// MIDI To, on a MIDI track: another MIDI track, or none (No Output,
-    /// a new MIDI track's).
+    /// MIDI To, on a MIDI track: another MIDI track, an output port with a
+    /// channel, or none (No Output, a new MIDI track's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub midi_output: Option<TrackId>,
+    pub midi_output: Option<MidiTo>,
     /// Main Out, on Main: the interface's output channels the Main mix goes
     /// to, as a stereo pair. Saved only where it differs from the first
     /// pair.
@@ -421,7 +487,8 @@ pub struct Mixer {
     /// Whether the track is muted: its Track Activator is off. Always off on
     /// the Main track.
     pub mute: bool,
-    /// Whether the track is soloed. Always off on the Main track.
+    /// Whether the track is soloed, or, in Cue mode, cue-switched. Always off
+    /// on the Main track.
     pub solo: bool,
     /// Whether the track is armed for recording. Only audio and MIDI tracks
     /// can be armed.
@@ -686,12 +753,56 @@ impl Track {
     }
 
     /// Whether any of the track's envelopes is turned off: a control was
-    /// moved by hand and Re-Enable Automation hasn't run since.
+    /// moved by hand and Re-Enable Automation hasn't run since. A Session
+    /// clip's automation envelope counts too (WP-3.12).
     #[must_use]
     pub fn automation_overridden(&self) -> bool {
         self.automation
             .values()
             .any(|automation| !automation.enabled)
+            || self.slots.values().any(|clip| {
+                clip.envelopes
+                    .iter()
+                    .any(|envelope| envelope.kind == EnvelopeKind::Automation && !envelope.enabled)
+            })
+    }
+
+    /// Turns `target`'s envelope off, in the track's automation and in each
+    /// Session clip's automation envelopes: what moving the control by
+    /// hand does (automation R5, WP-3.12). A clip that isn't playing is
+    /// turned off too, and its launch turns it on again.
+    pub(crate) fn override_target(&mut self, target: &AutomationTarget) {
+        crate::automation::override_target(&mut self.automation, target);
+        self.set_clip_envelopes_enabled(|t| t == target, false);
+    }
+
+    /// Turns the Session clips' automation envelopes for the targets
+    /// `which` accepts on or off, copying only the clips that change.
+    pub(crate) fn set_clip_envelopes_enabled(
+        &mut self,
+        which: impl Fn(&AutomationTarget) -> bool,
+        enabled: bool,
+    ) {
+        let changing = |envelope: &crate::clip::ClipEnvelope| {
+            envelope.kind == EnvelopeKind::Automation
+                && envelope.enabled != enabled
+                && which(&envelope.target)
+        };
+        let scenes: Vec<SceneId> = self
+            .slots
+            .iter()
+            .filter(|(_, clip)| clip.envelopes.iter().any(changing))
+            .map(|(&scene, _)| scene)
+            .collect();
+        for scene in scenes {
+            if let Some(clip) = self.slots.get_mut(&scene) {
+                for envelope in &mut Shared::make_mut(clip).envelopes {
+                    if changing(envelope) {
+                        envelope.enabled = enabled;
+                    }
+                }
+            }
+        }
     }
 
     /// Whether the track's own settings differ from another version's:

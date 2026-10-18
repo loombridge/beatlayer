@@ -87,12 +87,14 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
     let (mut rig, a) = rig_at(64, 0.5);
     let clip = looping_clip(&mut rig, a, Ticks::ZERO, 2);
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     let synced = rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -131,12 +133,14 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
     let (mut fine, b) = rig_at(1, 0.5);
     let clip = looping_clip(&mut fine, b, Ticks::ZERO, 2);
     fine.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     fine.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -162,17 +166,20 @@ fn an_unlinked_clip_envelope_runs_once_from_the_clip_start() {
     // it doesn't repeat, so the fader climbs from silence to its own level
     // across both bars.
     rig.apply(Command::SetClipEnvelopeLinked {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         linked: false,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE * 2,
@@ -214,12 +221,14 @@ fn an_envelope_plays_only_where_its_clip_does() {
         clip: Clip::new(clip, Ticks::WHOLE, Ticks::WHOLE, ClipData::Midi(data)),
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
         value: 0.0,
     });
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::WHOLE,
@@ -251,6 +260,7 @@ fn clearing_an_envelope_hands_the_parameter_back() {
     let (mut rig, a) = rig_at(64, 0.5);
     let clip = looping_clip(&mut rig, a, Ticks::ZERO, 1);
     rig.apply(Command::SetClipEnvelopeBreakpoint {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
         at: Ticks::ZERO,
@@ -263,6 +273,7 @@ fn clearing_an_envelope_hands_the_parameter_back() {
         "the envelope drives it"
     );
     let synced = rig.apply(Command::DeleteClipEnvelope {
+        kind: bl_model::EnvelopeKind::Modulation,
         clip,
         target: volume(),
     });
@@ -302,6 +313,7 @@ fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
         (Ticks::WHOLE, 1.0),
     ] {
         rig.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target: volume(),
             at,
@@ -336,4 +348,72 @@ fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
         out[end..].iter().all(|&s| s == alone()),
         "after the clip the fader plays alone"
     );
+}
+
+/// An audio clip on `track` at `start`, `bars` bars long, with its first bar
+/// as the loop brace, warped (its markers and brace are ticks of its
+/// contents) or not.
+fn audio_clip(rig: &mut Rig, track: TrackId, start: Ticks, bars: i64, warped: bool) -> ClipId {
+    use bl_model::{AudioData, ContentHash, WarpMarker};
+    let id = rig.editor.new_id();
+    let data = AudioData {
+        warp: warped,
+        warp_markers: if warped {
+            vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }]
+        } else {
+            Vec::new()
+        },
+        tempo: warped.then_some(120.0),
+        looping: warped,
+        loop_start: 0.0,
+        loop_end: warped.then_some(Ticks::WHOLE.get() as f64),
+        ..AudioData::new(ContentHash([3; 32]))
+    };
+    rig.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(id, start, Ticks::WHOLE * bars, ClipData::Audio(data)),
+    });
+    id
+}
+
+// Spec: warping R16, clip-envelopes R2. A warped audio clip's linked
+// envelope follows the clip's contents round its loop; an unwarped one's
+// plays once from the clip's start, one tick to the tick.
+#[test]
+fn a_warped_audio_clips_linked_envelope_follows_its_beats() {
+    for warped in [true, false] {
+        let mut rig = Rig::new(64);
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, a, 1.0);
+        rig.apply(Command::SetVolume {
+            track: a,
+            volume: 0.5,
+        });
+        let clip = audio_clip(&mut rig, a, Ticks::ZERO, 2, warped);
+        for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)] {
+            let synced = rig.apply(Command::SetClipEnvelopeBreakpoint {
+                clip,
+                kind: bl_model::EnvelopeKind::Modulation,
+                target: volume(),
+                at,
+                value,
+            });
+            assert!(!synced.program, "a clip envelope needs no new program");
+        }
+        rig.sender.transport(TransportCommand::Play);
+        let out = rig.render(BAR * 2 + 64, 64);
+        for (frame, &sample) in out[..BAR * 2].iter().enumerate() {
+            // Warped: each bar of the loop ramps the share again. Unwarped:
+            // the one bar's ramp plays once, then holds its last value.
+            let along = if warped { frame % BAR } else { frame.min(BAR) };
+            let expected = want(ramp_value(along, 0, BAR));
+            assert!(
+                (sample - expected).abs() < 1e-6,
+                "warped {warped}, frame {frame}: {sample} isn't {expected}"
+            );
+        }
+    }
 }

@@ -11,7 +11,7 @@ mod common;
 
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{GAIN, GAIN_PARAM, INSTRUMENT, SEMITONES, THROUGH, TRANSPOSE};
-use bl_engine::{NoteKind, TransportCommand};
+use bl_engine::{Block, Node, NoteEvent, NoteKind, TransportCommand};
 use bl_model::{
     AutomationTarget, Chain, ChainId, Command, Device, DeviceId, DeviceRole, MixerParam, ParamId,
     RackKind, TrackId, TrackKind,
@@ -293,7 +293,11 @@ fn a_nested_rack_renders_the_same_at_every_block_size() {
 /// A MIDI track with a clip of notes, a MIDI effect rack, and the test
 /// instrument after it.
 fn midi_rack(chains: usize) -> (Rig, TrackId, Vec<ChainId>) {
-    let mut rig = Rig::new(256);
+    midi_rack_in(Rig::new(256), chains)
+}
+
+/// As [`midi_rack`], in `rig`.
+fn midi_rack_in(mut rig: Rig, chains: usize) -> (Rig, TrackId, Vec<ChainId>) {
     let midi = track(&mut rig.editor, TrackKind::Midi, None);
     let (_, chains) = rack(&mut rig.editor, midi, RackKind::MidiEffect, chains);
     device(&mut rig.editor, midi, INSTRUMENT, &[]);
@@ -429,6 +433,84 @@ fn a_midi_chain_that_is_off_passes_only_its_note_offs() {
     assert_eq!(heard, expected);
 }
 
+/// A test MIDI effect that forwards its notes and sends a control change of
+/// its controller behind each note-on (WP-5.44).
+struct Controller(u8);
+
+impl Node for Controller {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for &note in block.notes() {
+            block.send_note(note);
+            if note.kind == NoteKind::On {
+                block.send_note(NoteEvent {
+                    kind: NoteKind::Control {
+                        controller: self.0,
+                        value: 1.0,
+                    },
+                    key: 0,
+                    ..note
+                });
+            }
+        }
+    }
+}
+
+// Spec: racks R4, device-framework R39
+#[test]
+fn a_midi_effect_racks_chains_merge_their_messages_with_their_notes() {
+    for size in SIZES {
+        let rig = Rig::with_registry(4096, |registry| {
+            registry.add_native("test.controller.1", |_, _| Box::new(Controller(1)));
+            registry.add_native("test.controller.2", |_, _| Box::new(Controller(2)));
+        });
+        let (mut rig, _, chains) = midi_rack_in(rig, 2);
+        for (chain, controller) in chains
+            .iter()
+            .zip(["test.controller.1", "test.controller.2"])
+        {
+            in_chain(
+                &mut rig.editor,
+                *chain,
+                controller,
+                DeviceRole::MidiEffect,
+                &[],
+            );
+        }
+        rig.sync();
+        let heard: Vec<_> = heard(&mut rig, size)
+            .into_iter()
+            .map(|(frame, kind, _)| (frame, kind))
+            .collect();
+        let control = |controller| NoteKind::Control {
+            controller,
+            value: 1.0,
+        };
+        let beat = heard
+            .iter()
+            .find(|h| h.0 > 0)
+            .expect("the first note-off")
+            .0;
+        // On each frame the first chain's note and message, then the
+        // second's.
+        assert_eq!(
+            heard,
+            [
+                (0, NoteKind::On),
+                (0, control(1)),
+                (0, NoteKind::On),
+                (0, control(2)),
+                (beat, NoteKind::Off),
+                (beat, NoteKind::On),
+                (beat, control(1)),
+                (beat, NoteKind::Off),
+                (beat, NoteKind::On),
+                (beat, control(2)),
+            ],
+            "block size {size}"
+        );
+    }
+}
+
 // Spec: racks R4
 #[test]
 fn an_instrument_racks_chains_all_take_the_notes() {
@@ -513,7 +595,8 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
     assert_eq!(made(&rig), 4);
 
     // Group wraps two devices in a rack: the rack's one chain is the only
-    // node new to the set.
+    // thing new to the set, with its mixer, its zones and the rack's chain
+    // selector (WP-5.3): no device's node.
     let rack_id: DeviceId = rig.editor.new_id();
     let chain: ChainId = rig.editor.new_id();
     let grouped =
@@ -525,7 +608,11 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
         })
         .program
     );
-    assert_eq!(new_nodes(&mut rig), 1, "only the chain's mixer is new");
+    assert_eq!(
+        new_nodes(&mut rig),
+        3,
+        "only the chain's mixer and zones and the rack's selector are new"
+    );
     assert_eq!(made(&rig), 4, "no device node was made anew");
     assert_eq!(settled(&mut rig, 64), 0.5);
 
@@ -537,8 +624,9 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
     assert_eq!(new_nodes(&mut rig), 0);
     assert_eq!(made(&rig), 4);
 
-    // A rack with a chain makes the chain's mixer; a chain added with a
-    // device makes its mixer and the device.
+    // A rack with a chain makes the chain's mixer, its zones and the rack's
+    // selector; a chain added with a device makes its mixer, its zones and
+    // the device.
     let rack_id: DeviceId = rig.editor.new_id();
     let first: ChainId = rig.editor.new_id();
     rig.apply(Command::InsertDevice {
@@ -546,7 +634,7 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
         index: 4,
         device: Device::rack(rack_id, RackKind::AudioEffect).with_chain(Chain::new(first, "A")),
     });
-    assert_eq!(new_nodes(&mut rig), 1);
+    assert_eq!(new_nodes(&mut rig), 3);
     let second: ChainId = rig.editor.new_id();
     let tail: DeviceId = rig.editor.new_id();
     rig.apply(Command::AddChain {
@@ -560,7 +648,7 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
             },
         )]),
     });
-    assert_eq!(new_nodes(&mut rig), 2);
+    assert_eq!(new_nodes(&mut rig), 3);
     assert_eq!(made(&rig), 5);
 
     // Moving a device into a rack, between racks and out again, and a chain

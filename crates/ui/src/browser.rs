@@ -15,7 +15,7 @@
 use std::path::Path;
 
 use bl_core::time::Ticks;
-use bl_shell::browser::drop::{DropTarget, drop_target};
+use bl_shell::browser::drop::{DropTarget, drop_target_on};
 use bl_shell::browser::listing::file_kind;
 use bl_shell::browser_commands::{self as ids, Item, ItemKind, Label, LabelInfo, Part, Section};
 use bl_shell::{Area, Invocation, MainView, Shell, WindowKind};
@@ -98,6 +98,18 @@ pub fn add_folder_id() -> Id {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrowserDrag {
     /// The audio files dragged, in the list's order.
+    pub paths: Vec<String>,
+    /// The plug-in dragged, by its Plug-Ins row's key (WP-2.9b): dropped
+    /// on a track, it loads there.
+    pub plugin: Option<String>,
+}
+
+/// What a drag of presets or devices from the browser carries (the racks
+/// spec, R43): preset files' paths and the IDs of devices the labels list,
+/// for the Device View to load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DevicesDrag {
+    /// The presets and devices dragged, in the list's order.
     pub paths: Vec<String>,
 }
 
@@ -498,6 +510,15 @@ impl BrowserUi {
             }
             invoke(events, ids::OPEN_PLACE, json!({ "label": info.label }));
         }
+        // Spec: racks R46. A chain dropped on a place is saved there; on the
+        // User Library, in its folder for the rack's presets.
+        match (&info.label, &info.path) {
+            (Label::UserLibrary, _) => drop_chains(ui, theme, rect, "", events),
+            (label, Some(path)) if label.is_place() => {
+                drop_chains(ui, theme, rect, path, events);
+            }
+            _ => {}
+        }
         if let Label::Folder(path) = &info.label {
             // C-BROWSER-017: a folder the person added.
             let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
@@ -682,18 +703,37 @@ impl BrowserUi {
                 if item.open { Glyph::Down } else { Glyph::Right },
                 ink,
             ),
-            ItemKind::Audio => glyph(&painter, mark, Glyph::Wave, ink),
+            ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
-            ItemKind::Plugin => glyph(&painter, mark, Glyph::Plugin, ink),
+            ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
         }
         let text_colour = if selected {
             theme.colors.text.0
         } else {
             theme.colors.text.0.gamma_multiply(0.92)
         };
+        // Spec: plugin-scanning R11. A plug-in's row shows its format as a
+        // badge before its name, as Live's does.
+        let mut name_left = indent + 12.0;
+        if let Some(format) = item.format {
+            let badge = painter.text(
+                pos2(name_left + 2.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                format_badge(format),
+                theme.small_font(),
+                ink,
+            );
+            painter.rect_stroke(
+                badge.expand2(vec2(2.0, 0.0)),
+                2.0,
+                Stroke::new(1.0, ink),
+                StrokeKind::Inside,
+            );
+            name_left = badge.right() + 6.0;
+        }
         let name = painter.text(
-            pos2(indent + 12.0, rect.center().y),
+            pos2(name_left, rect.center().y),
             Align2::LEFT_CENTER,
             &item.name,
             theme.small_font(),
@@ -714,6 +754,9 @@ impl BrowserUi {
             }
         }
 
+        if item.kind == ItemKind::Folder {
+            drop_chains(ui, theme, rect, &item.path, events);
+        }
         if response.double_clicked() {
             match item.kind {
                 ItemKind::Folder => invoke(
@@ -722,6 +765,14 @@ impl BrowserUi {
                     json!({ "path": item.path, "keep_others": command(modifiers) }),
                 ),
                 ItemKind::Audio => invoke(events, ids::LOAD_SELECTED, json!({})),
+                // Spec: multisampler R47. An SFZ instrument loads as a
+                // multisampler.
+                ItemKind::Sfz => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 // Spec: device-chains R19. While a device is hot-swapped, a
                 // preset loads into it.
                 ItemKind::Preset => {
@@ -730,7 +781,15 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                ItemKind::Set | ItemKind::Plugin => {}
+                // Spec: modulation R12, plugin-scanning R11. A device or a
+                // plug-in loads onto the selected track.
+                ItemKind::Device | ItemKind::Plugin => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+                ItemKind::Set => {}
             }
         } else if response.clicked() {
             ui.memory_mut(|m| {
@@ -753,17 +812,46 @@ impl BrowserUi {
             } else {
                 vec![item.path.clone()]
             };
-            paths.retain(|p| is_audio(p));
             paths.sort_by_key(|p| view.position_of(Path::new(p)));
-            if !paths.is_empty() {
-                DragAndDrop::set_payload(ui.ctx(), BrowserDrag { paths });
+            if item.kind == ItemKind::Plugin {
+                DragAndDrop::set_payload(
+                    ui.ctx(),
+                    BrowserDrag {
+                        paths: Vec::new(),
+                        plugin: Some(item.path.clone()),
+                    },
+                );
+            } else {
+                let (loadable, mut audio): (Vec<String>, Vec<String>) =
+                    paths.into_iter().partition(|p| is_loadable(p));
+                audio.retain(|p| is_audio(p) || is_sfz(p));
+                if !audio.is_empty() {
+                    DragAndDrop::set_payload(
+                        ui.ctx(),
+                        BrowserDrag {
+                            paths: audio,
+                            plugin: None,
+                        },
+                    );
+                } else if !loadable.is_empty() {
+                    DragAndDrop::set_payload(ui.ctx(), DevicesDrag { paths: loadable });
+                }
             }
         }
+        let dragged = DragAndDrop::payload::<BrowserDrag>(ui.ctx())
+            .map(|d| (d.paths.clone(), d.plugin.is_some()))
+            .or_else(|| {
+                DragAndDrop::payload::<DevicesDrag>(ui.ctx()).map(|d| (d.paths.clone(), false))
+            });
         if response.dragged()
-            && let Some(drag) = DragAndDrop::payload::<BrowserDrag>(ui.ctx())
+            && let Some((drag, plugin)) = dragged
             && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         {
-            let text = match drag.paths.as_slice() {
+            let text = match drag.as_slice() {
+                _ if plugin => item.name.clone(),
+                [one] if bl_shell::browser::device_by_id(one).is_some() => {
+                    bl_shell::browser::device_by_id(one).map_or_else(String::new, |d| d.name)
+                }
                 [one] => Path::new(one)
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -792,9 +880,17 @@ impl BrowserUi {
                 }
             }
             ItemKind::Audio => "audio file",
+            ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
-            ItemKind::Plugin => "plug-in",
+            ItemKind::Plugin => match item.format {
+                Some(bl_model::PluginFormat::Clap) => "CLAP plug-in",
+                Some(bl_model::PluginFormat::Vst3) => "VST3 plug-in",
+                Some(bl_model::PluginFormat::AudioUnit) => "Audio Unit plug-in",
+                Some(bl_model::PluginFormat::Lv2) => "LV2 plug-in",
+                None => "plug-in",
+            },
+            ItemKind::Device => "device",
         };
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Other, true, selected, &item.name));
@@ -1129,7 +1225,11 @@ impl BrowserUi {
                     }
                 }
                 ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
-                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin => {}
+                ItemKind::Sfz
+                | ItemKind::Set
+                | ItemKind::Preset
+                | ItemKind::Plugin
+                | ItemKind::Device => {}
             }
         }
         if left {
@@ -1161,7 +1261,7 @@ impl BrowserUi {
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
-        main_view: Rect,
+        (main_view, zone_editor): (Rect, Option<Rect>),
         events: &mut Vec<UiEvent>,
     ) {
         let ctx = ui.ctx().clone();
@@ -1172,7 +1272,7 @@ impl BrowserUi {
                 .dropped_files
                 .iter()
                 .map(|file| file.path().to_string_lossy().into_owned())
-                .filter(|path| is_audio(path))
+                .filter(|path| is_audio(path) || is_sfz(path))
                 .collect();
             (
                 dropped,
@@ -1188,6 +1288,9 @@ impl BrowserUi {
         if shell.main_view() != MainView::Arrangement {
             return;
         }
+        if pointer.is_some_and(|p| zone_editor.is_some_and(|editor| editor.contains(p))) {
+            return;
+        }
         let view = shell.arrangement();
         let doc = shell.editor().document();
         let pinned = bl_shell::arrangement::rows::pinned_tracks(doc).count();
@@ -1198,8 +1301,20 @@ impl BrowserUi {
         } else {
             modifiers.alt
         };
+        // An SFZ instrument goes on a MIDI track, where audio goes on an
+        // audio track (multisampler R47).
+        let sfz_drag = payload.as_ref().map_or_else(
+            || !dropped.is_empty() && dropped.iter().all(|path| is_sfz(path)),
+            |drag| drag.paths.iter().all(|path| is_sfz(path)),
+        );
+        let kind = if sfz_drag {
+            bl_model::TrackKind::Midi
+        } else {
+            bl_model::TrackKind::Audio
+        };
         let target = pointer.filter(|p| lanes.contains(*p)).and_then(|p| {
-            drop_target(
+            drop_target_on(
+                kind,
                 view,
                 doc,
                 lanes.height(),
@@ -1208,8 +1323,32 @@ impl BrowserUi {
                 ignore_snap,
             )
         });
+        let plugin = payload.as_ref().and_then(|p| p.plugin.clone());
+        if let Some(key) = plugin {
+            // Spec: plugin-scanning R11. A plug-in dropped on a track loads
+            // onto it.
+            let track = target.as_ref().and_then(|t| t.track);
+            if track.is_none() && pointer.is_some_and(|p| main_view.contains(p)) {
+                ctx.set_cursor_icon(CursorIcon::NoDrop);
+            }
+            if released {
+                DragAndDrop::clear_payload(&ctx);
+                if let Some(track) = track
+                    && shell.browser_view().plugin(Path::new(&key)).is_some()
+                {
+                    invoke(events, ids::SELECT, json!({ "paths": [key] }));
+                    invoke(
+                        events,
+                        bl_shell::arrangement_commands::SELECT_TRACKS,
+                        json!({ "tracks": [track] }),
+                    );
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+            }
+            return;
+        }
         if let Some(target) = target {
-            draw_target(ui, theme, lanes, view, doc, &target);
+            draw_target(ui, theme, lanes, view, doc, &target, kind);
         } else if pointer.is_some_and(|p| main_view.contains(p)) {
             ctx.set_cursor_icon(CursorIcon::NoDrop);
         }
@@ -1217,6 +1356,22 @@ impl BrowserUi {
         // (I-DROP-003).
         let spread = command(modifiers);
         let add = |events: &mut Vec<UiEvent>, paths: &[String], target: Option<DropTarget>| {
+            if sfz_drag {
+                // One multisampler for each instrument, on the track the
+                // pointer is over or on a new one.
+                for path in paths {
+                    let mut args = json!({ "path": path });
+                    if let Some(track) = target.and_then(|t| t.track) {
+                        args["track"] = json!(track);
+                    }
+                    invoke(events, bl_shell::multisampler_commands::IMPORT_SFZ, args);
+                }
+                return;
+            }
+            let paths: Vec<String> = paths.iter().filter(|p| is_audio(p)).cloned().collect();
+            if paths.is_empty() {
+                return;
+            }
             let mut args = json!({ "paths": paths, "spread": spread });
             match target {
                 Some(target) => {
@@ -1243,6 +1398,9 @@ impl BrowserUi {
             match (pointer.filter(|p| lanes.contains(*p)), target) {
                 (Some(_), Some(target)) => add(events, &dropped, Some(target)),
                 (Some(_), None) => {}
+                // An instrument dropped outside the main view, on the
+                // Device View or the zone editor, is theirs to take.
+                (None, _) if sfz_drag && pointer.is_some_and(|p| !main_view.contains(p)) => {}
                 (None, _) => add(events, &dropped, None),
             }
         }
@@ -1258,6 +1416,7 @@ fn draw_target(
     view: &bl_shell::arrangement::ArrangementView,
     doc: &bl_model::Document,
     target: &DropTarget,
+    kind: bl_model::TrackKind,
 ) {
     let painter = ui.painter_at(lanes);
     let top = lanes.top() + target.top;
@@ -1283,7 +1442,11 @@ fn draw_target(
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            "Drop to make a new audio track",
+            if kind == bl_model::TrackKind::Midi {
+                "Drop to make a new MIDI track"
+            } else {
+                "Drop to make a new audio track"
+            },
             theme.small_font(),
             theme.colors.text.0,
         );
@@ -1316,11 +1479,62 @@ fn range_paths(shell: &Shell, from: usize, to: usize) -> Vec<String> {
         .collect()
 }
 
+/// Chain rows dragged over `rect` are saved as chain presets when released
+/// there (the racks spec, R46): in `folder`, or with an empty one in the User
+/// Library's folder for the rack's presets.
+fn drop_chains(ui: &Ui, theme: &Theme, rect: Rect, folder: &str, events: &mut Vec<UiEvent>) {
+    let Some(drag) = DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) || !ui.clip_rect().contains(pointer) {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.accent.0),
+        StrokeKind::Inside,
+    );
+    if ui.input(|i| i.pointer.any_released()) {
+        DragAndDrop::clear_payload(ui.ctx());
+        for chain in &drag.chains {
+            let args = if folder.is_empty() {
+                json!({ "chain": chain })
+            } else {
+                json!({ "chain": chain, "folder": folder })
+            };
+            invoke(events, "chain.save_preset", args);
+        }
+    }
+}
+
+/// Whether a dragged path is a preset file or the ID of a device a label
+/// lists: what the Device View loads.
+fn is_loadable(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| file_kind(&n.to_string_lossy()))
+        == Some(ItemKind::Preset)
+        || bl_shell::browser::device_by_id(path).is_some()
+}
+
 fn is_audio(path: &str) -> bool {
     Path::new(path)
         .file_name()
         .and_then(|n| file_kind(&n.to_string_lossy()))
         == Some(ItemKind::Audio)
+}
+
+/// Whether `path` names an SFZ instrument, which a MIDI track or the drop
+/// area takes (multisampler R47).
+pub(crate) fn is_sfz(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| file_kind(&n.to_string_lossy()))
+        == Some(ItemKind::Sfz)
 }
 
 fn file_name(path: &str) -> String {
@@ -1357,6 +1571,16 @@ enum Glyph {
     Preset,
     Plugin,
     Speaker,
+}
+
+/// The short name a plug-in row's badge shows for its format.
+fn format_badge(format: bl_model::PluginFormat) -> &'static str {
+    match format {
+        bl_model::PluginFormat::Clap => "CLAP",
+        bl_model::PluginFormat::Vst3 => "VST3",
+        bl_model::PluginFormat::AudioUnit => "AU",
+        bl_model::PluginFormat::Lv2 => "LV2",
+    }
 }
 
 fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {

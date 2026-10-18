@@ -471,6 +471,192 @@ fn the_sidechain_strip_shows_the_section_and_its_controls_set_the_sidechain() {
     assert!(section(&h, key).listen);
 }
 
+fn midi_section(h: &Harness, device: DeviceId) -> bl_shell::device_commands::MidiSidechainSection {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.midi_sidechain)
+        .unwrap()
+}
+
+// Spec: routing R34 (a device's MIDI sidechain strip and its MIDI source
+// chooser)
+#[test]
+fn the_midi_sidechain_strip_shows_the_section_and_its_chooser_sets_the_source() {
+    use bl_ui::sidechain::{rows, strip_buttons};
+    let mut h = harness();
+    let plain = add(&mut h, gain());
+    let t = testing::hear_type();
+    let hear = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true }),
+    );
+    let (fp, fh) = (frame_of(&mut h, plain), frame_of(&mut h, hear));
+    assert_eq!(
+        fh.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH,
+        "a MIDI sidechain has its strip"
+    );
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Show/Hide Sidechain").value, "off");
+
+    // The toggle shows the section, which changes only the view.
+    let steps = h.shell.editor().undo_history().len();
+    h.click(strip_buttons(fh)[0].center());
+    h.settle();
+    assert!(midi_section(&h, hear).shown);
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+    let fh = frame_of(&mut h, hear);
+    assert_eq!(
+        fh.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH
+            + bl_shell::device_commands::SIDECHAIN_SECTION_WIDTH
+    );
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Source").value,
+        "No Input"
+    );
+
+    // A source from the chooser's list.
+    let [_, source, ..] = rows(fh);
+    h.click(source.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "1-MIDI" && n.bounds.is_some_and(|b| b.y0 as f32 > source.top()))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(midi_section(&h, hear).source, "1-MIDI");
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+}
+
+fn hardware() -> Value {
+    let t = bl_devices::hardware_instrument_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role })
+}
+
+fn external_of(h: &Harness, device: DeviceId) -> bl_shell::device_commands::ExternalSection {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.external)
+        .unwrap()
+}
+
+// Spec: external-devices R9, R12, R15 (an external instrument's section)
+#[test]
+fn the_external_instruments_choosers_route_it() {
+    use bl_midi_io::{Direction, TestBackend};
+    use bl_model::HardwareLatency;
+    use bl_ui::external::rows;
+
+    let mut h = harness();
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "track": true }),
+        )
+        .unwrap();
+    let device = add(&mut h, hardware());
+    let frame = frame_of(&mut h, device);
+    // A new device is routed nowhere: channel 1, the first input pair,
+    // 0 ms; its section sits left of its body.
+    let section = external_of(&h, device);
+    assert_eq!(section.port, None);
+    assert_eq!(section.channel, 1);
+    assert_eq!(section.hardware_latency, HardwareLatency::default());
+    let nodes = Harness::nodes(&h.settle());
+    for (name, value) in [
+        ("External MIDI To", "No Output"),
+        ("External MIDI Channel", "1"),
+        ("External Audio From", "1/2"),
+        ("Hardware Latency", "0.00 ms"),
+        ("Hardware Latency Unit", "ms"),
+    ] {
+        assert_eq!(Harness::node(&nodes, name).value, value, "{name}");
+    }
+    let [midi_to, channel, _, latency, unit] = rows(frame);
+
+    // MIDI To lists the port; choosing it is a routing change.
+    h.click(midi_to.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "Synth" && n.bounds.is_some())
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(external_of(&h, device).port.as_deref(), Some("Synth"));
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+
+    // Its channel.
+    h.click(channel.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "5" && n.bounds.is_some_and(|b| b.y1 - b.y0 > 8.0))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(external_of(&h, device).channel, 5);
+
+    // A drag on Hardware Latency is one undo step.
+    let steps = h.shell.editor().undo_history().len();
+    let from = latency.center();
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from - egui::vec2(0.0, 5.0 * step as f32),
+        )]);
+    }
+    h.frame(vec![press(
+        from - egui::vec2(0.0, 25.0),
+        false,
+        PointerButton::Primary,
+    )]);
+    h.settle();
+    let HardwareLatency::Milliseconds { value } = external_of(&h, device).hardware_latency else {
+        panic!("still in milliseconds");
+    };
+    assert!(value > 150.0 && value < 250.0, "{value}");
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Hardware Latency\"");
+
+    // The unit switch converts the value at the open rate (48 kHz with no
+    // device), to whole samples.
+    h.click(unit.center());
+    h.settle();
+    let HardwareLatency::Samples { value: samples } = external_of(&h, device).hardware_latency
+    else {
+        panic!("samples now");
+    };
+    assert_eq!(f64::from(samples), (value * 48.0).round());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Hardware Latency Unit").value, "smp");
+}
+
 /// A file dropped into the window, as the app's drag and drop gives egui.
 #[derive(Debug)]
 struct DroppedFile(std::path::PathBuf);
@@ -512,7 +698,12 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
     std::fs::write(&file, bytes).unwrap();
 
     assert_eq!(
-        h.shell.editor().document().device(device).unwrap().media,
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media_at(0),
         None,
         "a new sampler has no sample"
     );
@@ -526,10 +717,177 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
             .document()
             .device(device)
             .unwrap()
-            .media
+            .media_at(0)
             .is_some(),
         "the drop loaded the sample"
     );
+    let _ = std::fs::remove_file(&file);
+}
+
+/// The drum sampler's cell for sample slot `slot` (counted from 0), as the
+/// panel draws it.
+fn slot_cell_rect(h: &mut Harness, device: DeviceId, slot: u32) -> Rect {
+    let frame = frame_of(h, device);
+    let panel = h
+        .shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .expect("a panel");
+    bl_ui::device_panel::place(
+        &panel,
+        bl_ui::device_panel::body_rect(frame, TITLE_BAR_HEIGHT),
+    )
+    .1
+    .into_iter()
+    .find(|(_, _, s)| *s == Some(slot))
+    .expect("a cell for the slot")
+    .1
+}
+
+fn add_kitbag(h: &mut Harness) -> DeviceId {
+    let kit = bl_devices::kitbag_type();
+    add(
+        h,
+        json!({ "kind": kit.kind, "name": kit.name, "role": kit.role }),
+    )
+}
+
+fn selected_slot(h: &Harness, device: DeviceId) -> u32 {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .map(|p| p.selected_slot)
+        .unwrap()
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn clicking_a_slot_cell_shows_that_slots_controls() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    // Slot 4 pans left; the panel shows slot 1's Pan until slot 4 is picked.
+    let pan = bl_devices::kitbag::param(3, bl_devices::kitbag::slot::PAN);
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": pan, "value": -20.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "0");
+    let cell = Harness::node(&nodes, "Slot 4");
+    assert_eq!(cell.role, Role::Button);
+    assert!(
+        cell.description.contains("plays F3") && cell.description.contains("empty"),
+        "{}",
+        cell.description
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected"),
+        "slot 1 is selected to start"
+    );
+
+    let at = slot_cell_rect(&mut h, device, 3).center();
+    h.click(at);
+    h.settle();
+    assert_eq!(selected_slot(&h, device), 3);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "-20");
+    assert!(
+        nodes.iter().all(|n| n.label != "Slot 1 Pan"),
+        "slot 1's controls are gone"
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 4")
+            .description
+            .contains("selected")
+    );
+    assert!(
+        !Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected")
+    );
+    // Choosing a slot is a view change: nothing for undo.
+    assert_ne!(last_step(&h), "Select Sample Slot");
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn a_sample_dropped_on_a_slot_cell_loads_into_that_slot_and_delete_clears_it() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    let file = std::env::temp_dir().join(format!("bl-ui-kitbag-{}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..480)
+        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
+        .collect();
+    let bytes = bl_media::wav_bytes(
+        &samples,
+        1,
+        48_000,
+        bl_media::BitDepth::Int16,
+        bl_media::Dither::None,
+    )
+    .unwrap();
+    std::fs::write(&file, bytes).unwrap();
+
+    let media = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media
+            .clone()
+    };
+    assert!(media(&h).is_empty(), "a new drum sampler has no samples");
+    // Dropped on slot 6's cell, the file goes to slot 6 whatever is
+    // selected.
+    let cell = slot_cell_rect(&mut h, device, 5).center();
+    h.frame(vec![Event::PointerMoved(cell)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    let loaded = media(&h);
+    assert_eq!(loaded.len(), 6, "{loaded:?}");
+    assert!(loaded[..5].iter().all(Option::is_none) && loaded[5].is_some());
+    assert_eq!(last_step(&h), "Load Sample");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        Harness::node(&nodes, "Slot 6")
+            .description
+            .contains("holds a sample")
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 5")
+            .description
+            .contains("empty")
+    );
+
+    // Dropped elsewhere on the device, it goes to the selected slot (1).
+    let frame = frame_of(&mut h, device);
+    let title = pos2(frame.center().x, frame.top() + 4.0);
+    h.frame(vec![Event::PointerMoved(title)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    assert!(media(&h)[0].is_some(), "slot 1, the selected one");
+
+    // Delete on a focused cell clears its slot: one undo step.
+    h.click(cell);
+    h.settle();
+    h.key(Key::Delete, Modifiers::NONE);
+    h.settle();
+    assert_eq!(media(&h).len(), 1, "slot 6 is clear: {:?}", media(&h));
+    assert_eq!(last_step(&h), "Clear Sample");
     let _ = std::fs::remove_file(&file);
 }
 
@@ -653,4 +1011,55 @@ fn compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins() {
             .unwrap_or_else(|| panic!("no menu item {label:?}"));
         assert!(item.disabled, "{label} on a plug-in");
     }
+}
+
+// Spec: multisampler R29
+#[test]
+fn the_multisamplers_title_bar_menu_holds_its_options() {
+    let mut h = harness();
+    let tracks: Vec<TrackId> = h.shell.editor().document().top_level().collect();
+    h.shell
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
+        .unwrap();
+    h.shell.set_device_types(bl_devices::device_types());
+    let t = bl_devices::multisampler_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let frame = frame_of(&mut h, device);
+    h.click(button_rects(frame, false)[2].center());
+    let nodes = Harness::nodes(&h.settle());
+    // The device's own items, then the multisampler's.
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label.starts_with("Save as Default Preset"))
+    );
+    let fade = nodes
+        .iter()
+        .find(|n| n.label.starts_with("Use Constant Power Fade for Loops"))
+        .expect("the multisampler's option is in the menu");
+    assert!(
+        fade.selected == Some(true) || fade.toggled == Some(true),
+        "on in a new device: {fade:?}"
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Convert to Simpler" && !n.disabled),
+        "the conversion is in the menu (multisampler R62)"
+    );
+    let b = fade.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    let layers = &h.shell.editor().document().device(device).unwrap().layers;
+    assert!(layers.linear_loop_fades, "off now: crossfades are linear");
+    assert_eq!(last_step(&h), "Change Sample Options");
 }

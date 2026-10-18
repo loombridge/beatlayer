@@ -52,6 +52,7 @@ impl Rig {
         let (engine, mut processor) =
             Engine::start(EngineConfig::new(SampleRate::HZ_48000, BLOCK), registry).unwrap();
         processor.set_midi_input(shell.midi().sender().attach(1024));
+        processor.set_midi_output(shell.midi().output().attach(1024));
         let mut rig = Self {
             shell,
             test,
@@ -94,9 +95,26 @@ impl Rig {
 
     /// Plays a message from a port, and processes the block it arrives in
     /// and the one after, where it lands.
-    fn play(&mut self, port: &str, message: [u8; 3]) -> usize {
-        self.test.send(port, Instant::now(), &message);
+    fn play(&mut self, port: &str, message: impl AsRef<[u8]>) -> usize {
+        self.test.send(port, Instant::now(), message.as_ref());
         self.blocks_run(2)
+    }
+
+    /// Plays a message from a port and runs blocks until the engine has taken
+    /// it: after a pause the block clock has drifted from the clock the
+    /// message is stamped on, and takes a few blocks to catch up.
+    fn play_settled(&mut self, port: &str, message: impl AsRef<[u8]>) {
+        let before = self.processor.midi_counters().received;
+        self.test.send(port, Instant::now(), message.as_ref());
+        for _ in 0..400 {
+            self.blocks_run(1);
+            if self.processor.midi_counters().received > before {
+                // One more block, where the message lands.
+                self.blocks_run(1);
+                return;
+            }
+        }
+        panic!("the engine never took the message");
     }
 
     /// Runs `count` blocks, each starting after the last and after now, and
@@ -473,7 +491,7 @@ fn midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input() {
     rig.run("midi.ports", json!({}));
     rig.sync();
     let message = MidiMessage::note_on(4, 60, 100);
-    assert_eq!(rig.play("Keys B", message.bytes().try_into().unwrap()), 1);
+    assert_eq!(rig.play("Keys B", message.bytes()), 1);
 }
 
 /// The queue is attached to the engine the audio host starts, so a note
@@ -517,7 +535,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
     registry.set_media(Arc::new(Constant));
     let mut rig = Rig::with_registry(registry);
 
-    // Snapshot with a sample, on the MIDI track.
+    // Simpler with a sample, on the MIDI track.
     let folder = std::env::temp_dir().join(format!("bl-midi-play-{}", std::process::id()));
     std::fs::create_dir_all(&folder).unwrap();
     let file = folder.join("Tone.wav");
@@ -529,7 +547,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: SAMPLER.to_owned() },
-            "name": "Snapshot",
+            "name": "Simpler",
             "role": DeviceRole::Instrument,
         } }),
     );
@@ -559,7 +577,7 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
         json!({ "key": "A", "pressed": true }),
     );
     let heard = (0..4).map(|_| peak(&mut rig)).fold(0.0_f32, f32::max);
-    assert!(heard > 0.01, "the key plays Snapshot: {heard}");
+    assert!(heard > 0.01, "the key plays Simpler: {heard}");
 }
 
 // Spec: midi-io R12, midi-transpose R1
@@ -587,7 +605,7 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: LIFT.to_owned() },
-            "name": "Lift",
+            "name": "Pitch",
             "role": DeviceRole::MidiEffect,
         } }),
     );
@@ -617,8 +635,88 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
         .iter()
         .map(|n| (n.event.kind, n.event.key))
         .collect();
-    // The computer keyboard's A is middle C; Lift moves it up a fifth.
+    // The computer keyboard's A is middle C; Pitch moves it up a fifth.
     assert_eq!(heard, [(NoteKind::On, 67), (NoteKind::Off, 67)]);
+}
+
+// Spec: midi-io R12, device-framework R39. A control change, pitch bend and
+// channel pressure from a port reach the instrument through a MIDI effect,
+// in order with the notes, and through the same effect switched off.
+#[test]
+fn a_ports_channel_messages_reach_the_instrument_through_a_midi_effect() {
+    use bl_devices::lift::{LIFT, PITCH};
+    use bl_engine::NoteKind;
+    use bl_engine::testing::{self, Probe};
+
+    let probe = Arc::new(Probe::default());
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut rig = Rig::with_registry(registry);
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let add = |rig: &mut Rig, device_type: &str, role: DeviceRole| {
+        rig.run(
+            "device.add",
+            json!({ "device": {
+                "kind": DeviceKind::Native { device_type: device_type.to_owned() },
+                "name": device_type,
+                "role": role,
+            } }),
+        )
+    };
+    add(&mut rig, testing::INSTRUMENT, DeviceRole::Instrument);
+    let lift = add(&mut rig, LIFT, DeviceRole::MidiEffect);
+    rig.run(
+        "device.set_param",
+        json!({ "device": lift["device"], "param": PITCH.0, "value": 7.0 }),
+    );
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": track, "monitor": "in" }),
+    );
+    rig.sync();
+    rig.blocks_run(1);
+    let messages: [&[u8]; 4] = [
+        &[0x90, 60, 100],
+        &[0xB0, 1, 127],
+        &[0xE0, 127, 127],
+        &[0xD0, 64],
+    ];
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    let kinds = |probe: &Probe| -> Vec<NoteKind> {
+        probe
+            .recorded_notes()
+            .iter()
+            .map(|n| n.event.kind)
+            .collect()
+    };
+    let expected = [
+        NoteKind::On,
+        NoteKind::Control {
+            controller: 1,
+            value: 1.0,
+        },
+        NoteKind::PitchBend { value: 1.0 },
+        NoteKind::ChannelPressure {
+            value: 64.0 / 127.0,
+        },
+    ];
+    // Pitch moves the note, and passes the messages as they came.
+    assert_eq!(kinds(&probe), expected);
+
+    // Switched off, it ends the note it started and passes all of them.
+    rig.run(
+        "device.set_enabled",
+        json!({ "device": lift["device"], "enabled": false }),
+    );
+    rig.sync();
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    assert_eq!(kinds(&probe), [&[NoteKind::Off][..], &expected].concat());
 }
 
 // Spec: midi-chord R13
@@ -633,7 +731,7 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
         "device.add",
         json!({ "device": {
             "kind": DeviceKind::Native { device_type: STACK.to_owned() },
-            "name": "Stack",
+            "name": "Chord",
             "role": DeviceRole::MidiEffect,
         } }),
     );
@@ -706,4 +804,96 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     key(&mut rig, "S", true);
     key(&mut rig, "D", true);
     assert_eq!(shifts(&rig), fixed);
+}
+
+/// Waits until `done` holds, for up to two seconds: the MIDI output thread
+/// hands messages on a thread of its own.
+fn wait_for(mut done: impl FnMut() -> bool) -> bool {
+    let began = Instant::now();
+    while began.elapsed() < Duration::from_secs(2) {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    done()
+}
+
+// Spec: external-devices R2, R5
+#[test]
+fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
+    let mut rig = Rig::new();
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "track": true }),
+    );
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": rig.track, "monitor": "in" }),
+    );
+    rig.run(
+        "routing.set_midi_output",
+        json!({ "track": rig.track, "to": { "name": "Synth", "channel": 2 } }),
+    );
+    rig.sync();
+    // The port is open, with Track on, and the note leaves on channel 2.
+    assert!(rig.test.is_open(Direction::Output, "Synth"));
+    rig.play_settled("Keys A", [0x90, 60, 100]);
+    assert!(wait_for(|| !rig.test.sent("Synth").is_empty()));
+    assert_eq!(rig.test.sent("Synth")[0], [0x91, 60, 100]);
+    assert_eq!(rig.shell.midi().output().stats().snapshot().sent, 1);
+
+    // The port goes: the track keeps its name and sends nothing.
+    rig.test.remove_port(Direction::Output, "Synth");
+    rig.shell.refresh_midi();
+    assert_eq!(rig.shell.midi().output_names(), Vec::<String>::new());
+    rig.play_settled("Keys A", [0x90, 62, 100]);
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        >= 1));
+    let routing = rig
+        .shell
+        .editor()
+        .document()
+        .track(rig.track)
+        .unwrap()
+        .routing();
+    assert_eq!(
+        routing.midi_output,
+        Some(bl_model::MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 2
+        })
+    );
+
+    // It returns, with the Track switch it had, and the track sends again.
+    rig.test.add_port(Direction::Output, "Synth");
+    rig.shell.refresh_midi();
+    assert_eq!(rig.shell.midi().output_names(), vec!["Synth".to_owned()]);
+    rig.play_settled("Keys A", [0x90, 64, 100]);
+    assert!(wait_for(|| !rig.test.sent("Synth").is_empty()));
+    assert_eq!(rig.test.sent("Synth")[0], [0x91, 64, 100]);
+
+    // A port whose Track switch is off takes nothing, though it is open
+    // for another reason.
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "track": false, "sync": true }),
+    );
+    let unrouted = rig.shell.midi().output().stats().snapshot().unrouted;
+    rig.play_settled("Keys A", [0x90, 65, 100]);
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        > unrouted));
+    assert_eq!(rig.test.sent("Synth").len(), 1);
 }

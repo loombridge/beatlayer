@@ -1,4 +1,4 @@
-//! Stack, the chord MIDI effect (WP-5.30; the MIDI chord spec): added notes with
+//! Chord, the chord MIDI effect (WP-5.30; the MIDI chord spec): added notes with
 //! their velocity and chance, the strum with tension and crescendo, notes
 //! that end with their source, and each added note's own ID. Every block is a
 //! real-time section under the allocation trap.

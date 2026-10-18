@@ -66,9 +66,11 @@ pub mod agent;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+pub mod auto_warp;
 mod automation_record;
 pub mod browser;
 mod chord_learn;
+pub mod clip_defaults;
 pub mod clip_view;
 pub mod devices;
 pub mod export;
@@ -85,11 +87,13 @@ pub mod plugins;
 pub mod processed;
 pub mod recording;
 pub mod routing;
+pub mod sample_editor;
 pub mod scene_fields;
 mod session_capture;
 pub mod session_view;
 pub mod settings;
 mod shell;
+pub mod stems;
 pub mod tracks;
 pub mod transport;
 
@@ -97,6 +101,8 @@ pub mod transport;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+/// Capture MIDI's command ID and its result types (WP-3.14).
+pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;
@@ -111,14 +117,21 @@ pub use bl_shell_spec::midi_io as midi_io_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
+/// The multisampler's commands that run on the shell (WP-5.13).
+pub use bl_shell_spec::multisampler as multisampler_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;
+/// A drum rack's pad view and the commands on pads (WP-5.6).
+pub use bl_shell_spec::pads as pad_commands;
 /// The perception commands' IDs and their argument and result types
 /// (WP-1.16).
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+/// The Sample Editor's view command IDs and their argument and result types
+/// (WP-4.10).
+pub use bl_shell_spec::sample_editor as sample_editor_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;
@@ -128,6 +141,8 @@ pub use bl_shell_spec::session_view as session_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).
+/// Stem separation's command IDs and arguments (IMP-11).
+pub use bl_shell_spec::stems as stems_commands;
 pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
@@ -135,5 +150,5 @@ pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
-    WindowKind,
+    TransientList, WindowKind,
 };

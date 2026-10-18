@@ -45,9 +45,9 @@ use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
 };
 use bl_engine::{
-    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
-    Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand, SlotStatus,
-    TakeBounds, TransportCommand,
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams, Pool,
+    PoolConfig, Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand,
+    SlotStatus, TakeBounds, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
 use bl_model::{Channel, Document, LaunchSettings, TrackId};
@@ -323,6 +323,10 @@ const ENGINE_START_TIMEOUT: Duration = Duration::from_secs(5);
 /// takes at most `MIDI_EVENTS_PER_BLOCK` of them a block.
 const MIDI_QUEUE_MESSAGES: usize = 4096;
 
+/// How many messages the queue from the engine to the MIDI output ports
+/// holds (the external devices spec, R5).
+const MIDI_OUT_MESSAGES: usize = 4096;
+
 /// The transport as the engine last published it: what the Control Bar's
 /// transport section and the Arrangement show. While no engine runs, it's
 /// the transport as the last one left it, stopped.
@@ -393,6 +397,8 @@ pub struct AudioHost {
     engines: u64,
     /// Reports from engines that have closed, not yet taken.
     held_reports: Vec<Report>,
+    /// Captured notes from closed engines, not yet read (WP-3.14).
+    held_captured: Vec<bl_engine::CapturedMidi>,
     /// The CLAP host whose factory makes each engine's CLAP nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
@@ -406,6 +412,12 @@ pub struct AudioHost {
     /// Where MIDI input arrives (WP-2.2): each engine's processor gets a
     /// fresh queue from it.
     midi: Option<bl_midi_io::InputSender>,
+    /// The bus MIDI output leaves on (WP-5.34): each engine's processor
+    /// attaches its own queue to it.
+    midi_out: Option<bl_midi_io::OutputBus>,
+    /// The output latency and round trip, in frames, the engine was last
+    /// told (WP-5.34).
+    latency_sent: (u32, u32),
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -477,11 +489,14 @@ impl AudioHost {
             streams: None,
             engines: 0,
             held_reports: Vec::new(),
+            held_captured: Vec::new(),
             plugins: None,
             au: None,
             vst3: None,
             kit: None,
             midi: None,
+            midi_out: None,
+            latency_sent: (0, 0),
         }
     }
 
@@ -489,6 +504,12 @@ impl AudioHost {
     /// input (WP-2.2; the MIDI I/O spec, R14).
     pub fn set_midi(&mut self, sender: bl_midi_io::InputSender) {
         self.midi = Some(sender);
+    }
+
+    /// Gives every engine from now on the queue it sends MIDI to output
+    /// ports on (WP-5.34; the external devices spec, R5).
+    pub fn set_midi_output(&mut self, bus: bl_midi_io::OutputBus) {
+        self.midi_out = Some(bus);
     }
 
     /// Plays clips' audio from `media`, streaming long files from disk, from
@@ -599,6 +620,7 @@ impl AudioHost {
         self.memory.playing = false;
         if let Some(engine) = self.engine.as_mut() {
             self.held_reports.extend(engine.reports());
+            self.held_captured.extend(engine.captured());
         }
         // The processor goes with the stream's callback; then the engine's
         // threads stop, and its drop thread frees the last program.
@@ -651,6 +673,24 @@ impl AudioHost {
     /// or no device is open.
     pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
         self.running_engine()?.transport(command);
+        Ok(())
+    }
+
+    /// Sends a sampler's node a click in its display (WP-5.15, the
+    /// multisampler spec, R54): the node plays its sample from a point until
+    /// the button comes up. Nothing is written to the set.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn audition(
+        &mut self,
+        device: bl_model::DeviceId,
+        audition: bl_engine::Audition,
+    ) -> Result<(), String> {
+        let engine = self.running_engine()?;
+        engine.send_data(bl_engine::NodeKey::Device(device), engine.data(audition));
         Ok(())
     }
 
@@ -722,6 +762,33 @@ impl AudioHost {
         }
     }
 
+    /// The rack chains the engine found processing in the last block
+    /// (WP-5.3): what Auto Select follows. Empty while no engine runs.
+    pub fn processing_into(&mut self, out: &mut Vec<bl_model::ChainId>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().processing);
+        }
+    }
+
+    /// Sends the engine's node `key` a parameter change that takes effect
+    /// at the start of the next block, as a held Preview button does for a
+    /// drum chain (the drum racks spec, R5). Nothing while no engine runs.
+    pub fn send_param(&self, key: bl_engine::NodeKey, param: bl_model::ParamId, value: f64) {
+        if let Some(engine) = &self.engine {
+            engine.send_param(bl_engine::ParamEvent::now(key, param, value));
+        }
+    }
+
+    /// How many notes have reached each drum chain of the running program
+    /// (the drum racks spec, R20); empty while no engine runs.
+    pub fn chain_hits_into(&self, out: &mut std::collections::BTreeMap<bl_model::ChainId, u64>) {
+        out.clear();
+        if let Some(engine) = &self.engine {
+            engine.chain_hits().read_all(out);
+        }
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which
@@ -759,6 +826,16 @@ impl AudioHost {
     pub fn cancel(&mut self, id: u64) -> Result<(), String> {
         self.running_engine()?.cancel(id);
         Ok(())
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call, for
+    /// Capture MIDI (WP-3.14), the closed engines' first.
+    pub fn take_captured(&mut self) -> Vec<bl_engine::CapturedMidi> {
+        let mut notes = std::mem::take(&mut self.held_captured);
+        if let Some(engine) = self.engine.as_mut() {
+            notes.extend(engine.captured());
+        }
+        notes
     }
 
     /// The engine's reports since the last call, the closed engines' first:
@@ -1073,7 +1150,8 @@ impl AudioHost {
             .open_stream(&request, callback)
             .map_err(|e| e.to_string())?;
         // The engine is made for the rate the device runs at.
-        let engine = self.start_engine(stream.info(), handoff)?;
+        let engine =
+            self.start_engine(stream.info(), stream.latency(), stream.workgroup(), handoff)?;
         if let Err(error) = stream.start() {
             // The processor goes with the stream, before the engine.
             drop(stream);
@@ -1098,14 +1176,20 @@ impl AudioHost {
     fn start_engine(
         &mut self,
         info: &StreamInfo,
+        latency: bl_audio_io::Latency,
+        workgroup: Option<bl_audio_io::Workgroup>,
         mut handoff: Producer<Processor>,
     ) -> Result<Engine, String> {
         let rate = SampleRate::new(info.sample_rate)
             .ok_or_else(|| "the device runs at 0 Hz".to_owned())?;
         let max_frames = (info.max_block_frames as usize).max(1);
+        let (output_latency, round_trip_latency) = self.latency_frames(info.sample_rate, latency);
+        self.latency_sent = (output_latency, round_trip_latency);
         let config = EngineConfig {
             input_channels: info.input_channels.into(),
             output_channels: info.output_channels.into(),
+            output_latency,
+            round_trip_latency,
             ..EngineConfig::new(rate, max_frames)
         };
         let mut registry = Registry::new();
@@ -1135,6 +1219,27 @@ impl AudioHost {
             // The processor has no queue yet, so nothing comes back to drop.
             processor.set_midi_input(midi.attach(MIDI_QUEUE_MESSAGES));
         }
+        if let Some(bus) = &self.midi_out {
+            processor.set_midi_output(bus.attach(MIDI_OUT_MESSAGES));
+        }
+        // The multicore scheduler (WP-5.37): workers beside the audio
+        // thread, joined to the stream's workgroup, started with the stream
+        // and stopped with it. A pool that can't start leaves the audio
+        // thread to run the song alone.
+        let frames = info.buffer_size.unwrap_or(info.max_block_frames);
+        let period = Duration::from_secs_f64(f64::from(frames) / f64::from(info.sample_rate));
+        let promote = workgroup.is_some() || info.backend != BackendKind::Null;
+        let mut pool = PoolConfig::for_stream(period, workgroup, promote);
+        // The null device is a test's: it runs as fast as it can, and
+        // workers spinning beside it would only crowd the machine.
+        if info.backend == BackendKind::Null {
+            pool.workers = 0;
+        }
+        if let Ok(pool) = Pool::start(&config, &pool)
+            && pool.workers() > 0
+        {
+            processor.set_pool(Some(pool));
+        }
         if let Some(document) = &self.document {
             engine.sync(document);
         }
@@ -1159,6 +1264,36 @@ impl AudioHost {
         Ok(engine)
     }
 
+    /// The device's output latency and the round trip an external device
+    /// reports, in frames at `rate`: its reported input and output latency
+    /// plus Driver Error Compensation, never less than zero (the external
+    /// devices spec, R4, R13).
+    fn latency_frames(&self, rate: u32, latency: bl_audio_io::Latency) -> (u32, u32) {
+        let compensation = clamped_compensation_ms(self.settings.driver_error_compensation_ms)
+            * f64::from(rate)
+            / 1000.0;
+        let round_trip =
+            i64::from(latency.input) + i64::from(latency.output) + compensation.round() as i64;
+        (
+            latency.output,
+            u32::try_from(round_trip.max(0)).unwrap_or(u32::MAX),
+        )
+    }
+
+    /// Tells the engine the device's latency when it has changed since it
+    /// last heard: a backend that measures it from its first callbacks, or
+    /// Driver Error Compensation edited while the stream runs.
+    fn refresh_latency(&mut self) {
+        let (Some(stream), Some(engine)) = (&self.stream, &self.engine) else {
+            return;
+        };
+        let now = self.latency_frames(stream.info().sample_rate, stream.latency());
+        if now != self.latency_sent {
+            engine.set_latency(now.0, now.1);
+            self.latency_sent = now;
+        }
+    }
+
     /// Measures the CPU load since the last call: the share of the audio
     /// produced in that time that the callback spent processing, in percent.
     /// The meter calls it a few times a second. `None` while the engine is
@@ -1168,6 +1303,7 @@ impl AudioHost {
             self.cpu_load = None;
             return None;
         }
+        self.refresh_latency();
         let busy = self.shared.busy_ns.load(Relaxed);
         let audio = self.shared.audio_ns.load(Relaxed);
         let (last_busy, last_audio) = self.last_sample;

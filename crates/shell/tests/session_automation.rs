@@ -204,6 +204,15 @@ fn a_move_during_a_slot_recording_is_a_step_in_the_new_clips_envelope() {
     assert_eq!(stats.heap_operations, 0, "{stats:?}");
 }
 
+/// Whether `track`'s Session clip plays, its recording over: what Session
+/// Record overdubs.
+fn playing(shell: &Shell, track: TrackId) -> bool {
+    shell
+        .session_states()
+        .iter()
+        .any(|s| s.track == track && s.state == bl_engine::SlotState::Playing)
+}
+
 // Spec: session-automation R1
 #[test]
 fn with_automation_arm_off_nothing_is_recorded() {
@@ -229,9 +238,7 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
     pass_time(&mut shell, 300);
     shell.run("session.stop_recording", json!({})).unwrap();
     poll_until(&mut shell, "the recording to end", recorded);
-    poll_until(&mut shell, "the clip to play", |shell| {
-        !shell.session_states().is_empty()
-    });
+    poll_until(&mut shell, "the clip to play", |shell| playing(shell, keys));
     arm_automation(&mut shell);
     let clips = shell
         .editor()
@@ -267,6 +274,9 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
 
     // A second take replaces the envelope from its move to the end of the
     // pass and leaves what came before.
+    poll_until(&mut shell, "the clip to play again", |shell| {
+        playing(shell, keys)
+    });
     shell.run("session.record", json!({})).unwrap();
     pass_time(&mut shell, 300);
     set_volume(&mut shell, keys, 0.1);
@@ -339,9 +349,7 @@ fn a_hand_move_takes_the_parameter_back_until_the_clip_launches_again() {
     let scene = scenes(&shell)[0];
     arm_automation(&mut shell);
     record_with_move(&mut shell, keys, scene, 0.25);
-    poll_until(&mut shell, "the clip to play", |shell| {
-        !shell.session_states().is_empty()
-    });
+    poll_until(&mut shell, "the clip to play", |shell| playing(shell, keys));
     let enabled = |shell: &Shell| {
         slot_clip(shell, keys, scene)
             .unwrap()

@@ -93,7 +93,7 @@ pub use automation::{
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
-    Note, TakeClip, TakeLane,
+    Note, PressurePoint, TakeClip, TakeLane,
 };
 pub use command::Command;
 pub use device::{
@@ -122,11 +122,13 @@ pub use layers::{
 };
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
-pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
+pub use rack::{
+    CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
+};
 pub use repr::{SavedSong, saved_schema};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
-pub use warp::WarpMarker;
+pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};

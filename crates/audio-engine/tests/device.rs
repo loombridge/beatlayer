@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use bl_audio_engine::{AudioEngine, Cause, DeviceEvent, DeviceStatus, SupervisorOptions};
 use bl_audio_io::{
     Backend, BackendKind, DeviceId, DeviceSelector, NullBackend, NullControl, NullOptions,
-    StreamRequest, StreamStats,
+    StreamRequest, StreamStats, WorkgroupJoin,
 };
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
@@ -62,6 +62,11 @@ struct Rig {
 /// The engine on the simulated USB interface, beside a built-in output,
 /// playing one tone, with the null control's power events.
 fn rig() -> Rig {
+    rig_with_workers(None)
+}
+
+/// [`rig`], with a pool of `workers` workers beside the audio thread.
+fn rig_with_workers(workers: Option<usize>) -> Rig {
     let (backend, control) = NullBackend::with_devices(
         NullOptions::default(),
         &[("built-in", "Built-in Output"), ("usb", "USB Interface")],
@@ -77,13 +82,14 @@ fn rig() -> Rig {
         fall_back_to_default: false,
     };
     let probe = Arc::new(Probe::default());
-    let mut audio = AudioEngine::start_with_power(
+    let mut audio = AudioEngine::start_with_workers(
         EngineConfig::new(SampleRate::HZ_48000, 128),
         testing::registry(&probe),
         Box::new(move || Ok(Box::new(backend) as Box<dyn Backend>)),
         request,
         options,
         Box::new(control.power()),
+        workers,
     )
     .unwrap();
     let mut editor = Editor::new();
@@ -220,6 +226,59 @@ fn unplugging_during_playback_reports_and_recovers_on_replug() {
     ));
     clean(interruption.stream_stats, &audio);
     assert_eq!(audio.engine().counts().restarts, 2);
+}
+
+// WP-5.37: the multicore scheduler's workers start with each stream, join
+// its audio workgroup (macOS), and leave it when the stream goes. macOS stops
+// a process whose thread exits inside a workgroup, so a run that gets through
+// the changes below is the evidence that they leave.
+#[test]
+fn workers_join_and_leave_the_workgroup_across_device_changes() {
+    let Rig {
+        mut audio,
+        control,
+        tone,
+        ..
+    } = rig_with_workers(Some(3));
+    let joined = |audio: &AudioEngine| {
+        let workers = audio.workers();
+        assert_eq!(workers.len(), 3, "a pool of three");
+        for worker in workers {
+            let expected = if cfg!(target_os = "macos") {
+                WorkgroupJoin::Joined
+            } else {
+                WorkgroupJoin::None
+            };
+            assert_eq!(worker.workgroup, expected, "{worker:?}");
+        }
+    };
+    joined(&audio);
+
+    // The device changes its rate: the stream closes, its pool with it, and
+    // the new stream has a pool of its own, in the new stream's workgroup.
+    control.set_sample_rate("usb", 44_100);
+    running(&mut audio, 44_100);
+    wait(&mut audio, "the engine at 44.1 kHz", |audio| {
+        let state = audio.state();
+        state.sample_rate == SampleRate::HZ_44100
+            && state.meter(tone).is_some_and(|peak| peak[0] > 0.0)
+    });
+    joined(&audio);
+
+    // Unplugged, there is no stream and no pool; plugged in, both are back.
+    control.unplug("usb");
+    wait(&mut audio, "the interruption", |audio| {
+        matches!(audio.device(), DeviceStatus::Interrupted(_))
+    });
+    assert!(audio.workers().is_empty());
+    control.replug("usb");
+    running(&mut audio, 44_100);
+    joined(&audio);
+    wait(&mut audio, "the tone", |audio| {
+        audio.state().meter(tone).is_some_and(|peak| peak[0] > 0.0)
+    });
+    let stats = audio.stats().expect("a running stream");
+    assert_eq!(stats.heap_operations, 0);
 }
 
 // Spec: device-changes R3

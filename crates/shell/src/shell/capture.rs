@@ -23,7 +23,7 @@ enum Work {
     /// Notes added to the clip playing in a slot.
     Merge {
         scene: SceneId,
-        clip: Clip,
+        clip: Box<Clip>,
         notes: Vec<Note>,
     },
     /// A new clip in the slot of `scene`, or of a scene added at the end.
@@ -157,7 +157,14 @@ impl Shell {
                     continue;
                 };
                 let notes = launch_relative(notes, started, &ticks);
-                work.push((*track, Work::Merge { scene, clip, notes }));
+                work.push((
+                    *track,
+                    Work::Merge {
+                        scene,
+                        clip: Box::new(clip),
+                        notes,
+                    },
+                ));
                 continue;
             }
             let placed = capture::place(notes, timing, ticks, phrase, bar);

@@ -64,11 +64,11 @@ pub const LFO_FILTER: ParamId = ParamId(20);
 const PARAMS: usize = 21;
 
 /// The longest free delay the manual records, in seconds.
-const MAX_DELAY_SECONDS: f64 = 5.0;
+pub(crate) const MAX_DELAY_SECONDS: f64 = 5.0;
 /// The LFO's deepest delay-time movement, in seconds.
 const MODULATION_SECONDS: f64 = 0.02;
 /// How long a change of delay time takes in Repitch and Fade, in seconds.
-const TRANSITION_SECONDS: f64 = 0.02;
+pub(crate) const TRANSITION_SECONDS: f64 = 0.02;
 /// The LFO's highest filter movement, in octaves.
 const FILTER_MOD_OCTAVES: f64 = 2.0;
 
@@ -213,7 +213,7 @@ pub fn register(registry: &mut Registry) {
 
 /// How a change of delay time is handled.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Repitch,
     Fade,
     Jump,
@@ -373,6 +373,14 @@ impl Delay {
     }
 }
 
+/// Frames in a sixteenth note at the tempo of the stretch's first frame: the
+/// synced delays' unit, shared by the delays (the delay spec, R1).
+pub(crate) fn sixteenth_frames(audio: &Audio<'_, '_>) -> f64 {
+    let tempo = audio.tempo();
+    let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
+    audio.sample_rate().as_f64() * 60.0 / tempo.bpm_at(ticks).get() / 4.0
+}
+
 /// One stretch's settings, worked out once: the parameters the engine
 /// doesn't smooth, each parameter's place in the bank, and the tempo.
 struct Settings {
@@ -400,9 +408,6 @@ impl Settings {
         glide: f64,
         mod_depth: f64,
     ) -> Self {
-        let tempo = audio.tempo();
-        let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-        let bpm = tempo.bpm_at(ticks).get();
         let index = core::array::from_fn(|id| {
             params
                 .index(ParamId(id as u32))
@@ -416,7 +421,7 @@ impl Settings {
             ping_pong: params.value(index[PING_PONG.0 as usize]) >= 0.5,
             mode: Mode::of(params.value(index[TIME_MODE.0 as usize]) as usize),
             wave: params.value(index[LFO_WAVE.0 as usize]) as usize,
-            sixteenth: rate * 60.0 / bpm / 4.0,
+            sixteenth: sixteenth_frames(audio),
             rate,
             glide,
             mod_depth,
@@ -475,7 +480,7 @@ impl Settings {
 }
 
 /// One channel's delay line, with its filter and its time change.
-struct Line {
+pub(crate) struct Line {
     buffer: Vec<f32>,
     write: usize,
     /// The delay in frames the line is reading at.
@@ -489,7 +494,7 @@ struct Line {
 }
 
 impl Line {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self {
             buffer: vec![0.0; len],
             write: 0,
@@ -503,7 +508,7 @@ impl Line {
     }
 
     /// The delayed sample for this frame, moving to `base` as `mode` says.
-    fn tap(&mut self, base: f64, modulation: f64, mode: Mode, glide: f64) -> f64 {
+    pub(crate) fn tap(&mut self, base: f64, modulation: f64, mode: Mode, glide: f64) -> f64 {
         if !self.started {
             self.started = true;
             self.delay = base;
@@ -545,7 +550,7 @@ impl Line {
     }
 
     /// Reads the line `delay` frames back, interpolating between samples.
-    fn read(&self, delay: f64) -> f64 {
+    pub(crate) fn read(&self, delay: f64) -> f64 {
         let len = self.buffer.len();
         let delay = delay.clamp(1.0, (len - 2) as f64);
         let position = (self.write as f64 - delay).rem_euclid(len as f64);
@@ -566,6 +571,11 @@ impl Line {
         } else {
             value as f32
         };
+        self.write(sample);
+    }
+
+    /// Writes `sample` into the line and moves the write head on.
+    pub(crate) fn write(&mut self, sample: f32) {
         let write = self.write;
         self.buffer[write] = sample;
         self.write = (write + 1) % self.buffer.len();

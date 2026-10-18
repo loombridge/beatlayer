@@ -143,7 +143,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Resampling, MIDI track to MIDI track, multi-output instruments | M2 (resampling, track to track), M5 (multi-output instruments) | Built in WP-2.19 (resampling, track-to-track audio; MIDI routing kept and shown, carried once WP-2.1 plays MIDI); multi-output instruments in WP-5.45 |
 | Sidechain to devices and plug-ins | M2 | WP-2.19b: a device's sidechain section picks its source (Live 12 routes no Audio To into a sidechain), External, Mix, SC Gain, Listen ([routing](specs/routing.md) R22 to R31) |
 | Up to 256 mono inputs and outputs | M2 | Built in WP-2.13 |
-| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore", which the capacity target (128 tracks on an M1) needs; Phase 10 only tunes it. Built in WP-5.37 |
+| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore", which the capacity target (128 tracks on an M1) needs; Phase 10 only tunes it. Built in WP-5.37: a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains at once, with the same output to the bit as one thread; Live has no setting for it (the manual's 38.1), and neither has Beatlayer |
 | MIDI track output to external MIDI ports and channels (hardware synths) | M5 | Needs the scheduled MIDI output backend (architecture, MIDI I/O), shared with External Instrument and MIDI Clock. Built in WP-5.34 |
 | Surround mixing | Out | Live 12 is stereo apart from one Max device; revisit after 1.0 |
 

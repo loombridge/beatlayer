@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        140,
+        145,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -63,7 +63,7 @@ fn every_document_command_is_registered() {
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
-         set_clip_launch_mode, WP-4.1 seven for the warp map, WP-5.1 fifteen for racks and \
+         set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, and \
          WP-3.10 the two for follow actions, and WP-5.27 set_midi_sidechain_source"
@@ -579,9 +579,35 @@ fn every_command_runs_by_id() {
         json!({ "clip": loop_clip, "factor": 2.0 }),
     );
     assert_eq!(warped(&agent).warp_markers.len(), 3);
+    // Transients (WP-4.3): edits by hand, and markers over a range.
+    agent.run(
+        "clip.insert_transient",
+        json!({ "clip": loop_clip, "time": 0.4 }),
+    );
+    agent.run(
+        "clip.move_transient",
+        json!({ "clip": loop_clip, "from": 0.4, "to": 0.45 }),
+    );
+    agent.run(
+        "clip.delete_transients",
+        json!({ "clip": loop_clip, "times": [0.45, 0.9] }),
+    );
+    assert_eq!(warped(&agent).transient_edits.removed, [0.9]);
+    agent.run("clip.reset_transients", json!({ "clip": loop_clip }));
+    assert!(warped(&agent).transient_edits.is_empty());
+    agent.run(
+        "clip.insert_warp_markers",
+        json!({ "clip": loop_clip, "from": 3 * bar, "to": 4 * bar, "transients": [] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 5);
     agent.run(
         "clip.delete_warp_markers",
         json!({ "clips": [loop_clip], "markers": [2] }),
+    );
+    assert_eq!(warped(&agent).warp_markers.len(), 4);
+    agent.run(
+        "clip.delete_warp_markers",
+        json!({ "clips": [loop_clip], "markers": [3, 2] }),
     );
     assert_eq!(warped(&agent).warp_markers.len(), 2);
     agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": false }));
@@ -1868,6 +1894,8 @@ fn schemas_match_what_commands_serialise() {
                 clips: vec![clip],
                 beat: Some(Ticks::QUARTER),
                 time: None,
+                pin_neighbours: false,
+                transients: None,
             },
         ),
         (
@@ -1891,6 +1919,35 @@ fn schemas_match_what_commands_serialise() {
             Command::DeleteWarpMarkers {
                 clips: vec![clip],
                 markers: vec![1],
+            },
+        ),
+        (
+            "clip.insert_warp_markers",
+            Command::InsertWarpMarkers {
+                clip,
+                from: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+                transients: Some(vec![0.5, 1.0]),
+            },
+        ),
+        (
+            "clip.insert_transient",
+            Command::InsertTransient { clip, time: 0.5 },
+        ),
+        (
+            "clip.delete_transients",
+            Command::DeleteTransients {
+                clip,
+                times: vec![0.5],
+            },
+        ),
+        ("clip.reset_transients", Command::ResetTransients { clip }),
+        (
+            "clip.move_transient",
+            Command::MoveTransient {
+                clip,
+                from: 0.5,
+                to: 0.6,
             },
         ),
         (
@@ -2665,6 +2722,8 @@ fn bindings_follow_the_spec() {
         "transport.set_metronome_enabled",
         // WP-5.1: Option-click on a rack's Device Activator (S-DEV-003).
         "device.set_enabled_all",
+        // WP-5.2: Rename in a rack's chain list (S-EDIT-008).
+        "chain.rename",
     ]
     .into_iter()
     .collect();

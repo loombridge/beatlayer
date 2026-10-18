@@ -21,8 +21,11 @@
 //! Beatlayer ships its first native devices: the compressor ([`compressor`]),
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
-//! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
-//! adds them to the engine. The instruments are the polysynth
+//! ([`delay`]), the Utility device ([`utility`], WP-2.18b) and the multiband
+//! dynamics ([`multiband_dynamics`], WP-5.22); [`register`]
+//! adds them to the engine, with the three delays of WP-5.25
+//! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments
+//! are the polysynth
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16), the
 //! multisampler ([`multisampler`], WP-5.13) and the eight-slot drum sampler
 //! ([`kitbag`], WP-5.17). The
@@ -31,7 +34,9 @@
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod alignment_delay;
 pub mod auto_filter;
+pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod compressor;
@@ -42,8 +47,10 @@ pub mod dice;
 pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
+pub mod filter_delay;
 mod framework;
 pub mod gate;
+pub mod grain_delay;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -52,21 +59,27 @@ pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod multiband_dynamics;
 pub mod multisampler;
+pub mod overdrive;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+pub mod saturator;
 mod sections;
 pub mod shifter;
 pub mod stack;
 pub mod testing;
 pub mod three_band_eq;
 pub mod touch;
+pub mod tube;
 pub mod utility;
 pub mod wax;
 
+pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
+pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
@@ -76,23 +89,29 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
+pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
+pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
+pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
+pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
+pub use tube::{TUBE, tube_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -119,7 +138,16 @@ pub fn display(
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
+        SATURATOR => Some(saturator::display(device, description, values, data)),
+        OVERDRIVE => Some(overdrive::display(device, description, values, data)),
+        TUBE => Some(tube::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
+        MULTIBAND_DYNAMICS => Some(multiband_dynamics::display(
+            device,
+            description,
+            values,
+            data,
+        )),
         _ => None,
     }
 }
@@ -132,6 +160,9 @@ pub fn register(registry: &mut Registry) {
     polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);
+    filter_delay::register(registry);
+    grain_delay::register(registry);
+    alignment_delay::register(registry);
     reverb::register(registry);
     utility::register(registry);
     eq::register(registry);
@@ -154,6 +185,11 @@ pub fn register(registry: &mut Registry) {
     crusher::register(registry);
     wax::register(registry);
     auto_filter::register(registry);
+    saturator::register(registry);
+    overdrive::register(registry);
+    tube::register(registry);
+    beat_repeat::register(registry);
+    multiband_dynamics::register(registry);
     shifter::register(registry);
 }
 

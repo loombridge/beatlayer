@@ -87,6 +87,48 @@ pub fn run_at(
     data.chunks(frames).map(<[f32]>::to_vec).collect()
 }
 
+/// Runs `input` through `node` `block` frames at a time at `tempo`, the song
+/// playing from its start, each block a real-time section. `events` (offsets
+/// from the run's start) land in the block they fall in, on their frame.
+pub fn run_blocks(
+    node: &mut dyn Node,
+    input: &[Vec<f32>],
+    block: usize,
+    events: &[NodeEvent],
+    tempo: &TempoMap,
+) -> Vec<Vec<f32>> {
+    let frames = input[0].len();
+    let mut out = vec![Vec::with_capacity(frames); input.len()];
+    let mut done = 0;
+    while done < frames {
+        let length = block.min(frames - done);
+        let here: Vec<NodeEvent> = events
+            .iter()
+            .filter(|e| (e.offset as usize) >= done && (e.offset as usize) < done + length)
+            .map(|e| NodeEvent {
+                offset: e.offset - done as u32,
+                ..*e
+            })
+            .collect();
+        let part: Vec<Vec<f32>> = input
+            .iter()
+            .map(|c| c[done..done + length].to_vec())
+            .collect();
+        let transport = TransportInfo {
+            playing: true,
+            position: Frames(done as i64),
+        };
+        for (all, chunk) in out
+            .iter_mut()
+            .zip(run_at(node, &part, &here, tempo, transport))
+        {
+            all.extend(chunk);
+        }
+        done += length;
+    }
+    out
+}
+
 /// A noise signal, the same every run.
 pub fn noise(frames: usize) -> Vec<f32> {
     let mut state = 0x1234_5678u32;

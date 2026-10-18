@@ -282,3 +282,65 @@ fn a_source_that_would_close_a_loop_carries_nothing() {
     let out = play(&mut rig, 512);
     assert!(out.iter().all(|&s| s == 0.0));
 }
+
+// Spec: routing R32
+#[test]
+fn workers_hear_the_same_notes_on_the_same_frames_as_the_audio_thread_alone() {
+    // Several audio tracks listen to MIDI tracks, one of them to its own;
+    // tone tracks beside them keep the workers busy. Each source finishes
+    // before the tracks that listen to it start, whichever thread runs them.
+    let song = |rig: &mut Rig| {
+        let ed = &mut rig.editor;
+        let keys = [
+            track(ed, TrackKind::Midi, None),
+            track(ed, TrackKind::Midi, None),
+        ];
+        for &k in &keys {
+            play_keys(ed, k);
+        }
+        for n in 0..6 {
+            let audio = track(ed, TrackKind::Audio, None);
+            device(
+                ed,
+                audio,
+                bl_engine::nodes::TEST_TONE,
+                &[(
+                    bl_engine::nodes::test_tone::FREQUENCY,
+                    200.0 + 50.0 * f64::from(n),
+                )],
+            );
+            if n % 2 == 0 {
+                let probe = hear(ed, audio);
+                listen(ed, probe, Some(keys[(n / 2) as usize % 2]));
+            }
+        }
+        let own = hear(ed, keys[1]);
+        listen(ed, own, Some(keys[1]));
+        rig.sync();
+    };
+    let render = |rig: &mut Rig| -> Vec<u32> {
+        rig.sender.transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        for _ in 0..40 {
+            rig.block(1_000);
+            out.extend(
+                rig.processor.output().channel(0)[..1_000]
+                    .iter()
+                    .map(|s| s.to_bits()),
+            );
+        }
+        out
+    };
+    let mut alone = Rig::with_workers(4096, 0);
+    song(&mut alone);
+    let expected = render(&mut alone);
+    assert!(expected.iter().any(|&b| b != 0), "the song is silent");
+    for workers in [1, 3, 7] {
+        let mut rig = Rig::with_workers(4096, workers);
+        song(&mut rig);
+        assert_eq!(render(&mut rig), expected, "{workers} workers");
+        let pool = rig.pool.as_ref().unwrap();
+        assert_eq!(pool.heap_operations(), 0, "the workers touched the heap");
+        assert_eq!(pool.panics(), 0);
+    }
+}

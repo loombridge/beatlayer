@@ -95,6 +95,40 @@ pub trait MediaLibrary: Send + Sync {
         let _ = (media, rate);
         None
     }
+
+    /// A file at the engine's own rate that a sampler reads by frame, its
+    /// first `head` frames decoded now and the rest by a thread of its own
+    /// (WP-5.13, the multisampler spec, R23); `None` where the library can't
+    /// (the file's rate isn't the engine's, its length isn't known, or it
+    /// decodes whole for a render that must repeat), when the caller reads
+    /// [`sample`](Self::sample) instead.
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        let _ = (media, rate, head);
+        None
+    }
+}
+
+/// Opens `media` as a progressive sample if it's at `rate`, and starts the
+/// thread that fills it.
+fn progressive_of(
+    store: &MediaStore,
+    media: ContentHash,
+    rate: SampleRate,
+    head: usize,
+) -> Option<Arc<bl_media::ProgressiveSample>> {
+    let hash = bl_media::ContentHash::from_bytes(media.0);
+    let decoder = store.open(hash).ok()?;
+    if decoder.info().sample_rate != rate.hz() {
+        return None;
+    }
+    let (sample, fill) = bl_media::ProgressiveSample::start(decoder, head).ok()?;
+    fill.spawn().ok()?;
+    Some(sample)
 }
 
 /// A decoded sample for one of a device's sample slots: what the compiler
@@ -128,6 +162,15 @@ impl MediaLibrary for MediaStore {
     fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.load_at_rate(hash, rate.hz()).ok()
+    }
+
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        progressive_of(self, media, rate, head)
     }
 }
 
@@ -240,6 +283,20 @@ impl MediaLibrary for MediaStreams {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.store.load_at_rate(hash, rate.hz()).ok()
     }
+
+    /// Only for playing in real time: a render that must repeat decodes
+    /// whole.
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        if self.blocking {
+            return None;
+        }
+        progressive_of(&self.store, media, rate, head)
+    }
 }
 
 /// Cues on one stream.
@@ -344,6 +401,10 @@ impl Geometry {
         rate: SampleRate,
         length: Option<u64>,
     ) -> Self {
+        // Spec: warping R1. Until warped playback (WP-4.2) follows the map
+        // through the tempo, a warped clip plays as an unwarped one does,
+        // over the region its map converts to seconds in the file.
+        let audio = &*audio.in_seconds();
         let frames =
             |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
         let start = tempo.ticks_to_frames(clip.start, rate).get();
@@ -1089,6 +1150,62 @@ mod tests {
         assert_eq!(short.level(6), 0.5 * 6.0 / 12.0);
         assert_eq!(short.level(8), 0.5 * 8.0 / 12.0);
         assert_eq!(short.level(10), 0.5 * 6.0 / 12.0);
+    }
+
+    // Spec: warping R1. Until warped playback, a warped clip plays as an
+    // unwarped one over the region its map converts to seconds.
+    #[test]
+    fn a_warped_clip_plays_its_region_converted_to_seconds() {
+        use bl_core::time::Ticks;
+        use bl_model::WarpMarker;
+        let rate = SampleRate::HZ_48000;
+        let tempo = TempoMap::default();
+        let q = Ticks::QUARTER.get();
+        let hash = ContentHash([1; 32]);
+        // The file's second 0.5 is the clip's 1.1.1 at 120 BPM; the markers
+        // and brace are ticks of the contents.
+        let warped = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.5,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(120.0),
+            start: q as f64,
+            end: Some(5.0 * q as f64),
+            looping: true,
+            loop_start: 2.0 * q as f64,
+            loop_end: Some(4.0 * q as f64),
+            ..AudioData::new(hash)
+        };
+        // The same region in seconds: a quarter note is half a second.
+        let unwarped = AudioData {
+            start: 1.0,
+            end: Some(3.0),
+            looping: true,
+            loop_start: 1.5,
+            loop_end: Some(2.5),
+            ..AudioData::new(hash)
+        };
+        let id = ClipId(bl_core::id::Id::new(1).unwrap());
+        let geometry = |audio: &AudioData| {
+            let clip = Clip::new(
+                id,
+                Ticks::WHOLE,
+                Ticks::WHOLE * 2,
+                ClipData::Audio(audio.clone()),
+            );
+            Geometry::of(&clip, audio, &tempo, rate, Some(480_000))
+        };
+        assert_eq!(geometry(&warped), geometry(&unwarped));
+        // Unwarped, the same numbers are seconds, so the two differ.
+        let as_seconds = AudioData {
+            warp: false,
+            warp_markers: Vec::new(),
+            tempo: None,
+            ..warped
+        };
+        assert_ne!(geometry(&as_seconds), geometry(&unwarped));
     }
 
     // Spec: audio-clips R3, R16

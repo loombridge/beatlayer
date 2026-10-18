@@ -10,6 +10,8 @@ use bl_core::time::{Ticks, TimeSignatureMap};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::follow::FollowActions;
+
 /// One step of the launch quantisation grid: how long a slot waits after a
 /// launch or a stop is asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -249,6 +251,10 @@ pub struct ClipLaunch {
     /// What a press and a release of the clip's launch button do (WP-3.3).
     #[serde(default)]
     pub mode: LaunchMode,
+    /// What the clip does by itself after it has played for a while
+    /// (WP-3.10).
+    #[serde(default, skip_serializing_if = "FollowActions::is_default")]
+    pub follow: FollowActions,
 }
 
 impl ClipLaunch {
@@ -269,6 +275,18 @@ pub struct LaunchSettings {
     /// Whether launches and stops are quantised at all. Off, they happen at
     /// once, whatever the step says.
     pub enabled: bool,
+    /// Enable Follow Actions Globally (WP-3.10): off, no clip's or scene's
+    /// follow action runs. On by default.
+    #[serde(default = "follow_actions_on", skip_serializing_if = "is_on")]
+    pub follow_actions: bool,
+}
+
+fn follow_actions_on() -> bool {
+    true
+}
+
+fn is_on(value: &bool) -> bool {
+    *value
 }
 
 impl Default for LaunchSettings {
@@ -276,6 +294,7 @@ impl Default for LaunchSettings {
         Self {
             quantization: LaunchQuantization::default(),
             enabled: true,
+            follow_actions: true,
         }
     }
 }

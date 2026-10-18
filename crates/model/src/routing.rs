@@ -4,12 +4,13 @@
 
 use std::collections::BTreeSet;
 
-use crate::automation::AutomationTarget;
 use crate::clip::Clip;
 use crate::command::check_clip_envelope_value;
+use crate::device::DeviceRole;
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::TrackId;
+use crate::ids::{ChainId, TrackId};
+use crate::rack::RackKind;
 use crate::track::{Channel, Input, Output, Routing, Track, TrackKind};
 
 impl Document {
@@ -73,10 +74,22 @@ impl Document {
     /// a clip put on the track, must pass.
     pub(crate) fn check_clip_envelopes(&self, id: TrackId, clip: &Clip) -> Result<(), ModelError> {
         self.track_ref(id)?;
-        let mut seen: BTreeSet<AutomationTarget> = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let in_slot = self
+            .track_ref(id)?
+            .slots()
+            .any(|(_, slotted)| slotted.id == clip.id);
         for envelope in clip.envelopes() {
-            if !seen.insert(envelope.target) {
+            if !seen.insert((envelope.target, envelope.kind)) {
                 return Err(ModelError::DuplicateEnvelope { clip: clip.id });
+            }
+            // An Arrangement clip's envelopes only modulate (WP-3.12).
+            if envelope.kind == crate::EnvelopeKind::Automation && !in_slot {
+                return Err(ModelError::NotSlotClip(clip.id));
+            }
+            // A MIDI controller's envelope only modulates (WP-2.29).
+            if envelope.kind == crate::EnvelopeKind::Automation && envelope.target.is_midi() {
+                return Err(ModelError::MidiControllerNotAParameter);
             }
             self.check_clip_target(id, clip, envelope.target)?;
             envelope.envelope.check()?;
@@ -151,6 +164,47 @@ impl Document {
         }
     }
 
+    /// Checks that a MIDI track an audio track takes as its input holds an
+    /// instrument, which makes it a source (the racks spec, R38). Once set,
+    /// the input stays if the instrument goes, and carries silence.
+    pub(crate) fn check_instrument_source(
+        &self,
+        track: TrackId,
+        input: &Input,
+    ) -> Result<(), ModelError> {
+        let Input::Track { track: from, .. } = input else {
+            return Ok(());
+        };
+        let silent = self
+            .track(track)
+            .is_some_and(|t| t.kind == TrackKind::Audio)
+            && self.track(*from).is_some_and(|source| {
+                source.kind == TrackKind::Midi
+                    && !source.devices().any(|d| d.role == DeviceRole::Instrument)
+            });
+        if silent {
+            return Err(ModelError::CannotRoute { track, to: *from });
+        }
+        Ok(())
+    }
+
+    /// Puts every input that taps a chain in `gone` out of use, for a chain
+    /// or a rack that left its track: No Input, as for a deleted track
+    /// (the racks spec, R41).
+    pub(crate) fn forget_chain_taps(&mut self, gone: &BTreeSet<ChainId>) {
+        let touched: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, t)| taps_any(&t.routing.input, gone))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in touched {
+            if let Some(track) = self.tracks.get_mut(&id) {
+                crate::shared::Shared::make_mut(track).routing.input = Input::None;
+            }
+        }
+    }
+
     /// Brings a moved track's output up to date with where it is now: a
     /// track going into a group that was routed to Main goes to the group
     /// (as Live does), and a track routed to its group goes to its new
@@ -192,6 +246,11 @@ fn listens_to(device: &crate::Device, gone: &BTreeSet<TrackId>) -> bool {
         .is_some_and(|s| matches!(&s.input, Input::Track { track, .. } if gone.contains(track)))
 }
 
+/// Whether an input taps a chain in `gone`.
+fn taps_any(input: &Input, gone: &BTreeSet<ChainId>) -> bool {
+    matches!(input, Input::Track { chain: Some(chain), .. } if gone.contains(chain))
+}
+
 fn names_any(routing: &Routing, gone: &BTreeSet<TrackId>) -> bool {
     matches!(routing.output, Output::Track { track } if gone.contains(&track))
         || matches!(&routing.input, Input::Track { track, .. } if gone.contains(track))
@@ -230,21 +289,56 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
         (TrackKind::Audio | TrackKind::Midi, Input::None)
         | (TrackKind::Audio, Input::External { .. } | Input::Resampling)
         | (TrackKind::Midi, Input::AllIns | Input::ComputerKeyboard | Input::Port { .. }) => Ok(()),
-        (TrackKind::Audio, Input::Track { track: from, .. }) => {
+        (
+            TrackKind::Audio,
+            Input::Track {
+                track: from, chain, ..
+            },
+        ) => {
+            // A MIDI track is an Audio From source (the racks spec, R38);
+            // `check_instrument_source` asks for its instrument when the
+            // input is set, not when a set loads.
             doc.check_target(track, *from, |kind| {
                 matches!(
                     kind,
-                    TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
+                    TrackKind::Audio
+                        | TrackKind::Midi
+                        | TrackKind::Group
+                        | TrackKind::Return
+                        | TrackKind::Main
                 )
-            })
+            })?;
+            chain.map_or(Ok(()), |chain| check_chain_tap(doc, *from, chain))
         }
-        (TrackKind::Midi, Input::Track { track: from, .. }) => {
+        (
+            TrackKind::Midi,
+            Input::Track {
+                track: from, chain, ..
+            },
+        ) => {
+            if chain.is_some() {
+                return Err(ModelError::InvalidInput("only an audio track taps a chain"));
+            }
             doc.check_target(track, *from, |kind| kind == TrackKind::Midi)
         }
         (TrackKind::Audio, _) => Err(wrong_kind(track, "a MIDI track")),
         (TrackKind::Midi, _) => Err(wrong_kind(track, "an audio track")),
         (_, Input::None) => Ok(()),
         _ => Err(wrong_kind(track, "an audio or MIDI track")),
+    }
+}
+
+/// A chain tap names a chain of an instrument or audio effect rack on the
+/// source track (the racks spec, R38).
+fn check_chain_tap(doc: &Document, from: TrackId, chain: ChainId) -> Result<(), ModelError> {
+    if doc.chain_track(chain) != Some(from) {
+        return Err(ModelError::NoSuchChain(chain));
+    }
+    match doc.chain_rack(chain).and_then(crate::Device::rack_kind) {
+        Some(RackKind::Instrument | RackKind::AudioEffect) => Ok(()),
+        _ => Err(ModelError::InvalidInput(
+            "only a chain of an instrument or audio effect rack can be tapped",
+        )),
     }
 }
 
@@ -304,6 +398,9 @@ fn check_main_out(track: &Track) -> Result<(), ModelError> {
 fn check_sidechain_input(doc: &Document, track: &Track, input: Input) -> Result<(), ModelError> {
     match input {
         Input::None => Ok(()),
+        Input::Track { chain: Some(_), .. } => Err(ModelError::InvalidInput(
+            "a sidechain takes a track, not a chain",
+        )),
         Input::Track { track: from, .. } => {
             let source = doc.track(from).ok_or(ModelError::NoSuchTrack(from))?;
             if matches!(
@@ -325,9 +422,11 @@ fn check_sidechain_input(doc: &Document, track: &Track, input: Input) -> Result<
 #[cfg(test)]
 mod tests {
     use crate::command::Command;
+    use crate::device::{Device, DeviceKind, DeviceRole};
     use crate::editor::Editor;
     use crate::error::ModelError;
-    use crate::ids::TrackId;
+    use crate::ids::{ChainId, DeviceId, TrackId};
+    use crate::rack::{Chain, RackKind};
     use crate::track::{Channel, Input, Monitor, Output, Routing, Tap, TrackKind};
     use crate::{Document, SendTap};
 
@@ -414,7 +513,16 @@ mod tests {
         let tap = Tap::PreFx;
 
         for from in [b, g, r, main] {
-            input(&mut editor, a, Input::Track { track: from, tap }).unwrap();
+            input(
+                &mut editor,
+                a,
+                Input::Track {
+                    track: from,
+                    tap,
+                    chain: None,
+                },
+            )
+            .unwrap();
         }
         for ok in [
             Input::Resampling,
@@ -426,14 +534,53 @@ mod tests {
             input(&mut editor, a, ok).unwrap();
         }
         assert!(matches!(
-            input(&mut editor, a, Input::Track { track: a, tap }),
+            input(
+                &mut editor,
+                a,
+                Input::Track {
+                    track: a,
+                    tap,
+                    chain: None
+                }
+            ),
             Err(ModelError::CannotRoute { .. })
         ));
-        assert!(input(&mut editor, a, Input::Track { track: m, tap }).is_err());
+        assert!(
+            input(
+                &mut editor,
+                a,
+                Input::Track {
+                    track: m,
+                    tap,
+                    chain: None
+                }
+            )
+            .is_err()
+        );
         assert!(input(&mut editor, a, Input::AllIns).is_err());
-        input(&mut editor, m, Input::Track { track: n, tap }).unwrap();
+        input(
+            &mut editor,
+            m,
+            Input::Track {
+                track: n,
+                tap,
+                chain: None,
+            },
+        )
+        .unwrap();
         input(&mut editor, m, Input::ComputerKeyboard).unwrap();
-        assert!(input(&mut editor, m, Input::Track { track: a, tap }).is_err());
+        assert!(
+            input(
+                &mut editor,
+                m,
+                Input::Track {
+                    track: a,
+                    tap,
+                    chain: None
+                }
+            )
+            .is_err()
+        );
         assert!(input(&mut editor, m, Input::Resampling).is_err());
         assert!(
             input(
@@ -608,6 +755,7 @@ mod tests {
             Input::Track {
                 track: b,
                 tap: Tap::PostMixer,
+                chain: None,
             },
         )
         .unwrap();
@@ -634,6 +782,7 @@ mod tests {
             Input::Track {
                 track: c,
                 tap: Tap::PostFx,
+                chain: None,
             },
         )
         .unwrap();
@@ -837,6 +986,7 @@ mod tests {
                 Input::Track {
                     track,
                     tap: Tap::PostFx,
+                    chain: None,
                 },
             )
             .unwrap();
@@ -845,6 +995,7 @@ mod tests {
             Input::Track {
                 track: m,
                 tap: Tap::PreFx,
+                chain: None,
             },
             Input::External {
                 channel: Channel::Pair(1),
@@ -881,6 +1032,7 @@ mod tests {
             Input::Track {
                 track: c,
                 tap: Tap::PostFx,
+                chain: None,
             },
         )
         .unwrap();
@@ -931,5 +1083,271 @@ mod tests {
         broken["tracks"][0]["devices"][0]["sidechain"]["input"] =
             serde_json::json!({ "type": "track", "track": m });
         assert!(serde_json::from_value::<Document>(broken).is_err());
+    }
+
+    /// An audio track with an audio effect rack of two chains, the first
+    /// holding another audio effect rack of one chain, and an audio track to
+    /// tap them.
+    fn racks_to_tap(editor: &mut Editor) -> (TrackId, TrackId, DeviceId, [ChainId; 3]) {
+        let source = add(editor, TrackKind::Audio, None);
+        let tapper = add(editor, TrackKind::Audio, None);
+        let (rack, inner_rack): (DeviceId, DeviceId) = (editor.new_id(), editor.new_id());
+        let [a, b, inner]: [ChainId; 3] = std::array::from_fn(|_| editor.new_id());
+        let nested =
+            Device::rack(inner_rack, RackKind::AudioEffect).with_chain(Chain::new(inner, "Inner"));
+        let outer = Device::rack(rack, RackKind::AudioEffect)
+            .with_chain(Chain::new(a, "A").with_devices(vec![nested]))
+            .with_chain(Chain::new(b, "B"));
+        editor
+            .apply(Command::InsertDevice {
+                track: source,
+                index: 0,
+                device: outer,
+            })
+            .unwrap();
+        (source, tapper, rack, [a, b, inner])
+    }
+
+    fn tap_chain(editor: &mut Editor, tapper: TrackId, source: TrackId, chain: ChainId) {
+        input(
+            editor,
+            tapper,
+            Input::Track {
+                track: source,
+                tap: Tap::PostFx,
+                chain: Some(chain),
+            },
+        )
+        .unwrap();
+    }
+
+    // Spec: racks R41
+    #[test]
+    fn chain_taps_forget_deleted_chains() {
+        let mut editor = Editor::new();
+        let (source, tapper, rack, [a, b, inner]) = racks_to_tap(&mut editor);
+        let tap = |chain| Input::Track {
+            track: source,
+            tap: Tap::PostFx,
+            chain: Some(chain),
+        };
+        // Any depth is tapped, and saved with the set.
+        for chain in [a, b, inner] {
+            tap_chain(&mut editor, tapper, source, chain);
+            assert_eq!(
+                editor.document().track(tapper).unwrap().routing().input,
+                tap(chain)
+            );
+            let saved = serde_json::to_value(editor.document()).unwrap();
+            let loaded: Document = serde_json::from_value(saved).unwrap();
+            assert_eq!(&loaded, editor.document());
+        }
+        // Not the tapping track's own, nor a chain that isn't on the track.
+        assert!(input(&mut editor, source, tap(a)).is_err());
+        let other = add(&mut editor, TrackKind::Audio, None);
+        assert!(matches!(
+            input(
+                &mut editor,
+                other,
+                Input::Track {
+                    track: tapper,
+                    tap: Tap::PostFx,
+                    chain: Some(a),
+                }
+            ),
+            Err(ModelError::NoSuchChain(_))
+        ));
+
+        // Deleting the chain, an inner chain's rack or the rack, or moving
+        // them to another track, leaves No Input; undo brings both back.
+        let after_taps = |editor: &Editor| {
+            editor
+                .document()
+                .track(tapper)
+                .unwrap()
+                .routing()
+                .input
+                .clone()
+        };
+        for (chain, command) in [
+            (b, Command::RemoveChain { chain: b }),
+            (inner, Command::RemoveChain { chain: a }),
+            (inner, Command::RemoveDevice { device: rack }),
+            (
+                inner,
+                Command::MoveDevice {
+                    device: rack,
+                    track: other,
+                    index: 0,
+                },
+            ),
+        ] {
+            tap_chain(&mut editor, tapper, source, chain);
+            let before = editor.document().clone();
+            editor.apply(command).unwrap();
+            assert_eq!(after_taps(&editor), Input::None);
+            editor.document().check_invariants().unwrap();
+            editor.undo().unwrap();
+            assert_eq!(editor.document(), &before, "undo restores the tap");
+        }
+        // A chain that stays is still tapped when another one goes.
+        tap_chain(&mut editor, tapper, source, a);
+        editor.apply(Command::RemoveChain { chain: b }).unwrap();
+        assert_eq!(after_taps(&editor), tap(a));
+
+        // A track that goes takes its chains' taps too.
+        editor
+            .apply(Command::DeleteTrack { track: source })
+            .unwrap();
+        assert_eq!(after_taps(&editor), Input::None);
+    }
+
+    // Spec: racks R41
+    #[test]
+    fn a_chain_moved_into_a_rack_that_offers_no_taps_is_forgotten() {
+        let mut editor = Editor::new();
+        let tapper = add(&mut editor, TrackKind::Audio, None);
+        let source = add(&mut editor, TrackKind::Midi, None);
+        let (notes, keys): (DeviceId, DeviceId) = (editor.new_id(), editor.new_id());
+        let pad: ChainId = editor.new_id();
+        for (index, device) in [
+            (0, Device::rack(notes, RackKind::MidiEffect)),
+            (
+                1,
+                Device::rack(keys, RackKind::Instrument).with_chain(Chain::new(pad, "Pad")),
+            ),
+        ] {
+            editor
+                .apply(Command::InsertDevice {
+                    track: source,
+                    index,
+                    device,
+                })
+                .unwrap();
+        }
+        tap_chain(&mut editor, tapper, source, pad);
+        editor
+            .apply(Command::MoveChain {
+                chain: pad,
+                rack: notes,
+                index: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            editor.document().track(tapper).unwrap().routing().input,
+            Input::None
+        );
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
+    }
+
+    // Spec: racks R38
+    #[test]
+    fn only_audio_inputs_tap_instrument_and_audio_effect_racks() {
+        let mut editor = Editor::new();
+        let (_, tapper, _, [a, ..]) = racks_to_tap(&mut editor);
+        let midi = add(&mut editor, TrackKind::Midi, None);
+        let drum_track = add(&mut editor, TrackKind::Midi, None);
+        let (keys, drums): (DeviceId, DeviceId) = (editor.new_id(), editor.new_id());
+        let (keys_chain, drum_chain): (ChainId, ChainId) = (editor.new_id(), editor.new_id());
+        for (track, device) in [
+            (
+                midi,
+                Device::rack(keys, RackKind::Instrument).with_chain(Chain::new(keys_chain, "Pad")),
+            ),
+            (
+                drum_track,
+                Device::rack(drums, RackKind::Drum).with_chain(Chain::new(drum_chain, "Kick")),
+            ),
+        ] {
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index: 0,
+                    device,
+                })
+                .unwrap();
+        }
+        let tap = |track, chain| Input::Track {
+            track,
+            tap: Tap::PreFx,
+            chain: Some(chain),
+        };
+        // A MIDI track's instrument rack is tapped from an audio track.
+        input(&mut editor, tapper, tap(midi, keys_chain)).unwrap();
+        assert!(
+            input(&mut editor, tapper, tap(drum_track, drum_chain)).is_err(),
+            "a drum rack offers its return chains instead"
+        );
+        let audio = add(&mut editor, TrackKind::Audio, None);
+        assert!(
+            input(&mut editor, midi, tap(audio, a)).is_err(),
+            "MIDI From"
+        );
+        // A chain tap is not a sidechain source.
+        let sidechain: DeviceId = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track: tapper,
+                index: 0,
+                device: Device::new(
+                    sidechain,
+                    "Compressor",
+                    DeviceKind::Native {
+                        device_type: "test".to_owned(),
+                    },
+                )
+                .with_sidechain(),
+            })
+            .unwrap();
+        assert!(
+            editor
+                .apply(Command::SetSidechainInput {
+                    device: sidechain,
+                    input: tap(midi, keys_chain),
+                })
+                .is_err()
+        );
+    }
+
+    // Spec: racks R38
+    #[test]
+    fn a_midi_track_is_an_audio_source_once_it_holds_an_instrument() {
+        let mut editor = Editor::new();
+        let audio = add(&mut editor, TrackKind::Audio, None);
+        let midi = add(&mut editor, TrackKind::Midi, None);
+        let from = |track| Input::Track {
+            track,
+            tap: Tap::PostMixer,
+            chain: None,
+        };
+        assert!(input(&mut editor, audio, from(midi)).is_err());
+        let instrument = Device::new(
+            editor.new_id(),
+            "Sampler",
+            DeviceKind::Native {
+                device_type: "sampler".to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        let id = instrument.id;
+        editor
+            .apply(Command::InsertDevice {
+                track: midi,
+                index: 0,
+                device: instrument,
+            })
+            .unwrap();
+        input(&mut editor, audio, from(midi)).unwrap();
+        // The input stays, and the set loads, once the instrument is gone.
+        editor.apply(Command::RemoveDevice { device: id }).unwrap();
+        assert_eq!(
+            editor.document().track(audio).unwrap().routing().input,
+            from(midi)
+        );
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
     }
 }

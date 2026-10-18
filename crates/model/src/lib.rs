@@ -69,8 +69,10 @@ mod document;
 mod editor;
 mod error;
 pub mod fader;
+mod follow;
 mod ids;
 mod launch;
+mod layers;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
@@ -82,6 +84,7 @@ mod routing;
 mod scene;
 mod shared;
 mod track;
+mod warp;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -89,8 +92,8 @@ pub use automation::{
 };
 pub use changes::{Change, ChangeSet};
 pub use clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note,
-    PressurePoint, TakeClip, TakeLane,
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
+    Note, PressurePoint, TakeClip, TakeLane,
 };
 pub use command::Command;
 pub use device::{
@@ -102,12 +105,21 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub use follow::{
+    FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
+    FollowPatch,
+};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
+pub use layers::{
+    DEFAULT_ROOT_KEY, Distribution, EditorSize, FadeMode, LAYER_GAIN_MAX, Layer, LayerId,
+    LayerSettings, LayerSort, LayerZone, Layers, MultisamplerView, MultisamplerViews, ReleaseMode,
+    SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
+};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
@@ -117,3 +129,4 @@ pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
+pub use warp::WarpMarker;

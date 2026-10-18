@@ -10,8 +10,8 @@ mod common;
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::{NoteExpression, NoteKind, TransportCommand, testing};
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, Note, PressurePoint, TrackId,
-    TrackKind,
+    AutomationTarget, Clip, ClipData, ClipId, Command, EnvelopeKind, MidiData, Note, PressurePoint,
+    TrackId, TrackKind,
 };
 use common::{Rig, device, track};
 
@@ -95,6 +95,7 @@ fn in_every_block_size(
 fn set(rig: &mut Rig, clip: ClipId, target: AutomationTarget, at: Ticks, value: f64) {
     rig.apply(Command::SetClipEnvelopeBreakpoint {
         clip,
+        kind: EnvelopeKind::Modulation,
         target,
         at,
         value,
@@ -280,6 +281,7 @@ fn an_unlinked_envelope_runs_once_from_the_clip_start_while_the_loop_repeats() {
             set(rig, clip, cc(2), BAR * 2, 5.0);
             rig.apply(Command::SetClipEnvelopeLinked {
                 clip,
+                kind: EnvelopeKind::Modulation,
                 target: cc(2),
                 linked: false,
             });

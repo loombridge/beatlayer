@@ -46,6 +46,7 @@ fn rig_with_clip(max_frames: usize) -> (Rig, TrackId, ClipId) {
 fn envelope(rig: &mut Rig, clip: ClipId, target: AutomationTarget, points: &[(Ticks, f64)]) {
     for &(at, value) in points {
         rig.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip,
             target,
             at,

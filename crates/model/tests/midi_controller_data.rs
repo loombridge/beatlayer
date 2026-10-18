@@ -7,8 +7,8 @@ use bl_commands::validate;
 use bl_core::time::Ticks;
 use bl_model::registry;
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, Editor, MidiData, Note, PressurePoint,
-    TrackId, TrackKind,
+    AutomationTarget, Clip, ClipData, ClipId, Command, Editor, EnvelopeKind, MidiData, Note,
+    PressurePoint, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -196,6 +196,7 @@ fn a_controller_or_value_that_breaks_the_rules_is_refused() {
     let set = |song: &mut Song, clip: ClipId, target: AutomationTarget, value: f64| {
         song.editor.apply(Command::SetClipEnvelopeBreakpoint {
             clip,
+            kind: EnvelopeKind::Modulation,
             target,
             at: Ticks::ZERO,
             value,
@@ -237,6 +238,7 @@ fn a_controller_or_value_that_breaks_the_rules_is_refused() {
         song.editor
             .apply(Command::MoveClipEnvelopeBreakpoint {
                 clip: midi,
+                kind: EnvelopeKind::Modulation,
                 target: cc(1),
                 at: Ticks::ZERO,
                 to: Ticks::QUARTER,
@@ -244,6 +246,19 @@ fn a_controller_or_value_that_breaks_the_rules_is_refused() {
             })
             .is_err()
     );
+    // A controller's envelope only modulates: it isn't a Session clip's
+    // automation of a parameter.
+    let error = song
+        .editor
+        .apply(Command::SetClipEnvelopeBreakpoint {
+            clip: midi,
+            kind: EnvelopeKind::Automation,
+            target: cc(1),
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("MIDI controller"), "{error}");
     // An audio clip has no controllers.
     let audio = song.audio;
     let error = set(&mut song, audio, cc(1), 1.0).unwrap_err();
@@ -311,6 +326,7 @@ fn a_clip_keeps_its_controller_envelopes_when_it_moves_to_another_midi_track() {
     song.editor
         .apply(Command::SetClipEnvelopeBreakpoint {
             clip,
+            kind: EnvelopeKind::Modulation,
             target: cc(1),
             at: Ticks::ZERO,
             value: 5.0,

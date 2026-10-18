@@ -566,14 +566,16 @@ impl EnvelopeEditor {
         }
         // A MIDI clip's controllers come first, before the Mixer.
         // Spec: midi-controller-data R8
-        devices.insert(
-            0,
-            Choice {
-                label: "MIDI Ctrl".to_owned(),
-                value: AutomationDevice::MidiCtrl,
-                leds: NO_LEDS,
-            },
-        );
+        if !clip.data.is_audio() {
+            devices.insert(
+                0,
+                Choice {
+                    label: "MIDI Ctrl".to_owned(),
+                    value: AutomationDevice::MidiCtrl,
+                    leds: NO_LEDS,
+                },
+            );
+        }
         let mut controls = device
             .map(|device| control_choices(shell, doc, device))
             .unwrap_or_default();

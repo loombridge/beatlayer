@@ -19,9 +19,7 @@ use std::collections::BTreeMap;
 use bl_core::time::{SampleRate, TempoMap, Ticks};
 use bl_model::modulation::Travel;
 use bl_model::modulator::ModTarget;
-use bl_model::{
-    AutomationTarget, ClipData, DeviceId, MidiData, MixerParam, ParamId, TrackId, curve_value,
-};
+use bl_model::{AutomationTarget, ClipData, DeviceId, MixerParam, ParamId, TrackId, curve_value};
 
 use crate::mixer;
 use crate::modbus::{self, Bus};
@@ -122,14 +120,11 @@ impl PlacedClipEnvelope {
         rate: SampleRate,
         shift: i64,
     ) -> Option<Self> {
-        let ClipData::Midi(midi) = &clip.data else {
-            return None;
-        };
         if envelope.envelope.is_empty() {
             return None;
         }
         let mut segments = Vec::new();
-        for (song_from, song_to, content_from, _) in played_regions(clip, midi, envelope) {
+        for (song_from, song_to, content_from, _) in played_regions(clip, envelope) {
             let first_frame = tempo
                 .ticks_to_frames(song_from, rate)
                 .get()
@@ -202,54 +197,98 @@ impl PlacedClipEnvelope {
     }
 }
 
+/// What a clip's contents play, in ticks: the regions of a MIDI clip's
+/// notes and of a warped audio clip's beats (the warping spec, R5), which
+/// both run from a Start marker, to an End marker or round a loop brace.
+struct Contents {
+    start: Ticks,
+    end: Option<Ticks>,
+    looping: bool,
+    loop_start: Ticks,
+    loop_end: Option<Ticks>,
+}
+
+impl Contents {
+    /// The contents of a MIDI clip or a warped audio clip; `None` for an
+    /// unwarped audio clip, whose file runs at its own speed.
+    fn of(clip: &bl_model::Clip) -> Option<Self> {
+        match &clip.data {
+            ClipData::Midi(midi) => Some(Self {
+                start: midi.start,
+                end: midi.end,
+                looping: midi.looping,
+                loop_start: midi.loop_start,
+                loop_end: midi.loop_end,
+            }),
+            ClipData::Audio(audio) if audio.warp => {
+                let ticks = |value: f64| Ticks(value as i64);
+                Some(Self {
+                    start: ticks(audio.start),
+                    end: audio.end.map(ticks),
+                    looping: audio.looping,
+                    loop_start: ticks(audio.loop_start),
+                    loop_end: audio.loop_end.map(ticks),
+                })
+            }
+            ClipData::Audio(_) => None,
+        }
+    }
+}
+
 /// The stretches of song time a clip plays, each with the part of its
 /// contents that plays there, in ticks: `(song start, song end, content
 /// start, content end)`, in order. A linked envelope (WP-3.15) runs over
 /// what the clip's contents play, which is this mapping, and the player's
-/// notes play by the same one (`crate::midi_clips`). An unlinked one runs
-/// once from the clip's start, one tick per tick, for as long as the clip
-/// lasts.
+/// notes play by the same one (`crate::midi_clips`); so does a warped audio
+/// clip's audio (the warping spec, R16). An unlinked one, and an unwarped
+/// audio clip's, runs once from the clip's start, one tick per tick, for as
+/// long as the clip lasts.
 // Spec: clip-envelopes R2
 fn played_regions(
     clip: &bl_model::Clip,
-    midi: &MidiData,
     envelope: &bl_model::ClipEnvelope,
 ) -> Vec<(Ticks, Ticks, Ticks, Ticks)> {
     let (start, length) = (clip.start, clip.length);
     if length <= Ticks::ZERO || start < Ticks::ZERO {
         return Vec::new();
     }
-    if !envelope.linked {
+    let contents = Contents::of(clip).filter(|_| envelope.linked);
+    let Some(contents) = contents else {
         return vec![(start, start + length, Ticks::ZERO, length)];
-    }
+    };
     let mut regions = Vec::new();
-    if !midi.looping {
-        let end_marker = midi.end.unwrap_or(midi.start + length);
-        if end_marker > midi.start {
-            let active = length.min(end_marker - midi.start);
-            regions.push((start, start + active, midi.start, midi.start + active));
+    if !contents.looping {
+        let end_marker = contents.end.unwrap_or(contents.start + length);
+        if end_marker > contents.start {
+            let active = length.min(end_marker - contents.start);
+            regions.push((
+                start,
+                start + active,
+                contents.start,
+                contents.start + active,
+            ));
         }
         return regions;
     }
-    let loop_end = midi
-        .loop_end
-        .unwrap_or_else(|| (midi.loop_start + length).max(midi.loop_start + Ticks::QUARTER));
-    if loop_end <= midi.loop_start || midi.start >= loop_end {
+    let loop_end = contents.loop_end.unwrap_or_else(|| {
+        (contents.loop_start + length).max(contents.loop_start + Ticks::QUARTER)
+    });
+    if loop_end <= contents.loop_start || contents.start >= loop_end {
         return regions;
     }
-    let loop_len = loop_end - midi.loop_start;
+    let loop_len = loop_end - contents.loop_start;
     // Repetition 0: from the start marker to the brace's end, cut off where
     // the clip ends. Then the brace repeats.
-    let first = (loop_end - midi.start).min(length);
-    regions.push((start, start + first, midi.start, midi.start + first));
+    let first = (loop_end - contents.start).min(length);
+    regions.push((start, start + first, contents.start, contents.start + first));
     let mut at = first;
     while at < length {
         let repeat = loop_len.min(length - at);
         regions.push((
             start + at,
             start + at + repeat,
-            midi.loop_start,
-            midi.loop_start + repeat,
+            contents.loop_start,
+            contents.loop_start + repeat,
         ));
         at += repeat;
     }
@@ -615,10 +654,7 @@ pub fn clip_envelope_value_at(
     envelope: &bl_model::ClipEnvelope,
     at: Ticks,
 ) -> Option<f64> {
-    let ClipData::Midi(midi) = &clip.data else {
-        return None;
-    };
-    played_regions(clip, midi, envelope)
+    played_regions(clip, envelope)
         .into_iter()
         .find(|&(from, to, ..)| at >= from && at < to)
         .and_then(|(from, _, content, _)| envelope.envelope.value_at(content + (at - from)))

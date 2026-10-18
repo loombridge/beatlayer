@@ -23,9 +23,11 @@
 //! `sources.rs`). A source stays with its clip from list to list while the
 //! clip stays on its track.
 //!
-//! A clip plays unwarped (until Phase 4): one frame of its file, at the
-//! engine's rate, to each frame of the song, whatever the tempo, with its
-//! Start marker at the clip's start in time.
+//! An unwarped clip plays one frame of its file, at the engine's rate, to each
+//! frame of the song, whatever the tempo, with its Start marker at the clip's
+//! start in time. A warped clip (WP-4.2, `warped.rs`) plays the file position
+//! its warp map and the tempo map put at each song frame, through its warp
+//! mode.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -35,9 +37,11 @@ use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfi
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
 use bl_model::{AudioData, Clip, ClipData, ClipId, ContentHash, SceneId, Track, TrackId};
 
+use crate::clip_source::ClipSource;
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
+use crate::warped::{CUE_BACK, Positions, WarpScratch, Warped};
 
 /// A clip's source, as a [`MediaLibrary`] opens it.
 pub struct OpenedSource {
@@ -83,6 +87,15 @@ pub trait MediaLibrary: Send + Sync {
     /// play; `None` if the media is missing, has changed, or doesn't decode.
     /// A clip without its audio plays silence.
     fn open(&self, media: ContentHash, rate: SampleRate, start: u64) -> Option<OpenedSource>;
+
+    /// A source of `media` at `rate` that holds the whole file in memory,
+    /// for a clip whose RAM switch is on (the warp modes spec, R11): the
+    /// same audio as [`open`](Self::open), with nothing left to stream. The
+    /// default is `open`'s, which is right for a library that holds every
+    /// file in memory already.
+    fn open_in_memory(&self, media: ContentHash, rate: SampleRate) -> Option<OpenedSource> {
+        self.open(media, rate, 0)
+    }
 
     /// The media decoded into memory at `rate`, whole, for a device that
     /// reads it at positions of its own (a sampler's sample, WP-2.16):
@@ -276,6 +289,10 @@ impl MediaLibrary for MediaStreams {
         }
     }
 
+    fn open_in_memory(&self, media: ContentHash, rate: SampleRate) -> Option<OpenedSource> {
+        self.sample(media, rate).map(in_memory)
+    }
+
     /// Decodes the whole file into memory at the engine's rate, through the
     /// store it streams from: a device that reads the audio at positions of
     /// its own needs all of it.
@@ -374,7 +391,7 @@ impl MediaLibrary for MediaMap {
 
 /// Where a clip sits in song frames, and which frames of its file it
 /// plays, at the engine's rate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct Geometry {
     /// The song frame of the clip's start, which it plays.
     pub(crate) start: i64,
@@ -389,30 +406,60 @@ pub(crate) struct Geometry {
     pub(crate) looping: bool,
     pub(crate) loop_start: u64,
     pub(crate) loop_end: u64,
+    /// A warped clip's playback, which the frames above only locate (the
+    /// warping spec, R12): it plays the file positions of its table, not
+    /// `region_start` and on, one file frame to a song frame.
+    pub(crate) warped: Option<Arc<Warped>>,
 }
 
 impl Geometry {
     /// Places `clip`, which plays `audio`, under `tempo` at `rate`, for a
-    /// file `length` frames long (at `rate`) if that's known.
+    /// file `length` frames long (at `rate`) if that's known. A warped
+    /// Arrangement clip gets its table once the length is known; a Session
+    /// slot clip follows the tempo from its launch instead.
     fn of(
         clip: &Clip,
         audio: &AudioData,
         tempo: &TempoMap,
         rate: SampleRate,
         length: Option<u64>,
+        arrangement: bool,
     ) -> Self {
-        // Spec: warping R1. Until warped playback (WP-4.2) follows the map
-        // through the tempo, a warped clip plays as an unwarped one does,
-        // over the region its map converts to seconds in the file.
-        let audio = &*audio.in_seconds();
-        let frames =
-            |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
         let start = tempo.ticks_to_frames(clip.start, rate).get();
         let end = tempo.ticks_to_frames(clip.end(), rate).get();
-        // Spec: audio-clips R3. One file frame to each song frame, with the
-        // Start marker where the clip starts in time: the file frame less
-        // the song frame is the same for every part of a split clip, since
-        // a part's marker moved by as long as its start did (R16).
+        // Spec: warping R12. A warped clip follows its table, which the
+        // compiler makes once the file's length is known.
+        if audio.warp
+            && let Some(warped) = Warped::new(
+                clip,
+                audio,
+                tempo,
+                rate,
+                length,
+                arrangement && length.is_some(),
+            )
+        {
+            return Self {
+                start,
+                end,
+                region_start: warped.first_frame(start),
+                region_end: u64::MAX,
+                looping: audio.looping,
+                loop_start: warped.loop_start_frame(),
+                loop_end: u64::MAX,
+                warped: Some(Arc::new(warped)),
+            };
+        }
+        let frames =
+            |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
+        // A warped clip whose map is damaged, which the commands never
+        // leave, plays nothing.
+        let silent = audio.warp;
+        // Spec: audio-clips R3. One file frame to each frame of the song,
+        // with the Start marker where the clip starts in time: the file
+        // frame less the song frame is the same for every part of a split
+        // clip, since a part's marker moved by as long as its start did
+        // (R16).
         let r = rate.as_f64();
         let along = (audio.start * r - tempo.ticks_to_seconds(clip.start) * r).round() as i64;
         let length = length.unwrap_or(u64::MAX);
@@ -420,11 +467,22 @@ impl Geometry {
             start,
             end,
             region_start: u64::try_from(start.saturating_add(along)).unwrap_or(0),
-            region_end: audio.end.map_or(length, frames),
-            looping: audio.looping,
+            region_end: if silent {
+                0
+            } else {
+                audio.end.map_or(length, frames)
+            },
+            looping: audio.looping && !silent,
             loop_start: frames(audio.loop_start),
             loop_end: audio.loop_end.map_or(length, frames),
+            warped: None,
         }
+    }
+
+    /// How many frames before a point a jump lands on the clip may read, so
+    /// the point is cued that far early.
+    pub(crate) fn reach_back(&self) -> u64 {
+        if self.warped.is_some() { CUE_BACK } else { 0 }
     }
 
     /// Where in the file the clip plays `elapsed` frames after its start,
@@ -456,7 +514,10 @@ impl Geometry {
     /// The file frame the clip plays at song frame `at`, inside it.
     pub(crate) fn file_frame(&self, at: i64) -> Option<u64> {
         let elapsed = u64::try_from(at - self.start).ok()?;
-        self.run_at(elapsed, 1).0
+        match &self.warped {
+            Some(warped) => warped.file_frame(at),
+            None => self.run_at(elapsed, 1).0,
+        }
     }
 }
 
@@ -475,6 +536,8 @@ pub(crate) struct PlacedClip {
     gain: f64,
     fade_in: u64,
     fade_out: u64,
+    /// The HiQ switch (the warp modes spec, R12).
+    high_quality: bool,
 }
 
 impl PlacedClip {
@@ -562,7 +625,7 @@ impl ClipList {
                 continue;
             }
             // Where the clip starts reading, before its length is known.
-            let at = Geometry::of(clip, audio, tempo, rate, None);
+            let at = Geometry::of(clip, audio, tempo, rate, None, true);
             if at.end <= at.start {
                 continue;
             }
@@ -571,19 +634,21 @@ impl ClipList {
                 clip.id,
                 audio.media,
                 rate,
-                at.region_start,
+                audio.ram,
+                at.region_start.saturating_sub(at.reach_back()),
                 media,
                 &mut missing,
             ) else {
                 continue;
             };
-            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames);
+            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, true);
             sources.cue(clip.id, &geometry, loop_start);
             let frames =
                 |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
             let (carry, source) = match sourced.supply {
                 Supply::Carry => (true, None),
                 Supply::Fresh(source) => (false, Some(source)),
+                Supply::Switch(source) => (true, Some(source)),
             };
             placed.push((
                 PlacedClip {
@@ -594,6 +659,7 @@ impl ClipList {
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
+                    high_quality: audio.high_quality,
                 },
                 source,
             ));
@@ -607,7 +673,7 @@ impl ClipList {
             if clip.mute {
                 continue;
             }
-            let at = Geometry::of(clip, audio, tempo, rate, None);
+            let at = Geometry::of(clip, audio, tempo, rate, None, false);
             if at.end <= at.start {
                 continue;
             }
@@ -616,19 +682,21 @@ impl ClipList {
                 clip.id,
                 audio.media,
                 rate,
-                at.region_start,
+                audio.ram,
+                at.region_start.saturating_sub(at.reach_back()),
                 media,
                 &mut missing,
             ) else {
                 continue;
             };
-            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames);
+            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames, false);
             sources.cue(clip.id, &geometry, loop_start);
             let frames =
                 |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
             let (carry, source) = match sourced.supply {
                 Supply::Carry => (true, None),
                 Supply::Fresh(source) => (false, Some(source)),
+                Supply::Switch(source) => (true, Some(source)),
             };
             placed.push((
                 PlacedClip {
@@ -639,6 +707,7 @@ impl ClipList {
                     gain: audio.gain,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
+                    high_quality: audio.high_quality,
                 },
                 source,
             ));
@@ -703,6 +772,8 @@ pub struct ClipPlayer {
     /// `max_frames` frames.
     scratch: Vec<f32>,
     max_frames: usize,
+    /// Room for warped clips' playback (WP-4.2).
+    warp: WarpScratch,
     /// Whether the clips sounded in the last block, so a stop stops their
     /// sources.
     sounding: bool,
@@ -738,6 +809,7 @@ impl ClipPlayer {
             bank: None,
             scratch: vec![0.0; config.channels * config.max_frames],
             max_frames: config.max_frames,
+            warp: WarpScratch::new(config.channels, config.max_frames),
             sounding: false,
             playing_clip: false,
             readied: None,
@@ -830,7 +902,8 @@ impl ClipPlayer {
                 continue;
             }
             if let (Some(source), Some(at)) = (slot, clip.geometry.file_frame(position)) {
-                source.seek(at);
+                // A warped clip reads a little before the position.
+                source.seek(at.saturating_sub(clip.geometry.reach_back()));
             }
         }
     }
@@ -889,6 +962,39 @@ fn render(
     }
 }
 
+/// Adds the frames `range` of the block, which are `elapsed` frames into the
+/// warped `clip` and start at song frame `frame`, read from `source` through
+/// the clip's positions and warp mode, to the block, through `level`.
+#[allow(clippy::too_many_arguments)]
+fn render_warped(
+    clip: &PlacedClip,
+    positions: &Positions<'_>,
+    source: &mut dyn AudioSource,
+    block: &mut Block<'_>,
+    range: core::ops::Range<usize>,
+    (elapsed, frame): (u64, i64),
+    warp: &mut WarpScratch,
+    level: impl Fn(&PlacedClip, u64) -> f64,
+) {
+    let channels = block.channels();
+    let (mut at, mut elapsed, mut frame) = (range.start, elapsed, frame);
+    while at < range.end {
+        // Spec: warping R12, warp-modes R9
+        let (n, sound) = warp.render(source, positions, frame, range.end - at, clip.high_quality);
+        if sound {
+            for c in 0..channels {
+                let out = &mut block.channel_mut(c)[at..at + n];
+                for (i, (sum, &sample)) in out.iter_mut().zip(warp.rendered(c, n)).enumerate() {
+                    *sum += (f64::from(sample) * level(clip, elapsed + i as u64)) as f32;
+                }
+            }
+        }
+        at += n;
+        elapsed += n as u64;
+        frame += n as i64;
+    }
+}
+
 impl Node for ClipPlayer {
     fn process(&mut self, block: &mut Block<'_>) {
         let transport = block.transport();
@@ -925,22 +1031,43 @@ impl Node for ClipPlayer {
         {
             let from = transport.position.get();
             let elapsed = u64::try_from(from - entry.frame.get()).unwrap_or(0);
-            render(
-                &list.clips[at],
-                source.as_mut(),
-                block,
-                0..block.frames(),
-                elapsed,
-                &mut self.scratch,
-                self.max_frames,
-                PlacedClip::launch_level,
-            );
+            let clip = &list.clips[at];
+            if let Some(warped) = &clip.geometry.warped {
+                // Spec: warping R15. A launched warped clip follows the
+                // tempo from its launch frame.
+                let tempo = block.tempo();
+                let rate = block.sample_rate().as_f64();
+                let positions = warped.launched(tempo, entry.frame.get(), rate);
+                let frames = block.frames();
+                render_warped(
+                    clip,
+                    &positions,
+                    source.as_mut(),
+                    block,
+                    0..frames,
+                    (elapsed, from),
+                    &mut self.warp,
+                    PlacedClip::launch_level,
+                );
+            } else {
+                render(
+                    clip,
+                    source.as_mut(),
+                    block,
+                    0..block.frames(),
+                    elapsed,
+                    &mut self.scratch,
+                    self.max_frames,
+                    PlacedClip::launch_level,
+                );
+            }
         }
         let Self {
             clips,
             bank,
             scratch,
             max_frames,
+            warp,
             ..
         } = self;
         let (Some(list), Some(bank)) = (
@@ -986,6 +1113,19 @@ impl Node for ClipPlayer {
             let end = clip.geometry.end.min(to);
             let range = (start - from) as usize..(end - from) as usize;
             let elapsed = (start - clip.geometry.start) as u64;
+            if let Some(warped) = &clip.geometry.warped {
+                render_warped(
+                    clip,
+                    &warped.positions(),
+                    source.as_mut(),
+                    block,
+                    range,
+                    (elapsed, start),
+                    warp,
+                    PlacedClip::level,
+                );
+                continue;
+            }
             render(
                 clip,
                 source.as_mut(),
@@ -1020,11 +1160,24 @@ impl Node for ClipPlayer {
             bank.as_mut(),
         ) {
             for (clip, slot) in list.clips.iter().zip(new_bank.iter_mut()) {
-                if !clip.carry || slot.is_some() {
+                if !clip.carry {
                     continue;
                 }
-                if let Ok(i) = old.ids.binary_search_by_key(&clip.id, |&(id, _)| id) {
-                    *slot = old_bank[old.ids[i].1 as usize].take();
+                let Ok(i) = old.ids.binary_search_by_key(&clip.id, |&(id, _)| id) else {
+                    continue;
+                };
+                let playing = old_bank[old.ids[i].1 as usize].take();
+                match (slot.take(), playing) {
+                    // Spec: warp-modes R11. The RAM switch changed: the
+                    // clip goes on playing its source until the new one
+                    // is ready. What the source had retired goes back to
+                    // the old list's bank, to be freed with it.
+                    (Some(new), Some(mut playing)) => {
+                        old_bank[old.ids[i].1 as usize] = ClipSource::hand_over(&mut playing, new);
+                        *slot = Some(playing);
+                    }
+                    (Some(new), None) => *slot = Some(new),
+                    (None, playing) => *slot = playing,
                 }
             }
         }
@@ -1083,11 +1236,13 @@ mod tests {
                 looping,
                 loop_start: 100,
                 loop_end: 200,
+                warped: None,
             },
             carry: false,
             gain: 0.5,
             fade_in: 10,
             fade_out: 20,
+            high_quality: true,
         }
     }
 
@@ -1152,62 +1307,6 @@ mod tests {
         assert_eq!(short.level(10), 0.5 * 6.0 / 12.0);
     }
 
-    // Spec: warping R1. Until warped playback, a warped clip plays as an
-    // unwarped one over the region its map converts to seconds.
-    #[test]
-    fn a_warped_clip_plays_its_region_converted_to_seconds() {
-        use bl_core::time::Ticks;
-        use bl_model::WarpMarker;
-        let rate = SampleRate::HZ_48000;
-        let tempo = TempoMap::default();
-        let q = Ticks::QUARTER.get();
-        let hash = ContentHash([1; 32]);
-        // The file's second 0.5 is the clip's 1.1.1 at 120 BPM; the markers
-        // and brace are ticks of the contents.
-        let warped = AudioData {
-            warp: true,
-            warp_markers: vec![WarpMarker {
-                time: 0.5,
-                beat: Ticks::ZERO,
-            }],
-            tempo: Some(120.0),
-            start: q as f64,
-            end: Some(5.0 * q as f64),
-            looping: true,
-            loop_start: 2.0 * q as f64,
-            loop_end: Some(4.0 * q as f64),
-            ..AudioData::new(hash)
-        };
-        // The same region in seconds: a quarter note is half a second.
-        let unwarped = AudioData {
-            start: 1.0,
-            end: Some(3.0),
-            looping: true,
-            loop_start: 1.5,
-            loop_end: Some(2.5),
-            ..AudioData::new(hash)
-        };
-        let id = ClipId(bl_core::id::Id::new(1).unwrap());
-        let geometry = |audio: &AudioData| {
-            let clip = Clip::new(
-                id,
-                Ticks::WHOLE,
-                Ticks::WHOLE * 2,
-                ClipData::Audio(audio.clone()),
-            );
-            Geometry::of(&clip, audio, &tempo, rate, Some(480_000))
-        };
-        assert_eq!(geometry(&warped), geometry(&unwarped));
-        // Unwarped, the same numbers are seconds, so the two differ.
-        let as_seconds = AudioData {
-            warp: false,
-            warp_markers: Vec::new(),
-            tempo: None,
-            ..warped
-        };
-        assert_ne!(geometry(&as_seconds), geometry(&unwarped));
-    }
-
     // Spec: audio-clips R3, R16
     #[test]
     fn the_start_marker_falls_at_the_clips_start_in_time() {
@@ -1234,7 +1333,7 @@ mod tests {
             let ClipData::Audio(audio) = &clip.data else {
                 unreachable!("an audio clip")
             };
-            Geometry::of(clip, audio, &tempo, rate, Some(1_000_000))
+            Geometry::of(clip, audio, &tempo, rate, Some(1_000_000), true)
         };
         let g = geometry(&whole);
         let r = rate.as_f64();
@@ -1282,7 +1381,7 @@ mod tests {
                 let ClipData::Audio(audio) = &clip.data else {
                     unreachable!("an audio clip")
                 };
-                Geometry::of(clip, audio, &tempo, rate, Some(1_000_000))
+                Geometry::of(clip, audio, &tempo, rate, Some(1_000_000), true)
             };
             let g = geometry(&whole);
             let len = (g.loop_end - g.loop_start) as i64;

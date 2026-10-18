@@ -2492,6 +2492,88 @@ mod tests {
         assert_eq!(update.data.len(), 4);
     }
 
+    // Spec: warping R17. A warp edit, and the warp mode's settings, send the
+    // track's player its clips with their tables, and never a program.
+    #[test]
+    fn warp_edits_send_node_data_and_never_a_program() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, BeatsUpdate, Clip, ClipData, ContentHash, WarpMarker, WarpMode};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 96_000]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        f.sync();
+        let id = f.editor.new_id();
+        let data = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(100.0),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let update = f.apply(Command::CreateClip {
+            track: audio,
+            clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+        for command in [
+            Command::InsertWarpMarker {
+                clips: vec![id],
+                beat: Some(Ticks::QUARTER),
+                time: None,
+            },
+            Command::SetSegmentBpm {
+                clip: id,
+                marker: Some(0),
+                bpm: 90.0,
+            },
+            Command::SetClipWarpMode {
+                clip: id,
+                mode: WarpMode::RePitch,
+            },
+            Command::SetClipWarpSettings {
+                clip: id,
+                beats: Some(BeatsUpdate {
+                    transient_envelope: Some(50),
+                    ..BeatsUpdate::default()
+                }),
+                tones: None,
+                texture: None,
+                complex_pro: None,
+            },
+            Command::SetClipHighQuality {
+                clip: id,
+                high_quality: false,
+            },
+            Command::SetClipRamMode {
+                clip: id,
+                ram: true,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: false,
+            },
+            Command::SetClipWarp {
+                clip: id,
+                warp: true,
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.program.is_none(), "{command:?} built a program");
+            assert_eq!(clips_in(&update, audio), Some(1), "{command:?}");
+        }
+        // A tempo change recompiles, and sends the tables under the new map.
+        let update = f.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(90.0).unwrap()),
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+    }
+
     // Spec: audio-clips R18, R19
     #[test]
     fn with_a_loader_a_clip_joins_its_list_once_its_source_is_open() {

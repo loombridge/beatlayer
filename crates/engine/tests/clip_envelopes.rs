@@ -337,3 +337,70 @@ fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
         "after the clip the fader plays alone"
     );
 }
+
+/// An audio clip on `track` at `start`, `bars` bars long, with its first bar
+/// as the loop brace, warped (its markers and brace are ticks of its
+/// contents) or not.
+fn audio_clip(rig: &mut Rig, track: TrackId, start: Ticks, bars: i64, warped: bool) -> ClipId {
+    use bl_model::{AudioData, ContentHash, WarpMarker};
+    let id = rig.editor.new_id();
+    let data = AudioData {
+        warp: warped,
+        warp_markers: if warped {
+            vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }]
+        } else {
+            Vec::new()
+        },
+        tempo: warped.then_some(120.0),
+        looping: warped,
+        loop_start: 0.0,
+        loop_end: warped.then_some(Ticks::WHOLE.get() as f64),
+        ..AudioData::new(ContentHash([3; 32]))
+    };
+    rig.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(id, start, Ticks::WHOLE * bars, ClipData::Audio(data)),
+    });
+    id
+}
+
+// Spec: warping R16, clip-envelopes R2. A warped audio clip's linked
+// envelope follows the clip's contents round its loop; an unwarped one's
+// plays once from the clip's start, one tick to the tick.
+#[test]
+fn a_warped_audio_clips_linked_envelope_follows_its_beats() {
+    for warped in [true, false] {
+        let mut rig = Rig::new(64);
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, a, 1.0);
+        rig.apply(Command::SetVolume {
+            track: a,
+            volume: 0.5,
+        });
+        let clip = audio_clip(&mut rig, a, Ticks::ZERO, 2, warped);
+        for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)] {
+            let synced = rig.apply(Command::SetClipEnvelopeBreakpoint {
+                clip,
+                target: volume(),
+                at,
+                value,
+            });
+            assert!(!synced.program, "a clip envelope needs no new program");
+        }
+        rig.sender.transport(TransportCommand::Play);
+        let out = rig.render(BAR * 2 + 64, 64);
+        for (frame, &sample) in out[..BAR * 2].iter().enumerate() {
+            // Warped: each bar of the loop ramps the share again. Unwarped:
+            // the one bar's ramp plays once, then holds its last value.
+            let along = if warped { frame % BAR } else { frame.min(BAR) };
+            let expected = want(ramp_value(along, 0, BAR));
+            assert!(
+                (sample - expected).abs() < 1e-6,
+                "warped {warped}, frame {frame}: {sample} isn't {expected}"
+            );
+        }
+    }
+}

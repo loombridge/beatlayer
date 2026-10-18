@@ -19,9 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
-    AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer, Monitor, Note,
-    ParamId, PluginFormat, Routing, SceneId, SendTap, TrackId, TrackKind,
+    AudioData, BeatsUpdate, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
+    Device, DeviceId, DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer,
+    Monitor, Note, ParamId, PluginFormat, Routing, SceneId, SendTap, TonesUpdate, TrackId,
+    TrackKind, WarpMode,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -603,7 +604,7 @@ impl Op {
                 // isn't warped, or with these numbers, and must then change
                 // nothing; the ones that land are one undo step.
                 let ticks = Ticks((*a * 100_000.0) as i64);
-                match which % 12 {
+                match which % 16 {
                     5 => {
                         return Command::SetClipWarp {
                             clip,
@@ -645,6 +646,47 @@ impl Op {
                         };
                     }
                     11 => return Command::ScaleTempo { clip, factor: *a },
+                    // Warp modes (WP-4.2): a value out of range is refused
+                    // and changes nothing.
+                    12 => {
+                        return Command::SetClipWarpMode {
+                            clip,
+                            mode: match (*a * 3.0) as u8 % 6 {
+                                0 => WarpMode::Beats,
+                                1 => WarpMode::Tones,
+                                2 => WarpMode::Texture,
+                                3 => WarpMode::RePitch,
+                                4 => WarpMode::Complex,
+                                _ => WarpMode::ComplexPro,
+                            },
+                        };
+                    }
+                    13 => {
+                        return Command::SetClipWarpSettings {
+                            clip,
+                            beats: Some(BeatsUpdate {
+                                transient_envelope: Some((*a * 40.0) as u32),
+                                ..BeatsUpdate::default()
+                            }),
+                            tones: (*b > 1.0).then_some(TonesUpdate {
+                                grain_size: Some(*a * 40.0),
+                            }),
+                            texture: None,
+                            complex_pro: None,
+                        };
+                    }
+                    14 => {
+                        return Command::SetClipRamMode {
+                            clip,
+                            ram: *a > 1.0,
+                        };
+                    }
+                    15 => {
+                        return Command::SetClipHighQuality {
+                            clip,
+                            high_quality: *a > 1.0,
+                        };
+                    }
                     _ => {}
                 }
                 match which % 5 {

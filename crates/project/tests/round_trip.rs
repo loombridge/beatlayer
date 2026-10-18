@@ -194,6 +194,39 @@ fn a_warped_clip_keeps_its_warp_map_through_a_save_and_load() {
             data: ClipData::Audio(audio.clone()),
         })
         .unwrap();
+    // The warp mode, its controls, and the RAM and HiQ switches (WP-4.2).
+    editor
+        .apply(Edit::SetClipWarpMode {
+            clip: warped,
+            mode: bl_model::WarpMode::Tones,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipWarpSettings {
+            clip: warped,
+            beats: None,
+            tones: Some(bl_model::TonesUpdate {
+                grain_size: Some(45.0),
+            }),
+            texture: None,
+            complex_pro: None,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipRamMode {
+            clip: warped,
+            ram: true,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetClipHighQuality {
+            clip: warped,
+            high_quality: false,
+        })
+        .unwrap();
+    let ClipData::Audio(audio) = editor.document().clip(warped).unwrap().data.clone() else {
+        unreachable!("an audio clip");
+    };
     let project = Project::from_editor(&editor, Media::new());
     let json = encode_json(&project, 1).unwrap();
     let text = String::from_utf8(json.clone()).unwrap();
@@ -202,6 +235,18 @@ fn a_warped_clip_keeps_its_warp_map_through_a_save_and_load() {
         1,
         "only the warped clip"
     );
+    for saved in [
+        "warp_mode",
+        "warp_settings",
+        "\"ram\":true",
+        "\"high_quality\":false",
+    ] {
+        assert_eq!(
+            text.matches(saved).count(),
+            1,
+            "{saved}: only the warped clip"
+        );
+    }
     assert_eq!(text.matches("\"warp_markers\"").count(), 1);
     let (loaded, _) = decode_json(&json, &LoadOptions::default()).unwrap();
     assert_eq!(loaded, project);

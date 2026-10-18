@@ -84,6 +84,7 @@ mod scene;
 mod shared;
 mod track;
 mod warp;
+mod warp_settings;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -125,3 +126,7 @@ pub use track::{
     TrackKind,
 };
 pub use warp::WarpMarker;
+pub use warp_settings::{
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
+    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+};

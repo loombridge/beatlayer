@@ -5617,6 +5617,17 @@ impl Shell {
             return self.pad_drop(to_value(&drop));
         }
         if id == browser_ids::LOAD_SELECTED
+            && self.devices.hot_swap_pad_target().is_some()
+            && self.browser_view.selected_plugin().is_some()
+        {
+            // Spec: drum-racks R18. A plug-in can't go onto a pad from here
+            // yet; loading it in the rack's place would lose the kit.
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: "a pad being hot-swapped takes samples and presets; drag the plug-in onto the pad".to_owned(),
+            });
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()
         {
             // Spec: plugin-scanning R11. A plug-in chosen in the browser

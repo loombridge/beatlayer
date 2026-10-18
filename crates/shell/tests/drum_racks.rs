@@ -491,6 +491,50 @@ fn a_hot_swapped_pad_takes_what_the_browser_loads() {
     assert_eq!(state(&mut kit.shell).hot_swap.unwrap().device, kit.rack);
 }
 
+// Spec: drum-racks R18
+#[test]
+fn a_plug_in_loaded_on_a_hot_swapped_pad_leaves_the_kit_in_place() {
+    if bl_plugin_host::scan::scan_program().is_none() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let scratch = Scratch::new("hot-swap-plug-in");
+    let mut kit = kit();
+    drop_on(
+        &mut kit,
+        36,
+        json!({ "samples": [scratch.wav("Kick.wav", 1_000)] }),
+    );
+    let bundle = bl_test_clap::bundle().to_string_lossy().into_owned();
+    kit.shell
+        .invoke("plugin.scan", json!({ "paths": [bundle.clone()] }))
+        .unwrap();
+    kit.shell
+        .invoke("browser.open_place", json!({ "label": "plug_ins" }))
+        .unwrap();
+    let folder = kit.shell.invoke("browser.state", json!({})).unwrap()["rows"][0]["path"].clone();
+    kit.shell
+        .invoke("browser.open_folder", json!({ "path": folder, "open": true }))
+        .unwrap();
+    kit.shell
+        .invoke(
+            "browser.select",
+            json!({ "paths": [format!("{bundle}#{}", bl_test_clap::PLUGIN_ID)] }),
+        )
+        .unwrap();
+    kit.shell
+        .invoke("device.hot_swap", json!({ "device": kit.rack, "on": true }))
+        .unwrap();
+    kit.shell
+        .invoke("pad.select", json!({ "rack": kit.rack, "note": 36 }))
+        .unwrap();
+    kit.shell
+        .invoke("rack.switch_hot_swap_target", json!({}))
+        .unwrap();
+    assert!(kit.shell.invoke("browser.load_selected", json!({})).is_err());
+    assert!(kit.shell.editor().document().device(kit.rack).is_some());
+}
+
 // Spec: drum-racks R5
 #[test]
 fn preview_plays_one_chain_while_held_and_changes_nothing() {

@@ -436,7 +436,7 @@ impl DeviceView {
             .types
             .iter()
             .find(|t| t.kind == kind)
-            .map_or("Snapshot", |t| t.name.as_str())
+            .map_or("Simpler", |t| t.name.as_str())
             .to_owned();
         let mut device = new_device(
             editor.new_id(),

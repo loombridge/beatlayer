@@ -39,7 +39,7 @@ This spec covers the model, the saving, the commands, and the playback of clip e
 
 - The device chooser's "Only show adjusted envelopes" filter. Its "MIDI Ctrl" entry and the MIDI controller envelopes are built ([midi-controller-data.md](midi-controller-data.md), WP-2.29).
 - A keyboard path for the breakpoints (R11).
-- An audio clip's Envelopes tab: the Clip View shows MIDI clips only until the Sample Editor lands.
+- An audio clip's Envelopes tab runs the same editor from the clip's start, one tick per tick ([sample-editor.md](sample-editor.md) R1); what the engine plays of an audio clip's envelopes, linked or not, is not yet specified.
 
 ## Tests
 

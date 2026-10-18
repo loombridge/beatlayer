@@ -41,6 +41,18 @@ pub struct Settings {
     /// it, so the saved form of such a set is unchanged.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub solo_in_place: bool,
+    /// Cue mode: whether the tracks' Solo switches are Cue switches that
+    /// feed the Cue Out instead of silencing the other tracks (the mixer
+    /// spec). Off in a new set, and not written when off. It plays only
+    /// while Main's Cue Out and Main Out don't overlap
+    /// ([`Document::cue_active`]).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub cue_mode: bool,
+    /// The Preview/Cue Volume knob on Main's strip: linear gain from 0 to
+    /// [`MAX_CUE_VOLUME`], 1 (0 dB) in a new set, where the knob's reset
+    /// goes. A set at the default doesn't write it.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub cue_volume: f64,
     /// Metronome settings: enabled, count-in, sound, rhythm, and only while
     /// recording (WP-2.15). A set whose metronome is default doesn't write it.
     #[serde(default, skip_serializing_if = "MetronomeSettings::is_default")]
@@ -73,6 +85,8 @@ impl Default for Settings {
             crossfader: centre(),
             arrangement_loop: ArrangementLoop::default(),
             solo_in_place: true,
+            cue_mode: false,
+            cue_volume: 1.0,
             metronome: MetronomeSettings::default(),
             punch_in: false,
             punch_out: false,
@@ -94,6 +108,17 @@ fn is_centre(position: &f64) -> bool {
 
 fn on() -> bool {
     true
+}
+
+/// The Cue Volume's top, +6 dB as linear gain.
+pub const MAX_CUE_VOLUME: f64 = 1.995_262_314_968_879_5;
+
+fn unity() -> f64 {
+    1.0
+}
+
+fn is_unity(value: &f64) -> bool {
+    *value == 1.0
 }
 
 /// For serde's `skip_serializing_if`, which passes a reference.
@@ -266,6 +291,22 @@ impl Document {
     #[must_use]
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Whether Cue mode can be on: Main's Cue Out and Main Out share no
+    /// output channel (the mixer spec, S10). Live greys out the Cue
+    /// Switches and the Main strip's Solo/Cue button otherwise.
+    #[must_use]
+    pub fn cue_available(&self) -> bool {
+        let routing = self.main().routing();
+        !routing.cue_out.overlaps(routing.main_out)
+    }
+
+    /// Whether the tracks' Solo switches are Cue switches now: the set is in
+    /// Cue mode and it can be.
+    #[must_use]
+    pub fn cue_active(&self) -> bool {
+        self.settings.cue_mode && self.cue_available()
     }
 
     /// A copy of the document whose tempo map or time-signature map is
@@ -658,6 +699,24 @@ mod tests {
     fn documents_cross_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Document>();
+    }
+
+    // Spec: mixer R24, R27
+    #[test]
+    fn cue_mode_and_the_cue_volume_save_and_load_back() {
+        let (mut doc, ..) = song(0);
+        doc.apply(&Command::SetCueOut {
+            channel: crate::Channel::Pair(3),
+        })
+        .unwrap();
+        doc.apply(&Command::SetCueMode { enabled: true }).unwrap();
+        doc.apply(&Command::SetCueVolume { volume: 0.5 }).unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["settings"]["cue_mode"], serde_json::json!(true));
+        assert_eq!(saved["settings"]["cue_volume"], serde_json::json!(0.5));
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, doc);
+        assert!(loaded.cue_active());
     }
 
     // Spec: mixer R7, R8, R16

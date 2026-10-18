@@ -179,6 +179,18 @@ impl Channel {
         *self == Self::Pair(1)
     }
 
+    /// Whether the two choices share a channel: `1/2` overlaps `2` and
+    /// `2/3`, not `3/4`.
+    #[must_use]
+    pub fn overlaps(self, other: Self) -> bool {
+        let span = |c: Self| match c {
+            Self::Mono(c) => (c, c),
+            Self::Pair(c) => (c, c.saturating_add(1)),
+        };
+        let (a, b) = (span(self), span(other));
+        a.0 <= b.1 && b.0 <= a.1
+    }
+
     /// What Live's choosers show: `1` for one channel, `1/2` for a pair.
     #[must_use]
     pub fn label(self) -> String {
@@ -475,7 +487,8 @@ pub struct Mixer {
     /// Whether the track is muted: its Track Activator is off. Always off on
     /// the Main track.
     pub mute: bool,
-    /// Whether the track is soloed. Always off on the Main track.
+    /// Whether the track is soloed, or, in Cue mode, cue-switched. Always off
+    /// on the Main track.
     pub solo: bool,
     /// Whether the track is armed for recording. Only audio and MIDI tracks
     /// can be armed.

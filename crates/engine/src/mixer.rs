@@ -1051,8 +1051,12 @@ impl Route {
 ///   silenced with the other track's output;
 /// - a route into a device's sidechain is never silenced;
 /// - Main is always heard.
+///
+/// In Cue mode the Solo switches are Cue switches and silence nothing: Main
+/// plays what the activators leave (the mixer spec, S5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Solo {
+    cue: bool,
     main: TrackId,
     soloed: BTreeSet<TrackId>,
     path: BTreeSet<TrackId>,
@@ -1077,6 +1081,7 @@ impl Solo {
         let returns: BTreeSet<TrackId> = document.returns().collect();
         let main = document.main_id();
         let mut solo = Self {
+            cue: document.cue_active(),
             main,
             soloed: BTreeSet::new(),
             path: BTreeSet::new(),
@@ -1122,10 +1127,11 @@ impl Solo {
         solo
     }
 
-    /// Whether any track is soloed.
+    /// Whether solo silences anything: a track is soloed and the set isn't
+    /// in Cue mode.
     #[must_use]
     pub fn is_active(&self) -> bool {
-        !self.soloed.is_empty()
+        !self.cue && !self.soloed.is_empty()
     }
 
     /// Whether `track`'s Solo switch is on.

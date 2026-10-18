@@ -102,6 +102,8 @@ pub enum ModelError {
     /// Main Out and Cue Out take a stereo pair of the audio interface's
     /// outputs, not a single channel.
     NotStereoPair,
+    /// Cue mode needs a Cue Out that shares no channel with Main Out.
+    CueOverlapsMain,
     /// Tracks of this kind can't go inside a group: only audio, MIDI, and
     /// group tracks can.
     CannotGroup {
@@ -348,6 +350,9 @@ impl fmt::Display for ModelError {
             ),
             Self::NotStereoPair => {
                 f.write_str("Main Out and Cue Out take a stereo pair of the interface's outputs")
+            }
+            Self::CueOverlapsMain => {
+                f.write_str("Cue mode needs a Cue Out that shares no output channel with Main Out")
             }
             Self::CannotGroup { kind } => write!(f, "a {kind} track can't go inside a group"),
             Self::GroupCycle { track, parent } => {

@@ -35,6 +35,7 @@ use serde_json::Value;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
 use crate::arrangement::grid::{Step, snap};
+use crate::sample_editor::SampleView;
 
 fn invalid(message: impl Into<String>) -> EditFailure {
     EditFailure::InvalidArgs(message.into())
@@ -172,6 +173,9 @@ pub struct ClipView {
     /// The Session slot's clip most recently selected, which the Clip View
     /// shows until an Arrangement selection replaces it.
     session_clip: Option<ClipId>,
+    /// What the Sample Editor has selected and shows for the audio clip the
+    /// Clip View shows (WP-4.10).
+    sample: SampleView,
 }
 
 impl ClipView {
@@ -296,21 +300,71 @@ impl ClipView {
     }
 
     /// The clip the Clip View shows: the Session clip most recently
-    /// selected, or else the Arrangement's first selected clip, if it holds
-    /// MIDI notes.
+    /// selected, or else the Arrangement's first selected clip, of either
+    /// kind.
+    #[must_use]
+    pub fn shown_any_clip(&self, doc: &Document, arrangement: &ArrangementView) -> Option<ClipId> {
+        let exists = |id: &ClipId| doc.clip(*id).is_some();
+        self.session_clip
+            .filter(exists)
+            .or_else(|| arrangement.selected_clips().iter().copied().find(exists))
+    }
+
+    /// The clip the Clip View shows when it holds MIDI notes: the Session
+    /// clip most recently selected, or else the Arrangement's first selected
+    /// clip.
     #[must_use]
     pub fn shown_clip(&self, doc: &Document, arrangement: &ArrangementView) -> Option<ClipId> {
-        let holds_notes = |id: &ClipId| {
+        self.shown_any_clip(doc, arrangement).filter(|id| {
             doc.clip(*id)
                 .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)))
-        };
-        self.session_clip.filter(holds_notes).or_else(|| {
-            arrangement
-                .selected_clips()
-                .iter()
-                .copied()
-                .find(holds_notes)
         })
+    }
+
+    /// The clip the Clip View shows when it is an audio clip, whose editor
+    /// is the Sample Editor (WP-4.10).
+    #[must_use]
+    pub fn shown_audio_clip(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> Option<ClipId> {
+        self.shown_any_clip(doc, arrangement).filter(|id| {
+            doc.clip(*id)
+                .is_some_and(|clip| matches!(clip.data, ClipData::Audio(_)))
+        })
+    }
+
+    /// What the Sample Editor has selected and shows.
+    #[must_use]
+    pub fn sample(&self) -> &SampleView {
+        &self.sample
+    }
+
+    /// The Sample Editor's state, ready for `clip`, which it starts afresh
+    /// for if it isn't the clip it was last for.
+    pub(crate) fn sample_mut(
+        &mut self,
+        clip: ClipId,
+        audio: &bl_model::AudioData,
+    ) -> &mut SampleView {
+        self.sample.bind_to(clip, audio);
+        &mut self.sample
+    }
+
+    /// Lets the Sample Editor follow the set's changes.
+    pub(crate) fn sync_sample(&mut self, doc: &Document) {
+        self.sample.sync(doc);
+    }
+
+    /// Lets the Sample Editor follow playback again, or stop until the song
+    /// starts or stops.
+    pub(crate) fn sample_follow(&mut self, paused: bool) {
+        if paused {
+            self.sample.pause_follow();
+        } else {
+            self.sample.resume_follow();
+        }
     }
 
     /// The shown clip when it sits in a Session slot, which is when the
@@ -321,7 +375,7 @@ impl ClipView {
         doc: &Document,
         arrangement: &ArrangementView,
     ) -> Option<ClipId> {
-        self.shown_clip(doc, arrangement)
+        self.shown_any_clip(doc, arrangement)
             .filter(|clip| self.session_clip == Some(*clip))
     }
 
@@ -364,6 +418,7 @@ impl ClipView {
         self.selected.clear();
         self.session_clip = None;
         self.envelope = None;
+        self.sample = SampleView::default();
     }
 }
 

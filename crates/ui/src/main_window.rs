@@ -434,8 +434,15 @@ impl MainWindowUi {
             } else if shell.clip_view().visible() {
                 // Spec: piano-roll. The Clip View takes the detail area in
                 // place of the Device View.
-                self.clip_view
-                    .show(ui, shell, theme, layout.device_view, &mut events);
+                let arrangement = &mut self.arrangement;
+                self.clip_view.show(
+                    ui,
+                    shell,
+                    theme,
+                    layout.device_view,
+                    &mut events,
+                    &mut |media| arrangement.peaks_of(media),
+                );
             } else {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);

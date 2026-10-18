@@ -98,6 +98,7 @@ pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
     envelope_value,
 };
+pub use bl_stretch::WarpMap;
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
@@ -110,7 +111,7 @@ pub use device::{
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
-pub use document::{ArrangementLoop, Document, Settings};
+pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
 pub use external::{

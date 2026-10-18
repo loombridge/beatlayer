@@ -181,7 +181,13 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
     assert_eq!(delete["access"], "refused to agents");
 
     let found = call(&mut client, "list_commands", json!({ "search": "volume" }));
-    assert_eq!(found["commands"][0]["command"], "mixer.set_volume");
+    let ids: Vec<&Value> = found["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["command"])
+        .collect();
+    assert!(ids.contains(&&json!("mixer.set_volume")), "{ids:?}");
     assert!(
         call_err(&mut client, "list_commands", json!({ "area": "nowhere" }))
             .contains("no commands")

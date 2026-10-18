@@ -464,7 +464,7 @@ Stem separation was brought forward from Phase 9 on 18 October 2026. Its spec is
 | 3.15 | done | 16 October 2026 | [#61](https://github.com/loombridge/beatlayer/pull/61); clip envelopes in the document and the engine; [the spec](specs/clip-envelopes.md) |
 | 3.16 | done | 17 October 2026 | [#91](https://github.com/loombridge/beatlayer/pull/91); the Clip View's Notes, Envelopes and MPE tabs, the Envelopes tab's editor with its choosers and Linked switch, and the Clip View following the latest selected Session or Arrangement clip; [the spec](specs/clip-envelopes.md) |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |
-| 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
+| 3.18 | done | 18 October 2026 | [#198](https://github.com/loombridge/beatlayer/pull/198); Cue mode, the Cue Out (after the devices, before the fader) and the Cue Volume, with the Main strip button and Options items |
 | 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
 | 4.2 | done | 18 October 2026 | [#178](https://github.com/loombridge/beatlayer/pull/178); warped clips play through a table from song frames to file positions under the tempo map, sent as node data, with Re-Pitch on a warp-mode interface, the HiQ and RAM switches, loops only on warped clips, and four commands for the mode, its settings and the switches; [the spec](specs/warp-modes.md) |
 | 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
@@ -474,7 +474,7 @@ Stem separation was brought forward from Phase 9 on 18 October 2026. Its spec is
 | 4.7 | todo |  |  |
 | 4.8 | todo |  |  |
 | 4.9 | done | 18 October 2026 | [#184](https://github.com/loombridge/beatlayer/pull/184); a file's tempo and beats in its analysis, the three Warp/Fades settings, auto-warp of dropped and recorded clips, Set 1.1.1 Here, Warp From Here and Warp as Loop, and Save Default Clip writing a `.beatlayer-clip` file beside the sample; a drop still waits for the analysis rather than showing its place pending; [the spec](specs/warping.md) |
-| 4.10 | todo |  |  |
+| 4.10 | done | 18 October 2026 | [#190](https://github.com/loombridge/beatlayer/pull/190); the Sample Editor in the Clip View, its waveform drawn through the warp map (in the Arrangement too), warp markers, transients and pseudo-warp markers made, moved and deleted by mouse, keys and menus, each drag one undo step; the side-by-side layout check waits for the new L-CLIP rows, and Quantize for WP-4.12; [the spec](specs/sample-editor.md) |
 | 4.10b | todo |  |  |
 | 4.11 | todo |  |  |
 | 4.12 | todo |  |  |

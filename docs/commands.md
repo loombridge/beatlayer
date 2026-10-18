@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-473 commands in 37 areas.
+482 commands in 37 areas.
 
 ## Permission classes
 
@@ -50,7 +50,7 @@ Each command has:
 | [`arrangement.focus_title_bar`](#arrangementfocus_title_bar) | Go to Track Title Bar | `read` | `Esc` | `Esc` |
 | [`arrangement.fold_groups`](#arrangementfold_groups) | Show Grouped Tracks | `read` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`arrangement.fold_tracks`](#arrangementfold_tracks) | Fold Track | `read` | `U` | `U` |
-| [`arrangement.follow`](#arrangementfollow) | Follow | `read` | `Option+Shift+F`; `Option+Shift+F` | `Alt+Shift+F`; `Ctrl+Shift+F` |
+| [`arrangement.follow`](#arrangementfollow) | Follow | `read` | `Option+Shift+F`; `Option+Shift+F`; `Option+Shift+F` | `Alt+Shift+F`; `Ctrl+Shift+F`; `Ctrl+Shift+F` |
 | [`arrangement.loop_selection`](#arrangementloop_selection) | Loop Selection | `edit` | `Cmd+L` | `Ctrl+L` |
 | [`arrangement.move_clips`](#arrangementmove_clips) | Move Clips | `edit` |  |  |
 | [`arrangement.narrow_grid`](#arrangementnarrow_grid) | Narrow Grid | `read` | `Cmd+1` | `Ctrl+1` |
@@ -114,6 +114,7 @@ Each command has:
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
+| [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
 | [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
@@ -152,10 +153,10 @@ Each command has:
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
-| [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` |  |  |
-| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` |  |  |
-| [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` |  |  |
-| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` |  |  |
+| [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` |
+| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` | `Delete` | `Delete` |
+| [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
+| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` | `Cmd+I` | `Ctrl+I` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
@@ -199,7 +200,13 @@ Each command has:
 | [`clip.warp_from_here`](#clipwarp_from_here) | Warp From Here | `edit` |  |  |
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
+| [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
+| [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
+| [`clip_view.select_time`](#clip_viewselect_time) | Select Sample Editor Time | `read` |  |  |
+| [`clip_view.select_transients`](#clip_viewselect_transients) | Select Transients | `read` |  |  |
+| [`clip_view.select_warp_markers`](#clip_viewselect_warp_markers) | Select Warp Markers | `read` |  |  |
+| [`clip_view.set_insert_marker`](#clip_viewset_insert_marker) | Set Sample Editor Insert Marker | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
@@ -304,6 +311,8 @@ Each command has:
 | [`mixer.set_arm`](#mixerset_arm) | Arm Track | `edit` | `C` | `C` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | Assign Crossfade | `edit` |  |  |
 | [`mixer.set_crossfader`](#mixerset_crossfader) | Set Crossfader | `edit` |  |  |
+| [`mixer.set_cue_mode`](#mixerset_cue_mode) | Cue Switches | `edit` |  |  |
+| [`mixer.set_cue_volume`](#mixerset_cue_volume) | Set Cue Volume | `edit` |  |  |
 | [`mixer.set_mute`](#mixerset_mute) | Activate/Deactivate Track | `edit` | `0`; `F1..F8` | `0`; `F1..F8` |
 | [`mixer.set_pan`](#mixerset_pan) | Set Track Pan | `edit` |  |  |
 | [`mixer.set_send`](#mixerset_send) | Set Send Level | `edit` |  |  |
@@ -878,9 +887,9 @@ Result: [`ArrangementState`](#arrangementstate).
 
 #### `arrangement.follow`
 
-**Follow**. Permission: `read`. Contexts: `global`, `arrangement`.
+**Follow**. Permission: `read`. Contexts: `global`, `arrangement`, `sample-editor`.
 
-Switches Follow, the Control Bar's switch: while it's on and the song plays, the Arrangement View turns the page whenever the playhead leaves the view, so the playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time ruler, pauses it until playback starts or stops, or a click lands in the track lanes or the scrub area; `paused` does the same directly. With no arguments it toggles Follow, which also resumes it. Changes only the view.
+Switches Follow, the Control Bar's switch: while it's on and the song plays, the Arrangement View turns the page whenever the playhead leaves the view, so the playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time ruler, pauses it until playback starts or stops, or a click lands in the track lanes or the scrub area; `paused` does the same directly. The Sample Editor follows playback on the same switch (Option-Shift-F there too). With no arguments it toggles Follow, which also resumes it. Changes only the view.
 
 Default keys:
 
@@ -888,6 +897,7 @@ Default keys:
 |---|---|---|---|---|---|
 | S-ZOOM-005 | `Option+Shift+F` | `Alt+Shift+F` | `global` | Scroll the display to follow playback | runs it |
 | S-ARR-023 | `Option+Shift+F` | `Ctrl+Shift+F` | `arrangement` | Scroll the display to follow playback | runs it |
+| S-SAMPLE-005 | `Option+Shift+F` | `Ctrl+Shift+F` | `sample-editor` | Scroll the display to follow playback | runs it |
 
 Arguments:
 
@@ -1997,6 +2007,23 @@ Arguments:
 
 Result: [`PreviewState`](#previewstate).
 
+#### `browser.show_file`
+
+**Show in Browser**. Permission: `external`. Contexts: `browser`, `clip-view`, `sample-editor`.
+
+Shows an audio file in the browser, as Show in Browser does in the Sample Editor: shows the browser, chooses the place the file lies in, opens the folders down to it and selects it. Name the file by `path`, or by the `clip` that plays it. Refused if the file lies in none of the browser's places; `browser.add_folder` adds one. Changes nothing in the set, but reads folders outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | An audio clip whose file to show. Give this or `path`. |
+| `path` | string or null | no | The file to show, by path. Give this or `clip`. |
+
+Result: [`BrowserState`](#browserstate).
+
 #### `browser.state`
 
 **Browser State**. Permission: `external`. Contexts: `global`, `browser`, `browser-sidebar`.
@@ -2678,11 +2705,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.delete_transients`
 
-**Delete Transients**. Permission: `edit`. Contexts: `clip-view`.
+**Delete Transients**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Takes transients out of an audio clip: `times` are their times in the file, in seconds, as `clip.transients` lists them. A transient put in by hand is forgotten; a detected one is noted as taken away and stays away until `clip.reset_transients`. Refused for a time that is none of the clip's transients, once the file's analysis is ready. One undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-012 | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` | `sample-editor` | Delete the selected transient | runs it |
 
 Arguments:
 
@@ -2695,11 +2726,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.delete_warp_markers`
 
-**Delete Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+**Delete Warp Markers**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Deletes the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length: the segments either side of each join into one straight segment. Deleting the last marker leaves the audio after the new last one at the clip's tempo. A warped clip keeps at least one marker: deleting them all is refused.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-010 | `Delete` | `Delete` | `sample-editor` | Delete the selected warp marker | runs it |
 
 Arguments:
 
@@ -2712,11 +2747,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.insert_transient`
 
-**Insert Transient**. Permission: `edit`. Contexts: `clip-view`.
+**Insert Transient**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Puts a transient into an audio clip at `time`, seconds in its file: Insert Transient, at the Sample Editor's insert marker when the app runs it. Putting one where a detected transient was taken away brings that one back. The edit belongs to the clip, is saved with the set, and shows in `clip.transients`. One undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-011 | `Cmd+Shift+I` | `Ctrl+Shift+I` | `sample-editor` | Insert a transient | runs it |
 
 Arguments:
 
@@ -2729,11 +2768,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.insert_warp_marker`
 
-**Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+**Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one. With `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at the transients just before and just after the new one, read from the clip's transients (`clip.transients`) unless `transients` lists them; it works on one clip.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-009 | `Cmd+I` | `Ctrl+I` | `sample-editor` | Insert a warp marker | runs it |
 
 Arguments:
 
@@ -2749,7 +2792,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.insert_warp_markers`
 
-**Insert Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+**Insert Warp Markers**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Puts warp markers in a range of a warped audio clip's contents, `from` to `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, when it holds none, at its start and its end. The transients are the clip's own (`clip.transients`) unless `transients` lists times in the file. Each marker sits on the beat the map already places its time, so nothing moves; a marker already there is left. Refused for a clip that isn't warped, or while the file's analysis is not ready and `transients` is left out. One undo step.
 
@@ -2842,7 +2885,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.move_transient`
 
-**Move Transient**. Permission: `edit`. Contexts: `clip-view`.
+**Move Transient**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Moves the transient at `from` (seconds in the file, as `clip.transients` lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no audio and no warp marker. One undo step.
 
@@ -2860,7 +2903,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.move_warp_markers`
 
-**Move Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+**Move Warp Markers**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Moves the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by the same number of ticks `by` (negative moves them earlier). Each keeps its time in the file, so the audio either side of it stretches or squeezes to fit. Refused, changing nothing, if a marker would pass or reach a neighbour that isn't moving with it. Moving the last marker sets the clip's tempo to the new last segment's, so the audio after it carries on at that speed.
 
@@ -2899,7 +2942,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.reset_transients`
 
-**Reset Transients**. Permission: `edit`. Contexts: `clip-view`.
+**Reset Transients**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Takes away all of an audio clip's transient edits: the transients put in by hand go, and the detected ones that were taken away come back. One undo step.
 
@@ -2931,7 +2974,7 @@ Result: [`SavedDefaults`](#saveddefaults).
 
 #### `clip.scale_tempo`
 
-**Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
+**Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Multiplies every segment's tempo and the clip's own tempo of a warped audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found at half or double. Each marker's distance in ticks from the first marker is multiplied by it, and the Start and End markers and loop brace move with them about the first marker, so each keeps its place in the audio. The clip's place and length in the arrangement don't change. Refused if the clip's tempo would leave 1 to 1,000 BPM.
 
@@ -3188,7 +3231,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.set_loop`
 
-**Set Clip Loop**. Permission: `edit`. Contexts: `clip-view`.
+**Set Clip Loop**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Moves an audio clip's loop brace, in seconds into its audio file for an unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a command in the other form is refused; `end` `null` for the end of the file), as the Clip View's loop Position and Length fields do. It doesn't switch the loop on or off: use `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start marker into the brace, then repeats the brace until the clip ends in the arrangement; make the clip longer with `clip.set_length` to hear more repeats. A new clip's brace is the whole file.
 
@@ -3207,7 +3250,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.set_loop_enabled`
 
-**Clip Loop On/Off**. Permission: `edit`. Contexts: `clip-view`.
+**Clip Loop On/Off**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) for as long as it lasts in the arrangement; off, it plays from its Start marker to its End marker once. The Start marker must be before the brace's end to switch it on. An audio clip can only loop while Warp is on (`clip.set_warp`): switching the loop on for an unwarped audio clip is refused.
 
@@ -3298,7 +3341,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.set_region`
 
-**Set Clip Start and End**. Permission: `edit`. Contexts: `clip-view`.
+**Set Clip Start and End**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Moves an audio clip's Start and End markers: the clip starts playing at `start` when the song reaches the clip, and, while its loop is off, plays until `end` (`null` for the end of the file) or the clip's own end in the arrangement, whichever comes first, then is silent. An unwarped clip plays at its file's own speed and its positions are seconds into the file (`ticks` false, the default). A warped clip (`clip.set_warp`) follows the set's tempo and its positions are ticks of its contents, from the clip's 1.1.1, with `ticks` true; a command in the other form is refused. While the loop is on, `start` must be before the loop's end. Use `clip.set_length` to change how long the clip lasts in the arrangement.
 
@@ -3317,7 +3360,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.set_segment_bpm`
 
-**Set Warp Segment BPM**. Permission: `edit`. Contexts: `clip-view`.
+**Set Warp Segment BPM**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Sets a warped audio clip's BPM field. With `marker` (its place in the map, the first being 0), `bpm` is the tempo of the segment that starts at that marker: every later marker moves by the same number of ticks, so that segment alone changes and each later one keeps its tempo; for the last marker it is the clip's own tempo, from 1 to 1,000. Without `marker`, `bpm` is the first segment's tempo (the clip's when there's one marker) and every tempo of the clip scales by the same factor, as `clip.scale_tempo` does.
 
@@ -3352,7 +3395,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.set_warp`
 
-**Clip Warp On/Off**. Permission: `edit`. Contexts: `clip-view`.
+**Clip Warp On/Off**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Switches an audio clip's Warp on or off. Off, the clip plays at its file's own speed whatever the set's tempo, and its Start and End markers and loop brace are seconds into the file. On, it follows the set's tempo through its warp map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the last marker), and its markers and brace are ticks of its contents. Switching on a clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's tempo there, so it goes on playing at the speed it did; switching off keeps the map. Either way the markers and brace convert, so each keeps its place in the audio, and the clip keeps its place and length in the arrangement. A warped clip plays through its warp map at the set's tempo, in its warp mode (`clip.set_warp_mode`); only a warped clip can loop, so switching Warp off also switches the clip's loop off in the same undo step.
 
@@ -3406,7 +3449,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.shift_warp_marker`
 
-**Shift Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+**Shift Warp Marker**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
 
 Moves the time in the file of warp marker `marker` (its place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by `by` seconds (negative moves it earlier), keeping its beat: the waveform moves under the marker. Refused, changing nothing, if the marker would pass a neighbour or leave the file.
 
@@ -3532,6 +3575,45 @@ Arguments:
 
 Result: [`QuantizeSettings`](#quantizesettings).
 
+#### `clip_view.sample_editor`
+
+**Sample Editor State**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Reports what the Clip View's Sample Editor shows for the audio clip it shows: whether the clip is warped, the selected warp markers (by their place in the clip's warp map), whether the Start marker is selected, the selected transients (by their times in the file), the insert marker, the time selection, and the span shown. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SampleEditorState`](#sampleeditorstate).
+
+#### `clip_view.sample_view`
+
+**Zoom Sample Editor**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Changes the part of the file the Sample Editor shows: `selection` zooms to the time selection (Z, remembering the view before), `back` goes back to the view before the last zoom (X, a step at a time), `whole` fits the whole file across the editor (W), `height` switches fitting the waveform to the editor's height (H), and `span` shows `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents, and `scroll` does the same without remembering the view before, as dragging the ruler or the wheel does (scrolling pauses Follow until playback starts or stops); `page` is Follow turning the page, which doesn't pause it. Changes only the view.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-007 | `Z` | `Z` | `sample-editor` | Zoom to the clip selection | fixes `show` = `"selection"` |
+| S-SAMPLE-008 | `X` | `X` | `sample-editor` | Zoom back from the clip selection | fixes `show` = `"back"` |
+| S-SAMPLE-013 | `W` | `W` | `sample-editor` | Fit the content to the editor's width | fixes `show` = `"whole"` |
+| S-SAMPLE-014 | `H` | `H` | `sample-editor` | Fit the content to the editor's height | fixes `show` = `"height"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Sample Editor shows. |
+| `end` | number or null | no | With `span`, where the view ends, after `start`. |
+| `show` | [`SampleViewChange`](#sampleviewchange) or null | no | What to change. |
+| `start` | number or null | no | With `span`, where the view starts: seconds in the file, or ticks of a warped clip's contents with `ticks`. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file. |
+
+Result: [`SampleEditorState`](#sampleeditorstate).
+
 #### `clip_view.select_notes`
 
 **Select Notes**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`.
@@ -3549,6 +3631,80 @@ Arguments:
 | `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `clip_view.select_time`
+
+**Select Sample Editor Time**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Makes a time selection in the Sample Editor from `start` to `end`, in seconds in the file or, with `ticks`, in ticks of a warped clip's contents; with neither the selection is cleared. Dragging across the waveform runs this. Insert Warp Marker and Delete Warp Marker with a time selection act on the transients in it, and Z zooms to it. Never an undo step, and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Sample Editor shows. |
+| `end` | number or null | no | Where the selection ends, after `start`. |
+| `start` | number or null | no | Where the selection starts. Give neither `start` nor `end` to clear the selection. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file. |
+
+Result: [`SampleEditorState`](#sampleeditorstate).
+
+#### `clip_view.select_transients`
+
+**Select Transients**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Selects transients of an audio clip in the Sample Editor, as clicking a transient's pseudo-warp marker does: `replace` selects only these, `toggle` adds or removes each. A transient is named by its time in the file in seconds, as `clip.transients` lists it. Delete Transient acts on the selected transients. Selecting is never an undo step and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `times` | array of number | yes | The transients, by their times in the file in seconds, as `clip.transients` lists them. Empty with `replace` clears the selection. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Sample Editor shows. |
+| `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
+
+Result: [`SampleEditorState`](#sampleeditorstate).
+
+#### `clip_view.select_warp_markers`
+
+**Select Warp Markers**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Selects warp markers of an audio clip in the Sample Editor, as clicking one does: `replace` selects only these, `toggle` adds or removes each (Cmd-click, Ctrl-click on Windows). A marker is named by its place in the clip's warp map (`data.audio.warp_markers`), the first being 0. With `start_marker` the clip's Start marker is selected too. The marker edits (`clip.move_warp_markers`, `clip.delete_warp_markers`) take their markers by place and act on these when the app runs them from a key. Selecting is never an undo step and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `markers` | array of integer, at least 0 | yes | The markers, by their place in the clip's warp map, the first being 0. Empty with `replace` clears the selection. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Sample Editor shows. |
+| `mode` | [`NoteSelectMode`](#noteselectmode) | no | How to change the selection; `replace` if left out. |
+| `start_marker` | boolean | no | Whether the clip's Start marker is selected too, as clicking it in the marker strip does; Shift with the arrow keys then moves the clip's region with it. With `toggle` it switches the Start marker's selection. Not selected if left out. |
+
+Result: [`SampleEditorState`](#sampleeditorstate).
+
+#### `clip_view.set_insert_marker`
+
+**Set Sample Editor Insert Marker**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
+
+Puts the Sample Editor's insert marker, the point Insert Warp Marker (Cmd+I) and Insert Transient (Cmd+Shift+I) act at, at a `time` in the file in seconds or at a `beat` of a warped clip's contents in ticks from its 1.1.1; with neither it is taken away. Clicking the waveform runs this, on the nearest grid line while snapping is on. Never an undo step, and changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `beat` | [`Ticks`](#ticks) or null | no | Where to put the marker, as a beat of a warped clip's contents in ticks from its 1.1.1. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Sample Editor shows. |
+| `time` | number or null | no | Where to put the marker, as a time in the file in seconds. Give this or `beat`; give neither to take the marker away. |
+
+Result: [`SampleEditorState`](#sampleeditorstate).
 
 ### Area `device`
 
@@ -5414,6 +5570,38 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `mixer.set_cue_mode`
+
+**Cue Switches**. Permission: `edit`. Contexts: `global`.
+
+Switches Cue mode, as the Main strip's Solo/Cue button and the Options menu's Solo Switches and Cue Switches do: with `enabled` true, every track's Solo switch becomes a Cue switch (`mixer.set_solo` sets it) that feeds the Cue Out at the Cue Volume (`mixer.set_cue_volume`) instead of silencing the other tracks, and Main plays what the activators leave. A cue-switched track is heard on the Cue Out after its devices and before its volume, pan and activator. It needs a Cue Out that shares no output channel with Main Out (`routing.set_cue_out`, `routing.set_main_out`): turning it on with an overlap is refused, and an overlap made later switches it off in effect. A new set is in Solo mode. The mode is saved with the set and is no undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether the Solo switches are Cue switches. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_cue_volume`
+
+**Set Cue Volume**. Permission: `edit`. Contexts: `global`.
+
+Sets the Preview/Cue Volume knob on Main's strip, which scales the Cue Out in Cue mode, as a linear gain from 0 (-inf dB) to 1.995 (+6 dB); 1 (0 dB) is where a new set starts. The engine glides to the new value over 20 ms. The volume is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `volume` | number from 0 to 1.9952623149688795 | yes | The gain: 1 is unity (0 dB, where a new set starts) and 0 silence, up to 1.995 (+6 dB). |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `mixer.set_mute`
 
 **Activate/Deactivate Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
@@ -5492,7 +5680,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Solo Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
 
-Solos or unsolos one track, leaving other tracks' solo switches as they are, as a Cmd-click (Ctrl-click) on a Solo switch does; to solo one track alone, use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the groups that hold them, and the tracks inside soloed groups are heard. Return tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a return silences every other track's output but keeps their sends to it. Every track but Main can be soloed.
+Solos or unsolos one track, leaving other tracks' solo switches as they are, as a Cmd-click (Ctrl-click) on a Solo switch does; to solo one track alone, use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the groups that hold them, and the tracks inside soloed groups are heard. Return tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a return silences every other track's output but keeps their sends to it. In Cue mode (`mixer.set_cue_mode`) the switch is the track's Cue switch and silences nothing. Every track but Main can be soloed.
 
 Default keys:
 
@@ -8997,6 +9185,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_arm`](#mixerset_arm) | the query tool's `track` | `mixer.arm` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | the query tool's `track` | `mixer.crossfade` |
 | [`mixer.set_crossfader`](#mixerset_crossfader) | the query tool's `song` | `settings.crossfader` |
+| [`mixer.set_cue_mode`](#mixerset_cue_mode) | the query tool's `song` | `settings.cue_mode` |
+| [`mixer.set_cue_volume`](#mixerset_cue_volume) | the query tool's `song` | `settings.cue_volume` |
 | [`mixer.set_mute`](#mixerset_mute) | the query tool's `track` | `mixer.mute` |
 | [`mixer.set_pan`](#mixerset_pan) | the query tool's `track` | `mixer.pan` |
 | [`mixer.set_send`](#mixerset_send) | the query tool's `track` | `sends` |
@@ -9129,6 +9319,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
@@ -22604,6 +22795,175 @@ What `device.edit_sample` returns.
 
 </details>
 
+### `SampleEditorState`
+
+What the Sample Editor shows and has selected, for the clip it shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The audio clip the editor shows; `null` when it shows none. |
+| `warped` | boolean | yes | Whether the clip is warped, so the editor runs along its beats rather than along time in the file. |
+| `markers` | array of integer, at least 0 | yes | The selected warp markers, by their place in the clip's warp map. |
+| `start_marker` | boolean | yes | Whether the clip's Start marker is selected. |
+| `transients` | array of number | yes | The selected transients, by their times in the file in seconds. |
+| `insert_marker` | [`SamplePoint`](#samplepoint) or null | yes | The insert marker, if there is one. |
+| `time_selection` | array or null | yes | The time selection's start and end, if there is one. |
+| `view` | array or null | yes | The span shown, in seconds in the file, or in ticks of the clip's contents when it is warped (`warped`); `null` shows the whole file. |
+| `fit_height` | boolean | yes | Whether the waveform is fitted to the editor's height. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the Sample Editor shows and has selected, for the clip it shows.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The audio clip the editor shows; `null` when it shows none."
+    },
+    "fit_height": {
+      "description": "Whether the waveform is fitted to the editor's height.",
+      "type": "boolean"
+    },
+    "insert_marker": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SamplePoint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The insert marker, if there is one."
+    },
+    "markers": {
+      "description": "The selected warp markers, by their place in the clip's warp map.",
+      "items": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "start_marker": {
+      "description": "Whether the clip's Start marker is selected.",
+      "type": "boolean"
+    },
+    "time_selection": {
+      "description": "The time selection's start and end, if there is one.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/SamplePoint"
+        },
+        {
+          "$ref": "#/$defs/SamplePoint"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "transients": {
+      "description": "The selected transients, by their times in the file in seconds.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "view": {
+      "description": "The span shown, in seconds in the file, or in ticks of the clip's contents when it is warped (`warped`); `null` shows the whole file.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "warped": {
+      "description": "Whether the clip is warped, so the editor runs along its beats rather than along time in the file.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "clip",
+    "warped",
+    "markers",
+    "start_marker",
+    "transients",
+    "insert_marker",
+    "time_selection",
+    "view",
+    "fit_height"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SamplePoint`
+
+A point in the file, as the Sample Editor reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number | yes | Seconds into the file. |
+| `beat` | [`Ticks`](#ticks) or null | yes | The beat of a warped clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A point in the file, as the Sample Editor reports it.",
+  "properties": {
+    "beat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The beat of a warped clip's contents it plays on, in ticks from the clip's 1.1.1; `null` for a clip that isn't warped."
+    },
+    "time": {
+      "description": "Seconds into the file.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "beat"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SampleProcessed`
 
 What `device.crop_sample` and `device.reverse_sample` return.
@@ -22698,6 +23058,67 @@ A span of a sample, in frames at the sample's own rate: `from` inclusive to `to`
     "to"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SampleViewChange`
+
+How to change the Sample Editor's view: `selection` zooms to the time selection (Z), `back` goes to the view before the last zoom (X), `whole` fits the whole file across the editor (W), `height` switches fitting the waveform to the editor's height (H), `span` shows the span `start` to `end`, `scroll` shows it without remembering the view before, and `page` does the same without pausing Follow.
+
+One of:
+
+- `"selection"`: Zoom to the time selection.
+- `"back"`: Go back to the view before the last zoom.
+- `"whole"`: Fit the whole file across the editor.
+- `"height"`: Switch fitting the waveform to the editor's height.
+- `"span"`: Show a span.
+- `"scroll"`: Show a span without remembering the view before, as scrolling does.
+- `"page"`: Show a span without remembering the view before or pausing Follow, as Follow turning the page does.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How to change the Sample Editor's view: `selection` zooms to the time selection (Z), `back` goes to the view before the last zoom (X), `whole` fits the whole file across the editor (W), `height` switches fitting the waveform to the editor's height (H), `span` shows the span `start` to `end`, `scroll` shows it without remembering the view before, and `page` does the same without pausing Follow.",
+  "oneOf": [
+    {
+      "const": "selection",
+      "description": "Zoom to the time selection.",
+      "type": "string"
+    },
+    {
+      "const": "back",
+      "description": "Go back to the view before the last zoom.",
+      "type": "string"
+    },
+    {
+      "const": "whole",
+      "description": "Fit the whole file across the editor.",
+      "type": "string"
+    },
+    {
+      "const": "height",
+      "description": "Switch fitting the waveform to the editor's height.",
+      "type": "string"
+    },
+    {
+      "const": "span",
+      "description": "Show a span.",
+      "type": "string"
+    },
+    {
+      "const": "scroll",
+      "description": "Show a span without remembering the view before, as scrolling does.",
+      "type": "string"
+    },
+    {
+      "const": "page",
+      "description": "Show a span without remembering the view before or pausing Follow, as Follow turning the page does.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

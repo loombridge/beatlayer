@@ -266,6 +266,21 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // A multisampler's layers and options (WP-5.13).
+    device.layers = bl_model::Layers {
+        list: vec![bl_model::Layer::new(
+            bl_model::LayerId(1),
+            "Kick",
+            ContentHash([5; 32]),
+            48_000,
+            48_000,
+            1,
+        )],
+        last_id: 1,
+        ram_mode: true,
+        snap: true,
+        linear_loop_fades: true,
+    };
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
     // B active, with A's values kept (device compare R1, R10).
@@ -740,6 +755,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "sidechain",
                 "floating",
                 "media",
+                "layers",
+                "layers.ram_mode",
+                "layers.snap",
+                "layers.linear_loop_fades",
                 "b_active",
                 "other_params",
             ][..],

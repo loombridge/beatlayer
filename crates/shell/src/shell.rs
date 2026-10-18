@@ -66,6 +66,7 @@ use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
@@ -81,6 +82,7 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 mod capture;
+mod multisampler;
 mod processed_files;
 mod session_recording;
 
@@ -2884,6 +2886,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
@@ -3992,7 +3995,9 @@ impl Shell {
             return true;
         }
         if id == browser_ids::LOAD_SELECTED
-            && (self.hot_swap_preset().is_some() || self.hot_swap_sample().is_some())
+            && (self.hot_swap_preset().is_some()
+                || self.hot_swapped_layer_file().is_some()
+                || self.hot_swap_sample().is_some())
         {
             return true;
         }
@@ -4744,6 +4749,7 @@ impl Shell {
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
@@ -5073,6 +5079,18 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some((device, layer, path)) = self.hot_swapped_layer_file()
+        {
+            // Spec: multisampler R10. Loading a sample while hot-swapping a
+            // layer replaces the layer's.
+            Self::args::<NoArgs>(id, args)?;
+            self.devices.set_layer_hot_swap(None);
+            return self.run_multisampler(
+                multisampler_ids::SET_LAYER_SAMPLE,
+                json!({ "device": device, "layer": layer, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some((device, path)) = self.hot_swap_sample()
         {
             // Spec: eight-slot-drum-sampler R17. Loading a sample while
@@ -5118,6 +5136,9 @@ impl Shell {
             self.document_changed();
             self.touch();
             return Ok(to_value(&loaded));
+        }
+        if multisampler_ids::handles(id) {
+            return self.run_multisampler(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
@@ -5236,6 +5257,11 @@ impl Shell {
             midi_io_ids::COMPUTER_KEYBOARD_KEY => {
                 let args = Self::args::<midi_io_ids::KeyArgs>(id, args)?;
                 let result = self.midi.key(&args.key, args.pressed).map_err(failed)?;
+                // Spec: multisampler R7. Auto Select follows the note.
+                if let Some(note) = result.note {
+                    let velocity = self.midi.keyboard_info().velocity;
+                    self.follow_note(note, velocity, args.pressed);
+                }
                 to_value(&result)
             }
             _ => return Err(ShellError::UnknownCommand(id.to_owned())),
@@ -5553,6 +5579,8 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices
+                    .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
@@ -5579,6 +5607,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                self.devices
+                    .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
@@ -5629,6 +5659,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -5646,6 +5678,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
@@ -5758,6 +5792,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;

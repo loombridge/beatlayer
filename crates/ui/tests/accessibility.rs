@@ -1277,6 +1277,69 @@ fn an_expandable_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// A multisampler with a layer on a MIDI track, selected, its zone editor
+/// open (WP-5.13).
+fn a_multisampler(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let midi = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let t = bl_devices::multisampler_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("bl-access-multi-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // The second layer's name is its own: the first one names the device's
+    // title.
+    let files: Vec<String> = ["Alpha", "Tone"]
+        .iter()
+        .map(|name| {
+            let file = dir.join(format!("{name}.wav"));
+            std::fs::write(
+                &file,
+                bl_media::wav_bytes(
+                    &[0.5; 4800],
+                    1,
+                    48_000,
+                    bl_media::BitDepth::Int16,
+                    bl_media::Dither::None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            file.to_string_lossy().into_owned()
+        })
+        .collect();
+    h.shell
+        .run(
+            "device.add_layers",
+            json!({ "device": added["device"], "paths": files }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": added["device"] }))
+        .unwrap();
+    h.shell
+        .run(
+            "device.set_multisampler_view",
+            json!({ "device": added["device"], "zone_editor": true }),
+        )
+        .unwrap();
+}
+
 /// The keyboard in the Device View, as a click there leaves it.
 fn device_view(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
@@ -2178,6 +2241,125 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "device.set_sidechain_gain",
             main(a_sidechained_device, device_view, "SC Gain", Key::ArrowDown),
         ),
+        // The multisampler (WP-5.13): the zone editor's header buttons and
+        // layer rows, and the Sample tab's fields, are in the Device View's
+        // Tab order.
+        (
+            "device.set_multisampler_view",
+            main(a_multisampler, device_view, "Auto", Key::Enter),
+        ),
+        (
+            "device.hot_swap_layer",
+            main(a_multisampler, device_view, "Hot-Swap Sample", Key::Enter),
+        ),
+        (
+            "device.select_layers",
+            main(a_multisampler, device_view, "Tone", Key::Enter),
+        ),
+        (
+            "device.delete_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet, and the \
+                 Delete key, which deletes the selected device (multisampler R11)",
+            )),
+        ),
+        (
+            "device.set_layer",
+            main(a_multisampler, device_view, "Root", Key::ArrowUp),
+        ),
+        (
+            "device.set_layer_options",
+            main(a_multisampler, device_view, "Snap", Key::Enter),
+        ),
+        (
+            "device.insert_layers",
+            Exception(Equivalent(
+                "`device.add_layers`, which reads the files; this form takes layers whose \
+                 samples are already in the set's media",
+            )),
+        ),
+        (
+            "device.update_layers",
+            Exception(Equivalent(
+                "`device.set_layer`, which sets the same settings and snaps the markers",
+            )),
+        ),
+        (
+            "device.set_layer_media",
+            Exception(Equivalent(
+                "`device.set_layer_sample`, which reads the file",
+            )),
+        ),
+        (
+            "device.set_layer_sample",
+            Exception(Equivalent(
+                "Hot-Swap Sample (`device.hot_swap_layer`), then Enter in the browser \
+                 (`browser.load_selected`) on the file",
+            )),
+        ),
+        (
+            "device.add_layers",
+            Exception(Gap(
+                "adding samples to the layer list is a drop of files on the zone editor; the \
+                 keyboard has no way to name files yet (multisampler R3)",
+            )),
+        ),
+        (
+            "device.set_layer_zone",
+            Exception(Gap(
+                "dragging a zone's edge, body or fade in the zone editor has no keyboard \
+                 form yet (multisampler R10)",
+            )),
+        ),
+        (
+            "device.snap_layer_markers",
+            Exception(Gap(
+                "the loop marker's context menu, which the keyboard doesn't open yet \
+                 (multisampler R20)",
+            )),
+        ),
+        (
+            "device.duplicate_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.rename_layer",
+            Exception(Gap(
+                "the layer list's context menu and a double-click, which the keyboard doesn't \
+                 reach yet (multisampler R11)",
+            )),
+        ),
+        (
+            "device.move_layers",
+            Exception(Gap(
+                "no control moves layers by hand yet: the list's sorts reorder it (multisampler \
+                 R11)",
+            )),
+        ),
+        (
+            "device.sort_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.distribute_layers",
+            Exception(Gap(
+                "the layer list's context menu, which the keyboard doesn't open yet \
+                 (multisampler R11)",
+            )),
+        ),
+        (
+            "device.normalize_layers",
+            Exception(Gap(
+                "the layer list's and the waveform's context menus, which the keyboard \
+                 doesn't open yet (multisampler R11)",
+            )),
+        ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
         ("device.display", Exception(Query)),
@@ -2593,14 +2775,24 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "device.add_layers",
+            "device.delete_layers",
+            "device.distribute_layers",
+            "device.duplicate_layers",
             "device.load_sample",
+            "device.move_layers",
+            "device.normalize_layers",
+            "device.rename_layer",
+            "device.set_layer_zone",
+            "device.snap_layer_markers",
+            "device.sort_layers",
             "export.audio",
             "set.discard_recovery",
             "set.recover",
             "settings.set_continuous_save",
             "track.move",
         ],
-        "the M1 gaps the accessibility spec lists"
+        "the gaps the accessibility spec lists"
     );
 }
 

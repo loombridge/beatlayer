@@ -99,6 +99,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -167,6 +168,7 @@ fn sets_from_before_racks_load_unchanged() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     // A device that isn't a rack saves no chains, so a set saved before
     // racks existed is what is saved now.
@@ -323,6 +325,7 @@ fn an_older_clip_envelope_renders_the_same() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);
@@ -382,6 +385,7 @@ fn a_set_without_b_loads_with_b_equal_to_a() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     // A set from before the two states has neither field.
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();

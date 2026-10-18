@@ -1614,9 +1614,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
-    let sample_editor =
-        LaterView("the Sample Editor and the Audio Utilities panel's warp controls (WP-4.10)");
+    let audio_panel = LaterView("the Audio Utilities panel's warp controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
+    let auto_warp = LaterView(
+        "the Sample Editor's context menu's Set 1.1.1 Here and Warp items, drawn disabled \
+         until they run auto-warp's commands",
+    );
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
@@ -2186,7 +2189,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),
         ("clip.set_midi_region", Exception(clip_view)),
-        ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
@@ -2217,29 +2219,65 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the follow controls in the Launch Properties panel, which Tab reaches; their place in Live's Tab order",
             )),
         ),
-        ("clip.set_warp", Exception(sample_editor)),
-        ("clip.set_warp_mode", Exception(sample_editor)),
-        ("clip.set_warp_settings", Exception(sample_editor)),
-        ("clip.set_ram_mode", Exception(sample_editor)),
-        ("clip.set_high_quality", Exception(sample_editor)),
-        ("clip.insert_warp_marker", Exception(sample_editor)),
-        ("clip.insert_warp_markers", Exception(sample_editor)),
-        ("clip.set_1_1_1_here", Exception(sample_editor)),
-        ("clip.warp_from_here", Exception(sample_editor)),
-        ("clip.warp_as_loop", Exception(sample_editor)),
-        ("clip.warp_selection_as_loop", Exception(sample_editor)),
-        ("clip.insert_transient", Exception(sample_editor)),
-        ("clip.delete_transients", Exception(sample_editor)),
-        ("clip.reset_transients", Exception(sample_editor)),
-        ("clip.move_transient", Exception(sample_editor)),
-        ("clip.transients", Exception(sample_editor)),
+        ("clip.set_warp", Exception(audio_panel)),
+        ("clip.set_warp_mode", Exception(audio_panel)),
+        ("clip.set_warp_settings", Exception(audio_panel)),
+        ("clip.set_ram_mode", Exception(audio_panel)),
+        ("clip.set_high_quality", Exception(audio_panel)),
+        (
+            "clip.insert_warp_markers",
+            Exception(Equivalent(
+                "Insert Warp Marker (Cmd+I, S-SAMPLE-009) with a time selection in the Sample \
+                 Editor, which puts a marker at each transient in it (the sample editor spec, \
+                 R10)",
+            )),
+        ),
+        (
+            "clip.reset_transients",
+            Exception(Equivalent(
+                "the Sample Editor's context menu, opened from the keyboard with Shift+F10 \
+                 (Ctrl+Option+Shift+M on macOS): its Reset Transients item",
+            )),
+        ),
+        (
+            "clip.move_transient",
+            Exception(Live(
+                "the manual's Sample Editor keys (42.11) have none for moving a transient; \
+                 Shift-dragging a pseudo-warp marker is the mouse's way",
+            )),
+        ),
+        ("clip.transients", Exception(Query)),
+        (
+            "clip.shift_warp_marker",
+            Exception(Live(
+                "the manual's Sample Editor keys (42.11) have none for moving the waveform \
+                 under a marker; Shift-dragging the marker is the mouse's way",
+            )),
+        ),
+        ("clip.set_segment_bpm", Exception(audio_panel)),
+        ("clip.scale_tempo", Exception(audio_panel)),
+        ("clip_view.sample_editor", Exception(Query)),
+        (
+            "clip_view.select_transients",
+            Exception(Equivalent(
+                "an agent's form of clicking a transient's pseudo-warp marker; Shift+Left and \
+                 Shift+Right select a span, and Delete Transient (Cmd+Shift+Delete) acts on the \
+                 transients in it",
+            )),
+        ),
+        (
+            "browser.show_file",
+            Exception(Equivalent(
+                "the Sample Editor's context menu, opened from the keyboard with Shift+F10 \
+                 (Ctrl+Option+Shift+M on macOS): its Show in Browser item",
+            )),
+        ),
+        ("clip.set_1_1_1_here", Exception(auto_warp)),
+        ("clip.warp_from_here", Exception(auto_warp)),
+        ("clip.warp_as_loop", Exception(auto_warp)),
+        ("clip.warp_selection_as_loop", Exception(auto_warp)),
         ("clip.save_default", Exception(clip_title_bar)),
         ("clip.defaults", Exception(clip_title_bar)),
-        ("clip.move_warp_markers", Exception(sample_editor)),
-        ("clip.shift_warp_marker", Exception(sample_editor)),
-        ("clip.delete_warp_markers", Exception(sample_editor)),
-        ("clip.set_segment_bpm", Exception(sample_editor)),
-        ("clip.scale_tempo", Exception(sample_editor)),
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
@@ -3499,4 +3537,93 @@ fn the_keys_open_a_sidebar_place_s_context_menu() {
             .any(|e| matches!(e, UiEvent::Invoke(i) if i.id == "browser.remove_folder"))
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_sample_editors_markers_reach_assistive_technology() {
+    // Spec: sample-editor R20 (accessibility R4).
+    use bl_ui::arrangement::peaks::MemoryPeaks;
+    let (mut h, _tracks, clip) = set();
+    let mut peaks = MemoryPeaks::new();
+    peaks.insert(
+        benchmark::media_hash(0),
+        std::sync::Arc::new(
+            bl_media::Peaks::from_samples(&benchmark::media_samples(
+                &mut benchmark::Random::new(1),
+                16.0,
+            ))
+            .unwrap(),
+        ),
+    );
+    h.main
+        .arrangement_mut()
+        .set_peak_source(Box::new(peaks), None);
+    h.shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    h.shell
+        .run(
+            "clip.insert_warp_marker",
+            json!({ "clips": [clip], "time": 8.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": 4.0 }),
+        )
+        .unwrap();
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("clip_view.select_warp_markers", json!({ "markers": [1] }))
+        .unwrap();
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let view = Harness::node(&nodes, "Clip View").bounds.unwrap();
+    let inside = |node: &common::Node| {
+        let b = node.bounds.unwrap();
+        b.x0 >= view.x0 - 1.0 && b.x1 <= view.x1 + 1.0 && b.y0 >= view.y0 && b.y1 <= view.y1 + 1.0
+    };
+    // The waveform is a region naming the clip.
+    let wave = nodes
+        .iter()
+        .find(|n| n.label.starts_with("Waveform of Kick"))
+        .expect("the waveform is a region naming the clip");
+    assert_eq!(wave.role, Role::Group);
+    // Each marker is an item with its name, its value, and whether it is
+    // selected.
+    let first = Harness::node(&nodes, "Warp Marker 1");
+    let second = Harness::node(&nodes, "Warp Marker 2");
+    assert_eq!(first.role, Role::ListItem);
+    assert_eq!(first.selected, Some(false));
+    assert_eq!(second.selected, Some(true));
+    assert!(
+        second.value.contains("8.000 s in the file"),
+        "{}",
+        second.value
+    );
+    assert!(second.value.contains("beat 5.1.1"), "{}", second.value);
+    let transient = Harness::node(&nodes, "Transient 1");
+    assert!(
+        transient.value.contains("4.000 s in the file"),
+        "{}",
+        transient.value
+    );
+    for name in ["Start Marker", "End Marker", "Loop Brace"] {
+        let node = Harness::node(&nodes, name);
+        assert_eq!(node.role, Role::ListItem, "{name}");
+        assert!(!node.value.is_empty(), "{name}");
+    }
+    for node in [
+        wave,
+        first,
+        second,
+        transient,
+        Harness::node(&nodes, "Start Marker"),
+    ] {
+        assert!(inside(node), "{} lies outside the Clip View", node.label);
+    }
 }

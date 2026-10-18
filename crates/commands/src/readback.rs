@@ -169,6 +169,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("browser.remove_folder", nothing(BROWSER)),
     ("browser.search", nothing(BROWSER)),
     ("browser.select", nothing(BROWSER)),
+    ("browser.show_file", nothing(BROWSER)),
     ("browser.set_preview", nothing(BROWSER)),
     (
         "browser.state",

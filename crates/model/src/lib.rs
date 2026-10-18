@@ -98,6 +98,7 @@ pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
     envelope_value,
 };
+pub use bl_stretch::WarpMap;
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,

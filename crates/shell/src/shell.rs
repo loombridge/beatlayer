@@ -333,7 +333,7 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
-    /// The chord Chord's Learn is hearing.
+    /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
     config_dir: Option<PathBuf>,

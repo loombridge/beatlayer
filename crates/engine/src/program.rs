@@ -9,6 +9,7 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{ChainId, Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
+use crate::drum::DrumNotes;
 use crate::midi::{MidiRoutes, OutOwner, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::modbus::{Bus, Control, ROWS};
@@ -81,6 +82,8 @@ pub struct EngineProgram {
     pub(crate) racks: Vec<Rack>,
     /// The chains of the racks, each rack's together in list order.
     pub(crate) rack_chains: Vec<RackChain>,
+    /// The sends of the drum chains to their racks' return chains.
+    pub(crate) chain_sends: Vec<ChainSendRef>,
     /// Where a MIDI effect rack merges its chains' notes: the buffer and the
     /// next note of each chain, one cursor for every chain in the program.
     pub(crate) merge: Shared<MergeCursor>,
@@ -264,6 +267,8 @@ pub(crate) enum Instance {
     Selector(Box<ChainSelector>),
     /// The filter at a rack chain's input (WP-5.3).
     Zones(Box<ZoneFilter>),
+    /// A drum chain's note routing (the drum racks spec, R2, R4).
+    Drum(Box<DrumNotes>),
 }
 
 impl Instance {
@@ -273,7 +278,7 @@ impl Instance {
             Self::Device(node) => Some(node.as_mut()),
             Self::Mixer(mixer) => Some(mixer.as_mut()),
             Self::Selector(selector) => Some(selector.as_mut()),
-            Self::Route(_) | Self::Sidechain(_) | Self::Zones(_) => None,
+            Self::Route(_) | Self::Sidechain(_) | Self::Zones(_) | Self::Drum(_) => None,
         }
     }
 
@@ -283,7 +288,7 @@ impl Instance {
             Self::Device(node) => node.modulated(report),
             Self::Mixer(mixer) => Node::modulated(mixer.as_ref(), report),
             Self::Route(route) => route.modulated(report),
-            Self::Sidechain(_) | Self::Selector(_) | Self::Zones(_) => {}
+            Self::Sidechain(_) | Self::Selector(_) | Self::Zones(_) | Self::Drum(_) => {}
         }
     }
 
@@ -295,7 +300,7 @@ impl Instance {
             Self::Mixer(mixer) => mixer.receive_data(data),
             Self::Route(route) => route.receive_data(data),
             Self::Selector(selector) => selector.receive_data(data),
-            Self::Sidechain(_) | Self::Zones(_) => drop(data),
+            Self::Sidechain(_) | Self::Zones(_) | Self::Drum(_) => drop(data),
         }
     }
 }
@@ -314,9 +319,13 @@ pub(crate) enum Step {
 pub(crate) enum RackMode {
     /// An audio effect rack: the chains' audio is summed.
     Audio,
-    /// An instrument or drum rack: the chains take the notes, and their
-    /// audio is summed.
+    /// An instrument rack: the chains take the notes, and their audio is
+    /// summed.
     Instrument,
+    /// A drum rack: each chain takes the notes it answers, at its Play
+    /// note, and the drum chains' sends feed its return chains, whose audio
+    /// is summed with theirs.
+    Drum,
     /// A MIDI effect rack: the chains' notes are merged, and the audio
     /// passes through.
     Midi,
@@ -329,8 +338,11 @@ pub(crate) struct Rack {
     /// The task whose chain holds the rack, however deep.
     pub(crate) task: u32,
     pub(crate) mode: RackMode,
-    /// The rack's chains, in `rack_chains`.
+    /// The rack's chains, in `rack_chains`: a drum rack's drum chains.
     pub(crate) chains: Span,
+    /// A drum rack's return chains, in `rack_chains` after its chains; empty
+    /// in any other rack.
+    pub(crate) returns: Span,
     /// Switched off: the rack passes its input through untouched.
     pub(crate) bypass: bool,
     /// The frames the rack adds, which are its slowest chain's (R16).
@@ -338,6 +350,27 @@ pub(crate) struct Rack {
     /// The slot of the rack's chain selector (R33); the rack's place in
     /// `racks` is also its place in `selects`.
     pub(crate) selector: u32,
+}
+
+impl Rack {
+    /// Every chain of the rack, return chains included.
+    pub(crate) fn all(&self) -> Span {
+        Span {
+            start: self.chains.start,
+            end: self.returns.end,
+        }
+    }
+}
+
+/// No node: a chain that has no note routing.
+pub(crate) const NO_SLOT: u32 = u32::MAX;
+
+/// A drum chain's send to one of its rack's return chains: the slot of the
+/// send's route, and the return chain's place in `rack_chains`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChainSendRef {
+    pub(crate) route: u32,
+    pub(crate) to: u32,
 }
 
 /// One chain of a rack.
@@ -359,9 +392,30 @@ pub(crate) struct RackChain {
     /// (Pre FX), after its devices (Post FX) and after its mixer (Post
     /// Mixer), for routes that tap it (R38).
     pub(crate) taps: [Option<u32>; 3],
+    /// The slot of a drum chain's note routing, or [`NO_SLOT`].
+    pub(crate) notes: u32,
+    /// A drum chain's sends, in `chain_sends`.
+    pub(crate) sends: Span,
+    /// The delay line that holds a drum chain's output back from the time
+    /// its sends take it at to the rack's latency (drum racks R22), or
+    /// [`NO_DELAY`].
+    pub(crate) sum_delay: u32,
+    /// Whether the chain's output is added into its rack's: all but a
+    /// return chain sent to a return track.
+    pub(crate) summed: bool,
 }
 
 impl RackChain {
+    /// The slot to look a chain's note routing up in: a slot that is always
+    /// there, though only a drum chain's holds a [`DrumNotes`].
+    fn notes_slot(&self) -> u32 {
+        if self.notes == NO_SLOT {
+            self.mixer
+        } else {
+            self.notes
+        }
+    }
+
     /// The index of a tap in [`RackChain::taps`].
     pub(crate) fn tap_index(tap: Tap) -> usize {
         match tap {
@@ -892,7 +946,7 @@ impl EngineProgram {
             .map(|&step| match step {
                 Step::Node(slot) => slot,
                 Step::Rack(rack) => {
-                    self.rack_chains[self.racks[rack as usize].chains.range().start].mixer
+                    self.rack_chains[self.racks[rack as usize].all().range().start].mixer
                 }
             })
     }
@@ -1919,6 +1973,9 @@ impl EngineProgram {
     /// buffer in the chains' order. With threads to share the work (R15),
     /// the chains are offered to them, and the rack waits for every chain
     /// before it adds any, so the sum is the same whichever finishes first.
+    /// A drum rack (the drum racks spec) gives each chain the notes it
+    /// answers, lets a note choke the chains of its group, and after the
+    /// chains feeds its return chains with their sends and runs them.
     /// Returns which of the pair of note buffers at `pair` holds the notes
     /// after.
     fn run_rack(
@@ -1933,6 +1990,7 @@ impl EngineProgram {
         let Rack {
             mode,
             chains,
+            returns,
             bypass,
             ..
         } = self.racks[rack];
@@ -1940,11 +1998,12 @@ impl EngineProgram {
             self.flush_rack(pass, task, rack);
             return note_idx;
         }
-        if chains.start == chains.end {
+        if chains.start == returns.end {
             return note_idx;
         }
         let turn = pass.turn;
-        let (channels, stride, frames) = (self.channels, self.max_frames, pass.block.frames);
+        let block = pass.block;
+        let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
         let audio = mode != RackMode::Midi;
         let notes = mode != RackMode::Audio;
         let filter_ctrl = self.run_selector(pass, rack, buffer);
@@ -1980,15 +2039,34 @@ impl EngineProgram {
             if notes {
                 let to = 2 * self.tasks.len() + 2 * chain.buffer as usize;
                 let [from, to] = turn.note_pair(pair + note_idx, to);
-                to.clear();
-                zones.filter(
-                    selector,
-                    from.notes(),
-                    to,
-                    filter_ctrl,
-                    mode == RackMode::Midi,
-                );
+                match turn.slot(chain.notes_slot()).node.as_mut() {
+                    // Spec: drum-racks R2. A drum chain gets the notes it
+                    // answers, at its Play note.
+                    Some(Instance::Drum(drum)) => {
+                        pass.delivered += gather(
+                            block.events,
+                            chain.notes,
+                            block.from,
+                            block.until,
+                            pass.scratch,
+                        );
+                        drum.route(from.notes(), to, pass.scratch);
+                    }
+                    _ => {
+                        to.clear();
+                        zones.filter(
+                            selector,
+                            from.notes(),
+                            to,
+                            filter_ctrl,
+                            mode == RackMode::Midi,
+                        );
+                    }
+                }
             }
+        }
+        if mode == RackMode::Drum {
+            self.choke(&turn, chains);
         }
         if audio {
             for c in 0..channels {
@@ -2043,8 +2121,17 @@ impl EngineProgram {
             }
         }
         if audio {
-            for i in chains.range() {
-                let at = self.tasks.len() + self.rack_chains[i].buffer as usize;
+            self.run_returns(pass, task, rack);
+            for i in chains.start as usize..returns.end as usize {
+                let chain = self.rack_chains[i];
+                if !chain.summed {
+                    continue;
+                }
+                let at = self.tasks.len() + chain.buffer as usize;
+                if chain.sum_delay != NO_DELAY {
+                    let (line, ring) = turn.delay(chain.sum_delay);
+                    delay_in_place(line, ring, turn.buffer(at), channels, stride, frames);
+                }
                 for c in 0..channels {
                     let edge = c * stride;
                     let sum = &mut turn.buffer(buffer)[edge..edge + frames];
@@ -2100,17 +2187,160 @@ impl EngineProgram {
         selector.filters_ctrl()
     }
 
+    /// Spec: drum-racks R4. A note-on that reaches a chain in a choke group
+    /// ends what the other chains of the group started, on its own frame:
+    /// each gets a choke for every key it has started since the last one,
+    /// which its devices fade out. A chain doesn't choke itself, and a
+    /// chain on All Notes is in no group.
+    fn choke(&self, turn: &Turn<'_>, chains: Span) {
+        // shortcut: past this many choking notes in one block the rest
+        // choke nothing; upgrade if a kit ever needs more in one block.
+        const ROOM: usize = 256;
+        let mut found = [(0u32, 0u32, 0u8, 0u8); ROOM];
+        let mut count = 0;
+        for i in chains.range() {
+            let chain = self.rack_chains[i];
+            let Some(Instance::Drum(drum)) = turn.slot(chain.notes_slot()).node.as_ref() else {
+                continue;
+            };
+            if drum.group() == 0 {
+                continue;
+            }
+            let buffer = 2 * self.tasks.len() + 2 * chain.buffer as usize;
+            for note in turn.notes(buffer).notes() {
+                if note.kind == NoteKind::On && count < ROOM {
+                    found[count] = (note.offset, i as u32, note.key, note.channel);
+                    count += 1;
+                }
+            }
+        }
+        found[..count].sort_unstable();
+        let group_of = |i: usize| match turn.slot(self.rack_chains[i].notes_slot()).node.as_ref() {
+            Some(Instance::Drum(drum)) => drum.group(),
+            _ => 0,
+        };
+        for &(offset, i, key, channel) in &found[..count] {
+            let i = i as usize;
+            let group = group_of(i);
+            for j in chains.range().filter(|&j| j != i && group_of(j) == group) {
+                let chain = self.rack_chains[j];
+                let Some(Instance::Drum(drum)) = turn.slot(chain.notes_slot()).node.as_mut() else {
+                    continue;
+                };
+                let mut sounded = drum.take_sounded();
+                let buffer = turn.notes(2 * self.tasks.len() + 2 * chain.buffer as usize);
+                while sounded != 0 {
+                    let key = sounded.trailing_zeros() as u8;
+                    buffer.insert(NoteEvent {
+                        offset,
+                        kind: NoteKind::Choke,
+                        channel: drum.channel(key),
+                        key,
+                        velocity: 0.0,
+                        note_id: None,
+                    });
+                    sounded &= sounded - 1;
+                }
+            }
+            if let Some(Instance::Drum(drum)) =
+                turn.slot(self.rack_chains[i].notes_slot()).node.as_mut()
+            {
+                drum.sound(key, channel);
+            }
+        }
+    }
+
+    /// Spec: drum-racks R6, R7. Feeds a drum rack's return chains with the
+    /// drum chains' sends, each taken after its chain's mixer, and runs
+    /// them.
+    fn run_returns(&self, pass: &mut Pass<'_>, task: Task, rack: usize) {
+        let Rack {
+            chains, returns, ..
+        } = self.racks[rack];
+        let turn = pass.turn;
+        let block = pass.block;
+        let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
+        let song = block.transport.playing.then(|| crate::automation::Song {
+            frame: block.transport.position.get(),
+            session: block.session,
+            tempo: &self.tempo,
+            rate: self.sample_rate,
+        });
+        let shape = crate::mixer::Planar {
+            channels,
+            stride,
+            frames,
+        };
+        for j in returns.range() {
+            let to = self.rack_chains[j];
+            let at = self.tasks.len() + to.buffer as usize;
+            for c in 0..channels {
+                turn.buffer(at)[c * stride..c * stride + frames].fill(0.0);
+            }
+            for i in chains.range() {
+                let from = self.rack_chains[i];
+                let from_at = self.tasks.len() + from.buffer as usize;
+                for send in self.chain_sends[from.sends.range()]
+                    .iter()
+                    .filter(|send| send.to as usize == j)
+                {
+                    pass.delivered += gather(
+                        block.events,
+                        send.route,
+                        block.from,
+                        block.until,
+                        pass.scratch,
+                    );
+                    if let Some(Instance::Route(route)) = turn.slot(send.route).node.as_mut() {
+                        route.mix(
+                            turn.buffer(at),
+                            turn.buffer(from_at),
+                            shape,
+                            song,
+                            turn.bus(frames),
+                            pass.scratch,
+                        );
+                    }
+                }
+            }
+            // A return chain has no notes.
+            turn.notes(2 * self.tasks.len() + 2 * to.buffer as usize)
+                .clear();
+            if let Some(kept) = to.taps[RackChain::tap_index(Tap::PreFx)] {
+                self.keep(&turn, kept, at, frames);
+            }
+            self.run_chain_at(pass, task, rack, true, j);
+        }
+    }
+
     /// Runs the `i`th chain of `rack`: its devices, then its mixer, held
     /// back to the rack's latency, all on the chain's own buffer. A MIDI
     /// effect rack's chain leaves a cursor on its notes for the merge.
     fn run_chain(&self, pass: &mut Pass<'_>, task: Task, rack: usize, i: usize) {
         let Rack { mode, chains, .. } = self.racks[rack];
-        let index = chains.start as usize + i;
+        self.run_chain_at(
+            pass,
+            task,
+            rack,
+            mode != RackMode::Midi,
+            chains.start as usize + i,
+        );
+    }
+
+    /// Runs the chain at `index` in `rack_chains`, of rack `rack`; `audio`
+    /// if it carries audio, not a MIDI effect rack's notes alone.
+    fn run_chain_at(
+        &self,
+        pass: &mut Pass<'_>,
+        task: Task,
+        rack: usize,
+        audio: bool,
+        index: usize,
+    ) {
         let chain = self.rack_chains[index];
         let turn = pass.turn;
         let block = pass.block;
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
-        let audio = mode != RackMode::Midi;
         let at_buffer = self.tasks.len() + chain.buffer as usize;
         let chain_pair = 2 * self.tasks.len() + 2 * chain.buffer as usize;
         let end = self.run_steps(pass, task, chain.steps, at_buffer, chain_pair, 0);
@@ -2226,7 +2456,7 @@ impl EngineProgram {
         if let Some(Instance::Selector(node)) = turn.slot(selector).node.as_mut() {
             node.flush(pass.scratch);
         }
-        for i in self.racks[rack].chains.range() {
+        for i in self.racks[rack].all().range() {
             let chain = self.rack_chains[i];
             pass.delivered += gather(
                 block.events,
@@ -2285,6 +2515,31 @@ impl EngineProgram {
             );
             if let Some(Instance::Mixer(mixer)) = turn.slot(chain.mixer).node.as_mut() {
                 mixer.flush(pass.scratch);
+            }
+            // A drum chain's note routing and sends take their changes too.
+            if chain.notes != NO_SLOT {
+                pass.delivered += gather(
+                    block.events,
+                    chain.notes,
+                    block.from,
+                    block.until,
+                    pass.scratch,
+                );
+                if let Some(Instance::Drum(drum)) = turn.slot(chain.notes).node.as_mut() {
+                    drum.flush(pass.scratch);
+                }
+            }
+            for send in &self.chain_sends[chain.sends.range()] {
+                pass.delivered += gather(
+                    block.events,
+                    send.route,
+                    block.from,
+                    block.until,
+                    pass.scratch,
+                );
+                if let Some(Instance::Route(route)) = turn.slot(send.route).node.as_mut() {
+                    route.flush(pass.scratch);
+                }
             }
         }
     }

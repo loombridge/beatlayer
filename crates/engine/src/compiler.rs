@@ -14,6 +14,7 @@ use crate::automation;
 use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::disjoint::Shared;
 use crate::display::Displays;
+use crate::drum::{self, ChainHits, DrumNotes};
 use crate::gc::{GcHandle, Program};
 use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
@@ -21,9 +22,9 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input, Instance,
-    MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_TASK, NodeSlot, Rack, RackChain,
-    RackMode, Span, Step, Task, delay_storage,
+    ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
+    Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_SLOT, NO_TASK, NodeSlot,
+    Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -97,6 +98,7 @@ enum Identity {
     Selector,
     /// The zone filter of a rack's chain (WP-5.3).
     Zones,
+    Drum,
 }
 
 /// Which clip players a compile sends their clips to, besides the new ones
@@ -175,6 +177,8 @@ pub struct Compiler {
     modulator_rows: crate::modbus::ModRows,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
+    /// The counters of the notes that reach drum chains.
+    hits: ChainHits,
 }
 
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
@@ -212,7 +216,15 @@ impl Compiler {
             progressive: BTreeMap::new(),
             modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
+            hits: ChainHits::default(),
         }
+    }
+
+    /// The counters of the notes that reach the drum chains this compiler's
+    /// programs have, which the shell reads (the drum racks spec, R20).
+    #[must_use]
+    pub fn chain_hits(&self) -> ChainHits {
+        self.hits.clone()
     }
 
     /// The readers of the displays of the nodes this compiler makes, which
@@ -866,6 +878,7 @@ impl Compiler {
             selects: Shared::new(vec![0.0; build.racks.len() * self.config.max_frames]),
             racks: build.racks,
             rack_chains: build.rack_chains,
+            chain_sends: build.chain_sends,
             sidechain_pool: Shared::new(vec![0.0; build.sidechains.len() * size]),
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
@@ -922,6 +935,8 @@ impl Compiler {
         self.layout = build.layout;
         self.displays
             .retain(|device| self.layout.contains_key(&NodeKey::Device(device)));
+        self.hits
+            .retain(|chain| self.layout.contains_key(&NodeKey::ChainNotes(chain)));
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
@@ -1336,9 +1351,11 @@ impl Compiler {
     }
 
     /// Adds a rack's chains (the racks spec, R3): each one's devices, its
-    /// mixer node keyed by the chain, and a buffer of its own. A rack with no
-    /// chains passes its input through, so it adds nothing. Returns the
-    /// rack's place in `build.racks`.
+    /// mixer node keyed by the chain, and a buffer of its own. A drum rack's
+    /// drum chains also get their note routing and their sends to its return
+    /// chains (the drum racks spec). A rack with no chains passes its input
+    /// through, so it adds nothing. Returns the rack's place in
+    /// `build.racks`.
     fn add_rack(
         &self,
         build: &mut Build,
@@ -1351,10 +1368,10 @@ impl Compiler {
             return None;
         }
         let config = self.config.node_config();
-        let solo = device.chains.iter().any(|chain| chain.mixer.solo);
         let mut chains = Vec::with_capacity(device.chains.len());
         for chain in &device.chains {
             let steps = self.add_flow(build, chain.devices.iter(), sidechain_inputs, dependencies);
+            let silenced = silenced_by_solo(device, chain);
             let mixer = self.place(
                 build,
                 NodeKey::ChainMixer(chain.id),
@@ -1362,7 +1379,7 @@ impl Compiler {
                 0,
                 || {
                     Instance::Mixer(Box::new(TrackMixer::new(
-                        &chain_mixer(chain, solo),
+                        &chain_mixer(chain, silenced),
                         0.5,
                         &config,
                     )))
@@ -1375,6 +1392,11 @@ impl Compiler {
                 0,
                 || Instance::Zones(Box::new(ZoneFilter::new(&chain.zones, &config))),
             );
+            let notes = if kind == RackKind::Drum && !chain.is_return {
+                self.add_drum_notes(build, chain)
+            } else {
+                NO_SLOT
+            };
             chains.push(RackChain {
                 steps,
                 mixer,
@@ -1382,6 +1404,10 @@ impl Compiler {
                 buffer: build.chain_buffers,
                 delay: NO_DELAY,
                 taps: [None; 3],
+                notes,
+                sends: Span::default(),
+                sum_delay: NO_DELAY,
+                summed: !chain.is_return || chain.audio_to.is_none(),
             });
             build.chain_buffers += 1;
         }
@@ -1393,6 +1419,27 @@ impl Compiler {
             || Instance::Selector(Box::new(ChainSelector::new(device, &config))),
         );
         let start = build.rack_chains.len() as u32;
+        let drum_chains = device.chains.iter().take_while(|c| !c.is_return).count();
+        let end = start + device.chains.len() as u32;
+        let middle = start + drum_chains as u32;
+        // A drum chain's send to each return chain, whose place is known
+        // now: a route with the send's level, from −∞ dB in a new send.
+        for (at, chain) in device.chains.iter().enumerate().take(drum_chains) {
+            let sends_start = build.chain_sends.len() as u32;
+            if kind == RackKind::Drum {
+                for (to, ret) in device.chains.iter().enumerate().skip(drum_chains) {
+                    let route = self.add_chain_send(build, chain, ret);
+                    build.chain_sends.push(ChainSendRef {
+                        route,
+                        to: start + to as u32,
+                    });
+                }
+            }
+            chains[at].sends = Span {
+                start: sends_start,
+                end: build.chain_sends.len() as u32,
+            };
+        }
         build.rack_chains.extend(chains);
         for (at, chain) in device.chains.iter().enumerate() {
             build.chain_index.insert(chain.id, start + at as u32);
@@ -1402,18 +1449,56 @@ impl Compiler {
             task: build.tasks.len() as u32,
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
-                RackKind::Instrument | RackKind::Drum => RackMode::Instrument,
+                RackKind::Instrument => RackMode::Instrument,
+                RackKind::Drum => RackMode::Drum,
                 RackKind::MidiEffect => RackMode::Midi,
             },
-            chains: Span {
-                start,
-                end: build.rack_chains.len() as u32,
-            },
+            chains: Span { start, end: middle },
+            returns: Span { start: middle, end },
             bypass: !device.enabled,
             latency: 0,
             selector,
         });
         Some(build.racks.len() as u32 - 1)
+    }
+
+    /// The slot of a drum chain's note routing, made or migrated and told
+    /// the chain's Receive, Play and Choke now.
+    fn add_drum_notes(&self, build: &mut Build, chain: &Chain) -> u32 {
+        let key = NodeKey::ChainNotes(chain.id);
+        let settings = drum_settings(chain);
+        if self.previous(key, &Identity::Drum).is_some() {
+            for (param, value) in settings {
+                build.restate.push(ParamEvent::now(key, param, value));
+            }
+        }
+        self.place(build, key, Identity::Drum, 0, || {
+            Instance::Drum(Box::new(DrumNotes::new(
+                settings[0].1 as u8,
+                settings[1].1 as u8,
+                settings[2].1 as u8,
+                self.hits.counter(chain.id),
+            )))
+        })
+    }
+
+    /// The slot of the route that carries a drum chain's send to the return
+    /// chain `ret`.
+    fn add_chain_send(&self, build: &mut Build, chain: &Chain, ret: &Chain) -> u32 {
+        let config = self.config.node_config();
+        let key = NodeKey::ChainSend {
+            chain: chain.id,
+            to: ret.id,
+        };
+        let level = chain.send(ret.id);
+        if self.previous(key, &Identity::Route).is_some() {
+            build
+                .restate
+                .push(ParamEvent::now(key, route::LEVEL, level));
+        }
+        self.place(build, key, Identity::Route, 0, || {
+            Instance::Route(Box::new(Route::new(level, false, &config)))
+        })
     }
 
     /// Adds the sidechain of the device in `slot`: its settings, made or
@@ -1551,6 +1636,8 @@ struct Build {
     steps: Vec<Step>,
     racks: Vec<Rack>,
     rack_chains: Vec<RackChain>,
+    /// The sends of drum chains to their racks' return chains.
+    chain_sends: Vec<ChainSendRef>,
     /// How many rack chains have a buffer of their own so far.
     chain_buffers: u32,
     /// Each rack chain's place in `rack_chains`.
@@ -1594,6 +1681,7 @@ fn route_key(edge: &Edge) -> NodeKey {
         },
         Via::Input => NodeKey::Input(edge.to),
         Via::Sidechain(device) => NodeKey::SidechainInput(device),
+        Via::Chain(chain) => NodeKey::ChainOutput(chain),
     }
 }
 
@@ -1702,10 +1790,32 @@ fn compensate(build: &mut Build, order: &[u32]) {
             .map(|chain| flow_latency(build, chain.steps))
             .collect();
         let slowest = latencies.iter().copied().max().unwrap_or(0);
-        build.racks[r].latency = slowest;
         for (i, latency) in rack.chains.range().zip(latencies) {
             if slowest > latency {
                 let index = line(build, slowest - latency);
+                build.rack_chains[i].delay = index;
+            }
+        }
+        // A drum rack's sends take the chains at the slowest one's time,
+        // the return chains run from there, and the rack's output waits for
+        // the slowest return chain it sums (the drum racks spec, R22).
+        let returned: Vec<(usize, u32)> = rack
+            .returns
+            .range()
+            .filter(|&i| build.rack_chains[i].summed)
+            .map(|i| (i, flow_latency(build, build.rack_chains[i].steps)))
+            .collect();
+        let total = slowest + returned.iter().map(|&(_, l)| l).max().unwrap_or(0);
+        build.racks[r].latency = total;
+        if total > slowest {
+            for i in rack.chains.range() {
+                let index = line(build, total - slowest);
+                build.rack_chains[i].sum_delay = index;
+            }
+        }
+        for (i, latency) in returned {
+            if total > slowest + latency {
+                let index = line(build, total - slowest - latency);
                 build.rack_chains[i].delay = index;
             }
         }
@@ -1865,11 +1975,30 @@ fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(
                     if rack.bypass {
                         continue;
                     }
-                    for i in rack.chains.range() {
+                    // A drum rack's return chains start where its slowest
+                    // drum chain ends, which is where its sends take them.
+                    let sent = rack
+                        .chains
+                        .range()
+                        .map(|i| flow_latency(build, build.rack_chains[i].steps))
+                        .max()
+                        .unwrap_or(0);
+                    for i in rack.all().range() {
                         let chain = &build.rack_chains[i];
-                        rack_at[i].0 = before;
-                        walk(build, chain.steps, before, out, rack_at);
-                        out.push((chain.mixer, before + flow_latency(build, chain.steps)));
+                        let start = if i < rack.returns.start as usize {
+                            before
+                        } else {
+                            before + sent
+                        };
+                        rack_at[i].0 = start;
+                        walk(build, chain.steps, start, out, rack_at);
+                        out.push((chain.mixer, start + flow_latency(build, chain.steps)));
+                    }
+                    // A send's level acts on the audio at that time too.
+                    for i in rack.chains.range() {
+                        for send in &build.chain_sends[build.rack_chains[i].sends.range()] {
+                            out.push((send.route, before + sent));
+                        }
                     }
                     before += rack.latency;
                 }
@@ -1882,15 +2011,48 @@ fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(
 }
 
 /// A rack chain's mixer as a node's state: its Volume and Pan, and muted
-/// while its activator is off or, while any chain of its rack (`solo`) is
-/// soloed, it isn't (the racks spec, R5).
-fn chain_mixer(chain: &Chain, solo: bool) -> Mixer {
+/// while its activator is off or its rack's solo silences it
+/// ([`silenced_by_solo`]).
+fn chain_mixer(chain: &Chain, silenced: bool) -> Mixer {
     Mixer {
         volume: chain.mixer.volume,
         pan: chain.mixer.pan,
-        mute: !chain.mixer.enabled || (solo && !chain.mixer.solo),
+        mute: !chain.mixer.enabled || silenced,
         ..Mixer::default()
     }
+}
+
+/// Whether the solo of a chain of `rack` silences `chain`: while any chain
+/// is soloed, the others add nothing (the racks spec, R5). A drum rack's
+/// return chains stay audible while only drum chains are soloed, carrying
+/// just their sends (the drum racks spec, R9).
+fn silenced_by_solo(rack: &Device, chain: &Chain) -> bool {
+    let soloed = |returns: bool| {
+        rack.chains
+            .iter()
+            .any(|c| c.mixer.solo && c.is_return == returns)
+    };
+    !chain.mixer.solo
+        && if chain.is_return {
+            soloed(true)
+        } else {
+            soloed(false) || soloed(true)
+        }
+}
+
+/// The parameters of a drum chain's note routing that the document sets.
+fn drum_settings(chain: &Chain) -> [(ParamId, f64); 3] {
+    [
+        (
+            drum::param::RECEIVE,
+            match chain.receive {
+                bl_model::Receive::AllNotes => drum::param::ALL_NOTES,
+                bl_model::Receive::Note(note) => f64::from(note),
+            },
+        ),
+        (drum::param::PLAY, f64::from(chain.play)),
+        (drum::param::CHOKE, f64::from(chain.choke.unwrap_or(0))),
+    ]
 }
 
 /// A new delay line of `len` frames, returning its index in the program.
@@ -2065,15 +2227,39 @@ fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modul
 /// has a mixer made with its state, so only chains in both documents count,
 /// wherever they sit in them.
 fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mut Vec<ParamEvent>) {
-    fn states(document: &Document, ids: &[DeviceId]) -> BTreeMap<ChainId, Mixer> {
+    /// A drum chain's note routing and the levels of its sends to the
+    /// rack's return chains.
+    type Drum = ([(ParamId, f64); 3], Vec<(ChainId, f64)>);
+    /// What a chain's nodes hold: its mixer, and for a drum chain its drum
+    /// settings.
+    struct State {
+        mixer: Mixer,
+        drum: Option<Drum>,
+    }
+    fn states(document: &Document, ids: &[DeviceId]) -> BTreeMap<ChainId, State> {
         let mut states = BTreeMap::new();
         for &id in ids {
             let Some(rack) = document.device(id) else {
                 continue;
             };
-            let solo = rack.chains.iter().any(|chain| chain.mixer.solo);
             for chain in &rack.chains {
-                states.insert(chain.id, chain_mixer(chain, solo));
+                let drum =
+                    (rack.rack_kind() == Some(RackKind::Drum) && !chain.is_return).then(|| {
+                        let sends = rack
+                            .chains
+                            .iter()
+                            .filter(|c| c.is_return)
+                            .map(|c| (c.id, chain.send(c.id)))
+                            .collect();
+                        (drum_settings(chain), sends)
+                    });
+                states.insert(
+                    chain.id,
+                    State {
+                        mixer: chain_mixer(chain, silenced_by_solo(rack, chain)),
+                        drum,
+                    },
+                );
             }
         }
         states
@@ -2096,7 +2282,22 @@ fn chain_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
         let Some(is) = after.get(&chain) else {
             continue;
         };
-        mixer_events_for(NodeKey::ChainMixer(chain), &was, is, params);
+        mixer_events_for(NodeKey::ChainMixer(chain), &was.mixer, &is.mixer, params);
+        if let (Some((then, sent)), Some((now, sends))) = (&was.drum, &is.drum) {
+            for (&(param, was), &(_, is)) in then.iter().zip(now) {
+                if was != is {
+                    params.push(ParamEvent::now(NodeKey::ChainNotes(chain), param, is));
+                }
+            }
+            for &(to, level) in sends {
+                // A send to a return chain that is new has a route made
+                // with its level.
+                if sent.iter().any(|&(t, l)| t == to && l != level) {
+                    let key = NodeKey::ChainSend { chain, to };
+                    params.push(ParamEvent::now(key, route::LEVEL, level));
+                }
+            }
+        }
     }
     // The zones of the chains in both documents (WP-5.3): each number that
     // changed.

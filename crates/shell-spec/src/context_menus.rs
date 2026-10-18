@@ -159,6 +159,23 @@ pub fn device() -> Vec<MenuItem> {
     items(DEVICE)
 }
 
+/// The row of Group to Drum Rack (C-DEVICE-013), which a device's menu
+/// offers straight after Group wherever the selection could sit in one
+/// chain of a drum rack (the drum racks spec, R25).
+pub const GROUP_TO_DRUM_RACK_ROW: &str = "C-DEVICE-013";
+
+/// The Group to Drum Rack item, which the UI adds after Group while the
+/// command can run.
+#[must_use]
+pub fn group_to_drum_rack() -> MenuItem {
+    items(&[(
+        GROUP_TO_DRUM_RACK_ROW,
+        "Group to Drum Rack",
+        Cmd(crate::pads::GROUP_TO_DRUM_RACK),
+    )])
+    .remove(0)
+}
+
 /// The row of Beatlayer's own Ungroup in a rack's menu (racks spec, R26),
 /// straight after Group: not a row of menus.md.
 pub const R26_UNGROUP: &str = "R26-ungroup";

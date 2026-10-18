@@ -15,8 +15,9 @@ use bl_shell::device_commands::{
     CHAIN_DROP_AREA_HEIGHT, CHAIN_ROW_HEIGHT, ChainRow, DEVICE_GAP, DeviceFrame,
     RACK_CHAIN_LIST_WIDTH, RACK_COLUMN_WIDTH, RACK_EMPTY_DEVICES_WIDTH, RACK_END_BRACKET_WIDTH,
     RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH, RACK_ZONE_EDITOR_WIDTH, RackFrame,
-    TITLE_BAR_HEIGHT, frame_width,
+    TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
 };
+use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIGHT};
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
@@ -65,6 +66,36 @@ pub struct ChainRowRects {
     pub volume: Rect,
     /// The Pan slider; empty where the chain has none.
     pub pan: Rect,
+    /// A drum chain's Preview button, Receive, Play and Choke choosers, with
+    /// Input/Output on (drum racks spec, R21).
+    pub io: Option<IoRects>,
+    /// A drum chain's send slider to each return chain, with Send on: a
+    /// drum rack holds six return chains at most.
+    pub sends: [Option<Rect>; bl_model::MAX_RETURN_CHAINS],
+    /// A return chain's Audio To chooser.
+    pub audio_to: Option<Rect>,
+}
+
+/// Where a drum chain's Input/Output controls sit in its row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IoRects {
+    /// The Preview button.
+    pub preview: Rect,
+    /// The Receive chooser.
+    pub receive: Rect,
+    /// The Play chooser.
+    pub play: Rect,
+    /// The Choke chooser.
+    pub choke: Rect,
+}
+
+/// Where a chain list's return section sits (drum racks spec, R7).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReturnSectionRects {
+    /// The heading above the return chains' rows.
+    pub heading: Rect,
+    /// The drop area below the return chains.
+    pub drop_area: Rect,
 }
 
 /// A button in the header above a rack's chain list (racks spec, R35, R37).
@@ -90,10 +121,15 @@ pub struct ChainListRects {
     pub header: Rect,
     /// The header's buttons.
     pub buttons: Vec<(ZoneButton, Rect)>,
-    /// A row per chain, those scrolled out of the list included.
+    /// A row per chain shown, those scrolled out of the list included: a
+    /// drum rack's return chains' rows only while the Return switch is on.
     pub rows: Vec<ChainRowRects>,
-    /// The drop area below the rows.
+    /// The drop area below the (drum) chains' rows.
     pub drop_area: Rect,
+    /// A drum rack's return section, while the Return switch is on.
+    pub returns: Option<ReturnSectionRects>,
+    /// The height of everything the list holds, for scrolling.
+    pub content_height: f32,
 }
 
 /// Where a rack's zone editor and its rows sit (racks spec, R35).
@@ -122,6 +158,8 @@ pub struct RackLayout {
     pub selectors: Vec<(RackView, Rect)>,
     /// The Macro Controls' place, while it's shown.
     pub macros: Option<Rect>,
+    /// A drum rack's pad view, while it's shown.
+    pub pads: Option<crate::drum_view::PadLayout>,
     /// The chain list, while it's shown.
     pub chain_list: Option<ChainListRects>,
     /// The zone editor, while one is shown.
@@ -141,10 +179,48 @@ pub fn selector_name(view: RackView) -> &'static str {
         RackView::Macros => "Macro Controls View",
         RackView::ChainList => "Chain List View",
         RackView::Devices => "Devices View",
+        RackView::Pads => "Pad View",
+        RackView::InputOutput => "Show/Hide Input/Output",
+        RackView::Send => "Show/Hide Sends",
+        RackView::Returns => "Show/Hide Returns",
+        RackView::AutoSelect => "Auto Select",
     }
 }
 
 const VIEWS: [RackView; 3] = [RackView::Macros, RackView::ChainList, RackView::Devices];
+
+/// A drum rack's selectors: the pad view between the Macro Controls and the
+/// chain list, and four switches under the views (drum racks spec, R21).
+const DRUM_VIEWS: [RackView; 8] = [
+    RackView::Macros,
+    RackView::Pads,
+    RackView::ChainList,
+    RackView::Devices,
+    RackView::InputOutput,
+    RackView::Send,
+    RackView::Returns,
+    RackView::AutoSelect,
+];
+
+/// The selectors a rack's view column has, top to bottom.
+fn views_of(rack: &RackFrame) -> &'static [RackView] {
+    if rack.pads.is_some() {
+        &DRUM_VIEWS
+    } else {
+        &VIEWS
+    }
+}
+
+/// Where the `n`th selector of a view column sits: the switches of a drum
+/// rack are set a little apart from its views.
+fn selector_y(top: f32, n: usize, views: &[RackView]) -> f32 {
+    let gap = views
+        .iter()
+        .position(|v| *v == RackView::InputOutput)
+        .filter(|&at| n >= at)
+        .map_or(0.0, |_| 5.0);
+    top + n as f32 * (BUTTON + 3.0) + gap
+}
 
 /// The ID of a rack's view selector.
 #[must_use]
@@ -173,14 +249,14 @@ pub fn drop_area_id(rack: DeviceId) -> Id {
 
 /// Where a rack's view selectors sit when it's a strip (every view hidden):
 /// under the activator.
-fn strip_selectors(rect: Rect) -> Vec<(RackView, Rect)> {
+fn strip_selectors(rect: Rect, views: &[RackView]) -> Vec<(RackView, Rect)> {
     let x = rect.center().x;
     let first = rect.top() + 2.0 + BUTTON + 6.0 + BUTTON / 2.0;
-    VIEWS
+    views
         .iter()
         .enumerate()
         .map(|(n, view)| {
-            let y = first + n as f32 * (BUTTON + 3.0);
+            let y = selector_y(first, n, views);
             (
                 *view,
                 Rect::from_center_size(pos2(x, y), vec2(BUTTON, BUTTON)),
@@ -195,7 +271,8 @@ fn strip_selectors(rect: Rect) -> Vec<(RackView, Rect)> {
 pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
     if rack.is_strip() {
         return RackLayout {
-            selectors: strip_selectors(rect),
+            selectors: strip_selectors(rect, views_of(rack)),
+            pads: None,
             macros: None,
             chain_list: None,
             zone_editor: None,
@@ -206,13 +283,14 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
     }
     let body = Rect::from_min_max(pos2(rect.left(), rect.top() + TITLE_BAR_HEIGHT), rect.max);
     let column = Rect::from_min_size(body.min, vec2(RACK_COLUMN_WIDTH, body.height()));
-    let selectors = VIEWS
+    let views = views_of(rack);
+    let selectors = views
         .iter()
         .enumerate()
         .map(|(n, view)| {
             let centre = pos2(
                 column.center().x,
-                column.top() + 4.0 + BUTTON / 2.0 + n as f32 * (BUTTON + 3.0),
+                selector_y(column.top() + 4.0 + BUTTON / 2.0, n, views),
             );
             (*view, Rect::from_center_size(centre, vec2(BUTTON, BUTTON)))
         })
@@ -224,10 +302,17 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         area
     };
     let macros = rack.views.macros.then(|| part(RACK_MACROS_WIDTH));
+    let pads = (rack_pads_width(rack) > 0.0)
+        .then(|| part(rack_pads_width(rack)))
+        .and_then(|area| {
+            rack.pads
+                .as_ref()
+                .map(|pads| crate::drum_view::pad_layout(pads, area))
+        });
     let chain_list = rack
         .views
         .chain_list
-        .then(|| chain_list(rack, part(RACK_CHAIN_LIST_WIDTH), scroll));
+        .then(|| chain_list(rack, part(rack_chain_list_width(rack)), scroll));
     let zone_editor = rack
         .zone_editor()
         .map(|kind| zone_editor(rack, kind, part(RACK_ZONE_EDITOR_WIDTH), scroll));
@@ -255,6 +340,7 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
     }
     RackLayout {
         selectors,
+        pads,
         macros,
         chain_list,
         zone_editor,
@@ -370,35 +456,71 @@ fn zone_editor(rack: &RackFrame, kind: ZoneKind, area: Rect, scroll: f32) -> Zon
 }
 
 fn chain_list(rack: &RackFrame, area: Rect, scroll: f32) -> ChainListRects {
+    let drum = rack.pads.is_some();
+    let io = drum && rack.views.input_output;
+    let returns = rack.chains.iter().filter(|c| c.output.is_some()).count();
+    let sends = if drum && rack.views.send { returns } else { 0 };
     let header = Rect::from_min_size(area.min, vec2(area.width(), header_height(rack)));
     let rows_area = Rect::from_min_max(pos2(area.left(), header.bottom()), area.max);
     let mut y = rows_area.top() + 2.0 - scroll;
-    let rows = rack
-        .chains
-        .iter()
-        .map(|chain| {
-            let row = Rect::from_min_max(
-                pos2(area.left() + 2.0, y),
-                pos2(area.right() - 2.0, y + CHAIN_ROW_HEIGHT - 2.0),
-            );
-            y += CHAIN_ROW_HEIGHT;
-            row_rects(chain, row)
-        })
-        .collect();
+    let next = |chain: &ChainRow, y: &mut f32| {
+        let row = Rect::from_min_max(
+            pos2(area.left() + 2.0, *y),
+            pos2(area.right() - 2.0, *y + CHAIN_ROW_HEIGHT - 2.0),
+        );
+        *y += CHAIN_ROW_HEIGHT;
+        row_rects(chain, row, io, sends)
+    };
+    let mut rows = Vec::new();
+    for chain in rack.chains.iter().filter(|c| c.output.is_none()) {
+        rows.push(next(chain, &mut y));
+    }
+    let drop_area = Rect::from_min_max(
+        pos2(area.left() + 2.0, y + 2.0),
+        pos2(area.right() - 2.0, y + 2.0 + CHAIN_DROP_AREA_HEIGHT),
+    );
+    y = drop_area.bottom();
+    let mut section = None;
+    if drum && rack.views.returns {
+        let heading = Rect::from_min_max(
+            pos2(area.left() + 2.0, y + 2.0),
+            pos2(area.right() - 2.0, y + 2.0 + RETURN_HEADING_HEIGHT),
+        );
+        y = heading.bottom() + 2.0;
+        for chain in rack.chains.iter().filter(|c| c.output.is_some()) {
+            rows.push(next(chain, &mut y));
+        }
+        let drop_area = Rect::from_min_max(
+            pos2(area.left() + 2.0, y + 2.0),
+            pos2(area.right() - 2.0, y + 2.0 + CHAIN_DROP_AREA_HEIGHT),
+        );
+        y = drop_area.bottom();
+        section = Some(ReturnSectionRects { heading, drop_area });
+    }
     ChainListRects {
         area,
         rows_area,
         header,
         buttons: header_buttons(rack, header),
         rows,
-        drop_area: Rect::from_min_max(
-            pos2(area.left() + 2.0, y + 2.0),
-            pos2(area.right() - 2.0, y + 2.0 + CHAIN_DROP_AREA_HEIGHT),
-        ),
+        drop_area,
+        returns: section,
+        content_height: y + scroll - rows_area.top() + 4.0,
     }
 }
 
-fn row_rects(chain: &ChainRow, row: Rect) -> ChainRowRects {
+fn row_rects(chain: &ChainRow, row: Rect, io: bool, sends: usize) -> ChainRowRects {
+    // The controls every chain has fill the first stretch of the row; a
+    // drum rack's columns follow.
+    let whole = row;
+    let row = if chain.drum.is_some() || chain.output.is_some() {
+        Rect::from_min_max(
+            row.min,
+            pos2(row.left() + RACK_CHAIN_LIST_WIDTH - 4.0, row.bottom()),
+        )
+    } else {
+        row
+    };
     let line = row.top() + 8.0;
     let button = |x: f32| Rect::from_center_size(pos2(x, line), vec2(BUTTON, BUTTON));
     let hot_swap = button(row.right() - 2.0 - BUTTON / 2.0);
@@ -422,15 +544,54 @@ fn row_rects(chain: &ChainRow, row: Rect) -> ChainRowRects {
     } else {
         (Rect::NOTHING, Rect::NOTHING)
     };
+    // The columns right of the row's controls, on its middle line.
+    let middle = whole.center().y;
+    let cell = |x: f32, width: f32| {
+        Rect::from_min_max(pos2(x, middle - 6.0), pos2(x + width, middle + 6.0))
+    };
+    let mut x = row.right() + 4.0;
+    let mut io_rects = None;
+    let mut audio_to = None;
+    if chain.drum.is_some() && io {
+        let preview = Rect::from_center_size(pos2(x + BUTTON / 2.0, middle), vec2(BUTTON, BUTTON));
+        let receive = cell(preview.right() + 2.0, 56.0);
+        let play = cell(receive.right() + 2.0, 50.0);
+        let choke = cell(play.right() + 2.0, 28.0);
+        io_rects = Some(IoRects {
+            preview,
+            receive,
+            play,
+            choke,
+        });
+        x += DRUM_IO_WIDTH;
+    } else if chain.output.is_some() {
+        audio_to = Some(cell(x, DRUM_IO_WIDTH - 6.0));
+        x += DRUM_IO_WIDTH;
+    } else if io || sends > 0 {
+        // A chain without the columns still leaves their room.
+        x += if io { DRUM_IO_WIDTH } else { 0.0 };
+    }
+    let mut send_rects = [None; bl_model::MAX_RETURN_CHAINS];
+    if chain.drum.is_some() {
+        for (n, slot) in send_rects.iter_mut().enumerate().take(sends) {
+            *slot = Some(Rect::from_min_max(
+                pos2(x + n as f32 * DRUM_SEND_WIDTH, middle - 5.0),
+                pos2(x + (n as f32 + 1.0) * DRUM_SEND_WIDTH - 3.0, middle + 5.0),
+            ));
+        }
+    }
     ChainRowRects {
         chain: chain.id,
-        row,
+        row: whole,
         activator,
         name,
         solo,
         hot_swap,
         volume,
         pan,
+        io: io_rects,
+        sends: send_rects,
+        audio_to,
     }
 }
 
@@ -569,6 +730,9 @@ impl DeviceViewUi {
                 node.set_label("Macro Controls".to_owned());
             });
         }
+        if let (Some(pads), Some(at)) = (&rack.pads, &layout.pads) {
+            self.pad_view(ui, shell, theme, frame, pads, at, events);
+        }
         if let Some(list) = &layout.chain_list {
             self.chain_list(ui, shell, theme, frame, rack, list, events);
         }
@@ -674,6 +838,66 @@ impl DeviceViewUi {
                     StrokeKind::Inside,
                 );
             }
+            // The pad view: a grid of four.
+            RackView::Pads => {
+                for (dx, dy) in [(-2.0, -2.0), (2.0, -2.0), (-2.0, 2.0), (2.0, 2.0)] {
+                    painter.rect_filled(
+                        Rect::from_center_size(c0 + vec2(dx, dy), vec2(3.0, 3.0)),
+                        0.0,
+                        ink,
+                    );
+                }
+            }
+            // Input/Output: arrows in and out.
+            RackView::InputOutput => {
+                painter.line_segment(
+                    [pos2(c0.x - 3.0, c0.y - 1.5), pos2(c0.x + 3.0, c0.y - 1.5)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos2(c0.x - 3.0, c0.y + 1.5), pos2(c0.x + 3.0, c0.y + 1.5)],
+                    stroke,
+                );
+                painter.circle_filled(pos2(c0.x - 3.0, c0.y - 1.5), 1.0, ink);
+                painter.circle_filled(pos2(c0.x + 3.0, c0.y + 1.5), 1.0, ink);
+            }
+            // Send: a wedge.
+            RackView::Send => {
+                painter.add(Shape::convex_polygon(
+                    vec![
+                        c0 + vec2(-3.0, -3.0),
+                        c0 + vec2(3.0, 0.0),
+                        c0 + vec2(-3.0, 3.0),
+                    ],
+                    ink,
+                    Stroke::NONE,
+                ));
+            }
+            // Return: a curve back.
+            RackView::Returns => {
+                painter.line_segment(
+                    [pos2(c0.x + 3.0, c0.y - 2.0), pos2(c0.x - 3.0, c0.y - 2.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos2(c0.x - 3.0, c0.y - 2.0), pos2(c0.x - 3.0, c0.y + 2.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos2(c0.x - 3.0, c0.y + 2.0), pos2(c0.x + 3.0, c0.y + 2.0)],
+                    stroke,
+                );
+            }
+            // Auto Select: a pointer on a row.
+            RackView::AutoSelect => {
+                painter.rect_stroke(
+                    Rect::from_center_size(c0, vec2(7.0, 4.0)),
+                    0.5,
+                    stroke,
+                    StrokeKind::Inside,
+                );
+                painter.circle_filled(c0 + vec2(2.0, 2.0), 1.5, ink);
+            }
         }
         if response.has_focus() && crate::focus::outlined(ui.ctx()) {
             painter.rect_stroke(
@@ -723,7 +947,7 @@ impl DeviceViewUi {
         let painter = ui.painter_at(list.area);
         painter.rect_filled(list.area, 0.0, c.window.0.gamma_multiply(0.5));
         // The wheel scrolls a list taller than the rack.
-        let content = list.rows.len() as f32 * CHAIN_ROW_HEIGHT + CHAIN_DROP_AREA_HEIGHT + 6.0;
+        let content = list.content_height;
         if area_response.hovered() || ui.rect_contains_pointer(list.area) {
             let delta = ui.input(|i| i.smooth_scroll_delta.y);
             if delta != 0.0 {
@@ -734,7 +958,10 @@ impl DeviceViewUi {
         }
         self.chain_keys(ui, shell, rack, events);
         let drag = DragAndDrop::payload::<ChainDrag>(ui.ctx());
-        for (row, rects) in rack.chains.iter().zip(&list.rows) {
+        for rects in &list.rows {
+            let Some(row) = rack.chains.iter().find(|c| c.id == rects.chain) else {
+                continue;
+            };
             if rects.row.bottom() < list.rows_area.top()
                 || rects.row.top() > list.rows_area.bottom()
             {
@@ -742,6 +969,7 @@ impl DeviceViewUi {
             }
             self.chain_row(ui, shell, theme, rack, row, rects, list, events);
         }
+        self.return_section(ui, theme, frame, rack, list, events);
         self.chain_drop(ui, theme, frame, rack, list, drag.as_deref(), events);
         self.zone_header(ui, theme, frame, rack, list, events);
     }
@@ -1317,6 +1545,7 @@ impl DeviceViewUi {
             self.chain_slider(ui, theme, row, rects.volume, "volume", events);
             self.chain_slider(ui, theme, row, rects.pan, "pan", events);
         }
+        self.drum_cells(ui, theme, rack, row, rects, events);
     }
 
     /// A chain's name, or the text field it's being renamed in.
@@ -1586,7 +1815,7 @@ impl DeviceViewUi {
 
     /// The steps Up and Down (or a screen reader's Increment and Decrement)
     /// move a focused slider, and whether Delete resets it.
-    fn slider_keys(ui: &Ui, response: &egui::Response) -> (i32, bool) {
+    pub(crate) fn slider_keys(ui: &Ui, response: &egui::Response) -> (i32, bool) {
         if response.clicked() || response.drag_started() {
             response.request_focus();
         }
@@ -1751,8 +1980,14 @@ impl DeviceViewUi {
                     .count();
                 events.push(UiEvent::BeginNamedGesture("Move Chain".to_owned()));
                 // The rack's own dragged chains go to the end first, so each
-                // move below lands among chains that stay put.
-                let last = rack.chains.len().saturating_sub(1);
+                // move below lands among chains that stay put: in a drum
+                // rack, the end of its drum chains, before its returns.
+                let last = rack
+                    .chains
+                    .iter()
+                    .filter(|c| c.output.is_none())
+                    .count()
+                    .saturating_sub(1);
                 for chain in drag
                     .chains
                     .iter()

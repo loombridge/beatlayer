@@ -282,7 +282,7 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
             param: MixerParam::Mute,
             ..
         } => LaneScale::Switch,
-        AutomationTarget::Send { .. } => LaneScale::Send,
+        AutomationTarget::Send { .. } | AutomationTarget::ChainSend { .. } => LaneScale::Send,
         AutomationTarget::Device { device, param } => {
             let range = doc
                 .device(device)
@@ -324,7 +324,8 @@ pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
         AutomationTarget::Mixer { .. }
         | AutomationTarget::Send { .. }
         // The Device View's chain list picks chain controls (WP-5.2).
-        | AutomationTarget::Chain { .. } => AutomationDevice::Mixer,
+        | AutomationTarget::Chain { .. }
+        | AutomationTarget::ChainSend { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
         AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
@@ -945,6 +946,10 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
                 MixerParam::Pan => format!("{name} Pan"),
                 MixerParam::Mute => format!("{name} Activator"),
             }
+        }
+        AutomationTarget::ChainSend { chain, to } => {
+            let name = |id| doc.chain(id).map_or("Chain", |chain| chain.name.as_str());
+            format!("{} Send to {}", name(chain), name(to))
         }
         AutomationTarget::Device { device, param } => doc
             .device(device)

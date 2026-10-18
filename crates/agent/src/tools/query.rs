@@ -358,9 +358,20 @@ impl View<'_> {
             let chains: Vec<Value> = device
                 .chains
                 .iter()
+                .filter(|c| !c.is_return)
                 .map(|c| self.chain_summary(c))
                 .collect();
             value["chains"] = json!(chains);
+            // A drum rack's return chains (drum racks spec, R27).
+            if device.rack_kind() == Some(bl_model::RackKind::Drum) {
+                let returns: Vec<Value> = device
+                    .chains
+                    .iter()
+                    .filter(|c| c.is_return)
+                    .map(|c| self.chain_summary(c))
+                    .collect();
+                value["returns"] = json!(returns);
+            }
         }
         value
     }
@@ -375,7 +386,7 @@ impl View<'_> {
             })
         };
         let mixer = &chain.mixer;
-        json!({
+        let mut value = json!({
             "id": chain.id,
             "name": chain.name,
             "colour": chain.colour,
@@ -393,7 +404,25 @@ impl View<'_> {
                 "select": zone(chain.zones.select),
             },
             "devices": chain.devices.iter().map(|d| self.device_summary(d)).collect::<Vec<_>>(),
-        })
+        });
+        // What only a drum rack's chains have (drum racks spec, R27); a
+        // chain of any other rack holds the defaults.
+        if self
+            .document
+            .chain_rack(chain.id)
+            .and_then(Device::rack_kind)
+            == Some(bl_model::RackKind::Drum)
+        {
+            if chain.is_return {
+                value["audio_to"] = json!(chain.audio_to);
+            } else {
+                value["receive"] = json!(chain.receive);
+                value["play"] = json!(chain.play);
+                value["choke"] = json!(chain.choke);
+                value["sends"] = json!(chain.sends);
+            }
+        }
+        value
     }
 
     fn chain(&self, chain: &Chain) -> Value {
@@ -619,6 +648,9 @@ fn target_label(target: &AutomationTarget) -> String {
                 .and_then(|name| name.as_str().map(str::to_owned))
                 .unwrap_or_default()
         ),
+        AutomationTarget::ChainSend { chain, to } => {
+            format!("chain {} send {}", chain.0.get(), to.0.get())
+        }
         AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
         AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
         AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),

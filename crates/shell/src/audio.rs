@@ -771,6 +771,24 @@ impl AudioHost {
         }
     }
 
+    /// Sends the engine's node `key` a parameter change that takes effect
+    /// at the start of the next block, as a held Preview button does for a
+    /// drum chain (the drum racks spec, R5). Nothing while no engine runs.
+    pub fn send_param(&self, key: bl_engine::NodeKey, param: bl_model::ParamId, value: f64) {
+        if let Some(engine) = &self.engine {
+            engine.send_param(bl_engine::ParamEvent::now(key, param, value));
+        }
+    }
+
+    /// How many notes have reached each drum chain of the running program
+    /// (the drum racks spec, R20); empty while no engine runs.
+    pub fn chain_hits_into(&self, out: &mut std::collections::BTreeMap<bl_model::ChainId, u64>) {
+        out.clear();
+        if let Some(engine) = &self.engine {
+            engine.chain_hits().read_all(out);
+        }
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which

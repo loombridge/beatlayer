@@ -935,6 +935,19 @@ fn recorded_audio_is_warped_as_the_setting_says() {
     assert_eq!(audio.warp_markers[0].time, 0.0);
     assert_eq!(audio.warp_markers[0].beat, Ticks::ZERO);
     assert_eq!(audio.tempo, Some(120.0));
+    assert_eq!(audio.warp_mode, bl_model::WarpMode::Beats);
+
+    // Default Warp Mode is the warp mode of a new warped clip (R33).
+    let dir = TestDir::new("warped-mode");
+    let (mut shell, _control) = duplex_shell();
+    shell
+        .run(
+            "settings.set_default_warp_mode",
+            json!({ "mode": "texture" }),
+        )
+        .unwrap();
+    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    assert_eq!(audio.warp_mode, bl_model::WarpMode::Texture, "{audio:?}");
 
     // A tempo change inside the take gets a marker, at the time and beat the
     // file reaches it, and the take's last tempo is the clip's.

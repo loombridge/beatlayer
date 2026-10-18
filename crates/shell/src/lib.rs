@@ -85,6 +85,7 @@ pub mod plugins;
 pub mod processed;
 pub mod recording;
 pub mod routing;
+pub mod sample_editor;
 pub mod scene_fields;
 mod session_capture;
 pub mod session_view;
@@ -123,6 +124,9 @@ pub use bl_shell_spec::notes as note_commands;
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+/// The Sample Editor's view command IDs and their argument and result types
+/// (WP-4.10).
+pub use bl_shell_spec::sample_editor as sample_editor_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;
@@ -139,5 +143,5 @@ pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
-    WindowKind,
+    TransientList, WindowKind,
 };

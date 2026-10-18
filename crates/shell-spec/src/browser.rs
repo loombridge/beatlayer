@@ -8,7 +8,9 @@
 //! through the audio device, are in the external class, so an agent asks the
 //! person first. The behaviour they follow is in the browser spec.
 
-use bl_commands::Context::{Arrangement, Browser, BrowserSearch, BrowserSidebar, Global};
+use bl_commands::Context::{
+    Arrangement, Browser, BrowserSearch, BrowserSidebar, ClipView, Global, SampleEditor,
+};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{ClipId, TrackId};
@@ -27,6 +29,8 @@ pub const OPEN_PLACE: &str = "browser.open_place";
 pub const OPEN_FOLDER: &str = "browser.open_folder";
 /// `browser.select`: select items in the content pane.
 pub const SELECT: &str = "browser.select";
+/// `browser.show_file`: show an audio file in the browser (Show in Browser).
+pub const SHOW_FILE: &str = "browser.show_file";
 /// `browser.add_folder`: add a folder to Places.
 pub const ADD_FOLDER: &str = "browser.add_folder";
 /// `browser.remove_folder`: take an added folder out of Places.
@@ -54,6 +58,7 @@ pub const IDS: &[&str] = &[
     OPEN_PLACE,
     OPEN_FOLDER,
     SELECT,
+    SHOW_FILE,
     ADD_FOLDER,
     REMOVE_FOLDER,
     PREVIEW,
@@ -413,6 +418,18 @@ pub struct OpenFolderArgs {
     pub keep_others: bool,
 }
 
+/// Arguments of `browser.show_file`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowFileArgs {
+    /// The file to show, by path. Give this or `clip`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// An audio clip whose file to show. Give this or `path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+}
+
 /// Arguments of `browser.select`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -590,6 +607,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(Browser)
             .args::<SelectArgs>()
             .result::<BrowserState>(),
+        CommandSpec::new(SHOW_FILE, "Show in Browser")
+            .description(
+                "Shows an audio file in the browser, as Show in Browser does in the Sample \
+                 Editor: shows the browser, chooses the place the file lies in, opens the \
+                 folders down to it and selects it. Name the file by `path`, or by the `clip` \
+                 that plays it. Refused if the file lies in none of the browser's places; \
+                 `browser.add_folder` adds one. Changes nothing in the set, but reads folders \
+                 outside the project.",
+            )
+            .permission(Permission::External)
+            .contexts([Browser, ClipView, SampleEditor])
+            .args::<ShowFileArgs>()
+            .result::<BrowserState>(),
         CommandSpec::new(ADD_FOLDER, "Add Folder to Browser...")
             .description(
                 "Adds the folder at `path` to the browser's Places, after Current Project, \
@@ -719,6 +749,7 @@ mod tests {
             OPEN_PLACE,
             OPEN_FOLDER,
             SELECT,
+            SHOW_FILE,
             ADD_FOLDER,
             PREVIEW,
             LOAD_SELECTED,

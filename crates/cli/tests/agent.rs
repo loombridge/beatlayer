@@ -2827,6 +2827,152 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
     );
 }
 
+/// Spec: sample-editor R21. An agent selects, makes, moves and deletes warp
+/// markers and transients by command ID, as the Sample Editor's gestures
+/// and keys do, and reads the editor's selection and view back.
+#[test]
+fn an_agent_edits_warp_markers_as_the_sample_editor_does() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Loop"}, "kind": "audio", "name": "Loop", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Loop")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Break"}, "name": "Break", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "audio": { "media": "ab".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let markers = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            ["warp_markers"]["items"]
+            .clone()
+    };
+    run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    run(
+        &mut client,
+        "arrangement.select_clips",
+        json!({ "clips": [clip] }),
+    );
+    // The editor shows the clip: the insert marker puts a marker where the
+    // key would, and the selection reads back.
+    let state = run(&mut client, "clip_view.sample_editor", json!({}));
+    assert_eq!(state["clip"], json!(clip));
+    run(
+        &mut client,
+        "clip_view.set_insert_marker",
+        json!({ "beat": BAR }),
+    );
+    let before = steps(&mut client);
+    run(
+        &mut client,
+        "clip.insert_warp_marker",
+        json!({ "clips": [clip], "beat": BAR }),
+    );
+    assert_eq!(steps(&mut client), before + 1);
+    run(
+        &mut client,
+        "clip_view.select_warp_markers",
+        json!({ "markers": [1] }),
+    );
+    let state = run(&mut client, "clip_view.sample_editor", json!({}));
+    assert_eq!(state["markers"], json!([1]));
+    assert_eq!(state["insert_marker"]["beat"], BAR);
+    // Moving, shifting and deleting a marker, and a transient put in and
+    // taken out, each one undo step.
+    run(
+        &mut client,
+        "clip.move_warp_markers",
+        json!({ "clips": [clip], "markers": [1], "by": BAR / 2 }),
+    );
+    assert_eq!(markers(&mut client)[1]["beat"], BAR + BAR / 2);
+    run(
+        &mut client,
+        "clip.insert_transient",
+        json!({ "clip": clip, "time": 1.0 }),
+    );
+    run(
+        &mut client,
+        "clip_view.select_transients",
+        json!({ "times": [1.0] }),
+    );
+    assert_eq!(
+        run(&mut client, "clip_view.sample_editor", json!({}))["transients"],
+        json!([1.0])
+    );
+    run(
+        &mut client,
+        "clip.delete_transients",
+        json!({ "clip": clip, "times": [1.0] }),
+    );
+    run(
+        &mut client,
+        "clip.delete_warp_markers",
+        json!({ "clips": [clip], "markers": [1] }),
+    );
+    assert_eq!(markers(&mut client).as_array().unwrap().len(), 1);
+    // Zooming to a time selection reads back as the view.
+    run(
+        &mut client,
+        "clip_view.select_time",
+        json!({ "start": 0.5, "end": 1.5 }),
+    );
+    run(
+        &mut client,
+        "clip_view.sample_view",
+        json!({ "show": "selection" }),
+    );
+    let state = run(&mut client, "clip_view.sample_editor", json!({}));
+    // The view is the selection in ticks of the clip's contents: 1.5 s is
+    // three times 0.5 s on the map's one speed.
+    let view = state["view"].as_array().unwrap();
+    let (from, to) = (view[0].as_f64().unwrap(), view[1].as_f64().unwrap());
+    assert!(from > 0.0 && (to - 3.0 * from).abs() < 2.0, "{view:?}");
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
 // parameters, sets some by ID, shows Singe's expanded part, reads each

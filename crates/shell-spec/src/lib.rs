@@ -46,6 +46,7 @@
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
 //! - [`warping`]: a clip's transients (`clip.transients`, WP-4.3).
+//! - [`sample_editor`]: the Sample Editor's selections and view (WP-4.10).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -72,6 +73,7 @@ pub mod multisampler;
 pub mod notes;
 pub mod perception;
 pub mod plugins;
+pub mod sample_editor;
 pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
@@ -111,5 +113,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     settings::register(registry)?;
     modulation::register(registry)?;
     perception::register(registry)?;
+    sample_editor::register(registry)?;
     warping::register(registry)
 }

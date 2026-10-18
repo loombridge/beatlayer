@@ -47,6 +47,7 @@ use crate::midi::MidiHost;
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
+use crate::sample_editor;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
@@ -70,6 +71,7 @@ use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -84,6 +86,8 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 mod capture;
 mod multisampler;
 mod processed_files;
+mod sample_keys;
+pub use sample_keys::TransientList;
 mod session_recording;
 mod warping;
 
@@ -250,6 +254,10 @@ struct Gesture {
     view: ArrangementView,
     clip_view: ClipView,
     last: Option<Invocation>,
+    /// The step every later frame runs first, from where the gesture began:
+    /// the warp marker a pseudo-warp marker's drag makes, which the frames
+    /// that follow then move (sample editor R8).
+    base: Option<Invocation>,
 }
 
 /// A line for the Status Bar's message area (L-STAT-002).
@@ -555,19 +563,50 @@ fn automation_label(id: &str) -> &'static str {
     }
 }
 
-/// Whether `id` is one of the clip marker commands the Clip View's marker
-/// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
-/// document commands, but the strip's drags run them as gestures, so moving
-/// a marker or the loop brace however far is one undo step (piano-roll R11).
+/// Whether `id` is one of the document's clip commands the Clip View's
+/// drags run: the marker strip's (`clip.set_midi_region`,
+/// `clip.set_midi_loop` and the audio clips' `clip.set_region` and
+/// `clip.set_loop`) and the Sample Editor's (warp markers and transients).
+/// They are document commands, but the drags run them as gestures, so moving
+/// a marker or the loop brace however far is one undo step (piano-roll R11;
+/// sample editor R7).
 fn clip_marker_command(id: &str) -> bool {
-    matches!(id, model::SET_MIDI_REGION | model::SET_MIDI_LOOP)
+    matches!(
+        id,
+        model::SET_MIDI_REGION
+            | model::SET_MIDI_LOOP
+            | "clip.set_region"
+            | "clip.set_loop"
+            | "clip.insert_warp_marker"
+            | "clip.move_warp_markers"
+            | "clip.shift_warp_marker"
+            | "clip.move_transient"
+    )
 }
 
-/// The name of the undo step a marker-strip gesture makes.
+/// Whether `id` is an edit the Sample Editor makes to an audio clip's
+/// markers, transients or region.
+fn sample_edit_command(id: &str) -> bool {
+    clip_marker_command(id)
+        || matches!(
+            id,
+            "clip.delete_warp_markers"
+                | "clip.insert_warp_markers"
+                | "clip.insert_transient"
+                | "clip.delete_transients"
+                | "clip.reset_transients"
+        )
+}
+
+/// The name of the undo step a marker-strip or Sample Editor gesture makes.
 fn marker_label(id: &str) -> &'static str {
     match id {
-        model::SET_MIDI_REGION => "Change clip region",
-        _ => "Change clip loop",
+        model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
+        model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
+        "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
+        "clip.shift_warp_marker" => "Shift warp marker",
+        "clip.move_transient" => "Move transient",
+        _ => "Change clip",
     }
 }
 
@@ -1594,6 +1633,7 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        self.clip_view.sync_sample(self.editor.document());
         // The kit plug-ins' instances first, so a node the engine makes at once
         // finds its device's.
         self.kit.sync(self.editor.document());
@@ -3031,12 +3071,21 @@ impl Shell {
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
+        // Sample editor R8: a frame that inserts a warp marker begins the
+        // gesture's base, on which the frames that follow move it.
+        let makes_base = invocation.id == "clip.insert_warp_marker";
+        let base = if makes_base {
+            None
+        } else {
+            self.edit_gesture.as_ref().and_then(|g| g.base.clone())
+        };
         match &self.edit_gesture {
             None => {
                 self.edit_gesture = Some(Gesture {
                     view: self.arrangement.clone(),
                     clip_view: self.clip_view.clone(),
                     last: None,
+                    base: None,
                 });
             }
             Some(gesture) => {
@@ -3086,34 +3135,100 @@ impl Shell {
                 )
             }
         };
-        let result = run(
-            &mut self.editor,
-            &mut self.arrangement,
-            &mut self.clip_view,
-            &mut self.clipboard,
-            invocation,
-        );
+        // The warp commands check the files' lengths and fill in the
+        // transients, which only the shell can (warping R11, R25, R26).
+        let mut steps = Vec::with_capacity(2);
+        for step in base.iter().chain(std::iter::once(invocation)) {
+            match self.prepare_gesture_step(step) {
+                Ok(step) => steps.push(step),
+                Err(error) => {
+                    let failure = EditFailure::Refused(error.to_string());
+                    return self.gesture_refused(&base, &invocation.id, label, failure);
+                }
+            }
+        }
+        let mut result = Ok(Value::Null);
+        for step in &steps {
+            result = run(
+                &mut self.editor,
+                &mut self.arrangement,
+                &mut self.clip_view,
+                &mut self.clipboard,
+                step,
+            );
+            if result.is_err() {
+                break;
+            }
+        }
         let Some(gesture) = self.edit_gesture.as_mut() else {
             return Ok(Value::Null);
         };
         match result {
             Ok(value) => {
                 gesture.last = Some(invocation.clone());
+                if makes_base {
+                    gesture.base = Some(invocation.clone());
+                }
+                if sample_edit_command(&invocation.id) {
+                    self.clip_view.sample_follow(true);
+                }
                 Ok(value)
             }
-            Err(failure) => {
-                if let Some(last) = gesture.last.clone() {
-                    let _ = run(
-                        &mut self.editor,
-                        &mut self.arrangement,
-                        &mut self.clip_view,
-                        &mut self.clipboard,
-                        &last,
-                    );
-                }
-                Err(edit_error(&invocation.id, failure))
+            Err(failure) => self.gesture_refused(&base, &invocation.id, label, failure),
+        }
+    }
+
+    /// A gesture frame that was refused: the set goes back to the last frame
+    /// that worked.
+    fn gesture_refused(
+        &mut self,
+        base: &Option<Invocation>,
+        id: &str,
+        label: &'static str,
+        failure: EditFailure,
+    ) -> Result<Value, ShellError> {
+        let Some(last) = self.edit_gesture.as_ref().and_then(|g| g.last.clone()) else {
+            return Err(edit_error(id, failure));
+        };
+        // Back to where the gesture began, then the last frame that worked.
+        self.editor.cancel().ok();
+        self.editor.begin(label);
+        for step in base.iter().chain(std::iter::once(&last)) {
+            let Ok(step) = self.prepare_gesture_step(step) else {
+                break;
+            };
+            let outcome = if clip_marker_command(&step.id) {
+                model::run(&mut self.editor, &step.id, step.args.clone())
+                    .map(|_| ())
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if note_ids::handles(&step.id) {
+                clip_view::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                )
+                .map(|_| ())
+            } else if is_automation_edit(&step.id) {
+                model::run(&mut self.editor, &step.id, step.args.clone())
+                    .map(|_| ())
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else {
+                editing::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.arrangement,
+                    &mut self.clipboard,
+                )
+                .map(|_| ())
+            };
+            if outcome.is_err() {
+                break;
             }
         }
+        Err(edit_error(id, failure))
     }
 
     /// Takes what the engine last published (the playhead, whether the song
@@ -3171,6 +3286,11 @@ impl Shell {
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
+        }
+        // Spec: sample-editor R11. Starting or stopping playback lets the
+        // Sample Editor follow it again.
+        if engine.playing != self.arrangement.transport().playing {
+            self.clip_view.sample_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
@@ -3822,6 +3942,14 @@ impl Shell {
                         contexts.push(Context::ClipView);
                         if self.clip_view.tab() == ClipTab::Envelopes {
                             contexts.push(Context::Envelope);
+                        } else if self
+                            .clip_view
+                            .shown_audio_clip(self.editor.document(), &self.arrangement)
+                            .is_some()
+                        {
+                            // Spec: sample-editor R1. An audio clip's editor
+                            // is the Sample Editor.
+                            contexts.push(Context::SampleEditor);
                         } else {
                             contexts.push(Context::NoteEditor);
                             if !self
@@ -4213,6 +4341,9 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok());
         }
+        if self.is_sample_key(id, args) {
+            return self.complete_sample_command(id, args.clone()).is_ok();
+        }
         let Ok(args) = self.filled_args(id, args.clone()) else {
             return false;
         };
@@ -4523,6 +4654,12 @@ impl Shell {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
             }
+            _ if self.is_sample_key(id, &args) => {
+                // Spec: sample-editor R10. A key or a menu item acts on what
+                // the Sample Editor has selected.
+                let (id, args) = self.complete_sample_command(id, args)?;
+                self.run(&id, args)
+            }
             _ if !has("track") && Switch::of_command(id).is_some() => {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
@@ -4684,12 +4821,13 @@ impl Shell {
         result
     }
 
-    /// The MIDI clip in the Session slot selected first, if the slot holds
-    /// one.
+    /// The clip in the Session slot selected first, if the slot holds one.
     fn selected_slot_clip(&self) -> Option<bl_model::ClipId> {
         let slot = self.session.first_slot()?;
-        let clip = self.editor.document().slot(slot.track, slot.scene)?;
-        matches!(clip.data, ClipData::Midi(_)).then_some(clip.id)
+        self.editor
+            .document()
+            .slot(slot.track, slot.scene)
+            .map(|clip| clip.id)
     }
 
     /// Points the Clip View at the clip most recently selected, in the
@@ -4849,6 +4987,20 @@ impl Shell {
             self.touch();
             return result;
         }
+        if sample_ids::handles(id) {
+            // Spec: sample-editor R21. The Sample Editor's selections and
+            // view are the shell's, and change nothing in the set.
+            let result = sample_editor::run(
+                id,
+                args,
+                self.editor.document(),
+                &mut self.clip_view,
+                &self.arrangement,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            self.touch();
+            return result;
+        }
         if plugin_ids::handles(id) {
             return self.run_plugins(id, args);
         }
@@ -4895,6 +5047,11 @@ impl Shell {
                     command: id.to_owned(),
                     message: error.to_string(),
                 })?;
+            // Spec: sample-editor R11. An edit in the Sample Editor pauses
+            // Follow until playback starts or stops.
+            if sample_edit_command(id) {
+                self.clip_view.sample_follow(true);
+            }
             if let Some((track, target, value)) = moved {
                 self.automation_take.write(
                     track,
@@ -6026,7 +6183,7 @@ impl Shell {
                     let doc = self.editor.document();
                     let clip = self
                         .clip_view
-                        .shown_clip(doc, &self.arrangement)
+                        .shown_any_clip(doc, &self.arrangement)
                         .ok_or_else(|| unavailable("no clip is shown in the Clip View"))?;
                     let track = doc
                         .clip_track(clip)

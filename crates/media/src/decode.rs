@@ -24,6 +24,7 @@ use symphonia::core::packet::Packet;
 use symphonia::core::units::{TimeBase, Timestamp};
 
 use crate::error::{MediaError, from_symphonia};
+use crate::limits;
 use crate::mp4::{self, RecordedTrim};
 use crate::rf64::{Rf64Reader, is_rf64};
 use crate::sample_data::SampleData;
@@ -264,11 +265,13 @@ impl Decoder {
     /// As for [`Decoder::read`].
     pub fn decode_to_end(mut self) -> Result<SampleData, MediaError> {
         let channels = usize::from(self.info.channels);
+        // The header's length is a hint: reserve no more than 64 MiB for it
+        // over all channels, and let the planes grow as the audio arrives.
         let expected = self
             .info
             .frames
             .map_or(0, |f| f.saturating_sub(self.position))
-            .min(1 << 26) as usize;
+            .min((1 << 24) / channels.max(1) as u64) as usize;
         let mut planes: Vec<Vec<f32>> = (0..channels)
             .map(|_| Vec::with_capacity(expected))
             .collect();
@@ -516,6 +519,12 @@ impl SymphoniaStream {
         let track_id = track.id;
         let time_base = track.time_base;
         let mut frames = track.num_frames;
+        // Before the codec allocates for the header's channels and length.
+        limits::check_header(
+            params.channels.as_ref().map_or(0, |c| c.count() as u64),
+            params.sample_rate.unwrap_or(0),
+            frames,
+        )?;
 
         let decoder = symphonia::default::get_codecs()
             .make_audio_decoder(&params, &AudioDecoderOptions::default())

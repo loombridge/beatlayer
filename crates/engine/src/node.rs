@@ -11,6 +11,7 @@ use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
 use crate::display::DisplayReader;
+use crate::modbus::{Bus, Control};
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
@@ -388,6 +389,18 @@ pub trait Node: Send + 'static {
     /// effect; [`segments`] walks a block between them.
     fn process(&mut self, block: &mut Block<'_>);
 
+    /// Works out a modulator's output for a block part, before any track
+    /// runs (WP-5.10; the modulation spec, R20): the node writes its rows
+    /// into [`Control`]'s output and the rest of the program reads them as
+    /// it runs. A node that is a modulator takes its parameter changes
+    /// here, not in [`process`](Self::process), which then leaves the block
+    /// as it is. Returns whether the node is a modulator; the default is
+    /// no, and does nothing.
+    fn control(&mut self, ctl: &mut Control<'_>) -> bool {
+        let _ = ctl;
+        false
+    }
+
     /// Takes parameter changes while the node is switched off and doesn't
     /// process, as CLAP's `flush` does; their offsets mean nothing here. A
     /// node that keeps parameter values should apply them, or it comes back
@@ -470,6 +483,8 @@ pub struct Block<'a> {
     /// The Session slots playing on the tracks, with the frame each clip
     /// launched on (WP-3.2). Empty for a block outside a program's run.
     pub(crate) session: &'a [SessionPlayback],
+    /// What the modulators wrote for the frames of this block (WP-5.10).
+    pub(crate) modulation: Bus<'a>,
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -520,6 +535,7 @@ impl<'a> Block<'a> {
             notes: &[],
             notes_out: None,
             session: &[],
+            modulation: Bus::EMPTY,
         }
     }
 
@@ -540,6 +556,13 @@ impl<'a> Block<'a> {
             notes_out: Some(out),
             ..self
         }
+    }
+
+    /// The same block with what the modulators wrote for its frames
+    /// (WP-5.10). For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_modulation(self, modulation: Bus<'a>) -> Self {
+        Self { modulation, ..self }
     }
 
     /// The same block with the Session slots playing on the tracks
@@ -592,6 +615,13 @@ impl<'a> Block<'a> {
     /// The transport as the block starts.
     pub fn transport(&self) -> TransportInfo {
         self.transport
+    }
+
+    /// What the modulators wrote for the frames of this block (WP-5.10):
+    /// the contributions and holds of the slots that map the node's
+    /// parameters.
+    pub fn modulation(&self) -> Bus<'a> {
+        self.modulation
     }
 
     /// The Session slots playing on the tracks, each with the song frame

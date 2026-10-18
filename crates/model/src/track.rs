@@ -197,8 +197,10 @@ impl Channel {
 #[schemars(
     description = "Where a track takes its input from. Audio tracks: `external` (Ext. In, the \
                    audio interface's inputs, with its `channel`; a new audio track's), \
-                   `resampling` (the Main output), `track` (another audio track, a return, or \
-                   Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   `resampling` (the Main output), `track` (another audio track, a MIDI track with \
+                   an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
+                   instrument or audio effect rack on that track, that chain's signal at \
+                   `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
                    MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
                    by its name as the MIDI settings list it), `track` (another MIDI track), or \
                    `none`."
@@ -237,6 +239,11 @@ pub enum Input {
         /// out.
         #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
         tap: Tap,
+        /// A chain of an instrument or audio effect rack on that track, at
+        /// any depth, whose signal is taken at `tap` instead of the
+        /// track's own (the racks spec, R38 to R41).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain: Option<ChainId>,
     },
 }
 

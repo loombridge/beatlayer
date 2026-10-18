@@ -5,6 +5,7 @@
 //! format takes them. Everything is made with the node, so nothing here
 //! allocates on the audio thread.
 
+use bl_engine::modbus::Bus;
 use bl_engine::{AutomationList, Block, SessionNow, TransportInfo};
 use bl_model::modulation::Travel;
 use bl_model::{ParamDescriptor, ParamId};
@@ -101,8 +102,10 @@ impl Driver {
     }
 
     /// Works out which parameters the block drives: while the song plays,
-    /// those a track envelope or a clip's modulation envelope holds. Call
-    /// it before the block's changes and [`play`](Self::play).
+    /// those a track envelope, a Session clip's automation envelope or a
+    /// clip's modulation envelope holds, and always those a modulator maps
+    /// (WP-5.10). Call it before the block's changes and
+    /// [`play`](Self::play).
     pub(crate) fn prepare(&mut self, list: Option<&AutomationList>, block: &Block<'_>) {
         self.echoes.clear();
         let list = Self::active(list, block.transport());
@@ -112,7 +115,8 @@ impl Driver {
         for slot in &mut self.slots {
             let id = ParamId(slot.id);
             slot.modulated = list.is_some_and(|list| list.modulates(id));
-            slot.driven = slot.modulated || list.is_some_and(|list| list.drives(id));
+            slot.driven = slot.modulated
+                || (block.transport().playing && list.is_some_and(|list| list.drives(id)));
         }
     }
 
@@ -130,7 +134,7 @@ impl Driver {
     }
 
     fn active(list: Option<&AutomationList>, transport: TransportInfo) -> Option<&AutomationList> {
-        list.filter(|list| transport.playing && !list.is_empty())
+        list.filter(|list| (transport.playing || list.has_mapped()) && !list.is_empty())
     }
 
     /// Calls `send` for each value the plug-in is to be given in a block of
@@ -145,7 +149,7 @@ impl Driver {
         block: &Block<'_>,
         mut send: impl FnMut(Play),
     ) {
-        let transport = block.transport();
+        let (transport, bus) = (block.transport(), block.modulation());
         if let Some(list) = Self::active(list, transport) {
             self.live = true;
             let now = block.session_now(list);
@@ -157,7 +161,8 @@ impl Driver {
                 self.visit(
                     list,
                     &now,
-                    frame,
+                    transport.playing.then_some(frame),
+                    bus,
                     u32::try_from(offset).unwrap_or(0),
                     on_grid,
                     &mut send,
@@ -190,11 +195,13 @@ impl Driver {
 
     /// Works out the driven parameters at song `frame` and sends the ones
     /// due: all that differ on the grid, else the ones not yet sent.
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         &mut self,
         list: &AutomationList,
         now: &SessionNow<'_>,
-        frame: i64,
+        song: Option<i64>,
+        bus: Bus<'_>,
         offset: u32,
         on_grid: bool,
         send: &mut impl FnMut(Play),
@@ -209,8 +216,10 @@ impl Driver {
         {
             let slots: &[Slot] = slots;
             list.drive(
-                frame,
+                song,
                 now,
+                bus,
+                offset as usize,
                 |id| find(slots, id.0).map(|at| Travel::Param(&slots[at].descriptor)),
                 |id| find(slots, id.0).map_or(0.0, |at| slots[at].control),
                 |id, base, played| scratch.push((id.0, base, played)),

@@ -19,8 +19,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_CHAIN,
+    NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -152,6 +152,9 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// Where each modulator's rows sit on the last program's bus
+    /// (WP-5.10).
+    modulator_rows: BTreeMap<DeviceId, u32>,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
 }
@@ -188,6 +191,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            modulator_rows: BTreeMap::new(),
             displays: Displays::default(),
         }
     }
@@ -345,6 +349,25 @@ impl Compiler {
         // have gone the same way. A new tempo map moved every envelope, so
         // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
+        // Spec: modulation R15, R19. A mapping made, removed or taken away
+        // with its target, or a modulator that came or went, changes the
+        // lists of the nodes it reaches, and the rows they name.
+        let mapped = modulator_mappings(&old) != modulator_mappings(document);
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.shape != after.shape
+            {
+                let shape = after
+                    .shape
+                    .clone()
+                    .unwrap_or_else(bl_model::modulator::default_shape);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::modbus::Shape(shape)),
+                ));
+            }
+        }
         for track in document.tracks() {
             let id = track.id();
             let differs = match (old.track(id), document.track(id)) {
@@ -354,11 +377,16 @@ impl Compiler {
                 _ => false,
             };
             let clips_changed = tracks.contains(&id);
-            if all || differs || clips_changed {
+            if all || differs || clips_changed || mapped {
                 // The track whose envelopes or clips changed gets every
                 // list, so an empty one clears what a node had; a tempo map
                 // that moved them only sends the ones that drive something.
-                self.send_automation(document, id, !differs && !clips_changed, &mut update);
+                self.send_automation(
+                    document,
+                    id,
+                    !differs && !clips_changed && !mapped,
+                    &mut update,
+                );
             }
         }
         update
@@ -460,23 +488,34 @@ impl Compiler {
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
         let mut sidechain_inputs: BTreeMap<DeviceId, Vec<Input>> = BTreeMap::new();
         let mut taps: BTreeSet<(TrackId, Tap)> = BTreeSet::new();
+        // The inputs that tap a rack chain: the track they feed, their
+        // place among its inputs, and the chain, which is found once the
+        // tasks have added their racks.
+        let mut chain_taps: Vec<(TrackId, usize, ChainId)> = Vec::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
             let route = self.route(&mut build, document, &solo, edge, to);
-            if edge.tap != Tap::PostMixer {
+            if edge.tap != Tap::PostMixer && edge.chain.is_none() {
                 taps.insert((edge.from, edge.tap));
             }
             let input = Input {
                 route,
                 from,
                 tap: edge.tap,
+                chain: NO_CHAIN,
                 delay: NO_DELAY,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
-                None => inputs.entry(edge.to).or_default().push(input),
+                None => {
+                    let to_inputs = inputs.entry(edge.to).or_default();
+                    if let Some(chain) = edge.chain {
+                        chain_taps.push((edge.to, to_inputs.len(), chain));
+                    }
+                    to_inputs.push(input);
+                }
             }
         }
 
@@ -505,6 +544,21 @@ impl Compiler {
                 Tap::PostFx => &mut task.post_fx,
                 Tap::PostMixer => continue,
             };
+            if slot.is_none() {
+                *slot = Some(kept);
+                kept += 1;
+            }
+        }
+
+        // The chains that routes tap keep a copy at each tap too.
+        for (to, at, chain) in chain_taps {
+            let task = build.tasks[task_of[&to] as usize];
+            let Some(&index) = build.chain_index.get(&chain) else {
+                continue;
+            };
+            let input = &mut build.inputs[task.inputs.start as usize + at];
+            input.chain = index;
+            let slot = &mut build.rack_chains[index as usize].taps[RackChain::tap_index(input.tap)];
             if slot.is_none() {
                 *slot = Some(kept);
                 kept += 1;
@@ -619,7 +673,15 @@ impl Compiler {
                 .collect(),
             releases: crate::program::Releases::new(),
             midi,
+            modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
+            bus: vec![0.0; build.modulators.len() * crate::modbus::ROWS * self.config.max_frames],
         };
+        self.modulator_rows = build
+            .modulators
+            .iter()
+            .enumerate()
+            .map(|(row, &(_, device))| (device, row as u32))
+            .collect();
         self.generation = generation;
         self.layout = build.layout;
         self.displays
@@ -700,9 +762,13 @@ impl Compiler {
             return;
         };
         let rate = self.config.sample_rate;
-        for (key, list) in automation::lists(document, track.id(), rate, |key| {
-            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
-        }) {
+        for (key, list) in automation::lists(
+            document,
+            track.id(),
+            rate,
+            |key| i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay)),
+            &self.modulator_rows,
+        ) {
             if driving_only && list.is_empty() {
                 continue;
             }
@@ -973,6 +1039,12 @@ impl Compiler {
                 },
             };
             let slot = claim(build, key, identity, !device.enabled, latency, node);
+            // Spec: modulation R20. A modulator works its rows out before
+            // any task runs.
+            if bl_model::modulator::is_modulator_kind(&device.kind) {
+                build.slots[slot as usize].modulator = true;
+                build.modulators.push((slot, device.id));
+            }
             steps.push(Step::Node(slot));
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
@@ -1026,11 +1098,15 @@ impl Compiler {
                 mixer,
                 buffer: build.chain_buffers,
                 delay: NO_DELAY,
+                taps: [None; 3],
             });
             build.chain_buffers += 1;
         }
         let start = build.rack_chains.len() as u32;
         build.rack_chains.extend(chains);
+        for (at, chain) in device.chains.iter().enumerate() {
+            build.chain_index.insert(chain.id, start + at as u32);
+        }
         build.racks.push(Rack {
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
@@ -1145,6 +1221,7 @@ fn claim(
         // device is switched on again.
         latency: if bypass { 0 } else { latency },
         delay: 0,
+        modulator: false,
     });
     build.layout.insert(
         key,
@@ -1182,9 +1259,14 @@ struct Build {
     rack_chains: Vec<RackChain>,
     /// How many rack chains have a buffer of their own so far.
     chain_buffers: u32,
+    /// Each rack chain's place in `rack_chains`.
+    chain_index: BTreeMap<ChainId, u32>,
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
+    /// The modulators' slots and devices, in the order their rows sit on the
+    /// bus (WP-5.10).
+    modulators: Vec<(u32, DeviceId)>,
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
@@ -1275,6 +1357,19 @@ fn tap_latency(arrival: &[u32], chain: &[u32], from: usize, tap: Tap) -> u32 {
     }
 }
 
+/// The same for an input that may tap a rack chain, whose `(start, length)`
+/// within its task's chain `rack_chains` holds: the signal at the rack's
+/// input has the chain's start behind it, and after the chain's devices the
+/// chain's length too (the racks spec, R40).
+fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], input: &Input) -> u32 {
+    if input.chain == NO_CHAIN {
+        return tap_latency(arrival, chain, input.from as usize, input.tap);
+    }
+    let (start, length) = rack_chains[input.chain as usize];
+    let after = if input.tap == Tap::PreFx { 0 } else { length };
+    arrival[input.from as usize] + start + after
+}
+
 /// Works out and records delay compensation (WP-2.11): how far each track's
 /// clips and each route are held back so every path into a track lines up,
 /// each sidechain's source lines up with its device's own input, and each
@@ -1304,9 +1399,12 @@ fn compensate(build: &mut Build, order: &[u32]) {
     // node's own input is.
     let mut chain = vec![0u32; tasks];
     let mut offsets: Vec<Vec<(u32, u32)>> = vec![Vec::new(); tasks];
+    // Where each rack chain's input is in its task's chain, and what its
+    // devices add, for routes that tap it.
+    let mut rack_at = vec![(0u32, 0u32); build.rack_chains.len()];
     for (t, task) in build.tasks.clone().iter().enumerate() {
         chain[t] = flow_latency(build, task.chain);
-        offsets[t] = node_offsets(build, task.chain);
+        offsets[t] = node_offsets(build, task.chain, &mut rack_at);
         for &(slot, before) in &offsets[t] {
             for s in task.sidechains.range() {
                 if build.sidechains[s].device == slot {
@@ -1314,6 +1412,9 @@ fn compensate(build: &mut Build, order: &[u32]) {
                 }
             }
         }
+    }
+    for (at, rack_chain) in rack_at.iter_mut().zip(&build.rack_chains) {
+        at.1 = flow_latency(build, rack_chain.steps);
     }
     // The frames from song time to each track's input sum: what its inputs
     // and its devices' sidechain sources make it wait for.
@@ -1323,18 +1424,13 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let task = build.tasks[t];
         let mut arrived = 0u32;
         for input in &build.inputs[task.inputs.range()] {
-            arrived = arrived.max(tap_latency(
-                &arrival,
-                &chain,
-                input.from as usize,
-                input.tap,
-            ));
+            arrived = arrived.max(input_latency(&arrival, &chain, &rack_at, input));
         }
         for s in task.sidechains.range() {
             let sc = build.sidechains[s];
             for input in &build.sidechain_inputs[sc.inputs.range()] {
-                let need = tap_latency(&arrival, &chain, input.from as usize, input.tap)
-                    .saturating_sub(sc.before);
+                let need =
+                    input_latency(&arrival, &chain, &rack_at, input).saturating_sub(sc.before);
                 arrived = arrived.max(need);
             }
         }
@@ -1347,7 +1443,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let a = arrival[t];
         for i in task.inputs.range() {
             let input = build.inputs[i];
-            let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+            let lat = input_latency(&arrival, &chain, &rack_at, &input);
             let delay = a.saturating_sub(lat);
             if delay > 0 {
                 let index = line(build, delay);
@@ -1358,7 +1454,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
             let sc = build.sidechains[s];
             for i in sc.inputs.range() {
                 let input = build.sidechain_inputs[i];
-                let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+                let lat = input_latency(&arrival, &chain, &rack_at, &input);
                 let delay = (a + sc.before).saturating_sub(lat);
                 if delay > 0 {
                     let index = line(build, delay);
@@ -1399,9 +1495,16 @@ fn flow_latency(build: &Build, steps: Span) -> u32 {
 /// which its input is, given the chain starts `start` frames in (the racks
 /// spec, R16): what the audio it acts on is behind song time by, and so what
 /// its parameter changes are held back by. A switched-off rack's contents
-/// don't run, so they aren't listed.
-fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
-    fn walk(build: &Build, steps: Span, start: u32, out: &mut Vec<(u32, u32)>) {
+/// don't run, so they aren't listed. Each rack chain's start is recorded in
+/// `rack_at`, by its place in `rack_chains`.
+fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(u32, u32)> {
+    fn walk(
+        build: &Build,
+        steps: Span,
+        start: u32,
+        out: &mut Vec<(u32, u32)>,
+        rack_at: &mut [(u32, u32)],
+    ) {
         let mut before = start;
         for &step in &build.steps[steps.range()] {
             match step {
@@ -1414,8 +1517,10 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
                     if rack.bypass {
                         continue;
                     }
-                    for chain in &build.rack_chains[rack.chains.range()] {
-                        walk(build, chain.steps, before, out);
+                    for i in rack.chains.range() {
+                        let chain = &build.rack_chains[i];
+                        rack_at[i].0 = before;
+                        walk(build, chain.steps, before, out, rack_at);
                         out.push((chain.mixer, before + flow_latency(build, chain.steps)));
                     }
                     before += rack.latency;
@@ -1424,7 +1529,7 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
         }
     }
     let mut out = Vec::new();
-    walk(build, steps, 0, &mut out);
+    walk(build, steps, 0, &mut out, rack_at);
     out
 }
 
@@ -1578,6 +1683,17 @@ fn needs_program(
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
     recompile || scene_slots(old) != scene_slots(new)
+}
+
+/// Every modulator in track and chain order with its mappings: what decides
+/// which rows the nodes' lists name (WP-5.10).
+fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_modulator_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
 }
 
 /// Parameter changes for the mixers of the chains of racks that changed

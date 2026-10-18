@@ -18,12 +18,14 @@ use std::collections::BTreeMap;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::modulation::Travel;
+use bl_model::modulator::ModTarget;
 use bl_model::{
-    AutomationTarget, ClipData, EnvelopeKind, MidiData, MixerParam, ParamId, SceneId, TrackId,
-    curve_value,
+    AutomationTarget, ClipData, DeviceId, EnvelopeKind, MidiData, MixerParam, ParamId, SceneId,
+    TrackId, curve_value,
 };
 
 use crate::mixer;
+use crate::modbus::{self, Bus};
 use crate::node::NodeKey;
 use crate::session::SessionPlayback;
 
@@ -343,9 +345,13 @@ struct SessionEnvelope {
 /// track that stays taken over, and the tempo map to lay it out by.
 #[derive(Clone, Copy)]
 pub struct SessionNow<'a> {
-    anchor: Option<Anchor>,
-    tempo: &'a TempoMap,
-    rate: SampleRate,
+    anchor: Option<(Anchor, &'a TempoMap, SampleRate)>,
+}
+
+impl SessionNow<'_> {
+    /// No Session clip sets anything: what a block the song doesn't play
+    /// reads.
+    pub const NONE: SessionNow<'static> = SessionNow { anchor: None };
 }
 
 #[derive(Clone, Copy)]
@@ -370,6 +376,10 @@ pub struct AutomationList {
     /// parameter. They set the parameter, over the track's envelope, while
     /// their clip plays.
     session: Vec<(ParamId, SessionEnvelope)>,
+    /// The modulator slots (WP-5.10) that map each parameter, as the first
+    /// of their two rows on the bus ([`crate::modbus::row`]), ordered by
+    /// parameter.
+    mapped: Vec<(ParamId, Vec<u32>)>,
 }
 
 impl AutomationList {
@@ -411,9 +421,7 @@ impl AutomationList {
             (None, None) => None,
         });
         SessionNow {
-            anchor,
-            tempo,
-            rate,
+            anchor: anchor.map(|anchor| (anchor, tempo, rate)),
         }
     }
 
@@ -433,7 +441,7 @@ impl AutomationList {
     /// over (WP-3.12).
     // Spec: session-automation R6, R7
     #[must_use]
-    pub fn base(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
+    pub fn driven(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
         self.session_value(param, frame, now).or_else(|| {
             self.envelope(param)
                 .map(|envelope| envelope.value_at(frame))
@@ -442,7 +450,7 @@ impl AutomationList {
 
     /// The value the Session clip in `now` gives `param` at `frame`.
     fn session_value(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
-        let anchor = now.anchor?;
+        let (anchor, tempo, rate) = now.anchor?;
         let (_, clip) = self
             .session
             .iter()
@@ -452,7 +460,7 @@ impl AutomationList {
         let frame = anchor
             .stopped
             .map_or(frame, |stopped| frame.min(stopped.get() - 1));
-        let since = now.tempo.frames_to_ticks(Frames(frame), now.rate) - anchor.launched;
+        let since = tempo.frames_to_ticks(Frames(frame), rate) - anchor.launched;
         if since < Ticks::ZERO {
             return None;
         }
@@ -460,43 +468,86 @@ impl AutomationList {
             .value_at(clip.layout.content_at(since, clip.linked))
     }
 
-    /// The value the node's `param` plays at `frame`, `base` being its
-    /// value there before modulation (its envelope's, or its control's):
-    /// the clips' envelopes playing at the frame each contribute their
-    /// share of the parameter's travel, the contributions add, and the
-    /// sum moves the base's position on `travel`, clamped to its ends
-    /// (the modulation spec, R3 and R4). With no clip playing, or none
-    /// modulating the parameter, it is `base`, to the bit. The one place a
-    /// parameter's played value is worked out: the holders that macros and
-    /// modulators add change `base` or add to the sum here.
+    /// The value the node's `param` plays, `base` being its value before
+    /// modulation (its envelope's, a modulator's hold, or its control's):
+    /// the clips' envelopes playing at song frame `song` (none while the
+    /// song is stopped) and the modulators mapping it, read from `bus` at
+    /// frame `at` of the block, each contribute their share of the
+    /// parameter's travel, the contributions add, and the sum moves the
+    /// base's position on `travel`, clamped to its ends (the modulation
+    /// spec, R3, R4 and R14). With nothing modulating the parameter it is
+    /// `base`, to the bit. The one place a parameter's played value is worked
+    /// out: a macro's hold changes `base`, and a new kind of source adds to
+    /// the sum here.
     // Spec: modulation R3
     #[must_use]
-    pub fn played(&self, travel: Travel<'_>, param: ParamId, frame: i64, base: f64) -> f64 {
-        let Ok(index) = self
-            .modulation
-            .binary_search_by_key(&param, |&(param, _)| param)
-        else {
-            return base;
-        };
-        let sum: f64 = self.modulation[index]
-            .1
-            .iter()
-            .filter_map(|envelope| envelope.value_at(frame))
-            .map(|share| travel.clip_contribution(base, share))
-            .sum();
+    pub fn played(
+        &self,
+        travel: Travel<'_>,
+        param: ParamId,
+        song: Option<i64>,
+        base: f64,
+        bus: Bus<'_>,
+        at: usize,
+    ) -> f64 {
+        let mut sum = 0.0;
+        if let (Some(frame), Ok(index)) = (
+            song,
+            self.modulation
+                .binary_search_by_key(&param, |&(param, _)| param),
+        ) {
+            sum += self.modulation[index]
+                .1
+                .iter()
+                .filter_map(|envelope| envelope.value_at(frame))
+                .map(|share| travel.clip_contribution(base, share))
+                .sum::<f64>();
+        }
+        if let Some(rows) = self.rows(param) {
+            sum += rows
+                .iter()
+                .filter_map(|&row| bus.contribution(row).get(at))
+                .map(|&share| f64::from(share))
+                .sum::<f64>();
+        }
         travel.played(base, sum)
     }
 
-    /// Calls `visit` with the id, base and played value at song `frame` of
-    /// each parameter an envelope drives or a clip modulates, in parameter
-    /// order: for a node that plays the values itself, as a plug-in does.
-    /// `travel_of` gives a parameter's travel (`None` skips it) and
-    /// `control_of` its control's value, the base where no envelope drives
-    /// it. It allocates nothing.
+    /// The position on `param`'s travel a modulator in Remote Control holds
+    /// it at on frame `at` of the block, if one does (R16): the lowest slot
+    /// holding it, as a parameter has one holder.
+    // Spec: modulation R16
+    #[must_use]
+    pub fn held(&self, param: ParamId, bus: Bus<'_>, at: usize) -> Option<f64> {
+        self.rows(param)?
+            .iter()
+            .filter_map(|&row| bus.hold(row).get(at))
+            .map(|&position| f64::from(position))
+            .find(|&position| position >= 0.0)
+    }
+
+    fn rows(&self, param: ParamId) -> Option<&[u32]> {
+        let index = self
+            .mapped
+            .binary_search_by_key(&param, |&(param, _)| param)
+            .ok()?;
+        Some(&self.mapped[index].1)
+    }
+
+    /// Calls `visit` with the id, base and played value at frame `at` of the
+    /// block, song frame `song` (none while stopped), of each parameter an
+    /// envelope drives, a clip or a modulator modulates or holds, in
+    /// parameter order: for a node that plays the values itself, as a
+    /// plug-in does. `travel_of` gives a parameter's travel (`None` skips
+    /// it) and `control_of` its control's value, the base where nothing
+    /// drives it. It allocates nothing.
+    #[allow(clippy::too_many_arguments)]
     pub fn drive<'a>(
         &self,
-        frame: i64,
+        song: Option<i64>,
         now: &SessionNow<'_>,
+        bus: Bus<'_>,
+        at: usize,
         travel_of: impl Fn(ParamId) -> Option<Travel<'a>>,
         control_of: impl Fn(ParamId) -> f64,
         mut visit: impl FnMut(ParamId, f64, f64),
@@ -519,34 +570,79 @@ impl AutomationList {
                     .iter()
                     .map(|&(param, _)| param)
                     .filter(|&param| !self.drives(param)),
+            )
+            .chain(
+                self.mapped
+                    .iter()
+                    .map(|&(param, _)| param)
+                    .filter(|&param| !self.drives(param) && !self.modulates_by_clip(param)),
             );
         for param in driven {
             let Some(travel) = travel_of(param) else {
                 continue;
             };
-            let base = self
-                .base(param, frame, now)
-                .unwrap_or_else(|| control_of(param));
-            visit(param, base, self.played(travel, param, frame, base));
+            let base = self.base(travel, param, song, now, bus, at, &control_of);
+            visit(param, base, self.played(travel, param, song, base, bus, at));
         }
     }
 
-    /// Whether any clip envelope modulates `param`: what a node checks
-    /// before its fast paths, since a parameter with neither a track
-    /// envelope nor clip modulation follows its control alone.
+    /// The value `param` has before modulation on frame `at`: a modulator's
+    /// hold, else what sets it at song frame `song` ([`Self::driven`]), else
+    /// `control`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn base(
+        &self,
+        travel: Travel<'_>,
+        param: ParamId,
+        song: Option<i64>,
+        now: &SessionNow<'_>,
+        bus: Bus<'_>,
+        at: usize,
+        control_of: impl Fn(ParamId) -> f64,
+    ) -> f64 {
+        if let Some(position) = self.held(param, bus, at) {
+            return travel.value(position);
+        }
+        song.and_then(|frame| self.driven(param, frame, now))
+            .unwrap_or_else(|| control_of(param))
+    }
+
+    /// Whether a modulator slot maps `param`.
     #[must_use]
-    pub fn modulates(&self, param: ParamId) -> bool {
+    pub fn maps(&self, param: ParamId) -> bool {
+        self.rows(param).is_some()
+    }
+
+    /// Whether any modulator slot maps a parameter of the node.
+    #[must_use]
+    pub fn has_mapped(&self) -> bool {
+        !self.mapped.is_empty()
+    }
+
+    fn modulates_by_clip(&self, param: ParamId) -> bool {
         self.modulation
             .binary_search_by_key(&param, |&(param, _)| param)
             .is_ok()
     }
 
-    /// Whether neither a track envelope nor a clip envelope drives any of
-    /// the node's parameters: what a node whose envelopes all went is sent,
-    /// so it follows its controls again.
+    /// Whether any clip envelope or modulator slot modulates or holds
+    /// `param`: what a node checks before its fast paths, since a parameter
+    /// with neither a track envelope nor modulation follows its control
+    /// alone.
+    #[must_use]
+    pub fn modulates(&self, param: ParamId) -> bool {
+        self.modulates_by_clip(param) || self.rows(param).is_some()
+    }
+
+    /// Whether neither a track envelope, a clip envelope nor a modulator
+    /// drives any of the node's parameters: what a node whose envelopes all
+    /// went is sent, so it follows its controls again.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.envelopes.is_empty() && self.modulation.is_empty() && self.session.is_empty()
+        self.envelopes.is_empty()
+            && self.modulation.is_empty()
+            && self.session.is_empty()
+            && self.mapped.is_empty()
     }
 }
 
@@ -561,6 +657,7 @@ pub(crate) fn lists(
     track: TrackId,
     rate: SampleRate,
     delay: impl Fn(NodeKey) -> i64,
+    rows: &BTreeMap<DeviceId, u32>,
 ) -> Vec<(NodeKey, AutomationList)> {
     let Some(track) = document.track(track) else {
         return Vec::new();
@@ -621,6 +718,36 @@ pub(crate) fn lists(
             }
         }
     }
+    // The modulators' slots (WP-5.10) that map this track's nodes' parameters,
+    // from any track.
+    for owner in document.tracks() {
+        for device in owner.devices_deep() {
+            let Some(&modulator) = rows.get(&device.id) else {
+                continue;
+            };
+            for mapping in &device.mappings {
+                let (key, param) = match mapping.target {
+                    ModTarget::Mixer { track: t, param } if t == track.id() => {
+                        target_node(t, &AutomationTarget::Mixer { param })
+                    }
+                    ModTarget::Send { track: t, to } if t == track.id() => {
+                        target_node(t, &AutomationTarget::Send { to })
+                    }
+                    ModTarget::Device { device: d, param }
+                        if track.devices_deep().any(|x| x.id == d) =>
+                    {
+                        (NodeKey::Device(d), param)
+                    }
+                    _ => continue,
+                };
+                if let Some(entries) = lists.get_mut(&key) {
+                    entries
+                        .mapped
+                        .push((param, modbus::row(modulator, mapping.slot)));
+                }
+            }
+        }
+    }
     // The Session clips' automation envelopes (WP-3.12): each slot clip that
     // sets a parameter while it plays, kept apart from the Arrangement's
     // clips because the launcher, not the song's frames, says when it plays.
@@ -665,6 +792,14 @@ pub(crate) fn lists(
                     _ => modulation.push((param, vec![envelope])),
                 }
             }
+            entries.mapped.sort_unstable();
+            let mut mapped: Vec<(ParamId, Vec<u32>)> = Vec::new();
+            for (param, row) in entries.mapped {
+                match mapped.last_mut() {
+                    Some((last, rows)) if *last == param => rows.push(row),
+                    _ => mapped.push((param, vec![row])),
+                }
+            }
             (
                 key,
                 AutomationList {
@@ -672,6 +807,7 @@ pub(crate) fn lists(
                     envelopes: entries.envelopes,
                     modulation,
                     session: entries.session,
+                    mapped,
                 },
             )
         })
@@ -754,6 +890,7 @@ struct Entries {
     envelopes: Vec<(ParamId, PlacedEnvelope)>,
     modulation: Vec<(ParamId, PlacedClipEnvelope)>,
     session: Vec<(ParamId, SessionEnvelope)>,
+    mapped: Vec<(ParamId, u32)>,
 }
 
 #[cfg(test)]
@@ -828,19 +965,25 @@ mod tests {
             envelopes: vec![(ParamId(1), envelope)],
             modulation: Vec::new(),
             session: Vec::new(),
+            mapped: Vec::new(),
         };
         let mut seen = Vec::new();
         let tempo = TempoMap::default();
         let now = list.now(&[], &tempo, SampleRate::HZ_48000);
         list.drive(
-            12_000,
+            Some(12_000),
             &now,
+            Bus::EMPTY,
+            0,
             |_| Some(Travel::Pan),
             |_| 0.0,
             |param, base, played| seen.push((param, base, played)),
         );
         assert_eq!(seen, [(ParamId(1), 0.5, 0.5)], "no modulation, no change");
-        assert_eq!(list.played(Travel::Pan, ParamId(2), 0, 0.3), 0.3);
+        assert_eq!(
+            list.played(Travel::Pan, ParamId(2), Some(0), 0.3, Bus::EMPTY, 0),
+            0.3
+        );
     }
 
     // Spec: automation R12

@@ -276,6 +276,7 @@ fn fixture() -> Project {
         input: Input::Track {
             track: drums,
             tap: Tap::PreFx,
+            chain: None,
         },
         gain: 0.5,
         mix: 0.25,
@@ -287,6 +288,35 @@ fn fixture() -> Project {
             track: vox,
             index: 0,
             device,
+        },
+    );
+    // A Curve Mod mapping that device, with a shape of its own.
+    let curve: bl_model::DeviceId = editor.new_id();
+    let mut modulator = Device::new(
+        curve,
+        "Curve Mod",
+        DeviceKind::Native {
+            device_type: bl_model::modulator::CURVE_MOD.to_owned(),
+        },
+    );
+    modulator.shape = Some(bl_model::modulator::shape_preset(6).unwrap());
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: vox,
+            index: 1,
+            device: modulator,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::MapModulator {
+            device: curve,
+            slot: 2,
+            target: bl_model::modulator::ModTarget::Device {
+                device: compressor,
+                param: ParamId(2),
+            },
         },
     );
 
@@ -699,6 +729,14 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "b_active",
                 "other_params",
             ][..],
+        ),
+        (
+            &devices
+                .iter()
+                .find(|d| d["kind"]["native"]["device_type"] == bl_model::modulator::CURVE_MOD)
+                .unwrap()
+                .clone(),
+            &["mappings", "shape"][..],
         ),
         (
             &clips

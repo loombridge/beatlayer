@@ -2164,6 +2164,15 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// The modulator slot whose Map button is lit, if one is (WP-5.10): a
+    /// click on any parameter's control maps it.
+    #[must_use]
+    pub fn armed_map(&self) -> Option<device_ids::ArmedMap> {
+        self.devices
+            .armed()
+            .map(|(device, slot)| device_ids::ArmedMap { device, slot })
+    }
+
     /// Sets the display data a device's display draws, as
     /// [`Shell::poll_engine`] does with the engine's (for a shell without an
     /// engine, as in tests; while one runs, the next poll takes its data
@@ -4991,6 +5000,28 @@ impl Shell {
             return self.load_sample(
                 device_ids::LOAD_SAMPLE,
                 json!({ "device": device, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && self.browser_view.selected_audio_is_empty()
+            && let Some((device_type, name)) = self.browser_view.selected_device()
+        {
+            // Spec: modulation R12. A modulator selected under the
+            // Modulators label loads as `device.add` adds a device.
+            Self::args::<NoArgs>(id, args)?;
+            return self.run_devices(
+                device_ids::ADD,
+                to_value(&device_ids::AddDeviceArgs {
+                    device: device_ids::NewDevice {
+                        kind: bl_model::DeviceKind::Native { device_type },
+                        name,
+                        role: bl_model::DeviceRole::AudioEffect,
+                        sidechain: false,
+                    },
+                    track: None,
+                    chain: None,
+                    index: None,
+                }),
             );
         }
         if id == browser_ids::LOAD_SELECTED

@@ -1727,8 +1727,8 @@ impl Processor {
         }
     }
 
-    /// Copies the notes the monitoring MIDI tracks received in the frames
-    /// `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// Copies the notes and controllers the monitoring MIDI tracks received in
+    /// the frames `offset..offset + frames` of the block into Capture MIDI's ring,
     /// stamped with the engine clock and, while the song plays, the song
     /// frame (WP-3.14).
     fn log_captured(&mut self, offset: usize, frames: usize) {
@@ -1739,8 +1739,10 @@ impl Processor {
         for (track, events) in program.get().midi.monitored_inputs() {
             for event in events {
                 let at = event.offset as usize;
-                let note = event.message.is_note_on() || event.message.is_note_off();
-                if !note || at < offset || at >= offset + frames {
+                if !crate::recording::is_recorded(&event.message)
+                    || at < offset
+                    || at >= offset + frames
+                {
                     continue;
                 }
                 let into = (at - offset) as i64;

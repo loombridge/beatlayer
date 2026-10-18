@@ -2318,6 +2318,14 @@ impl Shell {
         }
     }
 
+    /// What `plugin.info` reports for a plug-in device, for the Device
+    /// View's window button (WP-2.10): whether it has an editor and whether
+    /// its window is open. None for a device that isn't a loaded plug-in.
+    #[must_use]
+    pub fn plugin_info(&self, device: bl_model::DeviceId) -> Option<plugin_ids::PluginInfo> {
+        crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
+    }
+
     /// How the Browser shows plug-ins, and the Plug-In Sources switches:
     /// what `plugin.settings` returns.
     #[must_use]

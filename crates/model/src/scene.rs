@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ModelError;
+use crate::follow::FollowActions;
 use crate::ids::SceneId;
 
 /// How many scenes a new set opens with (the layout reference's default
@@ -35,6 +36,10 @@ pub struct Scene {
     /// own. `None` leaves the set's signature as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<TimeSignature>,
+    /// What the scene does by itself after it has been launched for a while
+    /// (WP-3.10): on a scene, Linked is the Longest button.
+    #[serde(default, skip_serializing_if = "FollowActions::is_default")]
+    pub follow: FollowActions,
 }
 
 /// The lowest tempo a scene can set (Live's scene tempo range).
@@ -51,6 +56,7 @@ impl Scene {
             name: String::new(),
             tempo: None,
             signature: None,
+            follow: FollowActions::default(),
         }
     }
 }

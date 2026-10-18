@@ -1983,6 +1983,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 Key::ArrowDown,
             ),
         ),
+        (
+            "clip.set_follow_actions",
+            Exception(Unobserved(
+                "the follow controls in the Launch Properties panel, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
         ("clip.set_warp", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
         ("clip.move_warp_markers", Exception(sample_editor)),
@@ -2538,6 +2544,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "scene.set_tempo",
             Exception(Unobserved(
                 "the scene's Tempo field, which a click focuses and Up, Down, digits, and Delete edit; its place in Live's Tab order",
+            )),
+        ),
+        (
+            "scene.set_follow_actions",
+            Exception(Unobserved(
+                "the follow controls in the Scene View, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
+        (
+            "session.set_follow_actions_enabled",
+            Exception(Unobserved(
+                "the switch in Main's status row, which Tab reaches with the grid's buttons; its place in Live's Tab order",
             )),
         ),
         (

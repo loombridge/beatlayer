@@ -11,9 +11,10 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Chain, ChainId, Change, ChangeSet, Channel, Clip,
     ClipData, ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, EditError, Editor, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
-    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
-    SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    DeviceKind, EditError, Editor, FollowAction, FollowActions, FollowPatch, Input, LaunchMode,
+    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError, Monitor,
+    Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId,
+    TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -51,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        137,
+        139,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -64,7 +65,8 @@ fn every_document_command_is_registered() {
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
-         unmap_modulator and set_shape, and WP-5.13 eleven for a multisampler's layers"
+         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, and \
+         WP-3.10 the two for follow actions"
     );
 
     for op in &ops {
@@ -673,6 +675,11 @@ fn every_command_runs_by_id() {
         "clip.set_launch_mode",
         json!({ "clip": slot_riff, "mode": "gate" }),
     );
+    agent.run(
+        "clip.set_follow_actions",
+        json!({ "clip": slot_riff, "enabled": true, "action_b": "jump", "jump_b": 99,
+            "chance_a": 70 }),
+    );
     assert_eq!(
         agent.editor.document().clip(slot_riff).unwrap().launch,
         ClipLaunch {
@@ -680,12 +687,23 @@ fn every_command_runs_by_id() {
             quantization: Some(LaunchQuantization::Eighth),
             velocity_amount: 0.5,
             mode: LaunchMode::Gate,
+            follow: FollowActions {
+                enabled: true,
+                action_b: FollowAction::Jump,
+                jump_b: 8,
+                chance_a: 70,
+                ..FollowActions::default()
+            },
         }
     );
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
+    agent.run(
+        "scene.set_follow_actions",
+        json!({ "scene": first, "enabled": true, "linked": false, "time": 2822400 }),
+    );
     agent.run(
         "scene.set_time_signature",
         json!({ "scene": first, "signature": { "numerator": 7, "denominator": 8 } }),
@@ -1872,6 +1890,17 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLegato { clip, legato: true },
         ),
         (
+            "clip.set_follow_actions",
+            Command::SetClipFollowActions {
+                clip,
+                patch: FollowPatch {
+                    action_a: Some(FollowAction::Stop),
+                    chance_a: Some(25),
+                    ..FollowPatch::default()
+                },
+            },
+        ),
+        (
             "clip.set_launch_quantization",
             Command::SetClipLaunchQuantization {
                 clip,
@@ -2322,6 +2351,17 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSceneTempo {
                 scene,
                 tempo: Some(Bpm::new(90.0).unwrap()),
+            },
+        ),
+        (
+            "scene.set_follow_actions",
+            Command::SetSceneFollowActions {
+                scene,
+                patch: FollowPatch {
+                    enabled: Some(true),
+                    time: Some(Ticks::WHOLE),
+                    ..FollowPatch::default()
+                },
             },
         ),
         (

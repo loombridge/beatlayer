@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-398 commands in 34 areas.
+403 commands in 34 areas.
 
 ## Permission classes
 
@@ -149,6 +149,7 @@ Each command has:
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | Link Envelope | `edit` |  |  |
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
+| [`clip.set_follow_actions`](#clipset_follow_actions) | Set Clip Follow Actions | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
@@ -311,12 +312,14 @@ Each command has:
 | [`scene.duplicate`](#sceneduplicate) | Duplicate Scene | `edit` |  |  |
 | [`scene.move`](#scenemove) | Move Scene | `edit` |  |  |
 | [`scene.rename`](#scenerename) | Rename Scene | `edit` |  |  |
+| [`scene.set_follow_actions`](#sceneset_follow_actions) | Set Scene Follow Actions | `edit` |  |  |
 | [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
 | [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | Copy Clip to Slot | `edit` |  |  |
+| [`session.create_follow_action_chain`](#sessioncreate_follow_action_chain) | Create Follow Action Chain | `edit` | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` |
 | [`session.deactivate`](#sessiondeactivate) | Deactivate Clips | `edit` | `0` | `0` |
 | [`session.delete`](#sessiondelete) | Delete in the Session View | `destructive` |  |  |
 | [`session.drop_files`](#sessiondrop_files) | Drop Files into a Slot | `external` |  |  |
@@ -336,6 +339,7 @@ Each command has:
 | [`session.select`](#sessionselect) | Select in the Session View | `read` |  |  |
 | [`session.select_all`](#sessionselect_all) | Select All Slots | `read` | `Cmd+A` | `Ctrl+A` |
 | [`session.select_edge`](#sessionselect_edge) | Select the Scene's First or Last Track | `read` | `Home`, `Fn+Left`; `End`, `Fn+Right`; `End`, `Fn+Right` | `Home`; `End`; `End` |
+| [`session.set_follow_actions_enabled`](#sessionset_follow_actions_enabled) | Enable Follow Actions Globally | `read` |  |  |
 | [`session.set_quantization`](#sessionset_quantization) | Set Global Launch Quantization | `read` | `Cmd+6`; `Cmd+7`; `Cmd+8`; `Cmd+9`; `Cmd+0` | `Ctrl+6`; `Ctrl+7`; `Ctrl+8`; `Ctrl+9`; `Ctrl+0` |
 | [`session.set_quantization_enabled`](#sessionset_quantization_enabled) | Launch Quantization Enabled | `read` | `Cmd+4` | `Ctrl+4` |
 | [`session.smaller_quantization`](#sessionsmaller_quantization) | Smaller Launch Quantization | `read` | `Cmd+1` | `Ctrl+1` |
@@ -344,6 +348,7 @@ Each command has:
 | [`session.stop_recording`](#sessionstop_recording) | Stop Session Recording | `read` |  |  |
 | [`session.stop_selected`](#sessionstop_selected) | Stop the Selected Tracks' Clips | `read` | `Cmd+Enter` | `Ctrl+Enter` |
 | [`session.stop_track`](#sessionstop_track) | Stop Track | `read` |  |  |
+| [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | Toggle Follow Actions | `edit` | `Shift+Enter` | `Shift+Enter` |
 | [`session.triplet_quantization`](#sessiontriplet_quantization) | Triplet Launch Quantization | `read` | `Cmd+3` | `Ctrl+3` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
@@ -2529,6 +2534,31 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `fade_in` | number, at least 0 | yes | The fade-in's length in seconds from the clip's start: 0 for none. |
 | `fade_out` | number, at least 0 | yes | The fade-out's length in seconds up to the clip's end: 0 for none. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_follow_actions`
+
+**Set Clip Follow Actions**. Permission: `edit`. Contexts: `clip-view`.
+
+Changes a Session clip's follow actions, as the Launch Properties panel does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, 0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from 1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is 2822400 ticks in 4/4). Fields left out stay as they are, and a number past its limit is held at the limit. One undo step. The defaults are off, A Next, B No Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the follow time has passed after the clip started, and the global switch (`session.set_follow_actions_enabled`) must be on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
+| `action_a` | [`FollowAction`](#followaction) or null | no | Action A. |
+| `action_b` | [`FollowAction`](#followaction) or null | no | Action B. |
+| `chance_a` | integer or null | no | The chance of action A in whole percent, 0 to 100; B has the rest. |
+| `enabled` | boolean or null | no | The Follow Action switch. |
+| `jump_a` | integer or null | no | The slot (scene) number action A's Jump goes to: 1 up to the number of scenes, and 0 for none. |
+| `jump_b` | integer or null | no | The slot (scene) number action B's Jump goes to. |
+| `linked` | boolean or null | no | Linked (on a scene, Longest) or Unlinked. |
+| `multiplier` | integer or null | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) or null | no | The Unlinked follow time in ticks, from a sixteenth. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5425,6 +5455,31 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `scene.set_follow_actions`
+
+**Set Scene Follow Actions**. Permission: `edit`. Contexts: `session`.
+
+Changes a scene's follow actions, as the Scene View does: what the scene does after it was launched, over the scenes as a clip's do over its track's slots. `enabled` is the Follow Action switch; `action_a` and `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, 0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from 1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is 2822400 ticks in 4/4). Fields left out stay as they are, and a number past its limit is held at the limit. One undo step. The defaults are off, A Next, B No Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the follow time has passed after the scene started, and the global switch (`session.set_follow_actions_enabled`) must be on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `action_a` | [`FollowAction`](#followaction) or null | no | Action A. |
+| `action_b` | [`FollowAction`](#followaction) or null | no | Action B. |
+| `chance_a` | integer or null | no | The chance of action A in whole percent, 0 to 100; B has the rest. |
+| `enabled` | boolean or null | no | The Follow Action switch. |
+| `jump_a` | integer or null | no | The slot (scene) number action A's Jump goes to: 1 up to the number of scenes, and 0 for none. |
+| `jump_b` | integer or null | no | The slot (scene) number action B's Jump goes to. |
+| `linked` | boolean or null | no | Linked (on a scene, Longest) or Unlinked. |
+| `multiplier` | integer or null | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) or null | no | The Unlinked follow time in ticks, from a sixteenth. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `scene.set_tempo`
 
 **Set Scene Tempo**. Permission: `edit`. Contexts: `session`.
@@ -5524,6 +5579,22 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip to copy. |
 | `track` | [`TrackId`](#trackid) | yes | The track whose slot it goes in. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it goes in. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `session.create_follow_action_chain`
+
+**Create Follow Action Chain**. Permission: `edit`. Contexts: `session`.
+
+Chains the selected slots' clips, as the clip menu's Create Follow Action Chain (Cmd+Shift+Enter) does, a chain for each track in scene order: every clip gets Follow Action on, A Next at 100 %, B No Action and Linked 1x, so each launches the one after it when it ends. Where the next clip of the selection isn't the next slot, the clip gets A Jump to its slot instead, and the last clip jumps to the first, so the chain loops within the selection. Loop switches don't change. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-014 | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` | `session` | Create a follow action chain from the selected clips | runs it |
+
+Arguments: none (send `{}`).
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5852,6 +5923,22 @@ Arguments:
 
 Result: [`SessionViewState`](#sessionviewstate).
 
+#### `session.set_follow_actions_enabled`
+
+**Enable Follow Actions Globally**. Permission: `read`. Contexts: `session`.
+
+Turns every clip's and scene's follow actions on or off (`enabled`; left out, the switch goes to the other state), as the Enable Follow Actions Globally switch in Main's status row does. Off, no follow action runs, whatever a clip's or scene's own Follow Action switch says; a clip that started while it was off follows nothing until it starts again. On by default. Saved with the set beside the launch quantisation, and no undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Whether follow actions run; left out, the switch goes to the other state. |
+
+Result: [`LaunchSettings`](#launchsettings).
+
 #### `session.set_quantization`
 
 **Set Global Launch Quantization**. Permission: `read`. Contexts: `global`.
@@ -5979,6 +6066,22 @@ Arguments:
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 
 Result: nothing (`null`).
+
+#### `session.toggle_follow_actions`
+
+**Toggle Follow Actions**. Permission: `edit`. Contexts: `session`.
+
+Switches the Follow Action switch of the selected slots' clips on, or off when they are all on already, as Shift+Enter does: with some on and some off, they all go on. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-013 | `Shift+Enter` | `Shift+Enter` | `session` | Turn follow actions on or off for the selected clips | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`ChangeSet`](#changeset).
 
 #### `session.triplet_quantization`
 
@@ -7436,6 +7539,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | the query tool's `clip` | `envelopes` |
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
+| [`clip.set_follow_actions`](#clipset_follow_actions) | the query tool's `clip` | `launch.follow` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
@@ -7544,10 +7648,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`scene.duplicate`](#sceneduplicate) | the query tool's `song` | `scenes` |
 | [`scene.move`](#scenemove) | the query tool's `song` | `scenes` |
 | [`scene.rename`](#scenerename) | the query tool's `scene` | `name` |
+| [`scene.set_follow_actions`](#sceneset_follow_actions) | the query tool's `scene` | `follow` |
 | [`scene.set_tempo`](#sceneset_tempo) | the query tool's `scene` | `tempo` |
 | [`scene.set_time_signature`](#sceneset_time_signature) | the query tool's `scene` | `signature` |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | the query tool's `song` | `scenes` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | the query tool's `track` | `slots` |
+| [`session.create_follow_action_chain`](#sessioncreate_follow_action_chain) | the query tool's `clip` | `launch.follow` |
 | [`session.deactivate`](#sessiondeactivate) | the query tool's `clip` | `mute` |
 | [`session.delete`](#sessiondelete) | the query tool's `track` | `slots` |
 | [`session.drop_files`](#sessiondrop_files) | the query tool's `track` | `slots` |
@@ -7557,6 +7663,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.overdub`](#sessionoverdub) | `transport.state` | `recording.session_slots` |
 | [`session.record`](#sessionrecord) | `transport.state` | `recording.session_slots` |
 | [`session.record_slot`](#sessionrecord_slot) | `transport.state` | `recording.session_slots` |
+| [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
@@ -9947,6 +10054,7 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `follow` | [`FollowActions`](#followactions) | no | What the clip does by itself after it has played for a while (WP-3.10). |
 | `legato` | boolean | no | Legato: the clip takes over the play position of the clip playing on its track when it launches. |
 | `mode` | [`LaunchMode`](#launchmode) | no | What a press and a release of the clip's launch button do (WP-3.3). |
 | `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The clip's own launch quantisation; `null` (left out) follows the global one, which Live's chooser calls "Global". |
@@ -9958,6 +10066,10 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 {
   "description": "A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). They are saved with the clip, so they're part of the set and each change is one undo step; a clip without them has the defaults.",
   "properties": {
+    "follow": {
+      "$ref": "#/$defs/FollowActions",
+      "description": "What the clip does by itself after it has played for a while (WP-3.10)."
+    },
     "legato": {
       "default": false,
       "description": "Legato: the clip takes over the play position of the clip playing on its track when it launches.",
@@ -12617,6 +12729,169 @@ What `device.windows` returns.
 
 </details>
 
+### `FollowAction`
+
+What a follow action does when its time comes (the Clip View's action list, in its order).
+
+One of:
+
+- `"no_action"`: Nothing: the clip plays on as it was.
+- `"stop"`: Stops the clip.
+- `"play_again"`: Launches the clip again from its start.
+- `"previous"`: Launches the clip before this one in its group.
+- `"next"`: Launches the clip after this one in its group.
+- `"first"`: Launches the first clip of the group.
+- `"last"`: Launches the last clip of the group.
+- `"any"`: Launches any clip of the group, this one included.
+- `"other"`: Launches any clip of the group but this one.
+- `"jump"`: Launches the clip at a slot number the action names.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a follow action does when its time comes (the Clip View's action list, in its order).",
+  "oneOf": [
+    {
+      "const": "no_action",
+      "description": "Nothing: the clip plays on as it was.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Stops the clip.",
+      "type": "string"
+    },
+    {
+      "const": "play_again",
+      "description": "Launches the clip again from its start.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "Launches the clip before this one in its group.",
+      "type": "string"
+    },
+    {
+      "const": "next",
+      "description": "Launches the clip after this one in its group.",
+      "type": "string"
+    },
+    {
+      "const": "first",
+      "description": "Launches the first clip of the group.",
+      "type": "string"
+    },
+    {
+      "const": "last",
+      "description": "Launches the last clip of the group.",
+      "type": "string"
+    },
+    {
+      "const": "any",
+      "description": "Launches any clip of the group, this one included.",
+      "type": "string"
+    },
+    {
+      "const": "other",
+      "description": "Launches any clip of the group but this one.",
+      "type": "string"
+    },
+    {
+      "const": "jump",
+      "description": "Launches the clip at a slot number the action names.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `FollowActions`
+
+A clip's or a scene's follow actions: the Follow Action switch, actions A and B with the chance that splits them, and the follow time.
+
+On a scene, `linked` is the Longest button: the time is the multiplier times the longest clip of the scene.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action_a` | [`FollowAction`](#followaction) | no | Action A, which runs with the chance `chance_a`. Next by default. |
+| `action_b` | [`FollowAction`](#followaction) | no | Action B, which runs the rest of the time. No Action by default. |
+| `chance_a` | integer from 0 to 255 | no | The chance of action A in whole percent, 0 to 100. Action B has the rest, so the two always add up to 100. |
+| `enabled` | boolean | no | The Follow Action switch. Off, nothing runs; off is the default. |
+| `jump_a` | integer, at least 0 | no | The slot (scene) number action A's Jump goes to, counted from 1; 0 leaves it empty, and a jump to an empty target stops the clip. |
+| `jump_b` | integer, at least 0 | no | The slot (scene) number action B's Jump goes to, as `jump_a`. |
+| `linked` | boolean | no | Linked: the follow time is a multiple of the clip's length (the multiplier counts loops, and a clip whose Loop switch is off follows at its end). Unlinked: `time`. On by default. |
+| `multiplier` | integer, at least 0 | no | The Linked multiplier, a whole number from 1. |
+| `time` | [`Ticks`](#ticks) | no | The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A clip's or a scene's follow actions: the Follow Action switch, actions A and B with the chance that splits them, and the follow time.\n\nOn a scene, `linked` is the Longest button: the time is the multiplier times the longest clip of the scene.",
+  "properties": {
+    "action_a": {
+      "$ref": "#/$defs/FollowAction",
+      "default": "next",
+      "description": "Action A, which runs with the chance `chance_a`. Next by default."
+    },
+    "action_b": {
+      "$ref": "#/$defs/FollowAction",
+      "default": "next",
+      "description": "Action B, which runs the rest of the time. No Action by default."
+    },
+    "chance_a": {
+      "default": 100,
+      "description": "The chance of action A in whole percent, 0 to 100. Action B has the rest, so the two always add up to 100.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "enabled": {
+      "default": false,
+      "description": "The Follow Action switch. Off, nothing runs; off is the default.",
+      "type": "boolean"
+    },
+    "jump_a": {
+      "default": 1,
+      "description": "The slot (scene) number action A's Jump goes to, counted from 1; 0 leaves it empty, and a jump to an empty target stops the clip.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "jump_b": {
+      "default": 1,
+      "description": "The slot (scene) number action B's Jump goes to, as `jump_a`.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "linked": {
+      "description": "Linked: the follow time is a multiple of the clip's length (the multiplier counts loops, and a clip whose Loop switch is off follows at its end). Unlinked: `time`. On by default.",
+      "type": "boolean"
+    },
+    "multiplier": {
+      "default": 1,
+      "description": "The Linked multiplier, a whole number from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "time": {
+      "$ref": "#/$defs/Ticks",
+      "default": 2822400,
+      "description": "The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `GridState`
 
 The editing grid, as the Arrangement View uses it now.
@@ -13665,6 +13940,7 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
 |---|---|---|---|
 | `quantization` | [`LaunchQuantization`](#launchquantization) | yes | The step launches and stops wait for. |
 | `enabled` | boolean | yes | Whether launches and stops are quantised at all. Off, they happen at once, whatever the step says. |
+| `follow_actions` | boolean | no | Enable Follow Actions Globally (WP-3.10): off, no clip's or scene's follow action runs. On by default. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13674,6 +13950,10 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
   "properties": {
     "enabled": {
       "description": "Whether launches and stops are quantised at all. Off, they happen at once, whatever the step says.",
+      "type": "boolean"
+    },
+    "follow_actions": {
+      "description": "Enable Follow Actions Globally (WP-3.10): off, no clip's or scene's follow action runs. On by default.",
       "type": "boolean"
     },
     "quantization": {

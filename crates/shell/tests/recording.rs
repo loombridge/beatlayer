@@ -856,7 +856,7 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
         .find(|clip| clip.start == Ticks::QUARTER)
         .expect("a clip on the loop");
     let last = pass(lanes.len() - 1);
-    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data));
+    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data.clone()));
     assert_eq!(latest.length, last.length);
 
     // The whole path stayed off the heap.

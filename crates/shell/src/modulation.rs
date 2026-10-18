@@ -8,7 +8,7 @@ use bl_core::time::Ticks;
 use bl_engine::clip_envelope_value_at;
 use bl_model::modulation::Travel;
 use bl_model::modulator::ModTarget;
-use bl_model::{AutomationTarget, Document, MixerParam, TrackId};
+use bl_model::{AutomationTarget, Document, EnvelopeKind, MixerParam, TrackId};
 use bl_shell_spec::modulation::{
     ModulatedParameter, ModulationSource, ModulationState, ModulatorSource,
 };
@@ -56,6 +56,17 @@ fn travel_of<'a>(
     })
 }
 
+/// The value of the control `target` names on `track`, in its own units: the
+/// mixer's, the send's or the device's, or a default parameter's default.
+pub(crate) fn control_value(
+    document: &Document,
+    devices: &DeviceView,
+    track: TrackId,
+    target: &AutomationTarget,
+) -> Option<f64> {
+    travel_of(document, devices, track, target).map(|(_, control)| control)
+}
+
 /// What `modulation.state` reports for `track`, or every track when `None`,
 /// at play position `at`, with `played` giving what a parameter played in
 /// the last block: its base and played value, in its units.
@@ -74,7 +85,11 @@ pub(crate) fn state(
         let mut targets: BTreeMap<AutomationTarget, (Vec<ModulationSource>, Vec<ModulatorSource>)> =
             BTreeMap::new();
         for clip in owner.clips() {
-            for envelope in clip.envelopes() {
+            // Only the Modulation envelopes modulate (WP-3.12).
+            for envelope in clip
+                .envelopes()
+                .filter(|envelope| envelope.kind == EnvelopeKind::Modulation)
+            {
                 let Some((travel, control)) =
                     travel_of(document, devices, owner.id(), &envelope.target)
                 else {

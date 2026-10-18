@@ -137,6 +137,10 @@ pub const SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH: &str =
 /// Scene Launch (WP-3.4).
 pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
     "settings.set_start_recording_on_scene_launch";
+/// `settings.set_record_session_automation_in`: choose which tracks Session
+/// recordings write automation for (WP-3.12).
+pub const SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN: &str =
+    "settings.set_record_session_automation_in";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -204,6 +208,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_SELECT_ON_LAUNCH,
     SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
     SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+    SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -309,6 +314,14 @@ pub struct ThemeArgs {
 pub struct DefaultLaunchModeArgs {
     /// The launch mode new clips start with.
     pub mode: LaunchMode,
+}
+
+/// Arguments of `settings.set_record_session_automation_in`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSessionAutomationInArgs {
+    /// `armed_tracks` or `all_tracks`.
+    pub tracks: crate::settings::SessionAutomationTracks,
 }
 
 /// Arguments of `settings.set_default_launch_quantization`.
@@ -1094,6 +1107,22 @@ fn specs() -> Vec<CommandSpec> {
         .permission(Permission::Edit)
         .context(Settings)
         .args::<DefaultLaunchQuantizationArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+            "Record Session Automation in",
+        )
+        .description(
+            "Chooses Record Session automation in on the Settings window's Record, Warp & \
+             Launch page: `armed_tracks` (the default, Live's) records the control moves of \
+             a Session recording into the clips of the armed tracks, `all_tracks` into the \
+             playing clip of every track. Moves are recorded only while Automation Arm is \
+             on (`arrangement.automation_arm`). The setting is kept for the next start, and \
+             isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<RecordSessionAutomationInArgs>()
         .result::<()>(),
         CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
             .description(

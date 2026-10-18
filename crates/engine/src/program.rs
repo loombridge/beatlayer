@@ -141,6 +141,9 @@ pub struct EngineProgram {
     /// launch queues (WP-3.2) and where a press finds its clip's mode
     /// (WP-3.3).
     pub(crate) scene_slots: Vec<(SceneId, TrackId, LaunchMode)>,
+    /// Every slot clip's and scene's follow actions and the quantisation
+    /// and length a follow launch needs (WP-3.10).
+    pub(crate) follow: crate::session::FollowTable,
     /// Every audio and MIDI track, in order: what Stop All Clips stops
     /// (WP-3.6).
     pub(crate) session_tracks: Vec<TrackId>,
@@ -1051,7 +1054,12 @@ impl EngineProgram {
                         &mut self.pool[own.clone()],
                         &self.delay_scratch[..size],
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );
@@ -1065,7 +1073,12 @@ impl EngineProgram {
                         mine,
                         theirs,
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );
@@ -1074,7 +1087,12 @@ impl EngineProgram {
                         &mut self.pool[own.clone()],
                         &self.tap_pool[at..at + size],
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );

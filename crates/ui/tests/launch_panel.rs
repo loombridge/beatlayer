@@ -99,9 +99,10 @@ fn the_panel_shows_for_session_clips_only() {
 }
 
 // The recorded defaults: Trigger, Legato off, Global, 0.0 %; the follow
-// actions at A Next 100 % and B No Action 0 %, Linked 1x, all pending.
+// actions off, A Next 100 % and B No Action 0 %, Linked 1x, all live; only
+// the nudge buttons are pending.
 #[test]
-fn the_recorded_defaults_show_and_the_follow_controls_are_pending() {
+fn the_recorded_defaults_show_and_only_the_nudge_buttons_are_pending() {
     let (mut h, _) = session_clip();
     let all = nodes(&mut h);
     assert_eq!(Harness::node(&all, "Launch Mode").value, "Trigger");
@@ -110,22 +111,115 @@ fn the_recorded_defaults_show_and_the_follow_controls_are_pending() {
     let velocity = Harness::node(&all, "Velocity");
     assert_eq!(velocity.value, "0.0 %");
     assert_eq!(velocity.numeric, Some(0.0));
+    // Spec: follow-actions R1, R13
+    assert_eq!(Harness::node(&all, "Follow Action").toggled, Some(false));
     for (name, value) in [
-        ("Follow Action", "Follow Action"),
         ("Follow Action A", "Next"),
         ("Follow Action B", "No Action"),
         ("Chance A", "100 %"),
         ("Chance B", "0 %"),
-        ("Follow Time Linked", "Linked"),
-        ("Follow Time Multiplier", "1x"),
-        ("Nudge Back", "«"),
-        ("Nudge Forward", "»"),
     ] {
+        let node = Harness::node(&all, name);
+        assert!(!node.disabled, "{name} is live");
+        assert_eq!(node.value, value, "{name}");
+    }
+    assert_eq!(
+        Harness::node(&all, "Follow Time Linked").toggled,
+        Some(true)
+    );
+    assert!(
+        all.iter().all(|n| n.label != "Jump A"),
+        "Jump shows only for Jump"
+    );
+    for (name, value) in [("Nudge Back", "«"), ("Nudge Forward", "»")] {
         let node = Harness::node(&all, name);
         assert!(node.disabled, "{name} is pending");
         assert_eq!(node.value, value, "{name}");
         assert!(node.description.starts_with("Not built yet"), "{name}");
     }
+}
+
+// Spec: follow-actions R3, R4, R9, R13. Each follow control runs the clip's
+// command, one undo step, and shows the saved value back; Jump's target
+// shows while the action is Jump; the two chances add up to 100.
+#[test]
+fn the_follow_controls_drive_their_command_and_read_back_the_document() {
+    let (mut h, clip) = session_clip();
+    let follow = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .clip(clip)
+            .unwrap()
+            .launch
+            .follow
+    };
+
+    // The Follow Action switch: a click.
+    let before = steps(&h);
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Follow Action")));
+    assert!(follow(&h).enabled);
+    assert_eq!(steps(&h), before + 1);
+    assert_eq!(
+        Harness::node(&nodes(&mut h), "Follow Action").toggled,
+        Some(true)
+    );
+
+    // Action A: Down steps from Next to First, and Jump shows its target
+    // box once A is Jump.
+    h.shell
+        .run(
+            "clip.set_follow_actions",
+            json!({ "clip": clip, "action_a": "jump", "jump_a": 99 }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Follow Action A").value, "Jump");
+    let jump = Harness::node(&all, "Jump A");
+    assert_eq!(jump.value, "8", "held at the number of scenes");
+
+    // Chance B moves chance A the other way.
+    let before = steps(&h);
+    h.accesskit(Id::new(("number-box", "follow-chance-B")), Action::Focus);
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!((follow(&h).chance_a, follow(&h).chance_b()), (99, 1));
+    assert_eq!(steps(&h), before + 1);
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Chance A").value, "99 %");
+    assert_eq!(Harness::node(&all, "Chance B").value, "1 %");
+
+    // With the loop on, Linked shows its multiplier.
+    h.shell
+        .run(
+            "clip.set_midi_loop",
+            json!({ "clip": clip, "start": 0, "end": 3_225_600 }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "clip.set_loop_enabled",
+            json!({ "clip": clip, "enabled": true }),
+        )
+        .unwrap();
+    assert_eq!(
+        Harness::node(&nodes(&mut h), "Follow Time Multiplier").value,
+        "1x"
+    );
+
+    // Unlinked: the time reads bars.beats.sixteenths, 1.0.0 to begin with.
+    h.shell
+        .run(
+            "clip.set_follow_actions",
+            json!({ "clip": clip, "linked": false }),
+        )
+        .unwrap();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Follow Time").value, "1.0.0");
+    assert!(all.iter().all(|n| n.label != "Follow Time Multiplier"));
+    h.accesskit(Id::new(("number-box", "follow-time")), Action::Focus);
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(Harness::node(&nodes(&mut h), "Follow Time").value, "0.3.3");
 }
 
 // Each live control runs its command: one undo step, and the document and

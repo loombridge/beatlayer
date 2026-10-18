@@ -72,7 +72,7 @@ fn add(client: &mut Client<InProcess>, file: &PathBuf) -> (f64, f64) {
         .clips()
         .find(|c| c.start.get() == 0)
         .unwrap();
-    let ClipData::Audio(audio) = clip.data else {
+    let ClipData::Audio(audio) = &clip.data else {
         unreachable!("an audio clip");
     };
     (audio.fade_in, audio.fade_out)

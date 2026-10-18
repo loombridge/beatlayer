@@ -446,7 +446,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.7 | done | 15 October 2026 | [#58](https://github.com/loombridge/beatlayer/pull/58); the Session View grid; [the spec](specs/session-view.md) |
 | 3.8 | done | 17 October 2026 | [#87](https://github.com/loombridge/beatlayer/pull/87); the grid launches and stops through commands: slot and scene launch buttons, the status row's stop buttons, Stop All Clips, Back to Arrangement, and Enter; [the spec](specs/session-view.md) |
 | 3.9 | done | 17 October 2026 | [#96](https://github.com/loombridge/beatlayer/pull/96); a Session clip in the Clip View shows the Launch Properties panel, whose launch mode, Legato, Quantize and Velocity controls run the clip launch commands; the follow-action and nudge controls are drawn disabled, and the tab still needs measuring in Live; [the spec](specs/launch-quantisation.md) |
-| 3.10 | todo |  |  |
+| 3.10 | done | 18 October 2026 | [#150](https://github.com/loombridge/beatlayer/pull/150); follow actions on Session clips and scenes, seeded so renders repeat, with the global switch, Shift+Enter, Create Follow Action Chain and live controls in the Launch Properties panel and the Scene View; the nudge controls stay disabled; [the spec](specs/follow-actions.md) |
 | 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |
 | 3.12 | todo |  |  |
 | 3.13 | done | 17 October 2026 | [#116](https://github.com/loombridge/beatlayer/pull/116); Session clips played during Arrangement Record are copied to their tracks as one `Record` undo step, with loop settings, mid-take edits split and control moves written with Automation Arm off; [the spec](specs/session-to-arrangement.md) |
@@ -455,7 +455,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.16 | done | 17 October 2026 | [#91](https://github.com/loombridge/beatlayer/pull/91); the Clip View's Notes, Envelopes and MPE tabs, the Envelopes tab's editor with its choosers and Linked switch, and the Clip View following the latest selected Session or Arrangement clip; [the spec](specs/clip-envelopes.md) |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
-| 4.1 | todo |  |  |
+| 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
 | 4.2 | todo |  |  |
 | 4.3 | todo |  |  |
 | 4.4 | todo |  |  |
@@ -490,7 +490,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.10 | done | 17 October 2026 | [#133](https://github.com/loombridge/beatlayer/pull/133); the Wave Mod and the Curve Mod map up to eight targets on any track, in Modulation or Remote Control, on a 32-frame grid the same at any block size; [the spec](specs/modulation.md) |
 | 5.11 | todo |  |  |
 | 5.12 | done | 17 October 2026 | [#121](https://github.com/loombridge/beatlayer/pull/121); every native device holds A and B states, switched with P or the Edit and device menus' Compare items as one undo step that glides and overrides its envelopes, copied either way, and saved with the set; racks and plug-ins offer none; [the spec](specs/device-compare.md) |
-| 5.13 | todo |  |  |
+| 5.13 | done | 18 October 2026 | [#126](https://github.com/loombridge/beatlayer/pull/126); Mosaic, the multisampler, plays ordered layers chosen by key, velocity and the Sample Selector, with zone fades, Round Robin, loops, three interpolation kernels and its volume envelope, edited in the zone editor and Sample tab as one undo step each and sent to its node as data; [the spec](specs/multisampler.md) |
 | 5.14 | todo |  |  |
 | 5.15 | todo |  |  |
 | 5.15b | todo |  |  |
@@ -501,7 +501,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.20 | done | 18 October 2026 | [#142](https://github.com/loombridge/beatlayer/pull/142); Sweep, the Auto Filter ([the spec](specs/auto-filter.md)), filters with ten types and four circuits, its cutoff moved by an LFO and an envelope follower with a sidechain filter, with Mono Sidechain and Hi-Quality as menu items; the display's spectrum and handle, and a layout that hides unused controls, wait |
 | 5.20b | todo |  |  |
 | 5.20c | todo |  |  |
-| 5.21 | todo |  |  |
+| 5.21 | done | 18 October 2026 | [#148](https://github.com/loombridge/beatlayer/pull/148); Strip, Triad, Shutter and Bond, the channel EQ, three-band EQ, gate and bus compressor ([channel EQ](specs/channel-eq.md), [three-band EQ](specs/three-band-eq.md), [gate](specs/gate.md), [bus compressor](specs/bus-compressor.md)), with sidechains, look-ahead and oversampling latency, and gain reduction readable for the meters |
 | 5.22 | todo |  |  |
 | 5.22b | todo |  |  |
 | 5.23 | todo |  |  |

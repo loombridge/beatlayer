@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
-use crate::clip::{Clip, TakeLane};
+use crate::clip::{Clip, EnvelopeKind, TakeLane};
 use crate::device::Device;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::rack::Chain;
@@ -693,12 +693,56 @@ impl Track {
     }
 
     /// Whether any of the track's envelopes is turned off: a control was
-    /// moved by hand and Re-Enable Automation hasn't run since.
+    /// moved by hand and Re-Enable Automation hasn't run since. A Session
+    /// clip's automation envelope counts too (WP-3.12).
     #[must_use]
     pub fn automation_overridden(&self) -> bool {
         self.automation
             .values()
             .any(|automation| !automation.enabled)
+            || self.slots.values().any(|clip| {
+                clip.envelopes
+                    .iter()
+                    .any(|envelope| envelope.kind == EnvelopeKind::Automation && !envelope.enabled)
+            })
+    }
+
+    /// Turns `target`'s envelope off, in the track's automation and in each
+    /// Session clip's automation envelopes: what moving the control by
+    /// hand does (automation R5, WP-3.12). A clip that isn't playing is
+    /// turned off too, and its launch turns it on again.
+    pub(crate) fn override_target(&mut self, target: &AutomationTarget) {
+        crate::automation::override_target(&mut self.automation, target);
+        self.set_clip_envelopes_enabled(|t| t == target, false);
+    }
+
+    /// Turns the Session clips' automation envelopes for the targets
+    /// `which` accepts on or off, copying only the clips that change.
+    pub(crate) fn set_clip_envelopes_enabled(
+        &mut self,
+        which: impl Fn(&AutomationTarget) -> bool,
+        enabled: bool,
+    ) {
+        let changing = |envelope: &crate::clip::ClipEnvelope| {
+            envelope.kind == EnvelopeKind::Automation
+                && envelope.enabled != enabled
+                && which(&envelope.target)
+        };
+        let scenes: Vec<SceneId> = self
+            .slots
+            .iter()
+            .filter(|(_, clip)| clip.envelopes.iter().any(changing))
+            .map(|(&scene, _)| scene)
+            .collect();
+        for scene in scenes {
+            if let Some(clip) = self.slots.get_mut(&scene) {
+                for envelope in &mut Shared::make_mut(clip).envelopes {
+                    if changing(envelope) {
+                        envelope.enabled = enabled;
+                    }
+                }
+            }
+        }
     }
 
     /// Whether the track's own settings differ from another version's:

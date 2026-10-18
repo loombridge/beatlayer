@@ -502,6 +502,10 @@ pub struct DeviceFrame {
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
     pub hot_swap: bool,
+    /// A multisampler's views and selected layers (WP-5.13, R30); left out
+    /// for any other device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multisampler: Option<crate::multisampler::MultisamplerState>,
     /// Its parameters and layout, for the generic UI; left out for a
     /// device whose type doesn't describe them.
     #[serde(default, skip_serializing_if = "Option::is_none")]

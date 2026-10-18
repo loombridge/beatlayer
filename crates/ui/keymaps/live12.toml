@@ -2307,7 +2307,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Shift+Enter"]
 win = ["Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.toggle_follow_actions", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-014"
@@ -2318,7 +2321,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+Enter"]
 win = ["Ctrl+Shift+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.create_follow_action_chain", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-015"

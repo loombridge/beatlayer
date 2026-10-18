@@ -135,6 +135,7 @@ fn a_launch_lands_on_its_grid_frame_at_any_block_size_and_value() {
                 .session(SessionCommand::SetQuantization(LaunchSettings {
                     quantization: value,
                     enabled: true,
+                    ..LaunchSettings::default()
                 }));
             rig.sender.transport(TransportCommand::Play);
             at_frame(&mut rig, at, block, |rig| {
@@ -738,6 +739,7 @@ fn mode_rig(mode: LaunchMode, value: LaunchQuantization) -> (Rig, TrackId, Scene
         .session(SessionCommand::SetQuantization(LaunchSettings {
             quantization: value,
             enabled: true,
+            ..LaunchSettings::default()
         }));
     rig.sender.transport(TransportCommand::Play);
     (rig, track, scene)

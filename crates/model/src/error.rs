@@ -44,6 +44,9 @@ pub enum ModelError {
         /// The clip.
         clip: ClipId,
     },
+    /// A MIDI controller (a clip's MIDI Ctrl envelope) was named where a
+    /// track's parameter is needed, such as for track automation (WP-2.29).
+    MidiControllerNotAParameter,
     /// The device is a plug-in, which opens its own editor window rather
     /// than floating (IMP-14).
     CannotFloat(DeviceId),
@@ -308,6 +311,9 @@ impl fmt::Display for ModelError {
             ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
+            Self::MidiControllerNotAParameter => f.write_str(
+                "a MIDI controller belongs to a MIDI clip's envelopes; it isn't a track parameter",
+            ),
             Self::DuplicateEnvelope { clip } => {
                 write!(f, "{clip} carries two envelopes for one parameter")
             }

@@ -457,9 +457,9 @@ fn the_editor_reads_the_clips_start_marker() {
     let step = n_step();
     let mut n = set_with(4 * step, vec![Note::new(60, 4 * step, step, 100)]);
     let grid = n.grid();
-    let note = n.notes()[0];
+    let note = &n.notes()[0];
     let top = n.h.main.clip_view().top();
-    let rect = note_rect(grid, n.marker(), n.length(), top, &note);
+    let rect = note_rect(grid, n.marker(), n.length(), top, note);
     assert!(
         (rect.left() - grid.left()).abs() < 1.0,
         "a note at the marker sits at the clip's start, {:?} vs {:?}",

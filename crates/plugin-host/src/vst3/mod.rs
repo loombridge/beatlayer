@@ -466,6 +466,15 @@ impl Vst3Host {
         let main = guard.get()?;
         let module = module(main, path)?;
         let mut found = Vec::new();
+        // The factory's own vendor, for classes that name none: Live files
+        // such a plug-in under it (the plug-in scanning spec, R11).
+        // SAFETY: an all-zero factory info is valid; the factory fills it.
+        let mut factory_info: PFactoryInfo = unsafe { std::mem::zeroed() };
+        // SAFETY: the factory fills the info it's given.
+        let factory_vendor = (unsafe { module.factory.getFactoryInfo(&mut factory_info) }
+            == kResultOk)
+            .then(|| cstring(&factory_info.vendor))
+            .filter(|v| !v.is_empty());
         // SAFETY: the factory reports its own class count.
         let count = unsafe { module.factory.countClasses() }.max(0);
         for index in 0..count {
@@ -493,6 +502,7 @@ impl Vst3Host {
                     version = Some(cstring(&info2.version)).filter(|v| !v.is_empty());
                 }
             }
+            let vendor = vendor.or_else(|| factory_vendor.clone());
             let name = cstring(&info.name);
             let name = if name.is_empty() {
                 format_fuid(&cid)

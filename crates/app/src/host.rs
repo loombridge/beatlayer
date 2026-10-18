@@ -469,6 +469,11 @@ pub fn run(args: Args) -> Result<(), String> {
             }
         }));
     }
+    if !args.benchmark_scene {
+        // Live scans its plug-ins at launch: so does Beatlayer, in the
+        // background, so the first frame doesn't wait (WP-2.9b).
+        shell.start_plugin_scan();
+    }
     for (id, command_args) in &args.commands {
         if let Err(error) = shell.invoke(id, command_args.clone()) {
             eprintln!("beatlayer: --command {id}: {error}");

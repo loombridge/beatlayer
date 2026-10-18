@@ -3,8 +3,8 @@
 //! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
 //! Fades on Clip Edges (L-SET-018, WP-1.4b), and Display & Input's
 //! keyboard settings (Outline View in Focus, Use Tab Key to Move Focus,
-//! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Auto-Hide Plug-In Windows
-//! (L-SET-017, WP-2.5b) are built; the other pages are
+//! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Plug-In Sources (WP-2.9b)
+//! and Auto-Hide Plug-In Windows (L-SET-017, WP-2.5b) are built; the other pages are
 //! in the chooser and say which package builds them. The Agents page
 //! (L-SET-020) is Beatlayer's own: the agent server's settings (WP-1.15),
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
@@ -820,25 +820,14 @@ fn launch_rows(
     }
 }
 
-/// Plug-Ins' Plug-In Sources section (L-SET-017): the plug-in hosts build
-/// it. Live's VST2 rows are left out, as Beatlayer doesn't host VST2 (the
-/// parity matrix: Out).
-const PLUG_IN_SOURCES: [Pending; 4] = [
-    Pending {
-        label: "Plug-In Sources",
-        controls: &[("Rescan", SettingsLayout::CHOOSER)],
-        package: "WP-2.6",
-        value: "Rescan",
-    },
-    switch_row("Use Audio Units v2", "WP-2.8"),
-    switch_row("Use Audio Units v3", "WP-2.8"),
-    switch_row("VST3 Plug-In System Folders", "WP-2.7"),
-];
-
-/// Plug-Ins (L-SET-017): Plug-In Sources, pending until the plug-in hosts,
-/// then Plug-In Windows, whose Auto-Hide Plug-In Windows is built
-/// (WP-2.5b): floating devices' windows follow it as Live's plug-in windows
-/// do. Multiple and Auto-Open keep their places, pending.
+/// Plug-Ins (L-SET-017): Plug-In Sources (WP-2.9b): Rescan, which scans
+/// the formats switched on afresh in the background, and the switches that
+/// say which formats are scanned and listed; Live's VST2 rows are left out,
+/// as Beatlayer doesn't host VST2 (the parity matrix: Out), and so is the
+/// VST3 custom folder, not built yet. Then Plug-In Windows, whose Auto-Hide
+/// Plug-In Windows is built (WP-2.5b): floating devices' windows follow it
+/// as Live's plug-in windows do. Multiple and Auto-Open keep their places,
+/// pending.
 fn plug_ins_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -847,8 +836,49 @@ fn plug_ins_page(
     events: &mut Vec<UiEvent>,
 ) {
     rows.heading(ui, "Plug-In Sources");
-    for row in &PLUG_IN_SOURCES {
-        rows.pending(ui, row);
+    let rect = rows.row(ui, "Rescan Plug-Ins", SettingsLayout::SWITCH);
+    if push_button(
+        ui,
+        theme,
+        "rescan-plug-ins",
+        "Rescan Plug-Ins",
+        "Rescan",
+        rect,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::plugin_commands::RESCAN,
+            json!({ "background": true }),
+        )));
+    }
+    let sources = shell.plugin_settings();
+    let switches = [
+        (
+            "Use Audio Units v2",
+            "use-audio-units-v2",
+            sources.use_audio_units_v2,
+            "use_audio_units_v2",
+        ),
+        (
+            "Use Audio Units v3",
+            "use-audio-units-v3",
+            sources.use_audio_units_v3,
+            "use_audio_units_v3",
+        ),
+        (
+            "Use VST3 Plug-In System Folders",
+            "vst3-system-folders",
+            sources.vst3_system_folders,
+            "vst3_system_folders",
+        ),
+    ];
+    for (label, id_salt, value, field) in switches {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::plugin_commands::SETTINGS,
+                json!({ field: on }),
+            )));
+        }
     }
     rows.heading(ui, "Plug-In Windows");
     rows.pending(
@@ -873,6 +903,47 @@ fn plug_ins_page(
         ui,
         &switch_row("Auto-Open Plug-In Windows", "WP-2.6").showing("On"),
     );
+}
+
+/// A push button in the Settings window, as Live's Rescan is: a rounded
+/// face with its text. Returns whether it was pressed.
+fn push_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    id_salt: &str,
+    name: &str,
+    text: &str,
+    rect: Rect,
+) -> bool {
+    let response = ui.interact(rect, Id::new(("push-button", id_salt)), Sense::click());
+    let pressed = response.clicked()
+        || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    let c = &theme.colors;
+    let painter = ui.painter_at(rect.expand(3.0));
+    let face = if response.hovered() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    painter.rect_filled(rect, rect.height() / 2.0, face);
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.font(),
+        c.text.0,
+    );
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
+        painter.rect_stroke(
+            rect,
+            rect.height() / 2.0,
+            Stroke::new(1.5, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    pressed
 }
 
 fn theme_page(

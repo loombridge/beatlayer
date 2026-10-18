@@ -76,6 +76,7 @@ pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
 pub mod settings;
+pub mod stems;
 pub mod tracks;
 pub mod transport;
 pub mod warping;
@@ -111,5 +112,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     settings::register(registry)?;
     modulation::register(registry)?;
     perception::register(registry)?;
+    stems::register(registry)?;
     warping::register(registry)
 }

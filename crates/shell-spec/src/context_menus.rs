@@ -14,6 +14,7 @@
 use crate::arrangement::SET_GRID;
 use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
@@ -322,6 +323,9 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
+        "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
+            Some("Phase 9 (audio to MIDI, IMP-06)")
+        }
         _ => None,
     }
 }
@@ -330,6 +334,48 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
 #[must_use]
 pub fn arrangement_clip() -> Vec<MenuItem> {
     items(CLIP)
+}
+
+/// The rows an audio clip's menu adds after Reverse Clip(s) (C-CLIP-ARR-027):
+/// the three Convert commands and Separate Stems to New Audio Tracks, in the
+/// order observed in Live 12 on macOS (18 October 2026, from a screenshot of
+/// an audio clip's menu).
+const AUDIO_CLIP: &[Row] = &[
+    SEPARATOR,
+    (
+        "C-CLIP-ARR-027a",
+        "Convert Harmony to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027b",
+        "Convert Melody to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027c",
+        "Convert Drums to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-ARR-027d",
+        "Separate Stems to New Audio Tracks",
+        Cmd(SEPARATE_STEMS),
+    ),
+];
+
+/// The menu an audio clip in the Arrangement opens: the clip's menu with
+/// the rows only audio clips have (C-CLIP-ARR-027).
+#[must_use]
+pub fn arrangement_audio_clip() -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(CLIP.len() + AUDIO_CLIP.len());
+    for &row in CLIP {
+        rows.push(row);
+        if row.0 == "C-CLIP-ARR-018" {
+            rows.extend_from_slice(AUDIO_CLIP);
+        }
+    }
+    items(&rows)
 }
 
 /// The menu a time selection in the Arrangement opens (C-TIME).
@@ -460,6 +506,39 @@ mod tests {
                 .lines()
                 .find(|l| l.starts_with(&format!("| {id} |")))
                 .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
+            assert!(line.contains(item.label), "{}: {line}", item.label);
+        }
+    }
+
+    #[test]
+    fn an_audio_clips_menu_adds_the_convert_and_stems_rows_after_reverse() {
+        let base = arrangement_clip();
+        let audio = arrangement_audio_clip();
+        let added: Vec<_> = audio
+            .iter()
+            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .collect();
+        assert_eq!(added.len(), 4);
+        let reverse = audio
+            .iter()
+            .position(|i| i.row == "C-CLIP-ARR-018")
+            .unwrap();
+        assert!(audio[reverse + 1].is_separator());
+        assert_eq!(
+            audio[reverse + 5].label,
+            "Separate Stems to New Audio Tracks"
+        );
+        let Some(text) = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md"),
+        )
+        .ok() else {
+            return;
+        };
+        for item in added {
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("| {} |", item.row)))
+                .unwrap_or_else(|| panic!("{} isn't in menus.md", item.row));
             assert!(line.contains(item.label), "{}: {line}", item.label);
         }
     }

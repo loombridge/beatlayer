@@ -360,6 +360,14 @@ Package counts are estimates. [The parity matrix](04-parity-matrix.md) lists eve
 
 Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in Phases 6 to 10.
 
+### Phase 9 packages built early
+
+Stem separation was brought forward from Phase 9 on 18 October 2026. Its spec is [stem separation](specs/stem-separation.md).
+
+| WP | Package | Size | Depends on | Acceptance in short |
+|---|---|---|---|---|
+| 9.1 | Separate Stems to New Audio Tracks for Arrangement clips (IMP-11, first part): the clip's menu and the Create menu, the Separate Stems dialog, the open-source packages (ONNX Runtime and the Demucs model) downloaded on first use with their pages, sizes, folder and progress, separation on the CPU in High Speed and High Quality, merging, the Stems files, and the group of stem tracks | L | 4.20, 1.10 | A generated bass line and hi-hat separate into a bass stem and a drum stem; separating makes a group of four stem tracks holding copies of the clip, deactivates the clip, and undoes as one step; the packages download, check against their SHA-256, and install |
+
 ## Status table
 
 | WP | Status | Date | PR |
@@ -530,3 +538,4 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.43 | done | 17 October 2026 | [#117](https://github.com/loombridge/beatlayer/pull/117); devices publish display data after each block through a lock-free triple buffer, `device.display` reads it with Compressor's views as view state, and EQ Eight's spectrum, curves and band dots and Compressor's gain reduction meter and views are drawn in their cells; [the spec](specs/device-framework.md) |
 | 5.44 | done | 17 October 2026 | [#124](https://github.com/loombridge/beatlayer/pull/124); control changes, channel pitch bend and channel pressure travel beside the notes from monitored input through MIDI effects, switched-off devices and MIDI effect racks, into CLAP plug-ins as MIDI events, VST3 plug-ins through their MIDI mapping, Audio Units through their MIDI block, and the polysynth's pitch wheel and mod wheel; [device framework](specs/device-framework.md) R39 |
 | 5.45 | todo |  |  |
+| 9.1 | in progress | 18 October 2026 | Separate Stems to New Audio Tracks for Arrangement clips, on the CPU, with its packages downloaded on first use; [the spec](specs/stem-separation.md) |

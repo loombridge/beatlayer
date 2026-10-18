@@ -79,6 +79,7 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
@@ -88,6 +89,7 @@ mod multisampler;
 mod processed_files;
 mod sample_edits;
 mod session_recording;
+mod stems;
 mod warping;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
@@ -401,6 +403,8 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// Stem separation's download, separation, and dialog (WP-9.1).
+    stems: stems::StemsState,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -718,6 +722,7 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            stems: stems::StemsState::default(),
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
@@ -3023,7 +3028,7 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
-        let mut changed = polled.changed | self.poll_processed();
+        let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
@@ -4404,6 +4409,9 @@ impl Shell {
             }
             _ => {}
         }
+        if stems_ids::handles(id) {
+            return self.can_stems(id, args);
+        }
         if capture_ids::handles(id) {
             // Spec: capture-midi R1. Nothing played, nothing to capture.
             return self.capture_midi_ready() && self.audio.engine_running();
@@ -5625,6 +5633,9 @@ impl Shell {
                 self.arrangement.transport().position,
                 |track, target| self.played(track, target),
             )));
+        }
+        if stems_ids::handles(id) {
+            return self.run_stems(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time

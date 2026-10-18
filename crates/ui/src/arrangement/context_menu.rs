@@ -34,6 +34,9 @@ pub(super) struct ContextMenus {
     keymap: Keymap,
     platform: Platform,
     clip: Vec<MenuItem>,
+    /// An audio clip's, with the Convert and Separate Stems rows
+    /// (C-CLIP-ARR-027).
+    audio_clip: Vec<MenuItem>,
     time: Vec<MenuItem>,
     kind: MenuKind,
 }
@@ -44,6 +47,7 @@ impl ContextMenus {
             keymap: Keymap::live12(),
             platform: Platform::current(),
             clip: context_menus::arrangement_clip(),
+            audio_clip: context_menus::arrangement_audio_clip(),
             time: context_menus::arrangement_time(),
             kind: MenuKind::default(),
         }
@@ -87,6 +91,7 @@ impl ContextMenus {
     /// Draws the open menu's items.
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let menu = match self.kind {
+            MenuKind::Clip if audio_selected(shell) => &self.audio_clip,
             MenuKind::Clip => &self.clip,
             MenuKind::Time => &self.time,
         };
@@ -125,6 +130,18 @@ impl ContextMenus {
             }
         }
     }
+}
+
+/// Whether the selected clips are audio clips, whose menu adds the
+/// Convert and Separate Stems rows.
+fn audio_selected(shell: &Shell) -> bool {
+    let doc = shell.editor().document();
+    let selected = shell.arrangement().selected_clips();
+    !selected.is_empty()
+        && selected.iter().all(|clip| {
+            doc.clip(*clip)
+                .is_some_and(|c| matches!(c.data, bl_model::ClipData::Audio(_)))
+        })
 }
 
 /// Lays out `count` choices in `columns` columns.

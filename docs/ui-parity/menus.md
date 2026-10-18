@@ -645,6 +645,10 @@ Other states:
 | C-CLIP-ARR-025 | Split | manual 6.12 |
 | C-CLIP-ARR-026 | Consolidate | manual 6.13 |
 | C-CLIP-ARR-027 | Slice and Convert to New MIDI Track commands, Separate Stems to New Audio Tracks (audio clips) | manual 13, 22 |
+| C-CLIP-ARR-027a | Convert Harmony to New MIDI Track (audio clips) | observed in Live 12 on macOS, 18 October 2026: an audio clip's menu, after a separator below Reverse Clip(s) |
+| C-CLIP-ARR-027b | Convert Melody to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
+| C-CLIP-ARR-027c | Convert Drums to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
+| C-CLIP-ARR-027d | Separate Stems to New Audio Tracks (audio clips) | observed, as C-CLIP-ARR-027a, last in that group, before the clip colours |
 
 ### Arrangement time selection (C-TIME)
 

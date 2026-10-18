@@ -2834,6 +2834,30 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.move_to_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
+        // Separate Stems' dialog (WP-9.1).
+        ("stems.status", Exception(Query)),
+        (
+            "stems.install",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Download Required Packages Now, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.separate",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Separate, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.cancel",
+            Exception(Equivalent(
+                "the Separate Stems dialog's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "stems.close",
+            Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
         // Gaps.
         (
             "export.audio",

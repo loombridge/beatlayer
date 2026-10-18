@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-444 commands in 35 areas.
+450 commands in 36 areas.
 
 ## Permission classes
 
@@ -427,6 +427,12 @@ Each command has:
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | Set Tempo Breakpoint | `edit` |  |  |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | Set Time Signature Change | `edit` |  |  |
 | [`song.set_time_signatures`](#songset_time_signatures) | Set Time Signatures | `edit` |  |  |
+| [`stems.cancel`](#stemscancel) | Cancel | `edit` |  |  |
+| [`stems.close`](#stemsclose) | Close Separate Stems | `read` |  |  |
+| [`stems.install`](#stemsinstall) | Download Required Packages Now | `external` |  |  |
+| [`stems.open`](#stemsopen) | Separate Stems to New Audio Tracks | `read` |  |  |
+| [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
+| [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
@@ -7506,6 +7512,91 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+### Area `stems`
+
+#### `stems.cancel`
+
+**Cancel**. Permission: `edit`. Contexts: `global`.
+
+Stops the package download or the separation under way. A cancelled separation changes nothing in the set; a cancelled download keeps the packages it finished.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`StemsStatus`](#stemsstatus).
+
+#### `stems.close`
+
+**Close Separate Stems**. Permission: `read`. Contexts: `global`.
+
+Closes the Separate Stems dialog. A download or separation under way goes on; `stems.cancel` stops it. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`StemsStatus`](#stemsstatus).
+
+#### `stems.install`
+
+**Download Required Packages Now**. Permission: `external`. Contexts: `global`.
+
+Downloads and installs the open-source packages stem separation needs, ONNX Runtime and the Demucs model (about 350 MB together), into Beatlayer's application-data folder, checking each file's SHA-256. Returns at once; `stems.status` reports the progress. Installed packages aren't downloaded again. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`StemsStatus`](#stemsstatus).
+
+#### `stems.open`
+
+**Separate Stems to New Audio Tracks**. Permission: `read`. Contexts: `arrangement`.
+
+Opens the Separate Stems dialog for an audio clip in the Arrangement (`clip`, or the selected clip). The first time, the dialog lists the packages stem separation needs (ONNX Runtime and the Demucs model), their sizes and where they install, with Download Required Packages Now and Cancel; once they're installed it offers Vocals, Drums, Bass and Others, High Speed or High Quality, and Separate. Changes nothing in the set: an agent calls `stems.separate` instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to separate; the selected clip if left out. |
+
+Result: [`StemsStatus`](#stemsstatus).
+
+#### `stems.separate`
+
+**Separate Stems**. Permission: `edit`. Contexts: `global`.
+
+Separates an audio clip in the Arrangement into stems on new audio tracks, with a Demucs network running on this computer. `stems` chooses the parts (`vocals`, `drums`, `bass`, `others`; all four if left out); `quality` is `high_speed` (one pass) or `high_quality` (two passes averaged, about twice as long); `merge` puts two or three parts together on one track. The audio between the clip's Start and End markers, or through its loop, is separated at 44.1 kHz and written to the project's Samples/Processed/Stems folder. Each part gets a track below the clip's track, inside a new group track when there's more than one, with a copy of the clip playing that part; the original clip is deactivated. Playback stops first. Returns at once; `stems.status` reports the progress and the new tracks, and the whole edit is one undo step. Needs the packages `stems.install` downloads.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip in the Arrangement to separate. |
+| `merge` | boolean | no | Put the chosen parts together on one track: only with two or three parts. |
+| `quality` | [`StemQuality`](#stemquality) | no | `high_speed` (the default) or `high_quality`. |
+| `stems` | array of [`StemKind`](#stemkind) | no | Which parts to put on new tracks, one or more; all four if left out. |
+
+Result: [`StemsStatus`](#stemsstatus).
+
+#### `stems.status`
+
+**Stem Separation Status**. Permission: `read`. Contexts: `global`.
+
+Reads stem separation's state: whether its packages are installed (and each package's name, version, project page and download size), where they install, the download's progress, the separation's progress, the tracks the last separation made, and the dialog if it's open.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`StemsStatus`](#stemsstatus).
+
 ### Area `track`
 
 #### `track.add_take_lane`
@@ -8547,6 +8638,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
 | [`song.set_time_signatures`](#songset_time_signatures) | the query tool's `song` | `settings.time_signatures` |
+| [`stems.cancel`](#stemscancel) | `stems.status` | `separation` |
+| [`stems.install`](#stemsinstall) | `stems.status` | `install` |
+| [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
@@ -13343,6 +13437,83 @@ What `device_view.state` returns.
 
 </details>
 
+### `DialogStatus`
+
+The open dialog.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `step` | [`DialogStep`](#dialogstep) | yes | What it shows. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip it separates. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The open dialog.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip it separates."
+    },
+    "step": {
+      "$ref": "#/$defs/DialogStep",
+      "description": "What it shows."
+    }
+  },
+  "required": [
+    "step",
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DialogStep`
+
+The dialog a person sees.
+
+One of:
+
+- `"packages"`: The packages to download, the first time.
+- `"installing"`: The download's progress.
+- `"options"`: The parts and the quality.
+- `"separating"`: The separation's progress.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The dialog a person sees.",
+  "oneOf": [
+    {
+      "const": "packages",
+      "description": "The packages to download, the first time.",
+      "type": "string"
+    },
+    {
+      "const": "installing",
+      "description": "The download's progress.",
+      "type": "string"
+    },
+    {
+      "const": "options",
+      "description": "The parts and the quality.",
+      "type": "string"
+    },
+    {
+      "const": "separating",
+      "description": "The separation's progress.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Direction`
 
 Earlier (`left`) or later (`right`).
@@ -15229,6 +15400,103 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `JobState`
+
+Where a download or a separation is.
+
+One of:
+
+- `"idle"`: Nothing is under way.
+- `"running"`: Under way: see `progress`.
+- `"done"`: It finished.
+- `"failed"`: It failed: see `error`.
+- `"cancelled"`: It was cancelled.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a download or a separation is.",
+  "oneOf": [
+    {
+      "const": "idle",
+      "description": "Nothing is under way.",
+      "type": "string"
+    },
+    {
+      "const": "running",
+      "description": "Under way: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "done",
+      "description": "It finished.",
+      "type": "string"
+    },
+    {
+      "const": "failed",
+      "description": "It failed: see `error`.",
+      "type": "string"
+    },
+    {
+      "const": "cancelled",
+      "description": "It was cancelled.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `JobStatus`
+
+A download or a separation's progress.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `state` | [`JobState`](#jobstate) | yes | Where it is. |
+| `progress` | number | yes | How far it is, from 0 to 1. |
+| `error` | string or null | no | Why it failed. |
+| `stage` | string | no | What it's doing now, such as `Downloading ONNX Runtime`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A download or a separation's progress.",
+  "properties": {
+    "error": {
+      "description": "Why it failed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "progress": {
+      "description": "How far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
+    "stage": {
+      "description": "What it's doing now, such as `Downloading ONNX Runtime`.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/JobState",
+      "description": "Where it is."
+    }
+  },
+  "required": [
+    "state",
+    "progress"
+  ],
+  "type": "object"
 }
 ```
 
@@ -18403,6 +18671,66 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `PackageStatus`
+
+A package the separation needs.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `purpose` | string | yes | What it does. |
+| `version` | string | yes | Its version. |
+| `url` | string | yes | Its project's page. |
+| `size` | integer, at least 0 | yes | The download's size in bytes. |
+| `installed` | boolean | yes | Whether it's installed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A package the separation needs.",
+  "properties": {
+    "installed": {
+      "description": "Whether it's installed.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "purpose": {
+      "description": "What it does.",
+      "type": "string"
+    },
+    "size": {
+      "description": "The download's size in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "url": {
+      "description": "Its project's page.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Its version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "purpose",
+    "version",
+    "url",
+    "size",
+    "installed"
+  ],
+  "type": "object"
 }
 ```
 
@@ -22146,6 +22474,155 @@ A coarse spectrum.
   },
   "required": [
     "bands"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `StemKind`
+
+A part of the mix to separate (the dialog's four switches).
+
+One of:
+
+- `"vocals"`: Voices.
+- `"drums"`: Drums and percussion.
+- `"bass"`: Bass.
+- `"others"`: Everything else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A part of the mix to separate (the dialog's four switches).",
+  "oneOf": [
+    {
+      "const": "vocals",
+      "description": "Voices.",
+      "type": "string"
+    },
+    {
+      "const": "drums",
+      "description": "Drums and percussion.",
+      "type": "string"
+    },
+    {
+      "const": "bass",
+      "description": "Bass.",
+      "type": "string"
+    },
+    {
+      "const": "others",
+      "description": "Everything else.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `StemQuality`
+
+How hard the separation works (the dialog's High Speed / High Quality switch).
+
+One of:
+
+- `"high_speed"`: One pass: the quicker.
+- `"high_quality"`: Two passes, averaged: about twice as long, with fewer artefacts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How hard the separation works (the dialog's High Speed / High Quality switch).",
+  "oneOf": [
+    {
+      "const": "high_speed",
+      "description": "One pass: the quicker.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "Two passes, averaged: about twice as long, with fewer artefacts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `StemsStatus`
+
+What `stems.status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `installed` | boolean | yes | Whether every package is installed, so `stems.separate` can run. |
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages. |
+| `install` | [`JobStatus`](#jobstatus) | yes | The download. |
+| `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
+| `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
+| `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `stems.status` returns.",
+  "properties": {
+    "created_tracks": {
+      "description": "The tracks the last separation made, the group first if it made one.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    },
+    "dialog": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DialogStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The dialog, if it's open."
+    },
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The download."
+    },
+    "installed": {
+      "description": "Whether every package is installed, so `stems.separate` can run.",
+      "type": "boolean"
+    },
+    "packages": {
+      "description": "The packages.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    },
+    "separation": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "The separation."
+    }
+  },
+  "required": [
+    "installed",
+    "folder",
+    "packages",
+    "install",
+    "separation"
   ],
   "type": "object"
 }

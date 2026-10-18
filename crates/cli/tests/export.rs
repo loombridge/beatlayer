@@ -1346,3 +1346,207 @@ fn two_exports_with_a_random_lfo_are_identical() {
     assert!(first == other_blocks, "at any block size");
     assert!(first != plain, "the modulator changed the sound");
 }
+
+/// A set with every modulator: a Level Mod that follows a tone and a second
+/// one after the target in its own chain (the one-step lag), and a Gate
+/// Mod, a Strike Mod and a Play Mod that play the notes of a MIDI clip, all
+/// moving a Utility on a second tone's track. `without` leaves one modulator
+/// (by place in the order made) unmapped.
+fn modulated_set(without: Option<usize>) -> (Editor, MediaMap) {
+    use bl_core::time::TICKS_PER_QUARTER;
+    use bl_devices::utility::{BALANCE, GAIN};
+    use bl_model::modulator::{self, ModTarget};
+
+    let mut editor = Editor::new();
+    let mut media = MediaMap::new();
+    let tone: Vec<f32> = (0..96_000)
+        .map(|n| {
+            let swell = 0.5 + 0.5 * (std::f64::consts::TAU * 2.0 * f64::from(n) / 48_000.0).sin();
+            (0.5 * swell * (std::f64::consts::TAU * 440.0 * f64::from(n) / 48_000.0).sin()) as f32
+        })
+        .collect();
+    let hash = ContentHash([9; 32]);
+    media.insert(
+        hash,
+        Arc::new(bl_media::SampleData::new(48_000, vec![tone.clone(), tone]).unwrap()),
+    );
+    let track = |editor: &mut Editor, kind, name: &str| {
+        let id = editor.new_id();
+        editor
+            .apply(Edit::CreateTrack {
+                id,
+                kind,
+                name: name.to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let source = track(&mut editor, TrackKind::Audio, "Source");
+    let moved = track(&mut editor, TrackKind::Audio, "Moved");
+    let notes = track(&mut editor, TrackKind::Midi, "Notes");
+    for audio in [source, moved] {
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            ClipData::Audio(AudioData::new(hash)),
+        );
+        editor
+            .apply(Edit::CreateClip { track: audio, clip })
+            .unwrap();
+    }
+    let quarter = Ticks(TICKS_PER_QUARTER);
+    let midi = bl_model::MidiData {
+        notes: bl_model::Vector::from(vec![
+            bl_model::Note::new(60, Ticks::ZERO, quarter * 2, 110),
+            bl_model::Note::new(67, quarter * 2, quarter, 50),
+        ]),
+        ..bl_model::MidiData::default()
+    };
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        ClipData::Midi(midi),
+    );
+    editor
+        .apply(Edit::CreateClip { track: notes, clip })
+        .unwrap();
+
+    let insert = |editor: &mut Editor,
+                  track,
+                  device_type: bl_engine::DeviceType,
+                  params: &[(ParamId, f64)]| {
+        let mut device = device_type.device(editor.new_id());
+        for &(param, value) in params {
+            device.params.insert(param, value);
+        }
+        let id = device.id;
+        let index = editor.document().track(track).unwrap().devices().len();
+        editor
+            .apply(Edit::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+        id
+    };
+    let utility = insert(&mut editor, moved, bl_devices::utility::utility_type(), &[]);
+    let follower = [(modulator::POLARITY, 1.0), (modulator::amount(0), 60.0)];
+    // The first follows the source track; the second sits after the utility
+    // on its own track, so it moves its target one step late.
+    let level_a = insert(
+        &mut editor,
+        source,
+        bl_devices::level_mod::level_mod_type(),
+        &follower,
+    );
+    let level_b = insert(
+        &mut editor,
+        moved,
+        bl_devices::level_mod::level_mod_type(),
+        &follower,
+    );
+    let gate = insert(
+        &mut editor,
+        notes,
+        bl_devices::gate_mod::gate_mod_type(),
+        &[(modulator::POLARITY, 1.0), (modulator::amount(0), 50.0)],
+    );
+    let strike = insert(
+        &mut editor,
+        notes,
+        bl_devices::strike_mod::strike_mod_type(),
+        &[
+            (modulator::amount(0), 40.0),
+            (bl_devices::modulator::RATE_HZ, 2.0),
+            (bl_devices::strike_mod::VELOCITY, 100.0),
+        ],
+    );
+    let play = insert(
+        &mut editor,
+        notes,
+        bl_devices::play_mod::play_mod_type(),
+        &[
+            (modulator::amount(0), 40.0),
+            (
+                bl_devices::play_mod::param(0, bl_devices::play_mod::Field::Rise),
+                30.0,
+            ),
+            (
+                bl_devices::play_mod::param(0, bl_devices::play_mod::Field::Smoothing),
+                1.0,
+            ),
+        ],
+    );
+    for (n, (modulator, param)) in [
+        (level_a, GAIN),
+        (level_b, GAIN),
+        (gate, GAIN),
+        (strike, BALANCE),
+        (play, BALANCE),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if without == Some(n) {
+            continue;
+        }
+        editor
+            .apply(Edit::MapModulator {
+                device: modulator,
+                slot: 0,
+                target: ModTarget::Device {
+                    device: utility,
+                    param,
+                },
+            })
+            .unwrap();
+    }
+    (editor, media)
+}
+
+/// Spec: modulation R29. An export of a set with every modulator is the
+/// song's playback to the sample, at any block size, and each modulator
+/// changes the sound.
+#[test]
+fn an_export_with_modulators_matches_the_songs_playback() {
+    let (editor, media) = modulated_set(None);
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("modulators");
+    let export = |document: &Document, name: &str, block: usize| {
+        let path = temp.0.join(format!("{name}.wav"));
+        let mut job = job(path.clone(), FileType::Wav, BitDepth::Float32, 96_000);
+        job.block = block;
+        run(document, media.clone(), &job);
+        decode(&path).2
+    };
+    let mut playback = Vec::new();
+    playing(editor.document(), media.clone())
+        .render(96_000, |block| interleave(&block, &mut playback));
+    let exported = export(editor.document(), "full", 512);
+    assert_eq!(exported.len(), playback.len());
+    assert!(
+        bits(&exported) == bits(&playback),
+        "the export is the playback, sample for sample"
+    );
+    assert!(
+        bits(&export(editor.document(), "odd", 61)) == bits(&exported),
+        "at any block size"
+    );
+
+    // Each modulator is part of the sound.
+    for left_out in 0..5 {
+        let (set, library) = modulated_set(Some(left_out));
+        let library: Arc<dyn MediaLibrary> = Arc::new(library);
+        let mut without = Vec::new();
+        playing(set.document(), library).render(96_000, |block| interleave(&block, &mut without));
+        assert!(
+            bits(&without) != bits(&playback),
+            "modulator {left_out} changed the sound"
+        );
+    }
+}

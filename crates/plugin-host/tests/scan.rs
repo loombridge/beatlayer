@@ -338,3 +338,69 @@ fn vst3_bundles_are_taken_by_extension_and_name() {
     assert_eq!(files, vec![bundle, dir.join("a.vst3")]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Copies a file or a bundle folder, for a test that changes its copy.
+fn copy_all(from: &std::path::Path, to: &std::path::Path) {
+    if from.is_dir() {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap().flatten() {
+            copy_all(&entry.path(), &to.join(entry.file_name()));
+        }
+    } else {
+        std::fs::copy(from, to).unwrap();
+    }
+}
+
+// Spec: plugin-scanning R13. A plug-in removed from a folder the scan
+// searched is forgotten, so it leaves the browser.
+#[test]
+fn a_plugin_removed_from_a_scanned_folder_is_forgotten() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-removed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("Copied.clap");
+    copy_all(bundle(), &copy);
+    let scanner = scanner();
+    let found = scanner.scan(clap(), std::slice::from_ref(&dir));
+    assert_eq!(found.plugins.len(), 1, "{:?}", found.blocked);
+    assert_eq!(scanner.plugins().len(), 1);
+    if copy.is_dir() {
+        std::fs::remove_dir_all(&copy).unwrap();
+    } else {
+        std::fs::remove_file(&copy).unwrap();
+    }
+    let again = scanner.scan(clap(), std::slice::from_ref(&dir));
+    assert!(again.plugins.is_empty());
+    assert!(scanner.plugins().is_empty(), "forgotten");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R13. The scanner doesn't hold its cache while a
+// plug-in is described, so what it knows can be read during a scan, as the
+// browser does while the app's scan at start runs in the background.
+#[test]
+fn a_scan_answers_reads_while_it_runs() {
+    let scanner = std::sync::Arc::new(
+        scanner()
+            .with_env(TEST_SCAN_VAR, "hang")
+            .with_timeout(Duration::from_secs(3)),
+    );
+    let running = std::sync::Arc::clone(&scanner);
+    let scan = std::thread::spawn(move || running.scan(clap(), &[bundle().to_path_buf()]));
+    // Let the child start and hang.
+    std::thread::sleep(Duration::from_millis(300));
+    let started = std::time::Instant::now();
+    assert!(scanner.plugins().is_empty());
+    assert!(scanner.blocked().is_empty());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "reading waited for the scan: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        !scan.is_finished(),
+        "the hung plug-in is still being scanned"
+    );
+    let report = scan.join().unwrap();
+    assert_eq!(report.blocked.len(), 1);
+}

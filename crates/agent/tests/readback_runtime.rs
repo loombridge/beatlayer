@@ -168,7 +168,13 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(
         before["plug_ins"],
-        json!({ "hidden": [], "show_hidden": false })
+        json!({
+            "hidden": [],
+            "show_hidden": false,
+            "use_audio_units_v2": false,
+            "use_audio_units_v3": false,
+            "vst3_system_folders": false,
+        })
     );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
@@ -225,7 +231,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     run(
         &mut client,
         "plugin.settings",
-        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" }),
+        json!({
+            "hidden": ["vst3/example"],
+            "show_hidden": true,
+            "format_preference": "clap",
+            "use_audio_units_v2": true,
+            "use_audio_units_v3": true,
+            "vst3_system_folders": true,
+        }),
     );
     run(
         &mut client,
@@ -268,7 +281,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(
         state["plug_ins"],
-        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" })
+        json!({
+            "hidden": ["vst3/example"],
+            "show_hidden": true,
+            "format_preference": "clap",
+            "use_audio_units_v2": true,
+            "use_audio_units_v3": true,
+            "vst3_system_folders": true,
+        })
     );
     assert_eq!(
         state["display_input"],

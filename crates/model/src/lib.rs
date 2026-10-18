@@ -70,6 +70,7 @@ mod editor;
 mod error;
 pub mod fader;
 mod follow;
+pub mod graph;
 mod ids;
 mod launch;
 mod layers;

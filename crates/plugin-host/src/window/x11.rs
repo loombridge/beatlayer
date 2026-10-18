@@ -46,10 +46,34 @@ pub struct Window {
     scale: f64,
 }
 
+/// Connects to the display. A busy X server can reset a new connection
+/// before its setup reply (Xvfb does when many clients connect at once),
+/// so a failed connection is tried a few more times, briefly, before the
+/// editor is refused. A display that isn't there fails at once.
+fn connect() -> Result<(RustConnection, usize), String> {
+    const ATTEMPTS: u32 = 5;
+    let mut attempt = 1;
+    loop {
+        match RustConnection::connect(None) {
+            Ok(connected) => return Ok(connected),
+            Err(x11rb::errors::ConnectError::IoError(error))
+                if attempt < ATTEMPTS
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+                    ) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25 << attempt));
+                attempt += 1;
+            }
+            Err(error) => return Err(format!("couldn't reach an X display: {error}")),
+        }
+    }
+}
+
 impl Window {
     pub fn open(title: &str, size: GuiSize, resizable: bool) -> Result<Self, String> {
-        let (conn, screen_num) = RustConnection::connect(None)
-            .map_err(|error| format!("couldn't reach an X display: {error}"))?;
+        let (conn, screen_num) = connect()?;
         let screen = &conn.setup().roots[screen_num];
         let window = conn.generate_id().map_err(why)?;
         let protocols = atom(&conn, b"WM_PROTOCOLS")?;

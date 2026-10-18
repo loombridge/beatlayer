@@ -672,7 +672,10 @@ pub fn write_moves(
             .unwrap_or_default();
         let first = moves[0].0;
         let before = existing.value_at(first - Ticks(1)).unwrap_or(REST);
-        let mut written = controller_take::stepped(&moves, before);
+        let mut written = match replace_to {
+            Some(_) => controller_take::stepped(&moves, before),
+            None => controller_take::added(&existing.points().collect::<Vec<_>>(), &moves),
+        };
         if existing.is_empty() && written[0].0 > Ticks::ZERO {
             written.insert(0, (Ticks::ZERO, before));
         }
@@ -1678,11 +1681,20 @@ mod tests {
     fn captured_controllers_are_added_and_the_old_breakpoints_stay() {
         let (mut editor, track) = editor_with_track();
         let id = clip_with_cc1(&mut editor, track);
-        write_moves(&mut editor, id, &[(tick(60_000), cc(1, 127))], None).unwrap();
+        write_moves(
+            &mut editor,
+            id,
+            &[(tick(24_000), cc(1, 127)), (tick(60_000), cc(1, 127))],
+            None,
+        )
+        .unwrap();
         assert_eq!(
             points(&editor, id, cc1()),
             vec![
                 (Ticks::ZERO, 10.0),
+                (tick(24_000) - Ticks(1), 10.0),
+                (tick(24_000), 127.0),
+                (tick(48_000) - Ticks(2), 127.0),
                 (tick(48_000) - Ticks(1), 10.0),
                 (tick(48_000), 20.0),
                 (tick(60_000) - Ticks(1), 20.0),

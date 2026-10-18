@@ -6,7 +6,7 @@
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Note, PressurePoint};
+use bl_model::{AutomationTarget, Breakpoint, Note, PressurePoint, envelope_value};
 
 /// Whether a recorded message is one a clip keeps besides notes: a control
 /// change for one of the controllers a clip can hold, pitch bend, channel
@@ -71,6 +71,61 @@ pub fn stepped(moves: &[(Ticks, f64)], before: f64) -> Vec<(Ticks, f64)> {
     points
 }
 
+/// The breakpoints that add `moves` (positions and values, in order) to an
+/// envelope holding `points`, removing none (R15): each move steps from the
+/// value the envelope holds there and holds until the next breakpoint, old
+/// or new, so the old envelope steps back at its next breakpoint. Two moves
+/// on one tick leave the later.
+#[must_use]
+pub fn added(points: &[Breakpoint], moves: &[(Ticks, f64)]) -> Vec<(Ticks, f64)> {
+    fn put(all: &mut Vec<Breakpoint>, set: &mut Vec<(Ticks, f64)>, at: Ticks, value: f64) {
+        match all.binary_search_by_key(&at, |point| point.at) {
+            Ok(index) => all[index].value = value,
+            Err(index) => all.insert(
+                index,
+                Breakpoint {
+                    at,
+                    value,
+                    bend: 0.0,
+                },
+            ),
+        }
+        set.retain(|point| point.0 != at);
+        set.push((at, value));
+    }
+    let mut moves = moves.to_vec();
+    moves.dedup_by(|later, earlier| {
+        let same = later.0 == earlier.0;
+        if same {
+            earlier.1 = later.1;
+        }
+        same
+    });
+    let mut all = points.to_vec();
+    let mut set = Vec::with_capacity(moves.len() * 3);
+    for (index, &(at, value)) in moves.iter().enumerate() {
+        let before = at - Ticks(1);
+        if at > Ticks::ZERO && all.binary_search_by_key(&before, |point| point.at).is_err() {
+            let held = envelope_value(&all, before.0 as f64).unwrap_or(REST);
+            put(&mut all, &mut set, before, held);
+        }
+        put(&mut all, &mut set, at, value);
+        let next_old = all.iter().map(|point| point.at).find(|next| *next > at);
+        let next_move = moves.get(index + 1).map(|next| next.0);
+        let until = match (next_old, next_move) {
+            (Some(old), Some(new)) => Some(old.min(new)),
+            (old, new) => old.or(new),
+        };
+        if let Some(until) = until
+            && until - Ticks(1) > at
+        {
+            put(&mut all, &mut set, until - Ticks(1), value);
+        }
+    }
+    set.sort_by_key(|point| point.0);
+    set
+}
+
 /// Gives each polyphonic pressure message in `moves` to the note its key
 /// holds then: a pressure point at its offset from the note's start. A
 /// message for a key with no note held is left out, and the later of two on
@@ -125,6 +180,36 @@ mod tests {
         );
         assert_eq!(stepped(&[at(0, 7.0)], 0.0), [at(0, 7.0)]);
         assert_eq!(stepped(&[], 0.0), []);
+    }
+
+    // Spec: midi-controller-data R15 (S2). An added value steps from the old
+    // envelope and holds until its next breakpoint, where the old steps
+    // resume: no ramp to or from it.
+    #[test]
+    fn added_moves_hold_until_the_next_breakpoint() {
+        let old = |at, value| Breakpoint {
+            at: Ticks(at),
+            value,
+            bend: 0.0,
+        };
+        let points = [old(0, 10.0), old(499, 10.0), old(500, 20.0)];
+        assert_eq!(
+            added(&points, &[at(200, 127.0), at(600, 127.0), at(700, 127.0)]),
+            [
+                at(199, 10.0),
+                at(200, 127.0),
+                at(498, 127.0),
+                at(599, 20.0),
+                at(600, 127.0),
+                at(699, 127.0),
+                at(700, 127.0)
+            ]
+        );
+        assert_eq!(
+            added(&[], &[at(100, 1.0), at(100, 2.0), at(200, 3.0)]),
+            stepped(&[at(100, 2.0), at(200, 3.0)], REST),
+            "with no old breakpoints, the same steps as a take"
+        );
     }
 
     // Spec: midi-controller-data R10. Pitch bend is 14 bits around 8192,

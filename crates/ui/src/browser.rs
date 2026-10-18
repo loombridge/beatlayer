@@ -104,6 +104,15 @@ pub struct BrowserDrag {
     pub plugin: Option<String>,
 }
 
+/// What a drag of presets or devices from the browser carries (the racks
+/// spec, R43): preset files' paths and the IDs of devices the labels list,
+/// for the Device View to load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DevicesDrag {
+    /// The presets and devices dragged, in the list's order.
+    pub paths: Vec<String>,
+}
+
 /// What the last frame built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BrowserStats {
@@ -501,6 +510,15 @@ impl BrowserUi {
             }
             invoke(events, ids::OPEN_PLACE, json!({ "label": info.label }));
         }
+        // Spec: racks R46. A chain dropped on a place is saved there; on the
+        // User Library, in its folder for the rack's presets.
+        match (&info.label, &info.path) {
+            (Label::UserLibrary, _) => drop_chains(ui, theme, rect, "", events),
+            (label, Some(path)) if label.is_place() => {
+                drop_chains(ui, theme, rect, path, events);
+            }
+            _ => {}
+        }
         if let Label::Folder(path) = &info.label {
             // C-BROWSER-017: a folder the person added.
             let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
@@ -736,6 +754,9 @@ impl BrowserUi {
             }
         }
 
+        if item.kind == ItemKind::Folder {
+            drop_chains(ui, theme, rect, &item.path, events);
+        }
         if response.double_clicked() {
             match item.kind {
                 ItemKind::Folder => invoke(
@@ -791,7 +812,6 @@ impl BrowserUi {
             } else {
                 vec![item.path.clone()]
             };
-            paths.retain(|p| is_audio(p) || is_sfz(p));
             paths.sort_by_key(|p| view.position_of(Path::new(p)));
             if item.kind == ItemKind::Plugin {
                 DragAndDrop::set_payload(
@@ -801,22 +821,37 @@ impl BrowserUi {
                         plugin: Some(item.path.clone()),
                     },
                 );
-            } else if !paths.is_empty() {
-                DragAndDrop::set_payload(
-                    ui.ctx(),
-                    BrowserDrag {
-                        paths,
-                        plugin: None,
-                    },
-                );
+            } else {
+                let (loadable, mut audio): (Vec<String>, Vec<String>) =
+                    paths.into_iter().partition(|p| is_loadable(p));
+                audio.retain(|p| is_audio(p) || is_sfz(p));
+                if !audio.is_empty() {
+                    DragAndDrop::set_payload(
+                        ui.ctx(),
+                        BrowserDrag {
+                            paths: audio,
+                            plugin: None,
+                        },
+                    );
+                } else if !loadable.is_empty() {
+                    DragAndDrop::set_payload(ui.ctx(), DevicesDrag { paths: loadable });
+                }
             }
         }
+        let dragged = DragAndDrop::payload::<BrowserDrag>(ui.ctx())
+            .map(|d| (d.paths.clone(), d.plugin.is_some()))
+            .or_else(|| {
+                DragAndDrop::payload::<DevicesDrag>(ui.ctx()).map(|d| (d.paths.clone(), false))
+            });
         if response.dragged()
-            && let Some(drag) = DragAndDrop::payload::<BrowserDrag>(ui.ctx())
+            && let Some((drag, plugin)) = dragged
             && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         {
-            let text = match drag.paths.as_slice() {
-                _ if drag.plugin.is_some() => item.name.clone(),
+            let text = match drag.as_slice() {
+                _ if plugin => item.name.clone(),
+                [one] if bl_shell::browser::device_by_id(one).is_some() => {
+                    bl_shell::browser::device_by_id(one).map_or_else(String::new, |d| d.name)
+                }
                 [one] => Path::new(one)
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -1442,6 +1477,48 @@ fn range_paths(shell: &Shell, from: usize, to: usize) -> Vec<String> {
     rows.into_iter()
         .filter_map(|i| view.row(i).map(|item| item.path))
         .collect()
+}
+
+/// Chain rows dragged over `rect` are saved as chain presets when released
+/// there (the racks spec, R46): in `folder`, or with an empty one in the User
+/// Library's folder for the rack's presets.
+fn drop_chains(ui: &Ui, theme: &Theme, rect: Rect, folder: &str, events: &mut Vec<UiEvent>) {
+    let Some(drag) = DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return;
+    };
+    if !rect.contains(pointer) || !ui.clip_rect().contains(pointer) {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.accent.0),
+        StrokeKind::Inside,
+    );
+    if ui.input(|i| i.pointer.any_released()) {
+        DragAndDrop::clear_payload(ui.ctx());
+        for chain in &drag.chains {
+            let args = if folder.is_empty() {
+                json!({ "chain": chain })
+            } else {
+                json!({ "chain": chain, "folder": folder })
+            };
+            invoke(events, "chain.save_preset", args);
+        }
+    }
+}
+
+/// Whether a dragged path is a preset file or the ID of a device a label
+/// lists: what the Device View loads.
+fn is_loadable(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| file_kind(&n.to_string_lossy()))
+        == Some(ItemKind::Preset)
+        || bl_shell::browser::device_by_id(path).is_some()
 }
 
 fn is_audio(path: &str) -> bool {

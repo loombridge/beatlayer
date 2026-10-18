@@ -54,6 +54,7 @@ pub mod format;
 pub mod journal;
 pub mod migrate;
 pub mod preset;
+pub mod rack_preset;
 pub mod registry;
 
 mod error;

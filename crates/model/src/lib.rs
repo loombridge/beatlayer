@@ -59,7 +59,7 @@
 
 mod auto_warp;
 pub mod automation;
-mod base64;
+pub mod base64;
 mod changes;
 mod clip;
 mod command;

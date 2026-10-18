@@ -85,6 +85,10 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 12. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
 13. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
 
+**Gaps in rack presets** ([racks](racks.md), WP-5.8):
+
+14. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
+
 ## Tests
 
 | Rule | Test | Kind |

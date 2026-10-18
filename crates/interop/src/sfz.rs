@@ -335,15 +335,18 @@ fn expand(
                 }
             }
         } else if let Some(rest) = trimmed.strip_prefix("#include") {
-            let name = rest.trim().trim_matches('"');
-            // A path relative to the including file, never an absolute one.
+            let name = rest.trim().trim_matches('"').replace('\\', "/");
+            // A path relative to the including file, never an absolute one:
+            // no root (`/etc`, or `\etc` on Windows) and no drive.
+            let relative = Path::new(&name);
             if depth < MAX_INCLUDE_DEPTH
                 && *includes > 0
                 && !name.is_empty()
-                && Path::new(name).is_relative()
+                && relative.is_relative()
+                && !relative.has_root()
             {
                 *includes -= 1;
-                let path = dir.join(name.replace('\\', "/"));
+                let path = dir.join(&name);
                 if let Some(bytes) = include(&path) {
                     let inner = path.parent().unwrap_or(dir);
                     out.push_str(&expand(

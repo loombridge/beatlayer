@@ -390,6 +390,11 @@ fn a_damaged_file_never_panics() {
             .regions
             .is_empty()
     );
+    assert!(
+        read_with(b"#include \"\\etc\\hosts\"\n", &files)
+            .regions
+            .is_empty()
+    );
     let mut state = 0x1234_5678u32;
     for length in [1usize, 7, 64, 500, 4000] {
         for _ in 0..40 {

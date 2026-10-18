@@ -2827,6 +2827,163 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
     );
 }
 
+// Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
+// R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
+// parameters, sets some by ID, shows Singe's expanded part, reads each
+// display's curve, and finds the devices and values again when the saved
+// set is opened.
+#[test]
+fn an_agent_adds_sets_and_reads_the_saturation_devices_by_id_and_reopens_them() {
+    use bl_devices::{overdrive, saturator, tube};
+
+    let dir = TempDir::new("saturation");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("saturation-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let mut added = Vec::new();
+    for device_type in [
+        saturator::saturator_type(),
+        overdrive::overdrive_type(),
+        tube::tube_type(),
+    ] {
+        let reply = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": {
+                    "track": track,
+                    "device": {
+                        "kind": device_type.kind,
+                        "name": device_type.name,
+                        "role": device_type.role,
+                    },
+                },
+            }] }),
+        );
+        added.push(reply["results"][0]["result"]["device"].clone());
+    }
+    let [singe, grit, valve] = [&added[0], &added[1], &added[2]];
+
+    let parameters = |client: &mut Client<InProcess>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let value_of = |params: &Value, name: &str| {
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .clone()
+    };
+    assert_eq!(parameters(&mut client, singe).as_array().unwrap().len(), 19);
+    assert_eq!(parameters(&mut client, grit).as_array().unwrap().len(), 6);
+    assert_eq!(parameters(&mut client, valve).as_array().unwrap().len(), 9);
+
+    let set = |client: &mut Client<InProcess>, device: &Value, param: u32, value: f64| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value },
+            }] }),
+        );
+    };
+    set(&mut client, singe, saturator::CURVE.0, 7.0);
+    set(&mut client, singe, saturator::HI_QUALITY.0, 1.0);
+    set(&mut client, grit, overdrive::DRIVE.0, 80.0);
+    set(&mut client, valve, tube::MODEL.0, 2.0);
+    set(&mut client, valve, tube::ENVELOPE.0, -40.0);
+    let params = parameters(&mut client, singe);
+    assert_eq!(value_of(&params, "Curve"), json!(7.0));
+    assert_eq!(value_of(&params, "Hi-Quality"), json!(1.0));
+    assert_eq!(
+        value_of(&parameters(&mut client, grit), "Drive"),
+        json!(80.0)
+    );
+
+    // Singe has an expanded part; Grit and Valve have none.
+    let expand = |client: &mut Client<InProcess>, device: &Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.expand", "args": { "device": device } }] }),
+        )
+    };
+    let shown = expand(&mut client, singe);
+    assert_eq!(
+        shown["results"][0]["result"]["devices"][0]["expanded"],
+        json!(true)
+    );
+
+    // Each display holds its curve, with no engine publishing.
+    for (device, name) in [
+        (singe, "Shaper Curve"),
+        (grit, "Drive Curve"),
+        (valve, "Tube Curve"),
+    ] {
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        );
+        let display = &read["results"][0]["result"];
+        assert_eq!(display["live"], json!(false));
+        let curve = display["series"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {display}"));
+        assert!(curve["values"].as_array().unwrap().len() > 50);
+    }
+
+    // The saved set reopens with the three devices and their values.
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Saturation.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let devices: Vec<_> = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .collect();
+    let find = |kind: &str| {
+        devices
+            .iter()
+            .find(|d| {
+                matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == kind)
+            })
+            .unwrap_or_else(|| panic!("no {kind} in the reopened set"))
+    };
+    assert_eq!(find(saturator::SATURATOR).params[&saturator::CURVE], 7.0);
+    assert_eq!(
+        find(saturator::SATURATOR).params[&saturator::HI_QUALITY],
+        1.0
+    );
+    assert_eq!(find(overdrive::OVERDRIVE).params[&overdrive::DRIVE], 80.0);
+    assert_eq!(find(tube::TUBE).params[&tube::MODEL], 2.0);
+    assert_eq!(find(tube::TUBE).params[&tube::ENVELOPE], -40.0);
+}
+
 // Spec: multiband-dynamics R18, device-framework R14 (WP-5.22): an agent
 // inserts Triband by its type, sets its parameters by ID, a band's among
 // them, and reads every one back with its descriptor.

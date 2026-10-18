@@ -61,6 +61,9 @@ pub enum Channels {
     Right,
 }
 
+/// What a flag's context menu draws.
+pub type FlagMenu<'a> = Box<dyn Fn(&mut Ui, &mut Vec<UiEvent>) + 'a>;
+
 /// A flag or marker the person drags.
 pub struct Flag<'a> {
     /// What assistive technology reads.
@@ -74,7 +77,7 @@ pub struct Flag<'a> {
     /// The commands a drag to a frame runs.
     pub drag: Box<dyn Fn(u64) -> Vec<(&'static str, Value)> + 'a>,
     /// Its context menu, if it has one.
-    pub menu: Option<Box<dyn Fn(&mut Ui, &mut Vec<UiEvent>) + 'a>>,
+    pub menu: Option<FlagMenu<'a>>,
 }
 
 /// What a display shows now.
@@ -161,13 +164,6 @@ impl Displays {
         if let Some(state) = self.states.get_mut(&device) {
             state.channels = channels;
         }
-    }
-
-    /// The span a device's display has selected, in frames of the edited
-    /// sample.
-    #[must_use]
-    pub fn selection(&self, device: DeviceId) -> Option<(u64, u64)> {
-        self.states.get(&device).and_then(|s| s.selection)
     }
 
     /// Loads the edited sample into `device`'s state when it is new or its

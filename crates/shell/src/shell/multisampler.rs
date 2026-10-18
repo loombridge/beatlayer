@@ -597,20 +597,6 @@ impl Shell {
         self.touch();
     }
 
-    /// A layer's sample, decoded at its own rate, for the Sample tab's
-    /// waveform (R14). `None` if the media store can't supply it.
-    ///
-    /// shortcut: the first call decodes on the caller's thread; the Sample
-    /// tab asks again only when the selected layer changes, and the media
-    /// store shares what an earlier add or a playing engine decoded. Upgrade
-    /// to the peak cache's background build for very long samples.
-    #[must_use]
-    pub fn layer_audio(&self, media: ContentHash) -> Option<std::sync::Arc<SampleData>> {
-        self.media
-            .load(bl_media::ContentHash::from_bytes(media.0))
-            .ok()
-    }
-
     /// The folder a layer's sample lies in, for Show in Browser (R11).
     #[must_use]
     pub fn layer_folder(&self, media: ContentHash) -> Option<PathBuf> {

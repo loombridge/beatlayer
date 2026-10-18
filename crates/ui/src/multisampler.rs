@@ -7,7 +7,7 @@
 //! `device.set_layer`, `device.select_layers`, ...), which an agent runs
 //! too. A drag on a zone or a marker is one undo step however far it goes.
 
-use crate::sample_display::{Channels, Flag, Shown};
+use crate::sample_display::{Channels, Flag, FlagMenu, Shown};
 use bl_model::{
     EditorSize, Layer, LayerId, LayerSettings, ReleaseMode, SamplerTab, SustainMode, Zone, ZoneKind,
 };
@@ -711,7 +711,7 @@ impl MultisamplerUi {
             })
             .map(|marker| {
                 let (device, id) = (frame.id, layer.id);
-                let menu: Option<Box<dyn Fn(&mut Ui, &mut Vec<UiEvent>)>> = matches!(
+                let menu: Option<FlagMenu<'_>> = matches!(
                     marker,
                     Marker::LoopStart | Marker::LoopEnd | Marker::ReleaseLoop
                 )
@@ -732,7 +732,7 @@ impl MultisamplerUi {
                             );
                             ui.close();
                         }
-                    }) as Box<dyn Fn(&mut Ui, &mut Vec<UiEvent>)>
+                    }) as FlagMenu<'_>
                 });
                 Flag {
                     name: marker.name(),

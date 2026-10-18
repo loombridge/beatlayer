@@ -266,6 +266,11 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // The edits made to that sample (WP-5.15).
+    device.sample_edits = vec![bl_model::SampleEdit {
+        kind: bl_model::SampleEditKind::FadeIn,
+        range: None,
+    }];
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(

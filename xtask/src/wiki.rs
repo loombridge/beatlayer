@@ -25,7 +25,7 @@ const COMMAND_PAGES: [(&str, &str); 2] = [
 
 /// The planning documents and the other pages outside the specs, in the
 /// sidebar's order.
-const NAMED: [(&str, &str); 11] = [
+const NAMED: [(&str, &str); 12] = [
     ("docs/01-roadmap.md", "Roadmap"),
     ("docs/02-architecture.md", "Architecture"),
     ("docs/03-build-plan.md", "Build-plan"),
@@ -33,6 +33,7 @@ const NAMED: [(&str, &str); 11] = [
     ("docs/05-improvements.md", "Improvements-over-Live"),
     ("docs/progress.md", "Progress"),
     ("docs/commands.md", "Command-reference"),
+    ("docs/security.md", "Security"),
     ("docs/ui-parity/README.md", "UI-parity-reference"),
     ("docs/specs/README.md", "Behaviour-specs"),
     ("docs/specs/TEMPLATE.md", "Spec-template"),

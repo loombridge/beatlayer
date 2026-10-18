@@ -97,7 +97,7 @@ fn a_set_with_the_four_devices_reopens_with_every_parameter() {
                 .run(
                     "device.set_sidechain_input",
                     json!({ "device": added.device,
-                            "input": Input::Track { track: key, tap: Tap::PostFx } }),
+                            "input": Input::Track { track: key, tap: Tap::PostFx, chain: None } }),
                 )
                 .unwrap();
             shell
@@ -153,7 +153,8 @@ fn a_set_with_the_four_devices_reopens_with_every_parameter() {
                 sidechain.input,
                 Input::Track {
                     track: key,
-                    tap: Tap::PostFx
+                    tap: Tap::PostFx,
+                    chain: None,
                 }
             );
         }

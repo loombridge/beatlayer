@@ -22,9 +22,9 @@ use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode,
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::eq::{Type, coeffs};
-use crate::sections::Biquad;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sampler::{frames_of, read};
+use crate::sections::Biquad;
 
 /// The drum sampler device type's id.
 pub const DRUM_SAMPLER: &str = "beatlayer.strike";

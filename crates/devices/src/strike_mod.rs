@@ -247,6 +247,7 @@ impl NativeDevice for StrikeMod {
     fn release(&mut self, _: &mut bl_engine::NoteBuffer) {
         // Spec: device-framework R32. Switched off, it forgets the keys.
         self.held.clear();
+        self.out.off();
     }
 
     fn receive_data(&mut self, data: NodeData) {
@@ -257,7 +258,7 @@ impl NativeDevice for StrikeMod {
 
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
-        if self.out.begin(audio.playing()) {
+        if self.out.begin(audio) {
             // Spec: modulation R20, R21. It begins as a render from here
             // does, unless a key is already down.
             self.post.restart();
@@ -362,7 +363,6 @@ impl StrikeMod {
             Some(sustain) if held && !settings.looped && self.x <= sustain && next > sustain => {
                 sustain
             }
-            Some(sustain) if held && !settings.looped && self.x == sustain => sustain,
             _ => next,
         };
         if self.x >= 1.0 {

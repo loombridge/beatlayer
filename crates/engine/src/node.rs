@@ -296,9 +296,10 @@ impl NoteBuffer {
             .iter()
             .rposition(|n| n.offset <= note.offset)
             .map_or(0, |i| i + 1);
-        // Anything but a note-on or a channel message goes before the
-        // note-ons on its frame.
-        if !(ons(&note) || note.kind.is_message()) {
+        // Anything but a note-on, a channel message or a note's expression
+        // goes before the note-ons on its frame.
+        let expression = matches!(note.kind, NoteKind::Expression { .. });
+        if !(ons(&note) || note.kind.is_message() || expression) {
             let frame = self.notes[..at]
                 .iter()
                 .rposition(|n| n.offset < note.offset)

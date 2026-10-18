@@ -32,7 +32,7 @@ use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
-use crate::warp::WarpMarker;
+use crate::warp::{TransientEdits, WarpMarker};
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -484,6 +484,11 @@ pub struct AudioData {
     /// `null` (or nothing) means the song's signature at the clip's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<TimeSignature>,
+    /// The clip's edits to its file's detected transients (the warping spec,
+    /// R23): none unless given. They belong to the file, so replacing the
+    /// file drops them (R27).
+    #[serde(default, skip_serializing_if = "TransientEdits::is_empty")]
+    pub transient_edits: TransientEdits,
 }
 
 impl AudioData {
@@ -506,6 +511,7 @@ impl AudioData {
             warp_markers: Vec::new(),
             tempo: None,
             signature: None,
+            transient_edits: TransientEdits::default(),
         }
     }
 
@@ -715,8 +721,20 @@ impl MidiData {
     }
 }
 
+/// One point of a note's pressure (WP-2.29): from `at` after the note's
+/// start the note's key is pressed to `value`, until the next point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PressurePoint {
+    /// Where it takes effect, counted from the note's start: 0 or more and
+    /// before the note's length.
+    pub at: Ticks,
+    /// The pressure, from 0 to 127.
+    #[schemars(range(max = 127))]
+    pub value: u8,
+}
+
 /// A note in a MIDI clip.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     /// The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.
     #[schemars(range(max = 127))]
@@ -750,6 +768,11 @@ pub struct Note {
     /// Whether the note is switched off, so it stays in place but doesn't play.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mute: bool,
+    /// The note's own pressure, played as polyphonic pressure over its
+    /// length: points in order of `at`, none at the same place. A note with
+    /// none plays no pressure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pressure: Vec<PressurePoint>,
 }
 
 impl Note {
@@ -765,6 +788,7 @@ impl Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }
@@ -780,6 +804,7 @@ impl Default for Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }

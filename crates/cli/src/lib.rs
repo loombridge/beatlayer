@@ -6,11 +6,14 @@
 //!   thread, faster than real time, and written to a WAV file.
 //! - [`assistant`]: one turn of the built-in assistant with no window
 //!   (`bl-cli assistant`), its transcripts, and a provider that replays them.
+//! - [`capacity`]: the song of the capacity target, many tracks with an EQ
+//!   and a compressor each.
 //! - [`golden`]: songs built in code (the fixtures), rendered and
 //!   null-tested against reference renders stored as FLAC files in
 //!   `tests/golden/`.
 
 pub mod assistant;
+pub mod capacity;
 pub mod golden;
 pub mod render;
 

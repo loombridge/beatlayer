@@ -417,12 +417,13 @@ impl NativeDevice for PlayMod {
     fn release(&mut self, _: &mut bl_engine::NoteBuffer) {
         // Spec: device-framework R32. Switched off, it forgets the keys.
         self.held.clear();
+        self.out.off();
     }
 
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let playing = audio.playing();
-        if self.out.begin(playing) {
+        if self.out.begin(audio) {
             // Spec: modulation R20, R21. It begins as a render from here
             // does: Random starts again with the transport, and what the
             // last note said is forgotten unless a key is already down.

@@ -57,7 +57,7 @@ fn modulate(h: &mut Harness, params: &[(TrackId, AutomationTarget, f64, f64)]) {
         params
             .iter()
             .map(|&(track, target, base, played)| {
-                let (node, param) = target_node(track, &target);
+                let (node, param) = target_node(track, &target).unwrap();
                 PlayedParam {
                     node,
                     param,

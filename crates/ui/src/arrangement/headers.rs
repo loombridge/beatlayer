@@ -141,6 +141,7 @@ pub fn header(
     );
     let name = track.name();
     let title_response = ui.interact(title, title_id(id), Sense::click());
+    crate::rack_view::focus_track_under_drag(ui, shell, id, title, events);
     // The title marks the track as drawn for the keyboard's neighbour moves
     // (the accessibility spec, R4); Tab doesn't stop on it.
     crate::focus::register(

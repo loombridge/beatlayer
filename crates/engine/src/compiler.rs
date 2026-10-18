@@ -12,6 +12,7 @@ use bl_model::{
 use crate::EngineConfig;
 use crate::automation;
 use crate::clips::{ClipList, ClipPlayer, SlotSample};
+use crate::disjoint::Shared;
 use crate::display::Displays;
 use crate::gc::{GcHandle, Program};
 use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
@@ -20,11 +21,13 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, ModKind,
-    NO_CHAIN, NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, MergeCursor, Migration,
+    ModKind, NO_CHAIN, NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task,
+    delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::sched::Sched;
 use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
@@ -365,6 +368,16 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
+            // A sampler whose sample's edits changed gets the edited sample
+            // again as node data, with no new program (R57).
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.sample_edits != after.sample_edits
+                && before.media == after.media
+                && let Some(media) = after.media_at(0)
+            {
+                self.send_slot_sample(id, 0, media, &after.sample_edits, &mut update);
+            }
         }
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
@@ -451,6 +464,33 @@ impl Compiler {
         self.compile_with(&document, &Resend::default())
     }
 
+    /// Sends a sampler's node the audio of one of its sample slots, with
+    /// `edits` applied (WP-2.16, R57): the media library decodes and renders
+    /// here, on the compiler's thread, and shares the result with every
+    /// other reader of the same source and list; media it can't supply is
+    /// reported missing and plays silence.
+    fn send_slot_sample(
+        &mut self,
+        device: DeviceId,
+        slot: usize,
+        media: ContentHash,
+        edits: &[bl_model::SampleEdit],
+        update: &mut Update,
+    ) {
+        let rate = self.config.sample_rate;
+        match self
+            .registry
+            .media()
+            .and_then(|library| library.edited_sample(media, rate, edits))
+        {
+            Some(sample) => update.data.push((
+                NodeKey::Device(device),
+                self.gc.data(SlotSample { slot, sample }),
+            )),
+            None => update.missing.push(media),
+        }
+    }
+
     /// Sends a multisampler's node its layers, each with its decoded audio
     /// (WP-5.13, R31): the media library decodes here, on the compiler's
     /// thread, and shares each file with every other reader; a layer whose
@@ -471,7 +511,10 @@ impl Compiler {
                 // R23: with RAM Mode off, a layer over ten seconds is read
                 // in the background behind its held start; the rest decode
                 // whole.
+                // The edits are applied to the whole decoded sample (R57), so
+                // a layer that has some is read whole.
                 let long = !device.layers.ram_mode
+                    && layer.edits.is_empty()
                     && layer.length > u64::from(layer.sample_rate) * LONG_LAYER_SECONDS;
                 let held = self
                     .progressive
@@ -489,7 +532,7 @@ impl Compiler {
                 let sample = match progressive {
                     Some(sample) => Some(LayerSample::Progressive(sample)),
                     None => library
-                        .and_then(|library| library.sample(layer.media, rate))
+                        .and_then(|library| library.edited_sample(layer.media, rate, &layer.edits))
                         .map(LayerSample::Whole),
                 };
                 if sample.is_none() {
@@ -749,27 +792,26 @@ impl Compiler {
             generation,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
-            slots: build.slots,
+            slots: Shared::new(build.slots),
             migrations: build.migrations,
             order,
             task_dependents: dependents.iter().flatten().copied().collect(),
+            sched: Sched::new(tasks, build.racks.len(), build.rack_chains.len()),
             tasks: with_dependents(build.tasks, &dependents),
             task_inputs: build.inputs,
             steps: build.steps,
-            merge: Vec::with_capacity(build.rack_chains.len()),
+            merge: Shared::new(vec![MergeCursor::default(); build.rack_chains.len()]),
             racks: build.racks,
             rack_chains: build.rack_chains,
-            sidechain_pool: vec![0.0; build.sidechains.len() * size],
+            sidechain_pool: Shared::new(vec![0.0; build.sidechains.len() * size]),
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
-            pool: vec![0.0; (tasks + build.chain_buffers as usize) * size],
-            tap_pool: vec![0.0; kept as usize * size],
+            pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
+            tap_pool: Shared::new(vec![0.0; kept as usize * size]),
             delay_lines,
             delay_pool,
-            delay_scratch: vec![0.0; size],
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
-            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -789,19 +831,21 @@ impl Compiler {
                 .into_iter()
                 .filter(|&id| document.track(id).is_some_and(|t| t.kind().holds_clips()))
                 .collect(),
-            note_buffers: (0..2 + 2 * build.chain_buffers)
-                .map(|_| NoteBuffer::with_capacity(1024))
-                .collect(),
+            note_buffers: Shared::new(
+                (0..2 * (tasks as u32 + build.chain_buffers))
+                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .collect(),
+            ),
             releases: crate::program::Releases::new(),
             midi,
             modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
             lagged: mod_rows.any_late(document),
-            bus: vec![
+            bus: Shared::new(vec![
                 0.0;
                 (build.modulators.len() + build.signals.len())
                     * crate::modbus::ROWS
                     * self.config.max_frames
-            ],
+            ]),
             signals: build.signals,
         };
         self.modulator_rows = mod_rows;
@@ -827,19 +871,8 @@ impl Compiler {
         // (WP-2.16). The update reaches the node after the program that
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
-        let rate = self.config.sample_rate;
-        for &(device, slot, media) in &build.media {
-            match self
-                .registry
-                .media()
-                .and_then(|library| library.sample(media, rate))
-            {
-                Some(sample) => update.data.push((
-                    NodeKey::Device(device),
-                    self.gc.data(SlotSample { slot, sample }),
-                )),
-                None => update.missing.push(media),
-            }
+        for (device, slot, media, edits) in &build.media {
+            self.send_slot_sample(*device, *slot, *media, edits, &mut update);
         }
         for &device in &build.layered {
             self.send_layers(document, device, &mut update);
@@ -1152,7 +1185,14 @@ impl Compiler {
                         // with this compile's update (WP-2.16).
                         for (slot, media) in device.media.iter().enumerate() {
                             if let Some(media) = *media {
-                                build.media.push((device.id, slot, media));
+                                // Only slot 0 has edits (the sampler's one
+                                // sample).
+                                let edits = if slot == 0 {
+                                    device.sample_edits.clone()
+                                } else {
+                                    Vec::new()
+                                };
+                                build.media.push((device.id, slot, media, edits));
                             }
                         }
                         if !device.layers.is_default() {
@@ -1244,6 +1284,8 @@ impl Compiler {
             build.chain_index.insert(chain.id, start + at as u32);
         }
         build.racks.push(Rack {
+            // The task is pushed once its chain is built, in this place.
+            task: build.tasks.len() as u32,
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
                 RackKind::Instrument | RackKind::Drum => RackMode::Instrument,
@@ -1409,7 +1451,7 @@ struct Build {
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, usize, ContentHash)>,
+    media: Vec<(DeviceId, usize, ContentHash, Vec<bl_model::SampleEdit>)>,
     /// Devices new in this program that hold layers (WP-5.13): their layers,
     /// with each one's decoded audio, go with this compile's update.
     layered: Vec<DeviceId>,
@@ -2433,8 +2475,16 @@ mod tests {
                 program.order = program.ready_order();
                 assert_ne!(program.order, (0..5).collect::<Vec<_>>());
             }
-            let mut scratch = Vec::new();
-            program.run(64, 0, &[], &mut scratch, TransportInfo::default(), &[]);
+            let mut lane = crate::sched::Lane::new(f.compiler.config());
+            let block = crate::program::Blk {
+                frames: 64,
+                from: 0,
+                until: 64,
+                events: &[],
+                transport: TransportInfo::default(),
+                session: &[],
+            };
+            program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()
         };
         let in_order = render(&mut f, false);

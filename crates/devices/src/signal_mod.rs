@@ -69,6 +69,10 @@ pub(crate) struct SignalOut {
     clock: u64,
     was_playing: bool,
     primed: bool,
+    /// The modulator didn't run since it last did: it was switched off.
+    gap: bool,
+    /// The song position after the last stretch it ran.
+    end: i64,
     /// Each slot's level at the last grid point and the one before.
     from: [f64; SLOTS as usize],
     to: [f64; SLOTS as usize],
@@ -86,6 +90,8 @@ impl SignalOut {
             clock: 0,
             was_playing: false,
             primed: false,
+            gap: false,
+            end: 0,
             from: [0.0; SLOTS as usize],
             to: [0.0; SLOTS as usize],
             ring,
@@ -101,19 +107,35 @@ impl SignalOut {
         }
     }
 
+    /// Notes that the modulator is switched off, as it is each block it
+    /// doesn't run in.
+    pub(crate) fn off(&mut self) {
+        self.gap = true;
+    }
+
     /// Notes the transport's state at a stretch's start; true when it has
     /// just started, when the modulator starts again (R20, R21): its
     /// output, and what a target that runs before it reads of it, begin as
-    /// they would in a render that starts there.
-    pub(crate) fn begin(&mut self, playing: bool) -> bool {
+    /// they would in a render that starts there. A modulator switched on
+    /// again while the song plays takes its level at once, with nothing
+    /// behind it, and its grid carries on where the song has got to.
+    pub(crate) fn begin(&mut self, audio: &Audio<'_, '_>) -> bool {
+        let playing = audio.playing();
+        let position = audio.song_position().get();
         let started = playing && !self.was_playing;
-        self.was_playing = playing;
         if started {
             self.clock = 0;
+        } else if self.gap && playing && position >= self.end {
+            self.clock += (position - self.end) as u64;
+        }
+        if started || self.gap {
             self.primed = false;
             self.at = 0;
             Self::idle(&mut self.ring);
         }
+        self.gap = false;
+        self.was_playing = playing;
+        self.end = position + audio.frames() as i64;
         started
     }
 
@@ -136,7 +158,7 @@ impl SignalOut {
         levels: &[f64],
     ) {
         let level = |slot: usize| levels.get(slot).or(levels.first()).copied().unwrap_or(0.0);
-        if self.clock.is_multiple_of(GRID) {
+        if !self.primed || self.clock.is_multiple_of(GRID) {
             for slot in 0..ix.slots {
                 self.from[slot] = if self.primed {
                     self.to[slot]
@@ -182,7 +204,7 @@ impl SignalOut {
     /// 32 frames before each of its frames (R28).
     pub(crate) fn lag(&self, modulation: &mut Modulation<'_, '_>) {
         // The part that starts the transport is the first of a new start.
-        let fresh = modulation.playing() && !self.was_playing;
+        let fresh = self.gap || (modulation.playing() && !self.was_playing);
         for row in 0..ROWS {
             let out = modulation.row_mut(row);
             for (i, value) in out.iter_mut().enumerate() {
@@ -213,8 +235,10 @@ impl Held {
         }
     }
 
-    /// Notes the key `note` puts down.
+    /// Notes the key `note` puts down. A key put down again without being
+    /// lifted is the same key, so its one note-off lifts it.
     pub(crate) fn on(&mut self, note: &NoteEvent) {
+        self.off(note);
         if self.keys.len() < HELD_ROOM {
             self.keys.push((Key::of(note), note.velocity));
         }

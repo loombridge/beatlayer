@@ -762,7 +762,7 @@ pub fn place_midi(
                 .filter(|note| note.start >= from && note.start < to)
                 .map(|note| Note {
                     start: note.start - from,
-                    ..*note
+                    ..note.clone()
                 })
                 .collect();
             if inside.is_empty() {

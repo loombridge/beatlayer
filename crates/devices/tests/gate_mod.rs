@@ -209,3 +209,80 @@ fn the_envelope_is_the_same_at_any_block_size() {
         assert_eq!(out.rows.0, reference.rows.0, "blocks of {block} frames");
     }
 }
+
+// Spec: modulation R25
+#[test]
+fn a_repeated_note_on_is_one_key_and_its_note_off_lifts_it() {
+    let one = note_on(1_000, 60, 1.0, None);
+    let again = note_on(2_000, 60, 1.0, None);
+    let notes = [one, again, note_off(3_000, &again, 0.5)];
+    let mut node = gate(&[]);
+    let out = run(node.as_mut(), 16_000, 512, &notes);
+    let level = out.rows.contribution(0);
+    assert!(level[2_900] > 0.4, "held: {}", level[2_900]);
+    assert!(
+        level[15_000..].iter().all(|&v| v < 0.01),
+        "released: {}",
+        level[15_000]
+    );
+}
+
+// Spec: modulation R25
+#[test]
+fn echoes_end_when_loop_mode_moves_away_from_echo() {
+    let one = note_on(1_000, 60, 1.0, None);
+    let notes = [one, note_off(1_500, &one, 0.5)];
+    let params = [
+        (LOOP_MODE, 3.0),
+        (ECHO_TIME, 100.0),
+        (ECHO_FEEDBACK, 90.0),
+        (ATTACK, 10.0),
+        (DECAY, 20.0),
+        (RELEASE, 1.0),
+    ];
+    let mut node = gate(&params);
+    let free = [common::set(6_000, LOOP_MODE, 0.0)];
+    let out = signal(
+        node.as_mut(),
+        30_000,
+        512,
+        &[],
+        None,
+        &notes,
+        &free,
+        &TempoMap::default(),
+        playing,
+    );
+    let level = out.rows.contribution(0);
+    assert!(rises(&level[..6_000], 0.3) >= 2, "echoes run in Echo mode");
+    assert_eq!(rises(&level[7_000..], 0.1), 0, "none after the change");
+}
+
+// Spec: modulation R20, R28
+#[test]
+fn switched_on_again_it_leaves_no_stale_late_rows() {
+    let one = note_on(100, 60, 1.0, None);
+    let mut node = gate(&[]);
+    let out = run(node.as_mut(), 1_000, 32, &[one]);
+    assert!(
+        out.rows.contribution(0)[900] > 0.4,
+        "the first stretch writes"
+    );
+    // Switched off for 1,000 frames of the song, then on.
+    node.release(&mut bl_engine::NoteBuffer::with_capacity(8));
+    let out = signal(
+        node.as_mut(),
+        64,
+        32,
+        &[],
+        None,
+        &[],
+        &[],
+        &TempoMap::default(),
+        |at| playing(2_000 + at),
+    );
+    assert!(
+        out.late.contribution(0)[..32].iter().all(|&v| v == 0.0),
+        "the late rows hold nothing written before the gap"
+    );
+}

@@ -1445,6 +1445,174 @@ mod tests {
         assert!(error.contains("two envelopes"), "{error}");
     }
 
+    // Spec: midi-controller-data R7
+    #[test]
+    fn controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back() {
+        use crate::clip::{MidiData, Note, PressurePoint};
+        let mut editor = Editor::new();
+        let midi = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: midi,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let clip = editor.new_id();
+        let note = Note {
+            pressure: vec![
+                PressurePoint {
+                    at: Ticks::ZERO,
+                    value: 90,
+                },
+                PressurePoint {
+                    at: Ticks(500),
+                    value: 20,
+                },
+            ],
+            ..Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)
+        };
+        editor
+            .apply(Command::CreateClip {
+                track: midi,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::new([note])),
+                ),
+            })
+            .unwrap();
+        for (target, at, value) in [
+            (AutomationTarget::MidiCc { number: 1 }, 0, 12.0),
+            (AutomationTarget::MidiCc { number: 1 }, 960, 99.0),
+            (AutomationTarget::MidiPitchBend, 0, -8192.0),
+            (AutomationTarget::MidiChannelPressure, 0, 127.0),
+        ] {
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    clip,
+                    kind: crate::EnvelopeKind::Modulation,
+                    target,
+                    at: Ticks(at),
+                    value,
+                })
+                .unwrap();
+        }
+        let doc = editor.document().clone();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = find_clip(&value, clip).clone();
+        let wheel = saved["envelopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["target"] == json!({ "type": "midi.cc", "number": 1 }))
+            .unwrap();
+        assert_eq!(
+            wheel["envelope"]["points"],
+            json!([{ "at": 0, "value": 12.0 }, { "at": 960, "value": 99.0 }])
+        );
+        assert!(
+            saved["envelopes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["target"] == json!({ "type": "midi.pitch_bend" }))
+        );
+        assert_eq!(
+            saved["data"]["midi"]["notes"][0]["pressure"],
+            json!([{ "at": 0, "value": 90 }, { "at": 500, "value": 20 }])
+        );
+        let loaded = load(value.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A set saved before this package has neither, and loads with none.
+        let mut old = value.clone();
+        let entry = find_clip_mut(&mut old, clip);
+        entry.as_object_mut().unwrap().remove("envelopes");
+        entry["data"]["midi"]["notes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("pressure");
+        let back = load(old).unwrap();
+        assert_eq!(back.clip(clip).unwrap().envelopes().count(), 0);
+        let ClipData::Midi(data) = &back.clip(clip).unwrap().data else {
+            panic!("a MIDI clip")
+        };
+        assert!(data.notes[0].pressure.is_empty());
+
+        // Bad data doesn't load: a controller number a clip can't hold, a
+        // value outside the controller's range, a controller on an audio
+        // clip, and pressure out of order, outside the note or too strong.
+        let broken = |edit: &dyn Fn(&mut Value)| {
+            let mut value = value.clone();
+            edit(find_clip_mut(&mut value, clip));
+            load(value).unwrap_err()
+        };
+        let error = broken(&|clip| {
+            clip["envelopes"][0]["target"] = json!({ "type": "midi.cc", "number": 32 });
+        });
+        assert!(error.contains("MIDI controller number"), "{error}");
+        let error = broken(&|clip| {
+            clip["envelopes"][0]["envelope"]["points"] = json!([{ "at": 0, "value": 300.0 }]);
+            clip["envelopes"][0]["target"] = json!({ "type": "midi.channel_pressure" });
+        });
+        assert!(error.contains("out of range"), "{error}");
+        for bad in [
+            json!([{ "at": 500, "value": 20 }, { "at": 0, "value": 90 }]),
+            json!([{ "at": 5_000_000, "value": 20 }]),
+            json!([{ "at": 0, "value": 128 }]),
+        ] {
+            let error = broken(&|clip| {
+                clip["data"]["midi"]["notes"][0]["pressure"] = bad.clone();
+            });
+            assert!(error.contains("note"), "{bad}: {error}");
+        }
+        let (with_audio, [_, audio, _]) = song();
+        let audio_clip = with_audio.track(audio).unwrap().clips().next().unwrap().id;
+        let mut audio = serde_json::to_value(&with_audio).unwrap();
+        find_clip_mut(&mut audio, audio_clip)["envelopes"] = json!([{
+            "target": { "type": "midi.cc", "number": 1 },
+            "envelope": { "points": [{ "at": 0, "value": 1.0 }] }
+        }]);
+        let error = load(audio).unwrap_err();
+        assert!(error.contains("audio clip"), "{error}");
+    }
+
+    /// Where a clip's saved form sits in the tree of tracks, as a JSON
+    /// pointer.
+    fn clip_pointer(value: &Value, clip: ClipId) -> String {
+        fn walk(value: &Value, id: &Value, path: &str) -> Option<String> {
+            match value {
+                Value::Object(map) => {
+                    if map.get("id") == Some(id) && map.contains_key("data") {
+                        return Some(path.to_owned());
+                    }
+                    map.iter()
+                        .find_map(|(key, v)| walk(v, id, &format!("{path}/{key}")))
+                }
+                Value::Array(items) => items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, v)| walk(v, id, &format!("{path}/{i}"))),
+                _ => None,
+            }
+        }
+        walk(value, &json!(clip), "").expect("the clip is saved")
+    }
+
+    fn find_clip(value: &Value, clip: ClipId) -> &Value {
+        value.pointer(&clip_pointer(value, clip)).unwrap()
+    }
+
+    fn find_clip_mut(value: &mut Value, clip: ClipId) -> &mut Value {
+        let pointer = clip_pointer(value, clip);
+        value.pointer_mut(&pointer).unwrap()
+    }
+
     #[test]
     fn malformed_documents_are_refused() {
         let (doc, _) = song();

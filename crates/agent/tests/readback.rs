@@ -10,7 +10,8 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind, WarpMarker,
+    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    TransientEdits, WarpMarker,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -28,6 +29,10 @@ fn note(key: u8, start: i64) -> Note {
         probability: 0.5,
         velocity_deviation: 7,
         mute: false,
+        pressure: vec![PressurePoint {
+            at: Ticks(88_200),
+            value: 64,
+        }],
     }
 }
 
@@ -266,6 +271,11 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // The edits made to that sample (WP-5.15).
+    device.sample_edits = vec![bl_model::SampleEdit {
+        kind: bl_model::SampleEditKind::FadeIn,
+        range: None,
+    }];
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(
@@ -421,6 +431,10 @@ fn fixture() -> Project {
             ],
             tempo: Some(100.0),
             signature: Some(TimeSignature::new(3, 4).unwrap()),
+            transient_edits: TransientEdits {
+                added: vec![0.5],
+                removed: vec![1.25],
+            },
         }),
     );
     audio.name = "Verse vox".to_owned();
@@ -458,11 +472,38 @@ fn fixture() -> Project {
     );
     midi.name = "Chords".to_owned();
     midi.offset = Ticks(88_200);
+    let midi_id = midi.id;
     apply(
         &mut editor,
         Command::CreateClip {
             track: keys,
             clip: midi,
+        },
+    );
+    // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
+    // unlinked pitch bend one.
+    for (target, value) in [
+        (AutomationTarget::MidiCc { number: 1 }, 100.0),
+        (AutomationTarget::MidiPitchBend, -4096.0),
+    ] {
+        apply(
+            &mut editor,
+            Command::SetClipEnvelopeBreakpoint {
+                clip: midi_id,
+                kind: bl_model::EnvelopeKind::Modulation,
+                target,
+                at: Ticks(88_200),
+                value,
+            },
+        );
+    }
+    apply(
+        &mut editor,
+        Command::SetClipEnvelopeLinked {
+            clip: midi_id,
+            kind: bl_model::EnvelopeKind::Modulation,
+            target: AutomationTarget::MidiPitchBend,
+            linked: false,
         },
     );
     let scenes: Vec<_> = editor.document().scenes().map(|scene| scene.id).collect();
@@ -812,6 +853,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.warp_markers.1.beat",
                 "data.audio.tempo",
                 "data.audio.signature",
+                "data.audio.transient_edits.added.0",
+                "data.audio.transient_edits.removed.0",
             ][..],
         ),
         (
@@ -841,6 +884,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
     }
 }
 
+// Spec: midi-controller-data R9. The fixture's MIDI clip holds controller
+// envelopes and a note with pressure points.
 #[test]
 fn full_query_results_hold_everything_the_set_format_encodes() {
     let project = fixture();

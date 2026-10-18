@@ -255,7 +255,7 @@ fn a_modulated_control_reads_its_base_and_played_value() {
         played
             .iter()
             .map(|&(target, base, played)| {
-                let (node, param) = bl_engine::target_node(t, &target);
+                let (node, param) = bl_engine::target_node(t, &target).unwrap();
                 bl_engine::PlayedParam {
                     node,
                     param,
@@ -1106,6 +1106,39 @@ fn a_device(h: &mut Harness) {
             json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
         )
         .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// An audio effect rack with two chains, Pad and Lead, on audio track 3, the
+/// selected track, with no device selected (WP-5.2).
+fn a_rack(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "name": "Rack",
+                "role": "audio_effect",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    for (index, name) in ["Pad", "Lead"].into_iter().enumerate() {
+        let id: bl_model::ChainId = h.shell.new_id();
+        h.shell
+            .run(
+                "chain.add",
+                json!({ "rack": rack, "index": index, "chain": { "id": id, "name": name, "devices": [] } }),
+            )
+            .unwrap();
+    }
     h.shell
         .run("device.select", json!({ "device": null }))
         .unwrap();
@@ -2000,6 +2033,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("clip.set_warp", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
+        ("clip.insert_warp_markers", Exception(sample_editor)),
+        ("clip.insert_transient", Exception(sample_editor)),
+        ("clip.delete_transients", Exception(sample_editor)),
+        ("clip.reset_transients", Exception(sample_editor)),
+        ("clip.move_transient", Exception(sample_editor)),
+        ("clip.transients", Exception(sample_editor)),
         ("clip.move_warp_markers", Exception(sample_editor)),
         ("clip.shift_warp_marker", Exception(sample_editor)),
         ("clip.delete_warp_markers", Exception(sample_editor)),
@@ -2107,67 +2146,83 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "device.set_enabled_all",
-            Exception(LaterView(
-                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            Exception(Equivalent(
+                "Option-Enter (Alt-Enter) on the rack's Device Activator, as Option-click does \
+                 (I-CLICK-024)",
+            )),
+        ),
+        // The rack's frame (WP-5.2): the chain list's rows and their
+        // controls are in the Device View's Tab order, and its keys are
+        // the rack-chains context's.
+        (
+            "chain.add",
+            Exception(Equivalent(
+                "the chain list's drop area (`chain.create`), or Paste there (`chain.paste`, \
+                 Cmd-V)",
             )),
         ),
         (
-            "chain.add",
-            Exception(LaterView(
-                "the rack's chain list and its drop area (WP-5.2)",
+            "chain.create",
+            Exception(Equivalent(
+                "a drag onto the chain list's drop area; the keyboard pastes a chain \
+                 (`chain.paste`, Cmd-V)",
+            )),
+        ),
+        (
+            "chain.drop_on_track",
+            Exception(Equivalent(
+                "a drag onto the track's own chain; the keyboard cuts the chain's devices and \
+                 pastes them (`device.cut`, `device.paste`)",
             )),
         ),
         (
             "chain.remove",
-            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+            Exception(Equivalent("Delete in the chain list (`chain.delete`)")),
         ),
         (
             "chain.move",
-            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
-        ),
-        (
-            "chain.rename",
-            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+            Exception(Equivalent(
+                "a drag in the chain list; the keyboard cuts the chain and pastes it \
+                 (`chain.cut`, `chain.paste`)",
+            )),
         ),
         (
             "chain.set_colour",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's context menu, from its row with Shift-F10 (S-CTX-002)",
+            )),
         ),
         (
             "chain.set_info",
-            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+            Exception(LaterView(
+                "the chain's Edit Info Text, which waits for the Info View (WP-2.24)",
+            )),
         ),
         (
             "chain.set_gain",
-            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Volume of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_pan",
-            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+            main(a_rack, device_view, "Chain Pan of Pad", Key::ArrowUp),
         ),
         (
             "chain.set_enabled",
-            Exception(LaterView("the chain list's activator (WP-5.2)")),
+            main(a_rack, device_view, "Chain Activator of Pad", Key::Enter),
         ),
         (
             "chain.set_solo",
-            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+            Exception(Equivalent(
+                "the chain's Solo button, or S in the chain list (`chain.solo`)",
+            )),
         ),
         (
-            "chain.copy",
-            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+            "chain.select",
+            main(a_rack, device_view, "Chain Pad", Key::Enter),
         ),
         (
-            "chain.cut",
-            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
-        ),
-        (
-            "chain.paste",
-            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
-        ),
-        (
-            "chain.duplicate",
-            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+            "chain.hot_swap",
+            main(a_rack, device_view, "Hot-Swap of Pad", Key::Enter),
         ),
         (
             "device.load_sample",
@@ -2315,6 +2370,61 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Gap(
                 "dragging a zone's edge, body or fade in the zone editor has no keyboard \
                  form yet (multisampler R10)",
+            )),
+        ),
+        // Sample editing in the sampler devices (WP-5.15): the display's
+        // context menu, which the keyboard doesn't open yet, and gestures
+        // on the waveform.
+        (
+            "device.edit_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R55)",
+            )),
+        ),
+        (
+            "device.crop_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.reverse_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.audition_sample",
+            Exception(Gap(
+                "a click on the sample display, which has no keyboard form yet (multisampler R54)",
+            )),
+        ),
+        (
+            "device.convert",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R62)",
+            )),
+        ),
+        (
+            "device.add_sample_edit",
+            Exception(Equivalent(
+                "`device.edit_sample`, which checks the selection against the sample",
+            )),
+        ),
+        (
+            "device.clear_sample_edits",
+            Exception(Equivalent(
+                "`device.edit_sample` with `revert`, which reads the unedited length itself",
+            )),
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Exception(Equivalent(
+                "`device.crop_sample` and `device.reverse_sample`, which write the copy",
             )),
         ),
         (
@@ -2794,13 +2904,18 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         gaps,
         [
             "device.add_layers",
+            "device.audition_sample",
+            "device.convert",
+            "device.crop_sample",
             "device.delete_layers",
             "device.distribute_layers",
             "device.duplicate_layers",
+            "device.edit_sample",
             "device.load_sample",
             "device.move_layers",
             "device.normalize_layers",
             "device.rename_layer",
+            "device.reverse_sample",
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",

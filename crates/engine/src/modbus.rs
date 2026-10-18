@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{SampleRate, TempoMap};
 use bl_model::modulator::{Mapping, ModTarget, SLOTS};
-use bl_model::{Device, DeviceId, Document, Track, TrackId};
+use bl_model::{ChainId, Device, DeviceId, Document, Track, TrackId};
 
+use crate::disjoint::Shared;
 use crate::node::{NodeEvent, TransportInfo};
 
 /// The rows a modulator owns: a contribution row and a hold row per slot.
@@ -32,9 +33,15 @@ pub const fn row(modulator: u32, slot: u8) -> u32 {
 }
 
 /// The modulators' rows for the block part being run, read-only.
-#[derive(Clone, Copy, Debug)]
+///
+/// A row is read from the shared storage only when asked for, so a thread
+/// never holds a reference to a row another thread is writing: a signal
+/// modulator's task writes its own rows while other tasks run.
+#[derive(Clone, Copy)]
 pub struct Bus<'a> {
-    data: &'a [f32],
+    data: Option<&'a Shared<f32>>,
+    /// How many values from the start of `data` the bus may read.
+    len: usize,
     stride: usize,
     frames: usize,
 }
@@ -42,25 +49,46 @@ pub struct Bus<'a> {
 impl<'a> Bus<'a> {
     /// No rows: what a block outside a program's run sees.
     pub const EMPTY: Bus<'static> = Bus {
-        data: &[],
+        data: None,
+        len: 0,
         stride: 0,
         frames: 0,
     };
 
     /// Rows `stride` apart in `data`, `frames` frames of each.
-    pub(crate) fn new(data: &'a [f32], stride: usize, frames: usize) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// While the bus is in use, no thread writes a row that the holder asks
+    /// it for. The compiler chooses those rows: a modulator's direct row only
+    /// for a target that runs after the modulator's task or chain, and its
+    /// late row otherwise (R28).
+    pub(crate) unsafe fn new(data: &'a Shared<f32>, stride: usize, frames: usize) -> Self {
         Self {
-            data,
+            data: Some(data),
+            len: data.len(),
             stride,
             frames,
         }
     }
 
+    /// The same bus, reading only the first `rows` rows.
+    pub(crate) fn below(self, rows: usize) -> Self {
+        Self {
+            len: self.len.min(rows * self.stride),
+            ..self
+        }
+    }
+
     fn at(&self, row: u32) -> &'a [f32] {
         let start = row as usize * self.stride;
-        self.data
-            .get(start..start + self.frames)
-            .unwrap_or_default()
+        match self.data {
+            // SAFETY: the contract of `new`.
+            Some(data) if start + self.frames <= self.len => unsafe {
+                data.view(start..start + self.frames)
+            },
+            _ => &[],
+        }
     }
 
     /// The contribution row starting a slot's pair: its share of the
@@ -168,13 +196,18 @@ impl ModRows {
         }
         let position = |id: DeviceId| owner.devices_deep().position(|d| d.id == id);
         // Sends run as their return track's inputs, before its chain; a
-        // mixer after it; a device in the order of the chain.
+        // mixer after it; a device in the order of the chain, unless the
+        // two sit in different chains of one rack, which may run at once
+        // on different threads (racks R15).
         let lagged = match mapping.target {
             ModTarget::Mixer { .. } => false,
             ModTarget::Send { .. } => true,
-            ModTarget::Device { device: target, .. } => position(target)
-                .zip(position(device.id))
-                .is_some_and(|(t, m)| t <= m),
+            ModTarget::Device { device: target, .. } => {
+                position(target)
+                    .zip(position(device.id))
+                    .is_some_and(|(t, m)| t <= m)
+                    || in_parallel_chains(owner, target, device.id)
+            }
         };
         Some(if lagged { late } else { row.direct })
     }
@@ -192,6 +225,35 @@ impl ModRows {
             })
         })
     }
+}
+
+/// Whether devices `a` and `b` of `track` sit in different chains of one
+/// rack, at any depth: those chains may run on different threads at once.
+fn in_parallel_chains(track: &Track, a: DeviceId, b: DeviceId) -> bool {
+    fn path(device: &Device, id: DeviceId, at: &mut Vec<(DeviceId, ChainId)>) -> bool {
+        if device.id == id {
+            return true;
+        }
+        for chain in &device.chains {
+            at.push((device.id, chain.id));
+            if chain.devices.iter().any(|d| path(d, id, at)) {
+                return true;
+            }
+            at.pop();
+        }
+        false
+    }
+    let find = |id| {
+        let mut at = Vec::new();
+        track.devices().any(|d| path(d, id, &mut at)).then_some(at)
+    };
+    let (Some(a), Some(b)) = (find(a), find(b)) else {
+        return false;
+    };
+    a.iter()
+        .zip(&b)
+        .find(|(x, y)| x != y)
+        .is_some_and(|(x, y)| x.0 == y.0)
 }
 
 /// A Curve Mod's shape as node data (R23): sent to the device when it

@@ -37,7 +37,16 @@ schemars = { version = "=1.2.2", default-features = false, features = ["std", "d
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 
+# The semaphore a sleeping worker waits on (POSIX `sem_t`, which a thread may
+# post from a real-time section; Apple's and Windows' parking is semaphores
+# and wait-on-address already).
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
+# The analysis cache runs in the background beside blocks rendered under the
+# allocation trap (WP-4.3).
+bl-analysis.workspace = true
 # The stress test plays through the null device, which counts dropouts and
 # heap use on its audio thread.
 bl-audio-io.workspace = true

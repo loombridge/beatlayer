@@ -16,12 +16,13 @@ use bl_devices::level_mod::{FALL, RISE};
 use bl_devices::testing::{UTILITY, UTILITY_BALANCE, UTILITY_GAIN, utility_type};
 use bl_engine::testing::{self as engine_testing, Probe};
 use bl_engine::{
-    Collector, Compiler, EngineConfig, Monitor, Processor, Sender, TransportCommand, channel,
+    Collector, Compiler, EngineConfig, Monitor, Pool, PoolConfig, Processor, Sender,
+    TransportCommand, channel,
 };
 use bl_model::modulator::{self, ModTarget, POLARITY};
 use bl_model::{
-    Clip, ClipData, Command, DeviceId, Editor, Input, MidiData, Note, Output, Tap, TrackId,
-    TrackKind, Vector,
+    Chain, ChainId, Clip, ClipData, Command, Device, DeviceId, DeviceKind, DeviceRole, Editor,
+    Input, MidiData, Note, Output, RackKind, Tap, TrackId, TrackKind, Vector,
 };
 
 const RATE: SampleRate = SampleRate::HZ_48000;
@@ -36,7 +37,28 @@ struct Rig {
 }
 
 impl Rig {
+    /// A rig that runs its tasks on the workers `BL_TEST_WORKERS` names, if
+    /// it is set (`BL_TEST_WORKERS=3 cargo nextest run -p bl-devices`).
     fn new(max_frames: usize) -> Self {
+        let mut rig = Self::serial(max_frames);
+        let workers = std::env::var("BL_TEST_WORKERS")
+            .ok()
+            .and_then(|workers| workers.parse().ok())
+            .unwrap_or(0);
+        rig.use_workers(workers);
+        rig
+    }
+
+    /// Runs the rig's tasks on `workers` workers beside the test's thread;
+    /// `0` runs them on the one.
+    fn use_workers(&mut self, workers: usize) {
+        let config = *self.processor.config();
+        let pool =
+            (workers > 0).then(|| Pool::start(&config, &PoolConfig::plain(workers)).unwrap());
+        let _ = self.processor.set_pool(pool);
+    }
+
+    fn serial(max_frames: usize) -> Self {
         let config = EngineConfig::new(RATE, max_frames);
         let collector = Collector::new();
         let mut registry = engine_testing::registry(&Arc::new(Probe::default()));
@@ -401,59 +423,65 @@ fn an_earlier_target_in_the_chain_is_one_step_late_at_any_block_size() {
     );
 }
 
+/// A source track playing a held note into a Gate Mod mapped to the gain of
+/// a utility on the target track after it, playing.
+fn gate_rig(block: usize) -> Rig {
+    let mut rig = Rig::new(block);
+    let source = rig.track(TrackKind::Midi);
+    let target = rig.track(TrackKind::Midi);
+    rig.insert(
+        target,
+        bl_engine::testing::DC,
+        &[(bl_engine::testing::VALUE, 1.0)],
+    );
+    let utility = rig.insert(target, UTILITY, &[]);
+    let gate = rig.insert(
+        source,
+        modulator::GATE_MOD,
+        &[
+            (POLARITY, 1.0),
+            (modulator::amount(0), 100.0),
+            (SUSTAIN_LEVEL, 60.0),
+        ],
+    );
+    rig.apply(Command::MapModulator {
+        device: gate,
+        slot: 0,
+        target: ModTarget::Device {
+            device: utility,
+            param: UTILITY_GAIN,
+        },
+    });
+    let clip = rig.editor.new_id();
+    let note = Note::new(60, Ticks::ZERO, Ticks::WHOLE, 100);
+    rig.apply(Command::CreateClip {
+        track: source,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            ClipData::Midi(MidiData {
+                notes: Vector::from(vec![note]),
+                start: Ticks::ZERO,
+                end: None,
+                looping: false,
+                loop_start: Ticks::ZERO,
+                loop_end: None,
+                signature: None,
+            }),
+        ),
+    });
+    rig.sender.transport(TransportCommand::Play);
+    rig
+}
+
 // Spec: modulation R25, R28
 #[test]
 fn a_note_driven_modulator_modulates_a_later_track_at_any_block_size() {
     let factor = factor();
     let mut renders = Vec::new();
     for block in [1usize, 64, 512] {
-        let mut rig = Rig::new(block);
-        let source = rig.track(TrackKind::Midi);
-        let target = rig.track(TrackKind::Midi);
-        rig.insert(
-            target,
-            bl_engine::testing::DC,
-            &[(bl_engine::testing::VALUE, 1.0)],
-        );
-        let utility = rig.insert(target, UTILITY, &[]);
-        let gate = rig.insert(
-            source,
-            modulator::GATE_MOD,
-            &[
-                (POLARITY, 1.0),
-                (modulator::amount(0), 100.0),
-                (SUSTAIN_LEVEL, 60.0),
-            ],
-        );
-        rig.apply(Command::MapModulator {
-            device: gate,
-            slot: 0,
-            target: ModTarget::Device {
-                device: utility,
-                param: UTILITY_GAIN,
-            },
-        });
-        let clip = rig.editor.new_id();
-        let note = Note::new(60, Ticks::ZERO, Ticks::WHOLE, 100);
-        rig.apply(Command::CreateClip {
-            track: source,
-            clip: Clip::new(
-                clip,
-                Ticks::ZERO,
-                Ticks::WHOLE,
-                ClipData::Midi(MidiData {
-                    notes: Vector::from(vec![note]),
-                    start: Ticks::ZERO,
-                    end: None,
-                    looping: false,
-                    loop_start: Ticks::ZERO,
-                    loop_end: None,
-                    signature: None,
-                }),
-            ),
-        });
-        rig.sender.transport(TransportCommand::Play);
-        renders.push(rig.render(24_000, block));
+        renders.push(gate_rig(block).render(24_000, block));
     }
     assert!(
         renders[0] == renders[1] && renders[1] == renders[2],
@@ -468,4 +496,116 @@ fn a_note_driven_modulator_modulates_a_later_track_at_any_block_size() {
         (f64::from(renders[0][100]) - factor).abs() > 1e-3,
         "the note moved the target at its start"
     );
+}
+
+// Spec: modulation R28; racks R15
+#[test]
+fn modulators_render_the_same_with_workers_as_on_the_audio_thread_alone() {
+    for block in [64usize, 512] {
+        let serial = {
+            let mut rig = follower_rig(block, 0.5).0;
+            rig.sender.transport(TransportCommand::Play);
+            (
+                rig.render(4_096, block),
+                gate_rig(block).render(8_192, block),
+            )
+        };
+        for workers in [1, 3] {
+            let mut rig = follower_rig(block, 0.5).0;
+            rig.use_workers(workers);
+            rig.sender.transport(TransportCommand::Play);
+            let follower = rig.render(4_096, block);
+            let mut gate = gate_rig(block);
+            gate.use_workers(workers);
+            let gate = gate.render(8_192, block);
+            assert!(
+                follower == serial.0 && gate == serial.1,
+                "{workers} workers, blocks of {block}, differ from the audio thread alone"
+            );
+        }
+    }
+}
+
+// Spec: modulation R28; racks R15
+#[test]
+fn a_target_in_another_chain_of_the_modulators_rack_is_one_step_late() {
+    let factor = factor();
+    let build = |block: usize, workers: usize| {
+        let mut rig = Rig::new(block);
+        rig.use_workers(workers);
+        let track = rig.track(TrackKind::Midi);
+        rig.insert(
+            track,
+            bl_engine::testing::DC,
+            &[(bl_engine::testing::VALUE, 0.25)],
+        );
+        let chains: [ChainId; 2] = [rig.editor.new_id(), rig.editor.new_id()];
+        let rack = Device::rack(rig.editor.new_id(), RackKind::AudioEffect)
+            .with_chain(Chain::new(chains[0], "Follower"))
+            .with_chain(Chain::new(chains[1], "Target"));
+        rig.apply(Command::InsertDevice {
+            track,
+            index: 1,
+            device: rack,
+        });
+        let mut follower = bl_devices::level_mod::level_mod_type().device(rig.editor.new_id());
+        for (param, value) in [
+            (POLARITY, 1.0),
+            (modulator::amount(0), 100.0),
+            (RISE, 0.0),
+            (FALL, 0.0),
+        ] {
+            follower.params.insert(param, value);
+        }
+        let follower_id = follower.id;
+        rig.apply(Command::InsertChainDevice {
+            chain: chains[0],
+            index: 0,
+            device: follower.with_role(DeviceRole::AudioEffect),
+        });
+        let utility = Device::new(
+            rig.editor.new_id(),
+            "",
+            DeviceKind::Native {
+                device_type: UTILITY.to_owned(),
+            },
+        )
+        .with_role(DeviceRole::AudioEffect);
+        let utility_id = utility.id;
+        rig.apply(Command::InsertChainDevice {
+            chain: chains[1],
+            index: 0,
+            device: utility,
+        });
+        rig.apply(Command::MapModulator {
+            device: follower_id,
+            slot: 0,
+            target: ModTarget::Device {
+                device: utility_id,
+                param: UTILITY_GAIN,
+            },
+        });
+        rig.sender.transport(TransportCommand::Play);
+        rig.render(4_096, block)
+    };
+    let alone = build(64, 0);
+    // The chains may run at once, so the target reads what the follower
+    // wrote 32 frames before: the base plays for the first step, whatever
+    // the threads do.
+    let base = alone[0];
+    assert!(
+        alone[..32].iter().all(|&s| s == base),
+        "the first step plays the base"
+    );
+    assert!(
+        (f64::from(alone[40]) - f64::from(base)).abs() > 1e-3 * factor,
+        "the follower moves the target after the first step"
+    );
+    for (block, workers) in [(1, 0), (512, 0), (64, 1), (64, 3), (512, 3)] {
+        let got = build(block, workers);
+        assert!(
+            got == alone,
+            "{workers} workers, blocks of {block}, differ from the audio thread alone"
+        );
+    }
 }

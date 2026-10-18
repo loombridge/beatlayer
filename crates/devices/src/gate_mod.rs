@@ -308,6 +308,10 @@ impl GateMod {
                 self.start(self.peak);
             }
         }
+        // Echoes end when Loop Mode moves away from Echo.
+        if settings.mode != 3 {
+            self.echo = None;
+        }
         if let Some(peak) = self.echo {
             self.echo_clock += 1.0;
             if self.echo_clock >= settings.echo_frames {
@@ -343,7 +347,6 @@ impl GateMod {
                         self.stage = Stage::Sustain;
                     } else {
                         // No key held, no Sustain, or Loop: on to Release.
-                        self.stage = Stage::Decay;
                         self.begin_release();
                     }
                 }
@@ -384,11 +387,12 @@ impl NativeDevice for GateMod {
         // Spec: device-framework R32. Switched off, it forgets the keys.
         self.held.clear();
         self.begin_release();
+        self.out.off();
     }
 
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
-        if self.out.begin(audio.playing()) && self.held.is_empty() {
+        if self.out.begin(audio) && self.held.is_empty() {
             // Spec: modulation R20. It begins as a render from here does,
             // unless a key is already down.
             self.stage = Stage::Idle;

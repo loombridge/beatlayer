@@ -40,7 +40,7 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1167,7 +1167,72 @@ const ENTRIES: &[Entry] = &[
             Give one of the two. Nothing moves; the audio either side stays where it is. \
             Inserting where a marker is already changes nothing. Markers are named by their \
             place in the map (`data.audio.warp_markers`), the first being 0. The edit is made \
-            to every clip in one undo step, or to none if it's refused for one.",
+            to every clip in one undo step, or to none if it's refused for one. With \
+            `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at \
+            the transients just before and just after the new one, read from the clip's \
+            transients (`clip.transients`) unless `transients` lists them; it works on one \
+            clip.",
+    },
+    Entry {
+        id: "clip.insert_warp_markers",
+        action: Action::Apply("insert_warp_markers"),
+        label: "Insert Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts warp markers in a range of a warped audio clip's contents, `from` to \
+            `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, \
+            when it holds none, at its start and its end. The transients are the clip's own \
+            (`clip.transients`) unless `transients` lists times in the file. Each marker sits \
+            on the beat the map already places its time, so nothing moves; a marker already \
+            there is left. Refused for a clip that isn't warped, or while the file's analysis \
+            is not ready and `transients` is left out. One undo step.",
+    },
+    Entry {
+        id: "clip.insert_transient",
+        action: Action::Apply("insert_transient"),
+        label: "Insert Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts a transient into an audio clip at `time`, seconds in its file: Insert \
+            Transient, at the Sample Editor's insert marker when the app runs it. Putting one \
+            where a detected transient was taken away brings that one back. The edit belongs to \
+            the clip, is saved with the set, and shows in `clip.transients`. One undo step.",
+    },
+    Entry {
+        id: "clip.delete_transients",
+        action: Action::Apply("delete_transients"),
+        label: "Delete Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes transients out of an audio clip: `times` are their times in the \
+            file, in seconds, as `clip.transients` lists them. A transient put in by hand is \
+            forgotten; a detected one is noted as taken away and stays away until \
+            `clip.reset_transients`. Refused for a time that is none of the clip's transients, \
+            once the file's analysis is ready. One undo step.",
+    },
+    Entry {
+        id: "clip.reset_transients",
+        action: Action::Apply("reset_transients"),
+        label: "Reset Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes away all of an audio clip's transient edits: the transients put in \
+            by hand go, and the detected ones that were taken away come back. One undo step.",
+    },
+    Entry {
+        id: "clip.move_transient",
+        action: Action::Apply("move_transient"),
+        label: "Move Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the transient at `from` (seconds in the file, as `clip.transients` \
+            lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no \
+            audio and no warp marker. One undo step.",
     },
     Entry {
         id: "clip.move_warp_markers",
@@ -1315,8 +1380,13 @@ const ENTRIES: &[Entry] = &[
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
             or a parameter of a device in its chain), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
-            own units. A parameter with no clip envelope gets one, linked to the clip, with \
-            this breakpoint as its first.",
+            own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
+            the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
+            31 or 33 to 119, value 0 to 127), `{\"type\": \"midi.pitch_bend\"}` (-8192 to 8191, \
+            0 at rest) or `{\"type\": \"midi.channel_pressure\"}` (0 to 127); the value is \
+            the message the clip sends to its track's devices while it plays, on any channel. \
+            A parameter with no clip envelope gets one, linked to the clip, with this \
+            breakpoint as its first.",
     },
     Entry {
         id: "clip.set_envelope_curve",
@@ -1845,6 +1915,33 @@ const ENTRIES: &[Entry] = &[
         description: "Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.",
     },
     Entry {
+        id: "device.add_sample_edit",
+        action: Action::Apply("add_sample_edit"),
+        label: "Edit Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds one edit to the end of a sample's edit list without looking at the audio: `edit.kind` is `trim`, `cut`, `reverse`, `fade_in`, `fade_out` or `normalize`, and `edit.range` (`from` to `to`, in frames of the sample as the earlier edits left it) is its selection, left out for the whole sample (Trim and Cut need one). With a `layer` the edit joins that layer's list and its length and markers follow the audio; with none it joins the sample of the device itself, which this command doesn't check against the sample's length. The source file is never written. One undo step named for the edit. `device.edit_sample` checks the selection against the sample.",
+    },
+    Entry {
+        id: "device.clear_sample_edits",
+        action: Action::Apply("clear_sample_edits"),
+        label: "Revert Edits",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties a sample's edit list, a layer's (`layer`) or the device's own (none given). A layer's sample is `length` frames long again, the unedited sample's length at its own rate, and its markers keep their share of it. One undo step. `device.edit_sample` with `revert` reads the length itself.",
+    },
+    Entry {
+        id: "device.set_processed_layer_sample",
+        action: Action::Apply("set_processed_layer_sample"),
+        label: "Replace With Processed Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a layer's sample with a processed copy of its edited sample that is already in the media store (`media`, `length` frames at its own rate): the copy holds the edits, so the layer's list empties. `crop` is the span of the edited sample the copy keeps, which moves the markers as a Trim does; with none the markers stay where they are. One undo step, named Crop with a `crop` and Reverse without. `device.crop_sample` and `device.reverse_sample` write the copy.",
+    },
+    Entry {
         id: "device.distribute_layers",
         action: Action::Apply("distribute_layers"),
         label: "Distribute Ranges",
@@ -1984,8 +2081,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("rename_chain"),
         label: "Rename Chain",
         permission: Permission::Edit,
-        contexts: &[DeviceView],
-        keys: &[],
+        contexts: &[RackChains],
+        keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
     },
     Entry {

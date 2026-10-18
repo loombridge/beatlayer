@@ -357,6 +357,12 @@ impl ParamBank {
     /// Where parameter `id` is in the bank: its place in the description.
     #[must_use]
     pub fn index(&self, id: ParamId) -> Option<usize> {
+        // Most devices list their parameters in the order of their IDs, so
+        // the place named by the ID is usually the one.
+        let guess = id.0 as usize;
+        if self.slots.get(guess).is_some_and(|s| s.descriptor.id == id) {
+            return Some(guess);
+        }
         self.slots.iter().position(|s| s.descriptor.id == id)
     }
 

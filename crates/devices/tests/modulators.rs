@@ -72,10 +72,15 @@ fn modulators_pass_their_audio_and_notes_untouched() {
             "{kind} left the audio as it was"
         );
         // The modulators of the notes and MIDI send every note on; the
-        // others, which sit in an audio chain, have none to send.
+        // others, which sit in an audio chain, send none or the same.
         let sent = notes_through(node.as_mut(), &notes, 512);
         if device_type.role == bl_model::DeviceRole::MidiEffect {
             assert_eq!(sent, notes.to_vec(), "{kind} left the notes as they were");
+        } else {
+            assert!(
+                sent.is_empty() || sent == notes.to_vec(),
+                "{kind} changed the notes"
+            );
         }
     }
 }

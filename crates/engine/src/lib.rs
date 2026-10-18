@@ -86,6 +86,7 @@ mod automation;
 pub mod capture;
 pub mod clips;
 mod compiler;
+mod disjoint;
 pub mod display;
 mod engine;
 mod gc;
@@ -95,6 +96,7 @@ mod message;
 mod metronome;
 mod midi;
 pub mod midi_clips;
+pub mod midi_controllers;
 pub mod mixer;
 pub mod modbus;
 mod node;
@@ -106,6 +108,7 @@ mod program;
 pub mod recording;
 mod registry;
 pub mod routing;
+mod sched;
 pub mod session;
 pub mod sidechain;
 mod sources;
@@ -123,7 +126,8 @@ pub use automation::{
 };
 pub use capture::{CAPTURE_RING, CapturedMidi};
 pub use clips::{
-    ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
+    Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
+    SourceCues, media_edits,
 };
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
@@ -150,6 +154,7 @@ pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
+pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
     StoppedClip,

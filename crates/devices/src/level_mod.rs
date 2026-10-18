@@ -46,7 +46,7 @@ pub const DELAY_BEATS: ParamId = ParamId(5);
 /// The longest delay, in seconds.
 const MAX_DELAY_SECONDS: f64 = 5.0;
 /// The floor of the meters, in dB.
-const FLOOR_DB: f32 = -90.0;
+const FLOOR_DB: f32 = -60.0;
 /// The values the node publishes: Direct and S.C. in dB, and the level.
 const DISPLAY_VALUES: usize = 3;
 
@@ -175,10 +175,14 @@ impl NativeDevice for LevelMod {
         self.out.lag(modulation);
     }
 
+    fn release(&mut self, _: &mut bl_engine::NoteBuffer) {
+        self.out.off();
+    }
+
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels();
-        if self.out.begin(audio.playing()) {
+        if self.out.begin(audio) {
             // Spec: modulation R20. It begins as a render from here does.
             self.level = 0.0;
             self.delay.clear();

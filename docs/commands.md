@@ -252,7 +252,7 @@ Each command has:
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
 | [`device.sort_layers`](#devicesort_layers) | Sort Samples | `edit` |  |  |
-| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Simpler | `edit` |  |  |
 | [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.update_layers`](#deviceupdate_layers) | Change Sample Settings | `edit` |  |  |
@@ -3290,7 +3290,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Audition Sample**. Permission: `read`. Contexts: `device-view`.
 
-Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Snapshot, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
+Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Simpler, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
 
 Default keys: none.
 
@@ -3363,7 +3363,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Convert Sampler**. Permission: `edit`. Contexts: `device-view`.
 
-Converts Snapshot to a multisampler (`to: multisampler`) or a multisampler to Snapshot (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Snapshot becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Snapshot in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
+Converts Simpler to a multisampler (`to: multisampler`) or a multisampler to Simpler (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Simpler becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Simpler in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
 
 Default keys: none.
 
@@ -3400,7 +3400,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Crop Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the sample outside Snapshot's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
+Removes the sample outside Simpler's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
 
 Default keys: none.
 
@@ -3526,7 +3526,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Snapshot's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Snapshot and as `edits` in each layer of `layers` for the multisampler.
+Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Simpler's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Simpler and as `edits` in each layer of `layers` for the multisampler.
 
 Default keys: none.
 
@@ -3536,7 +3536,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
 | `kind` | [`SampleEditKind`](#sampleeditkind) or null | no | What the edit does. Leave it out with `revert`. |
-| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Snapshot has one sample and no layers. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Simpler has one sample and no layers. |
 | `range` | [`SampleRange`](#samplerange) or null | no | The selection it acts on, in frames of the sample as the earlier edits left it, at its own rate. Left out it acts on the whole sample; Trim and Cut need one. |
 | `revert` | boolean | no | Clears the sample's edit list instead of adding to it. |
 
@@ -4470,9 +4470,9 @@ Result: [`ChangeSet`](#changeset).
 
 #### `device.swap_to_snapshot`
 
-**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
+**Swap to Simpler**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
+Replaces a Drum Sampler with Simpler in One-Shot mode, as Drum Sampler's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Simpler's default. One undo step, named Swap to Simpler, and the new device is selected. A device that isn't a Drum Sampler is refused.
 
 Default keys: none.
 
@@ -11561,8 +11561,8 @@ What `device.convert` makes.
 
 One of:
 
-- `"snapshot"`: Snapshot, from a multisampler.
-- `"multisampler"`: A multisampler, from Snapshot.
+- `"snapshot"`: Simpler, from a multisampler.
+- `"multisampler"`: A multisampler, from Simpler.
 
 <details><summary>JSON Schema</summary>
 
@@ -11572,12 +11572,12 @@ One of:
   "oneOf": [
     {
       "const": "snapshot",
-      "description": "Snapshot, from a multisampler.",
+      "description": "Simpler, from a multisampler.",
       "type": "string"
     },
     {
       "const": "multisampler",
-      "description": "A multisampler, from Snapshot.",
+      "description": "A multisampler, from Simpler.",
       "type": "string"
     }
   ]
@@ -12097,7 +12097,7 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
-| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
@@ -12251,7 +12251,7 @@ One device as the Device View shows it.
     },
     "swaps_to_snapshot": {
       "default": false,
-      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
       "type": "boolean"
     },
     "takes_sample": {
@@ -20214,7 +20214,7 @@ What `device.edit_sample` returns.
 | `device` | [`DeviceId`](#deviceid) | yes | The sampler device. |
 | `edits` | array of [`SampleEdit`](#sampleedit) | yes | The sample's edit list now. |
 | `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Snapshot's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Simpler's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20242,7 +20242,7 @@ What `device.edit_sample` returns.
           "type": "null"
         }
       ],
-      "description": "The layer edited; none for Snapshot's sample."
+      "description": "The layer edited; none for Simpler's sample."
     },
     "length": {
       "description": "The edited sample's length in frames at its own rate.",
@@ -20272,7 +20272,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
 | `media` | [`ContentHash`](#contenthash) | yes | The processed copy, now the sample's media. |
 | `path` | string | yes | Where the copy is in the project folder. |
 | `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Snapshot's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Simpler's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20293,7 +20293,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
           "type": "null"
         }
       ],
-      "description": "The layer; none for Snapshot's sample."
+      "description": "The layer; none for Simpler's sample."
     },
     "length": {
       "description": "Its length in frames at its own rate.",

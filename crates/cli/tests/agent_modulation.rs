@@ -236,6 +236,9 @@ fn an_agent_maps_each_signal_modulator_and_reads_them_back() {
     let refused = client
         .call("run", json!({ "commands": [ map("Play", 5, 5) ] }))
         .expect("the call reaches the server");
-    assert!(refused.ok().is_err(), "a sixth slot on the Expression Control");
+    assert!(
+        refused.ok().is_err(),
+        "a sixth slot on the Expression Control"
+    );
     assert!(client.into_transport().finish().unwrap().success());
 }

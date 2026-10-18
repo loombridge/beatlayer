@@ -139,6 +139,7 @@ impl DeviceView {
                 };
                 PadState {
                     note,
+                    slot: note - first,
                     name: bl_model::note_name(note),
                     hover: hover_text(note),
                     kind,
@@ -611,7 +612,17 @@ impl DeviceView {
                 .take_while(|(at, _)| *at <= 127)
                 .map(|(at, s)| (at as u8, s))
                 .collect();
-            editor.transact("Insert Chain", |editor| {
+            // A sample that only replaces another's is a Load Sample; one
+            // that makes a chain is an Insert Chain.
+            let label = if plan
+                .iter()
+                .all(|&(at, _)| !pad_chains(&rack, at).is_empty())
+            {
+                "Load Sample"
+            } else {
+                "Insert Chain"
+            };
+            editor.transact(label, |editor| {
                 for &(at, sample) in &plan {
                     self.drop_sample(editor, &rack, at, sample, default.as_ref(), &mut chains)?;
                     notes.push(at);

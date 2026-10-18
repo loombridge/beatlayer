@@ -129,6 +129,9 @@ pub enum PadKind {
 pub struct PadState {
     /// Its MIDI note.
     pub note: u8,
+    /// Its place among the sixteen pads shown, from 0 for the lowest: what
+    /// keeps the keyboard's place while the view moves.
+    pub slot: u8,
     /// The note's name in Live's numbering (`C1`).
     pub name: String,
     /// What hovering it shows in the Status Bar: the note and its General

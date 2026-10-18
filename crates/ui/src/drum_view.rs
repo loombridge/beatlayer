@@ -142,17 +142,18 @@ pub fn pad_layout(frame: &PadFrame, area: Rect) -> PadLayout {
     }
 }
 
-/// The ID of a pad.
+/// The ID of a pad, by its place among the sixteen shown (`slot`, 0 for the
+/// lowest), so the keyboard keeps its place while the view moves.
 #[must_use]
-pub fn pad_id(rack: DeviceId, note: u8) -> Id {
-    Id::new(("pad", rack, note))
+pub fn pad_id(rack: DeviceId, slot: u8) -> Id {
+    Id::new(("pad", rack, slot))
 }
 
 /// The ID of one of a pad's buttons: `mute`, `solo`, `preview`, `hot_swap`
 /// or `sample`.
 #[must_use]
-pub fn pad_control_id(rack: DeviceId, note: u8, control: &str) -> Id {
-    Id::new(("pad-control", rack, note, control))
+pub fn pad_control_id(rack: DeviceId, slot: u8, control: &str) -> Id {
+    Id::new(("pad-control", rack, slot, control))
 }
 
 /// The ID of a pad view's overview.
@@ -258,7 +259,7 @@ impl DeviceViewUi {
     ) {
         let focused = ui.memory(|m| m.focused());
         let in_view = focused.is_some_and(|id| {
-            id == overview_id(frame.id) || pads.pads.iter().any(|p| pad_id(frame.id, p.note) == id)
+            id == overview_id(frame.id) || pads.pads.iter().any(|p| pad_id(frame.id, p.slot) == id)
         });
         if !in_view || shell.focused_area() != Area::Detail || egui::Popup::is_any_open(ui.ctx()) {
             return;
@@ -297,6 +298,9 @@ impl DeviceViewUi {
         let id = overview_id(frame.id);
         let response = ui.interact(layout.overview, id, Sense::click_and_drag());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
         let painter = ui.painter_at(layout.overview.expand(1.0));
         painter.rect_filled(layout.overview, theme.sizes.corner, c.control.0);
         for (g, cell) in layout.groups.iter().enumerate() {
@@ -375,9 +379,12 @@ impl DeviceViewUi {
         events: &mut Vec<UiEvent>,
     ) {
         let c = &theme.colors;
-        let id = pad_id(frame.id, pad.note);
+        let id = pad_id(frame.id, pad.slot);
         let response = ui.interact(rects.pad, id, Sense::click_and_drag());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
         if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
             invoke(
                 events,
@@ -597,7 +604,7 @@ impl DeviceViewUi {
         state: PadSwitch,
         events: &mut Vec<UiEvent>,
     ) {
-        let id = pad_control_id(frame.id, pad.note, which);
+        let id = pad_control_id(frame.id, pad.slot, which);
         let response = ui.interact(at, id, Sense::click());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
@@ -649,7 +656,7 @@ impl DeviceViewUi {
         at: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let id = pad_control_id(frame.id, pad.note, "preview");
+        let id = pad_control_id(frame.id, pad.slot, "preview");
         let response = ui.interact(at, id, Sense::click_and_drag());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         self.held_button(ui, &response, id, pad.previewing, |on| {
@@ -721,7 +728,7 @@ impl DeviceViewUi {
         events: &mut Vec<UiEvent>,
     ) {
         let on = pads.hot_swap == Some(pad.note);
-        let id = pad_control_id(frame.id, pad.note, "hot_swap");
+        let id = pad_control_id(frame.id, pad.slot, "hot_swap");
         let response = ui.interact(rects.hot_swap, id, Sense::click());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
@@ -746,7 +753,7 @@ impl DeviceViewUi {
         if !pad.has_sample || !(pad_response.hovered() || ui.rect_contains_pointer(rects.sample)) {
             return;
         }
-        let id = pad_control_id(frame.id, pad.note, "sample");
+        let id = pad_control_id(frame.id, pad.slot, "sample");
         let sample = ui.interact(rects.sample, id, Sense::click());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         if sample.clicked() || (sample.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {

@@ -10,7 +10,7 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
@@ -72,6 +72,12 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// The device's MIDI sidechain input, if its type declares one (the
+    /// routing spec, R32): a MIDI track whose notes and channel messages
+    /// the device hears beside its audio. Left out of the saved set for a
+    /// device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_sidechain: Option<MidiSidechain>,
     /// Whether the device floats in a window of its own rather than
     /// showing in the Device View (IMP-14, WP-2.5b), where its place in the
     /// chain shows as a strip. Only native devices float. Left out of the
@@ -251,6 +257,21 @@ impl Default for Sidechain {
     }
 }
 
+/// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
+/// whose notes and channel messages the device hears, played before that
+/// track's own devices. A new device has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
+                   channel messages the device hears, or absent for No Input."
+)]
+pub struct MidiSidechain {
+    /// The MIDI track it listens to, or `None` (No Input), as on a new
+    /// device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<TrackId>,
+}
+
 /// Reads a device's media: a list of slots, or the one hash (or `null`) a
 /// set saved before sample slots held, which is slot 0.
 fn media_slots<'de, D: serde::Deserializer<'de>>(
@@ -324,6 +345,7 @@ impl Device {
             b_active: false,
             other_params: None,
             sidechain: None,
+            midi_sidechain: None,
             floating: false,
             plugin: None,
             media: Vec::new(),
@@ -424,6 +446,13 @@ impl Device {
     #[must_use]
     pub fn with_sidechain(mut self) -> Self {
         self.sidechain = Some(Sidechain::default());
+        self
+    }
+
+    /// The same device with a MIDI sidechain input, as a new device has.
+    #[must_use]
+    pub fn with_midi_sidechain(mut self) -> Self {
+        self.midi_sidechain = Some(MidiSidechain::default());
         self
     }
 

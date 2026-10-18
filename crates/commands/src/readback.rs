@@ -283,6 +283,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.set_processed_layer_sample", query(Device, "layers")),
     ("device.set_sample", query(Device, "media")),
     ("device.set_show_preset_name", query(Device, "show_preset_name")),
+    ("device.set_midi_sidechain_source", query(Device, "midi_sidechain.source")),
     ("device.set_sidechain_enabled", query(Device, "sidechain.enabled")),
     ("device.set_sidechain_gain", query(Device, "sidechain.gain")),
     ("device.set_sidechain_input", query(Device, "sidechain.input")),

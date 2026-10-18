@@ -5062,6 +5062,21 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok());
         }
+        if id == bl_shell_spec::warping::QUANTIZE_AUDIO {
+            if self.is_sample_key(id, args) {
+                return self.complete_sample_command(id, args.clone()).is_ok();
+            }
+            let named: Option<bl_model::ClipId> = args
+                .get("clip")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            if let Some(clip) = named {
+                let doc = self.editor.document();
+                return match doc.clip(clip).map(|c| &c.data) {
+                    Some(ClipData::Audio(audio)) => audio.warp,
+                    _ => false,
+                };
+            }
+        }
         if self.is_sample_key(id, args) {
             return self.complete_sample_command(id, args.clone()).is_ok();
         }

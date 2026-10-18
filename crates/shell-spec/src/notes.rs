@@ -19,7 +19,7 @@
 //! check them and list them in the command reference; `bl-shell` runs them
 //! by ID. The behaviour they follow is in the piano roll spec.
 
-use bl_commands::Context::{ClipView, NoteEditor, NoteSelection};
+use bl_commands::Context::{ClipView, NoteEditor, NoteSelection, SampleEditor};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId};
@@ -520,17 +520,18 @@ fn specs() -> Vec<CommandSpec> {
             .result::<NoteEditResult>(),
         CommandSpec::new(QUANTIZE_SETTINGS, "Quantize Settings")
             .description(
-                "Reads or changes the Clip View's Quantize settings, the values `note.quantize \
-                 and Cmd-U use when their arguments leave them out: `grid`, the spacing \
-                 between the quantise grid's lines in ticks (positive; left unset, it follows \
-                 the note editor's editing grid), `target`, whether quantise moves note \
-                 starts or note ends, and `amount`, how far each note moves toward its grid \
-                 line as a percentage from 0 to 100. Fields left out keep their values, and \
+                "Reads or changes the Clip View's Quantize settings, the values `note.quantize`, \
+                 `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, \
+                 the spacing between the quantise grid's lines in ticks (positive; left unset, \
+                 it follows the note or sample editor's editing grid), `target`, whether quantise \
+                 moves note starts or note ends, and `amount`, how far each note moves toward its \
+                 grid line as a percentage from 0 to 100. Fields left out keep their values, and \
                  the result reports all of them. The settings belong to the view, like Draw \
                  Mode: changing them changes nothing in the set and is no undo step.",
             )
             .permission(Permission::Read)
-            .contexts([ClipView, NoteEditor, NoteSelection])
+            .contexts([ClipView, NoteEditor, NoteSelection, SampleEditor])
+            .binding("S-SAMPLE-002")
             .args::<QuantizeSettingsArgs>()
             .result::<QuantizeSettings>(),
         edit(
@@ -599,5 +600,13 @@ mod tests {
             .map(|binding| binding.shortcut.as_ref())
             .collect();
         assert_eq!(bindings, ["S-NOTE-011"]);
+        let settings_bindings: Vec<&str> = registry
+            .get(QUANTIZE_SETTINGS)
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|binding| binding.shortcut.as_ref())
+            .collect();
+        assert_eq!(settings_bindings, ["S-SAMPLE-002"]);
     }
 }

@@ -4,7 +4,7 @@
 //! and its siblings. Also a file's saved default clip settings (WP-4.9, R42):
 //! `clip.save_default` and `clip.defaults`.
 
-use bl_commands::Context::ClipView;
+use bl_commands::Context::{ClipView, SampleEditor};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{ClipDefaults, ClipId};
@@ -20,10 +20,13 @@ pub const SAVE_DEFAULT: &str = "clip.save_default";
 /// `clip.defaults`: read back the defaults saved for an audio clip's file.
 pub const DEFAULTS: &str = "clip.defaults";
 
-/// Every command [`register`] adds.
-pub const IDS: &[&str] = &[TRANSIENTS, SAVE_DEFAULT, DEFAULTS];
+/// `clip.quantize_audio`: quantise a warped audio clip's transients to the grid.
+pub const QUANTIZE_AUDIO: &str = "clip.quantize_audio";
 
-/// Whether `id` is one of the warping query commands.
+/// Every command [`register`] adds.
+pub const IDS: &[&str] = &[TRANSIENTS, SAVE_DEFAULT, DEFAULTS, QUANTIZE_AUDIO];
+
+/// Whether `id` is one of the warping commands.
 #[must_use]
 pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
@@ -88,7 +91,31 @@ pub struct ClipTransients {
     pub transients: Vec<ClipTransient>,
 }
 
-/// Adds `clip.transients` to a registry.
+/// Arguments of `clip.quantize_audio`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuantizeAudioArgs {
+    /// The audio clip. Left out, the one the Clip View shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The start of the time selection, in ticks from the clip's 1.1.1. Left out, the clip's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Ticks>,
+    /// The end of the time selection, in ticks from the clip's 1.1.1. Left out, the clip's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Ticks>,
+    /// The grid line spacing in ticks, over the Quantize settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Ticks>,
+    /// How far each warp marker moves toward its grid line, from 0 to 100 percent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u8>,
+    /// The transient times in the file in seconds to use over the clip's analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transients: Option<Vec<f64>>,
+}
+
+/// Adds `clip.transients` and `clip.quantize_audio` to a registry.
 ///
 /// # Errors
 ///
@@ -142,5 +169,59 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(ClipView)
             .args::<ClipDefaultsArgs>()
             .result::<SavedDefaults>(),
+    )?;
+    registry.register(
+        CommandSpec::new(QUANTIZE_AUDIO, "Quantize")
+            .description(
+                "Quantises a warped audio clip: for each line of the quantise grid inside the \
+                 time selection (`from` to `to` in ticks from 1.1.1, or the whole clip with none), \
+                 the clip's transient nearest that line, if one lies within half a grid step of it, \
+                 gets a warp marker at its time in the file (made if there is none) and moves `amount` \
+                 percent of the way to the line, keeping its time in the file. Transients nearest no \
+                 line get no marker. `grid` is the spacing between grid lines in ticks; left out, it \
+                 uses the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow \
+                 the editing grid until a grid is set. `amount` is from 0 to 100 percent (left out, \
+                 the settings' amount). 100 percent lands each on its line; 0 changes nothing and is \
+                 no undo step; otherwise it is one undo step. Refuses an unwarped clip.",
+            )
+            .permission(Permission::Edit)
+            .contexts([ClipView, SampleEditor])
+            .binding("S-SAMPLE-001")
+            .args::<QuantizeAudioArgs>()
+            .result::<()>(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_id_is_registered_and_complete() {
+        let mut registry = Registry::new();
+        register(&mut registry).unwrap();
+        assert_eq!(registry.len(), IDS.len());
+        for id in IDS {
+            assert!(registry.contains(id), "{id}");
+        }
+        let problems: Vec<String> = registry
+            .problems()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(problems.is_empty(), "{problems:#?}");
+        let class = |id: &str| registry.get(id).unwrap().permission;
+        assert_eq!(class(TRANSIENTS), Some(Permission::Read));
+        assert_eq!(class(DEFAULTS), Some(Permission::Read));
+        assert_eq!(class(SAVE_DEFAULT), Some(Permission::External));
+        assert_eq!(class(QUANTIZE_AUDIO), Some(Permission::Edit));
+        let bindings: Vec<&str> = registry
+            .get(QUANTIZE_AUDIO)
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|binding| binding.shortcut.as_ref())
+            .collect();
+        assert_eq!(bindings, ["S-SAMPLE-001"]);
+    }
 }

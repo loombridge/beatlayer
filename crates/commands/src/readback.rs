@@ -193,6 +193,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.move_to_slot", query(Track, "slots")),
     ("clip.move_transient", read("clip.transients", "transients")),
     ("clip.move_warp_markers", query(Clip, "data.audio.warp_markers")),
+    ("clip.quantize_audio", query(Clip, "data.audio.warp_markers")),
     ("clip.rename", query(Clip, "name")),
     ("clip.reset_transients", read("clip.transients", "transients")),
     ("clip.save_default", read("clip.defaults", "defaults")),

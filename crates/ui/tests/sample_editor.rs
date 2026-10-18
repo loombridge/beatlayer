@@ -886,7 +886,6 @@ fn the_context_menu_runs_the_warp_commands_and_disables_refused_ones() {
         "Warp From Here (Straight)",
         "Warp … BPM From Here",
         "Warp as x-Bar Loop",
-        "Quantize",
         "Crop Clip Sample",
     ] {
         assert!(item(pending).disabled, "{pending}");
@@ -903,6 +902,7 @@ fn the_context_menu_runs_the_warp_commands_and_disables_refused_ones() {
     assert!(item("Delete Warp Marker").disabled);
     assert!(!item("Insert Transient").disabled);
     assert!(!item("Reset Transients").disabled);
+    assert!(!item("Quantize").disabled);
     assert!(!item("Show in Browser").disabled);
     s.h.click(centre_of(&nodes, "Insert Warp Marker"));
     assert_eq!(s.markers(), [(0.0, 0), (2.0, 4 * Ticks::QUARTER.get())]);
@@ -1003,9 +1003,13 @@ fn the_create_menu_holds_the_marker_items_while_the_sample_editor_has_focus() {
     let invocation = delete.invocation.unwrap();
     s.h.shell.invoke(&invocation.id, invocation.args).unwrap();
     assert_eq!(transients(&mut s).len(), before);
-    // Edit ▸ Quantize waits for audio quantise.
+    // Edit ▸ Quantize runs audio quantise when the sample editor has focus.
     let quantize = state(&s, edit, "Quantize");
-    assert!(!quantize.enabled);
+    assert!(quantize.enabled);
+    assert_eq!(
+        quantize.invocation.as_ref().map(|i| i.id.as_str()),
+        Some("clip.quantize_audio")
+    );
 }
 
 #[test]
@@ -1294,5 +1298,34 @@ fn the_envelopes_tab_shows_an_audio_clips_envelopes() {
         Harness::nodes(&output)
             .iter()
             .any(|n| n.label.starts_with("Waveform of"))
+    );
+}
+
+// Spec: sample-editor R13, warping R49. Cmd+U (S-SAMPLE-001) quantises the
+// Sample Editor's selection.
+#[test]
+fn cmd_u_quantises_the_sample_editors_selection() {
+    let mut s = sample("cmd_u", true);
+    s.run("arrangement.set_grid", json!({ "fixed": "quarter" }));
+    let g = s.geometry();
+    // Focus the Sample Editor by clicking in it.
+    s.click_with(at_beat(&g, 2, 0.8), Modifiers::NONE);
+    // Select time covering the first click at 0.5s.
+    s.run("clip_view.select_time", json!({ "start": 0.0, "end": 1.0 }));
+    let before_markers = s.markers();
+    let before_steps = s.steps();
+    s.h.key(Key::U, command());
+    s.h.settle();
+    let after_markers = s.markers();
+    assert_ne!(before_markers, after_markers, "Cmd+U quantises the audio");
+    assert_eq!(s.steps(), before_steps + 1, "quantising is one undo step");
+    assert_eq!(
+        after_markers.len(),
+        2,
+        "only the selected transient was quantised"
+    );
+    assert!(
+        (after_markers[1].0 - 0.5).abs() < 0.01,
+        "transient at 0.5s got a marker"
     );
 }

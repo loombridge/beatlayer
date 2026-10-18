@@ -9,10 +9,10 @@ use std::sync::Arc;
 use bl_analysis::cache::{Analysis, AnalysisCache, AnalysisOptions, AnalysisStatus};
 use bl_core::time::Ticks;
 use bl_media::{ContentHash, MediaError};
-use bl_model::{AudioData, ClipData, ClipId, Command, FileBeats, TRANSIENT_MATCH};
+use bl_model::{AudioData, ClipData, ClipId, Command, FileBeats, TRANSIENT_MATCH, WarpMarker};
 use bl_shell_spec::warping::{
     self as spec, ClipDefaultsArgs, ClipTransient, ClipTransients, ClipTransientsArgs,
-    SavedDefaults,
+    QuantizeAudioArgs, SavedDefaults,
 };
 use serde_json::{Value, json};
 
@@ -163,8 +163,11 @@ impl Shell {
         }))
     }
 
-    /// Runs `clip.transients` (R24), `clip.save_default` or `clip.defaults`.
+    /// Runs `clip.transients` (R24), `clip.quantize_audio` (R49), `clip.save_default` or `clip.defaults`.
     pub(super) fn run_warping(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id == spec::QUANTIZE_AUDIO {
+            return self.run_quantize_audio(id, args);
+        }
         if id != spec::TRANSIENTS {
             return self.run_defaults(id, args);
         }
@@ -192,6 +195,222 @@ impl Shell {
             analysis_error: shown.error,
             transients,
         }))
+    }
+
+    /// Runs `clip.quantize_audio` (WP-4.12, R49).
+    pub(super) fn run_quantize_audio(
+        &mut self,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let QuantizeAudioArgs {
+            clip,
+            from,
+            to,
+            grid,
+            amount,
+            transients,
+        } = Self::args(id, args)?;
+        let (clip, audio, clip_start, clip_length) = {
+            let doc = self.editor.document();
+            let clip = match clip {
+                Some(clip) => clip,
+                None => self
+                    .clip_view
+                    .shown_audio_clip(doc, &self.arrangement)
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "no audio clip is shown in the Clip View".to_owned(),
+                    })?,
+            };
+            let Some(clip_entry) = doc.clip(clip) else {
+                return Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("clip {clip} does not exist"),
+                });
+            };
+            let ClipData::Audio(ref audio) = clip_entry.data else {
+                return Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("clip {clip} is not an audio clip"),
+                });
+            };
+            if !audio.warp {
+                return Err(ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "the clip isn't warped: switch Warp on first".to_owned(),
+                });
+            }
+            (clip, audio.clone(), clip_entry.start, clip_entry.length)
+        };
+        let settings = self.clip_view.quantize();
+        let grid = grid
+            .or(settings.grid)
+            .unwrap_or_else(|| self.arrangement.grid_ticks(self.editor.document()));
+        if grid <= Ticks::ZERO {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: "`grid` must be positive".to_owned(),
+            });
+        }
+        let amount = amount.unwrap_or(settings.amount);
+        if amount > 100 {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: "`amount` must be from 0 to 100 percent".to_owned(),
+            });
+        }
+        if amount == 0 {
+            // Spec: warping R49. 0 percent changes nothing and is no undo step.
+            return Ok(Value::Null);
+        }
+        let transients = match transients {
+            Some(ts) => ts,
+            None => self.ready_transients(id, clip)?,
+        };
+        let map = audio.warp_map().map_err(|err| ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message: err.to_string(),
+        })?;
+        let from_beat = from.unwrap_or_else(|| Ticks(audio.start.round() as i64));
+        let to_beat = to.unwrap_or_else(|| {
+            if let Some(end) = audio.end {
+                Ticks(end.round() as i64)
+            } else if let Some(file_sec) = self.file_seconds(&audio) {
+                Ticks(map.time_to_beat(file_sec).round() as i64)
+            } else {
+                from_beat.saturating_add(clip_length)
+            }
+        });
+        let (from_beat, to_beat) = if from_beat <= to_beat {
+            (from_beat, to_beat)
+        } else {
+            (to_beat, from_beat)
+        };
+
+        let doc = self.editor.document();
+        let signatures = &doc.settings().time_signatures;
+        let step = crate::clip_view::quantize_step(grid, signatures.signature_at(clip_start));
+        let mut grid_lines = Vec::new();
+        crate::arrangement::grid::lines(
+            signatures,
+            step,
+            from_beat,
+            to_beat,
+            usize::MAX,
+            |line, _| {
+                grid_lines.push(line);
+            },
+        );
+
+        // For each grid line, find the nearest transient within half a grid step.
+        let half_step = step.ticks.get() as f64 / 2.0;
+        let mut line_matches: Vec<(Ticks, f64, f64)> = Vec::new(); // (line, transient_time, dist)
+        for &line in &grid_lines {
+            let line_f64 = line.get() as f64;
+            let mut nearest: Option<(f64, f64)> = None;
+            for &t in &transients {
+                let beat_f64 = map.time_to_beat(t);
+                let dist = (beat_f64 - line_f64).abs();
+                if dist <= half_step + 1e-6 {
+                    match nearest {
+                        Some((_, best_dist)) if dist < best_dist - 1e-9 => {
+                            nearest = Some((t, dist));
+                        }
+                        None => {
+                            nearest = Some((t, dist));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some((t, dist)) = nearest {
+                line_matches.push((line, t, dist));
+            }
+        }
+
+        // Each transient matches at most one line.
+        let mut chosen_matches: Vec<(Ticks, f64)> = Vec::new(); // (line, transient_time)
+        for (line, t, dist) in line_matches {
+            if let Some(pos) = chosen_matches
+                .iter()
+                .position(|(_, existing_t)| (existing_t - t).abs() <= TRANSIENT_MATCH)
+            {
+                let (prev_line, _) = chosen_matches[pos];
+                let prev_dist = (map.time_to_beat(t) - prev_line.get() as f64).abs();
+                if dist < prev_dist - 1e-9 {
+                    chosen_matches[pos] = (line, t);
+                }
+            } else {
+                chosen_matches.push((line, t));
+            }
+        }
+
+        let mut new_markers: Vec<WarpMarker> = audio.warp_markers.clone();
+        for (line, t) in chosen_matches {
+            let mut next = new_markers.clone();
+            if let Some(m) = next
+                .iter_mut()
+                .find(|m| (m.time - t).abs() <= TRANSIENT_MATCH)
+            {
+                m.beat = crate::clip_view::toward(m.beat, line, amount);
+            } else {
+                let beat = Ticks(map.time_to_beat(t).round() as i64);
+                next.push(WarpMarker {
+                    time: t,
+                    beat: crate::clip_view::toward(beat, line, amount),
+                });
+                next.sort_by(|a, b| a.time.total_cmp(&b.time));
+            }
+            // A marker that would reach or pass a neighbour, such as a late
+            // first hit landing on the marker at 1.1.1, keeps its place, and
+            // a transient that had no marker keeps none; the rest still
+            // quantise.
+            if next
+                .windows(2)
+                .all(|pair| pair[0].time < pair[1].time && pair[0].beat < pair[1].beat)
+            {
+                new_markers = next;
+            }
+        }
+
+        if new_markers == audio.warp_markers {
+            return Ok(Value::Null);
+        }
+
+        let tempo = audio.tempo.unwrap_or(120.0);
+        let updated_audio =
+            audio
+                .with_map(new_markers, tempo)
+                .map_err(|err| ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: err.to_string(),
+                })?;
+
+        crate::arrangement::editing::transaction(&mut self.editor, "Quantize", |editor| {
+            editor.apply(Command::SetClipData {
+                clip,
+                data: ClipData::Audio(updated_audio),
+            })?;
+            Ok(())
+        })
+        .map_err(|err| match err {
+            crate::arrangement::editing::EditFailure::Refused(reason)
+            | crate::arrangement::editing::EditFailure::Unavailable(reason) => {
+                ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                }
+            }
+            crate::arrangement::editing::EditFailure::InvalidArgs(message) => {
+                ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message,
+                }
+            }
+        })?;
+
+        Ok(Value::Null)
     }
 
     /// The length of the clip's file in seconds, where the store knows it.

@@ -924,3 +924,202 @@ fn the_lfo_syncs_to_the_tempo() {
         }
     }
 }
+
+/// A set with a Snapshot on a MIDI track holding a held C3 for two beats,
+/// playing `hash` with `edits`; the registry finds `media`.
+fn edited_set(
+    hash: bl_model::ContentHash,
+    edits: Vec<bl_model::SampleEdit>,
+) -> (Editor, bl_model::DeviceId) {
+    let mut editor = Editor::new();
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device_id = editor.new_id();
+    let mut device = Device::new(
+        device_id,
+        "Snapshot",
+        DeviceKind::Native {
+            device_type: SAMPLER.to_owned(),
+        },
+    )
+    .with_role(DeviceRole::Instrument);
+    device.set_media(0, Some(hash));
+    device.sample_edits = edits;
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let clip: bl_model::ClipId = editor.new_id();
+    let note = Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 2), 100);
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 2),
+                ClipData::Midi(MidiData::new([note])),
+            ),
+        })
+        .unwrap();
+    (editor, device_id)
+}
+
+/// Renders a second of the set from its start.
+fn render_second(offline: &mut Offline) -> Vec<f32> {
+    offline.sender().transport(TransportCommand::Stop);
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(48_000, |block| out.extend_from_slice(block.channel(0)));
+    out
+}
+
+// Spec: multisampler R57
+#[test]
+fn an_edited_sample_reaches_the_node_off_the_audio_thread() {
+    use bl_model::{SampleEdit, SampleEditKind, SampleRange};
+    let hash = bl_model::ContentHash([8u8; 32]);
+    // A rising ramp over two seconds at 48 kHz.
+    let ramp = sample(96_000, |i| i as f32 / 96_000.0);
+    let mut media = MediaMap::new();
+    media.insert(hash, Arc::clone(&ramp));
+    let cut = SampleEdit {
+        kind: SampleEditKind::Cut,
+        range: Some(SampleRange {
+            from: 0,
+            to: 48_000,
+        }),
+    };
+    let (mut editor, device_id) = edited_set(hash, vec![cut]);
+    let registry = registry().with_media(Arc::new(media));
+    let mut offline = Offline::new(EngineConfig::new(RATE, 256), registry);
+    assert!(offline.sync(editor.document()).is_empty());
+    assert!(offline.missing_media().is_empty());
+    // The cut removed the first second, so the note starts at the ramp's
+    // middle: the engine plays the edited sample.
+    let out = render_second(&mut offline);
+    assert!(
+        (out[1000] - (0.5 + 1000.0 / 96_000.0)).abs() < 1e-3,
+        "{}",
+        out[1000]
+    );
+    assert_eq!(offline.heap_operations(), 0, "no allocation in a block");
+    // An edit made while the set is open reaches the running node as data:
+    // trim to the first 100 frames of what is left, which then ends.
+    editor
+        .apply(Command::AddSampleEdit {
+            device: device_id,
+            layer: None,
+            edit: SampleEdit {
+                kind: SampleEditKind::Trim,
+                range: Some(SampleRange { from: 0, to: 100 }),
+            },
+        })
+        .unwrap();
+    assert!(offline.sync(editor.document()).is_empty());
+    let out = render_second(&mut offline);
+    assert!((out[50] - 0.5).abs() < 1e-2, "{}", out[50]);
+    assert!(
+        out[1000].abs() < 1e-6,
+        "the trimmed sample has ended: {}",
+        out[1000]
+    );
+    assert_eq!(offline.heap_operations(), 0);
+    // Reverting the edits brings the source back.
+    editor
+        .apply(Command::ClearSampleEdits {
+            device: device_id,
+            layer: None,
+            length: 0,
+        })
+        .unwrap();
+    assert!(offline.sync(editor.document()).is_empty());
+    let out = render_second(&mut offline);
+    assert!(
+        (out[1000] - 1000.0 / 96_000.0).abs() < 1e-3,
+        "{}",
+        out[1000]
+    );
+}
+
+// Spec: multisampler R54
+#[test]
+fn a_click_auditions_from_its_point_and_ending_it_fades_the_voice_out() {
+    use bl_engine::Audition;
+    let ramp = sample(48_000, |i| 0.25 + i as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[], 512);
+    give(node.as_mut(), &collector, &ramp);
+    let audition = |down| {
+        collector.handle().data(Audition {
+            layer: None,
+            from: 0.5,
+            down,
+        })
+    };
+    // Nothing plays until the button goes down.
+    assert!(
+        run_notes(node.as_mut(), 256, &[])[0]
+            .iter()
+            .all(|v| *v == 0.0)
+    );
+    node.receive_data(audition(true));
+    let played = run_notes(node.as_mut(), 512, &[]);
+    // It starts at half the sample, at its own pitch.
+    assert!(
+        (played[0][10] - (0.25 + 24_010.0 / 96_000.0)).abs() < 1e-3,
+        "{}",
+        played[0][10]
+    );
+    assert!((played[0][400] - (0.25 + 24_400.0 / 96_000.0)).abs() < 1e-3);
+    // Releasing the button fades it out, whatever the mode's Trigger says.
+    node.receive_data(audition(false));
+    let faded = run_notes(node.as_mut(), 512, &[]);
+    let silent = run_notes(node.as_mut(), 512, &[]);
+    assert!(faded[0][0] > 0.0, "it faded rather than cut");
+    assert!(
+        silent[0].iter().all(|v| *v == 0.0),
+        "and it ended after the steal fade"
+    );
+}
+
+// Spec: multisampler R54
+#[test]
+fn slice_boundaries_are_what_the_device_cuts() {
+    use bl_devices::slice_boundaries;
+    // A click every 4,800 frames, the transients Slice By finds.
+    let clicks = sample(19_200, |i| if i % 4_800 < 20 { 1.0 } else { 0.0 });
+    let value = |id: ParamId| match id {
+        START => 0.0,
+        LENGTH => 100.0,
+        SLICE_BY => 0.0,
+        SLICE_SENSITIVITY => 50.0,
+        SLICE_DIVISION => 4.0,
+        SLICE_REGIONS => 4.0,
+        _ => 0.0,
+    };
+    let bounds = slice_boundaries(&clicks, &value, 6_000.0);
+    assert_eq!(bounds.first(), Some(&0));
+    assert_eq!(bounds, [0, 4_800, 9_600, 14_400, 19_200]);
+    // Region slicing cuts four equal parts; Manual places none.
+    let regions = |by: f64| {
+        slice_boundaries(
+            &clicks,
+            &|id| if id == SLICE_BY { by } else { value(id) },
+            6_000.0,
+        )
+    };
+    assert_eq!(regions(2.0), [0, 4_800, 9_600, 14_400, 19_200]);
+    assert!(regions(3.0).is_empty());
+}

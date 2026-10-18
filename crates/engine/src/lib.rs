@@ -123,7 +123,8 @@ pub use automation::{
 };
 pub use capture::{CAPTURE_RING, CapturedMidi};
 pub use clips::{
-    ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
+    Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
+    SourceCues, media_edits,
 };
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};

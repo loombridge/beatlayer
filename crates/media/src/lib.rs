@@ -31,6 +31,7 @@
 //! an [`AudioSource`], whose reads are real-time safe.
 
 mod decode;
+pub mod edits;
 pub mod encode;
 mod error;
 mod hash;
@@ -45,6 +46,7 @@ mod store;
 pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
+pub use edits::{Edit, EditKind};
 pub use encode::{
     AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, Quantiser, wav_bytes,
 };

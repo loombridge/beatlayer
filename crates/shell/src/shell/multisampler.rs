@@ -28,7 +28,7 @@ impl Shell {
             ids::ADD_LAYERS => {
                 let args: AddLayersArgs = Self::args(id, args)?;
                 let device = self.multisampler_target(id, args.device)?;
-                self.add_layers(id, device, &args.paths, args.index)
+                self.add_layers(id, device, &args, args.index)
             }
             ids::SET_LAYER => {
                 let args: SetLayerArgs = Self::args(id, args)?;
@@ -100,8 +100,23 @@ impl Shell {
                     layers: vec![layer],
                 }))
             }
+            ids::EDIT_SAMPLE
+            | ids::CROP_SAMPLE
+            | ids::REVERSE_SAMPLE
+            | ids::CONVERT
+            | ids::AUDITION_SAMPLE => self.run_sample_edits(id, args),
             ids::NORMALIZE_LAYERS => {
                 let args: NormalizeArgs = Self::args(id, args)?;
+                // Snapshot's Normalize Volumes sets its Gain (R60).
+                let snapshot = args.device.or_else(|| self.devices.selected()).filter(|d| {
+                    self.editor
+                        .document()
+                        .device(*d)
+                        .is_some_and(Self::is_snapshot)
+                });
+                if let Some(device) = snapshot {
+                    return self.normalize_snapshot(id, device, args.what);
+                }
                 let device = self.multisampler_target(id, args.device)?;
                 let layers = self.layers_or_selection(id, device, args.layers)?;
                 self.normalize(id, device, &layers, args.what)
@@ -162,7 +177,7 @@ impl Shell {
         }
     }
 
-    fn failed(&self, id: &str, message: impl ToString) -> ShellError {
+    pub(super) fn failed(&self, id: &str, message: impl ToString) -> ShellError {
         ShellError::Failed {
             command: id.to_owned(),
             message: message.to_string(),
@@ -170,14 +185,14 @@ impl Shell {
     }
 
     /// Records that the set changed.
-    fn changed(&mut self) {
+    pub(super) fn changed(&mut self) {
         self.dirty = true;
         self.document_changed();
         self.touch();
     }
 
     /// The multisampler a command acts on: `device`, or the selected one.
-    fn multisampler_target(
+    pub(super) fn multisampler_target(
         &self,
         id: &str,
         device: Option<DeviceId>,
@@ -203,7 +218,7 @@ impl Shell {
         Ok(device)
     }
 
-    fn layers_of(&self, device: DeviceId) -> bl_model::Layers {
+    pub(super) fn layers_of(&self, device: DeviceId) -> bl_model::Layers {
         self.editor
             .document()
             .device(device)
@@ -213,7 +228,7 @@ impl Shell {
 
     /// `layers`, or the selected ones when none are given; they must all be
     /// there, and some must be.
-    fn layers_or_selection(
+    pub(super) fn layers_or_selection(
         &self,
         id: &str,
         device: DeviceId,
@@ -281,12 +296,21 @@ impl Shell {
         &mut self,
         id: &str,
         device: DeviceId,
-        paths: &[String],
+        args: &AddLayersArgs,
         index: Option<usize>,
     ) -> Result<Value, ShellError> {
         let mut layers = Vec::new();
         let mut skipped = Vec::new();
-        for path in paths {
+        let held = self.layers_of(device);
+        let like = match args.like {
+            Some(like) => Some(
+                held.get(like)
+                    .ok_or_else(|| self.failed(id, format!("no layer {}", like.0)))?
+                    .clone(),
+            ),
+            None => None,
+        };
+        for path in &args.paths {
             let file = Path::new(path);
             match self.import_layer_file(id, path) {
                 Ok((media, length, rate, channels, _)) if length > 0 => {
@@ -294,6 +318,10 @@ impl Shell {
                         .file_stem()
                         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                     let mut layer = Layer::new(LayerId(0), name, media, length, rate, channels);
+                    if let Some(like) = &like {
+                        (layer.key, layer.velocity, layer.select) =
+                            (like.key, like.velocity, like.select);
+                    }
                     let info = read_sampler_info(file);
                     layer.root_key = info.root_key.unwrap_or(bl_model::DEFAULT_ROOT_KEY);
                     if let Some((start, end)) = info.loop_points
@@ -322,8 +350,15 @@ impl Shell {
                 },
             ));
         }
-        let held = self.layers_of(device);
-        let at = index.unwrap_or_else(|| {
+        let at = match args.after {
+            Some(after) => Some(
+                held.position(after)
+                    .ok_or_else(|| self.failed(id, format!("no layer {}", after.0)))?
+                    + 1,
+            ),
+            None => index,
+        }
+        .unwrap_or_else(|| {
             let selected = self.devices.layer_selection(self.editor.document(), device);
             held.list
                 .iter()
@@ -351,11 +386,9 @@ impl Shell {
         }))
     }
 
-    /// The left channel of a layer's sample, at its own rate.
+    /// A layer's sample with its edits applied, at its own rate (R57).
     fn left_channel(&self, layer: &Layer) -> Option<std::sync::Arc<SampleData>> {
-        self.media
-            .load(bl_media::ContentHash::from_bytes(layer.media.0))
-            .ok()
+        self.edited_audio(layer.media, &layer.edits)
     }
 
     /// Changes `layers` one at a time inside one transaction: each gets the

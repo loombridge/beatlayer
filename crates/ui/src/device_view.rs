@@ -51,6 +51,8 @@ struct DeviceDrag {
 /// scroll.
 pub struct DeviceViewUi {
     multisampler: crate::multisampler::MultisamplerUi,
+    /// Snapshot's sample displays (WP-5.15).
+    sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     scroll: f32,
     keymap: Keymap,
@@ -194,6 +196,7 @@ impl DeviceViewUi {
     pub fn new() -> Self {
         Self {
             multisampler: crate::multisampler::MultisamplerUi::default(),
+            sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
             scroll: 0.0,
             keymap: Keymap::live12(),
@@ -437,15 +440,33 @@ impl DeviceViewUi {
                             &played,
                             events,
                         ),
-                        None => crate::device_panel::show(
-                            ui,
-                            theme,
-                            frame,
-                            display.as_ref(),
-                            body,
-                            &played,
-                            events,
-                        ),
+                        None => {
+                            crate::device_panel::show(
+                                ui,
+                                theme,
+                                frame,
+                                display.as_ref(),
+                                body,
+                                &played,
+                                events,
+                            );
+                            // Spec: multisampler R54. Snapshot's sample
+                            // display fills its first cell.
+                            if matches!(
+                                &frame.kind,
+                                bl_model::DeviceKind::Native { device_type }
+                                    if device_type == bl_devices::sampler::SAMPLER
+                            ) && let Some(panel) = frame.panel.as_ref()
+                                && let Some((_, cell, _)) =
+                                    crate::device_panel::place_shown(panel, frame.expanded, body)
+                                        .1
+                                        .into_iter()
+                                        .next()
+                            {
+                                self.sample_displays
+                                    .snapshot(ui, shell, theme, frame, cell, events);
+                            }
+                        }
                     }
                 }
                 self.title(
@@ -803,8 +824,30 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
-            ui.add_enabled(false, egui::Button::new("Convert to Snapshot"))
-                .on_disabled_hover_text("Not built yet: arrives with WP-5.15.");
+            if ui.button("Convert to Snapshot").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "snapshot" }),
+                );
+                ui.close();
+            }
+        }
+        // Spec: multisampler R62. Snapshot's menu converts it the other way.
+        if matches!(
+            &frame.kind,
+            bl_model::DeviceKind::Native { device_type }
+                if device_type == bl_devices::sampler::SAMPLER
+        ) {
+            ui.separator();
+            if ui.button("Convert to Multisampler").clicked() {
+                invoke(
+                    events,
+                    bl_shell::multisampler_commands::CONVERT,
+                    json!({ "device": frame.id, "to": "multisampler" }),
+                );
+                ui.close();
+            }
         }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it

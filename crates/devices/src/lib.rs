@@ -81,7 +81,7 @@ pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
-pub use sampler::{Sampler, sampler_type};
+pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};

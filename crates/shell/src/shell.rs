@@ -84,6 +84,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 mod capture;
 mod multisampler;
 mod processed_files;
+mod sample_edits;
 mod session_recording;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
@@ -386,6 +387,9 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// The sample being auditioned from a click in a display (WP-5.15,
+    /// R54): its device and layer, while the button is down. Not saved.
+    auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -679,6 +683,7 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            auditioning: None,
             registry,
             editor,
             saved,

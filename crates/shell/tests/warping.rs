@@ -57,10 +57,9 @@ fn wav(path: &Path, seconds: u32, hz: f64) {
     std::fs::write(path, bytes).unwrap();
 }
 
-/// A shell with the files `(seconds, hz)` on its first audio track, a bar
-/// apart, each clip warped: the clips' IDs.
-fn shell_with(scratch: &Scratch, files: &[(u32, f64)]) -> (Shell, Vec<ClipId>) {
-    let mut shell = Shell::new(
+/// A shell and its first audio track.
+fn new_shell(scratch: &Scratch) -> (Shell, bl_model::TrackId) {
+    let shell = Shell::new(
         Preferences::default(),
         Some(scratch.0.join("config")),
         AudioHost::null(Default::default()),
@@ -73,6 +72,13 @@ fn shell_with(scratch: &Scratch, files: &[(u32, f64)]) -> (Shell, Vec<ClipId>) {
         .find(|t| t.kind() == TrackKind::Audio)
         .expect("the default set has audio tracks")
         .id();
+    (shell, track)
+}
+
+/// A shell with the files `(seconds, hz)` on its first audio track, a bar
+/// apart, each clip warped: the clips' IDs.
+fn shell_with(scratch: &Scratch, files: &[(u32, f64)]) -> (Shell, Vec<ClipId>) {
+    let (mut shell, track) = new_shell(scratch);
     for (n, &(seconds, hz)) in files.iter().enumerate() {
         let path = scratch.0.join(format!("File {n}.wav"));
         wav(&path, seconds, hz);
@@ -174,4 +180,270 @@ fn a_marker_edit_on_several_clips_of_one_length_is_one_step() {
         )
         .expect("inside the two-second file");
     assert_eq!(markers(&shell, longer), 2);
+}
+
+/// A shell with the generated drum loop (`tests/fixtures/gen/gen_drums.py`)
+/// on its first audio track, warped, and its analysis done: the clip.
+fn drum_clip(scratch: &Scratch) -> (Shell, ClipId) {
+    let (mut shell, track) = new_shell(scratch);
+    let path = scratch.0.join("drum-loop.wav");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/drums/drum-loop.wav"),
+        &path,
+    )
+    .unwrap();
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [path.display().to_string()], "track": track, "at": 0 }),
+        )
+        .unwrap();
+    let clip = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .id;
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    wait_for_analysis(&mut shell, clip);
+    (shell, clip)
+}
+
+fn audio(shell: &Shell, clip: ClipId) -> bl_model::AudioData {
+    match &shell.editor().document().clip(clip).unwrap().data {
+        ClipData::Audio(audio) => audio.clone(),
+        ClipData::Midi(_) => unreachable!("an audio clip"),
+    }
+}
+
+fn wait_for_analysis(shell: &mut Shell, clip: ClipId) {
+    let media = audio(shell, clip).media;
+    shell.wait_analysis(media).expect("the file is analysed");
+}
+
+/// `clip.transients` as `(time, by_hand)` pairs, with whether the analysis
+/// was ready.
+fn transients(shell: &mut Shell, clip: ClipId) -> (bool, Vec<(f64, bool)>) {
+    let result = shell
+        .run("clip.transients", json!({ "clip": clip }))
+        .unwrap();
+    let list = result["transients"].as_array().unwrap();
+    (
+        result["analysis_ready"].as_bool().unwrap(),
+        list.iter()
+            .map(|t| (t["time"].as_f64().unwrap(), t["by_hand"].as_bool().unwrap()))
+            .collect(),
+    )
+}
+
+fn times(shell: &mut Shell, clip: ClipId) -> Vec<f64> {
+    transients(shell, clip).1.iter().map(|t| t.0).collect()
+}
+
+// Spec: warping R23, R24
+#[test]
+fn transient_edits_are_one_step_saved_and_reset() {
+    let scratch = Scratch::new("transients");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let (ready, shown) = transients(&mut shell, clip);
+    assert!(ready);
+    let detected = times(&mut shell, clip);
+    assert_eq!(detected.len(), 9, "the loop has nine hits");
+    assert!(shown.iter().all(|t| !t.1), "none is by hand");
+    // A warped clip's transients carry the beat they play on: the second
+    // hit is a quarter of a second, half a quarter note, into the loop.
+    let listed = shell
+        .run("clip.transients", json!({ "clip": clip }))
+        .unwrap();
+    assert_eq!(listed["transients"][1]["beat"], Ticks::QUARTER.get() / 2);
+
+    let steps = |shell: &Shell| shell.editor().undo_history().len();
+    let start = steps(&shell);
+    shell
+        .run(
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": 0.1 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), start + 1);
+    let (_, shown) = transients(&mut shell, clip);
+    assert_eq!(shown.len(), 10);
+    assert_eq!(shown[1], (0.1, true));
+
+    shell
+        .run(
+            "clip.delete_transients",
+            json!({ "clip": clip, "times": [detected[3]] }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), start + 2);
+    assert!(!times(&mut shell, clip).contains(&detected[3]));
+
+    // Only a transient that exists can be deleted or moved, none can be put
+    // on another or past the end of the two-second file, and a range's
+    // markers can't either; a refusal is no step.
+    for (command, args) in [
+        (
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": detected[0] }),
+        ),
+        (
+            "clip.move_transient",
+            json!({ "clip": clip, "from": 0.1, "to": detected[0] }),
+        ),
+        (
+            "clip.insert_warp_markers",
+            json!({ "clip": clip, "from": 0, "to": 8 * Ticks::QUARTER.get() }),
+        ),
+        (
+            "clip.delete_transients",
+            json!({ "clip": clip, "times": [0.37] }),
+        ),
+        (
+            "clip.move_transient",
+            json!({ "clip": clip, "from": 0.37, "to": 0.4 }),
+        ),
+        (
+            "clip.move_transient",
+            json!({ "clip": clip, "from": 0.1, "to": 3.0 }),
+        ),
+        (
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": 3.0 }),
+        ),
+    ] {
+        assert!(shell.run(command, args).is_err(), "{command}");
+    }
+    assert_eq!(steps(&shell), start + 2);
+
+    shell
+        .run(
+            "clip.move_transient",
+            json!({ "clip": clip, "from": 0.1, "to": 0.11 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), start + 3);
+    assert_eq!(transients(&mut shell, clip).1[1], (0.11, true));
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(transients(&mut shell, clip).1[1], (0.1, true));
+    shell.run("edit.redo", json!({})).unwrap();
+
+    // The edits are the clip's, saved with the set as times in the file.
+    let edits = audio(&shell, clip).transient_edits;
+    assert_eq!(
+        (edits.added, edits.removed),
+        (vec![0.11], vec![detected[3]])
+    );
+
+    shell
+        .run("clip.reset_transients", json!({ "clip": clip }))
+        .unwrap();
+    assert_eq!(steps(&shell), start + 4);
+    assert_eq!(times(&mut shell, clip), detected);
+    assert!(audio(&shell, clip).transient_edits.is_empty());
+}
+
+// Spec: warping R25, R26
+#[test]
+fn markers_go_on_transients_over_a_range_and_beside_a_pseudo_marker() {
+    let scratch = Scratch::new("pseudo");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let detected = times(&mut shell, clip);
+    // Over the whole two-second loop, a marker at each of the nine hits,
+    // beside the one at the clip's start (the first hit lands a few samples
+    // after it).
+    shell
+        .run(
+            "clip.insert_warp_markers",
+            json!({ "clip": clip, "from": 0, "to": 4 * Ticks::QUARTER.get() }),
+        )
+        .unwrap();
+    let marked: Vec<f64> = audio(&shell, clip)
+        .warp_markers
+        .iter()
+        .map(|m| m.time)
+        .collect();
+    assert_eq!(marked.len(), 10);
+    for (marker, hit) in marked[1..].iter().zip(&detected) {
+        assert!((marker - hit).abs() < 1e-9, "{marker} vs {hit}");
+    }
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(markers(&shell, clip), 1);
+
+    // Cmd on a pseudo-warp marker puts markers on the transients beside it.
+    let (hat, kick) = (0.5, 0.75);
+    shell
+        .run(
+            "clip.insert_warp_marker",
+            json!({ "clips": [clip], "time": hat, "pin_neighbours": true }),
+        )
+        .unwrap();
+    let marked: Vec<f64> = audio(&shell, clip)
+        .warp_markers
+        .iter()
+        .map(|m| m.time)
+        .collect();
+    assert_eq!(marked.len(), 4, "{marked:?} around {hat} and {kick}");
+    assert!((marked[1] - 0.25).abs() < 0.001 && (marked[3] - kick).abs() < 0.001);
+}
+
+// Spec: warping R27
+#[test]
+fn a_replaced_sample_keeps_its_markers_only_at_the_same_length() {
+    let scratch = Scratch::new("replaced");
+    let (mut shell, clip) = drum_clip(&scratch);
+    shell
+        .run(
+            "clip.insert_warp_marker",
+            json!({ "clips": [clip], "time": 0.5 }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": 0.1 }),
+        )
+        .unwrap();
+    // The same length: the drum loop with its first 0.3 s silenced. The
+    // other is a second shorter.
+    let mut bytes = std::fs::read(scratch.0.join("drum-loop.wav")).unwrap();
+    bytes[44..44 + 28_800].fill(0);
+    std::fs::write(scratch.0.join("same.wav"), bytes).unwrap();
+    wav(&scratch.0.join("shorter.wav"), 1, 220.0);
+    let import = |shell: &Shell, name: &str| {
+        let hash = shell.media_store().import(scratch.0.join(name)).unwrap();
+        bl_model::ContentHash(*hash.as_bytes())
+    };
+    let replace = |shell: &mut Shell, media| {
+        let mut next = audio(shell, clip);
+        next.media = media;
+        shell
+            .run(
+                "clip.set_data",
+                json!({ "clip": clip, "data": ClipData::Audio(next) }),
+            )
+            .unwrap();
+        audio(shell, clip)
+    };
+
+    let before = audio(&shell, clip);
+    let media = import(&shell, "same.wav");
+    let same = replace(&mut shell, media);
+    assert!(same.warp);
+    assert_eq!(same.warp_markers, before.warp_markers, "the markers stay");
+    assert!(
+        same.transient_edits.is_empty(),
+        "the edits belonged to the old file"
+    );
+
+    let media = import(&shell, "shorter.wav");
+    let shorter = replace(&mut shell, media);
+    assert!(!shorter.warp && shorter.warp_markers.is_empty() && shorter.tempo.is_none());
+    // The Start marker keeps its place in the audio, now in seconds.
+    assert_eq!(shorter.start, 0.0);
 }

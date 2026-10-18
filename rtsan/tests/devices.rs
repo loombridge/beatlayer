@@ -12,7 +12,8 @@
 //! test binary, fails the test at any heap use it sees.
 //!
 //! The lo-fi effects (WP-5.24: Degrade, Crush and Wax) run after a test tone
-//! with every parameter changing the same way.
+//! with every parameter changing the same way, as do Singe, Grit and Valve
+//! (WP-5.23) with their curves, Hi-Quality and envelopes changing.
 
 bl_rt::install_trap!();
 
@@ -746,6 +747,160 @@ fn stutter_passes_under_rtsan() {
     assert!(state.counters.events_applied > 100);
     eprintln!(
         "2,000 blocks of Stutter under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
+// Spec: saturator R14, overdrive R8, tube-distortion R11
+#[test]
+fn the_saturation_devices_pass_under_rtsan() {
+    use bl_devices::{overdrive as grit, saturator as singe, tube as valve};
+    run_lo_fi_device(
+        singe::SATURATOR,
+        &[
+            (singe::CURVE, &[0.0, 2.0, 5.0, 7.0]),
+            (singe::DRIVE, &[-12.0, 12.0, 30.0]),
+            (singe::COLOR, &[1.0, 0.0]),
+            (singe::AMT_LO, &[80.0, -60.0]),
+            (singe::AMT_HI, &[-70.0, 90.0]),
+            (singe::WS_DEPTH, &[0.0, 70.0]),
+            (singe::POST_CLIP, &[0.0, 1.0, 2.0]),
+            (singe::HI_QUALITY, &[1.0, 0.0]),
+            (singe::PRE_DC, &[1.0, 0.0]),
+        ],
+    );
+    run_lo_fi_device(
+        grit::OVERDRIVE,
+        &[
+            (grit::DRIVE, &[0.0, 60.0, 100.0]),
+            (grit::TONE, &[0.0, 100.0]),
+            (grit::FREQUENCY, &[200.0, 3_000.0]),
+            (grit::WIDTH, &[0.5, 3.0]),
+            (grit::DYNAMICS, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        valve::TUBE,
+        &[
+            (valve::MODEL, &[0.0, 1.0, 2.0]),
+            (valve::DRIVE, &[0.0, 24.0]),
+            (valve::BIAS, &[0.0, 80.0]),
+            (valve::ENVELOPE, &[-80.0, 80.0]),
+            (valve::ATTACK, &[1.0, 200.0]),
+            (valve::HI_QUALITY, &[1.0, 0.0]),
+        ],
+    );
+}
+
+/// Triband (WP-5.22) on a track that plays, with its sidechain unused, while
+/// its band switches, detector, knee, Time, Amount, solos and thresholds
+/// change.
+#[test]
+fn triband_passes_under_rtsan() {
+    use bl_devices::multiband_dynamics::{
+        ABOVE_RATIO, ABOVE_THRESHOLD, AMOUNT, BELOW_RATIO, DETECTOR, HIGH, HIGH_ON, LOW, LOW_ON,
+        MID, MULTIBAND_DYNAMICS, SOFT_KNEE, SOLO, TIME, band_param,
+    };
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -10.0);
+    let mut triband = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: MULTIBAND_DYNAMICS.to_owned(),
+        },
+    );
+    for band in [LOW, MID, HIGH] {
+        triband
+            .params
+            .insert(band_param(band, ABOVE_THRESHOLD), -30.0);
+        triband.params.insert(band_param(band, ABOVE_RATIO), 4.0);
+        triband.params.insert(band_param(band, BELOW_RATIO), 0.5);
+    }
+    let triband_id = triband.id;
+    for (index, device) in [tone, triband].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: triband_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // band switches (the crossovers' topology), the detector, the
+        // knee, Time, Amount, a solo and a ratio.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(LOW_ON, (step % 2) as f64)),
+            2 => Some(set(HIGH_ON, (step / 2 % 2) as f64)),
+            4 => Some(set(DETECTOR, (step % 2) as f64)),
+            5 => Some(set(SOFT_KNEE, (step % 2) as f64)),
+            6 => Some(set(TIME, 25.0 + (step % 8) as f64 * 100.0)),
+            8 => Some(set(AMOUNT, (step % 5) as f64 * 50.0)),
+            9 => Some(set(
+                band_param(step as usize % 3, SOLO),
+                (step / 3 % 2) as f64,
+            )),
+            10 => Some(set(band_param(MID, ABOVE_RATIO), 1.0 + (step % 6) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Triband under RealtimeSanitizer: {} parameter changes, \
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0

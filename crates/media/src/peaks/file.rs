@@ -85,29 +85,7 @@ impl Peaks {
     ///
     /// Fails if the folder can't be created or the file can't be written.
     pub fn write_file(&self, path: impl AsRef<Path>, source: ContentHash) -> io::Result<()> {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let path = path.as_ref();
-        let folder = path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(folder)?;
-        let name = path
-            .file_name()
-            .map_or_else(|| "peaks".into(), |n| n.to_string_lossy().into_owned());
-        let temporary = folder.join(format!(
-            ".{name}.{}-{}.tmp",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let written = (|| {
-            let mut file = File::create(&temporary)?;
-            file.write_all(&self.header(source))?;
-            file.write_all(&self.data)?;
-            drop(file);
-            fs::rename(&temporary, path)
-        })();
-        if written.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        written
+        write_atomically(path.as_ref(), &[&self.header(source), &self.data])
     }
 
     fn header(&self, source: ContentHash) -> Vec<u8> {
@@ -134,6 +112,40 @@ impl Peaks {
         h[CHECKSUM].copy_from_slice(&sum);
         h
     }
+}
+
+/// Writes `parts`, in order, as one file at `path`: beside it under a
+/// temporary name, and then renamed into place, so a reader never sees a file
+/// half-written, and a write stopped part-way leaves no file at `path`. The
+/// folder is made if it isn't there. Peak files and analysis files use it.
+///
+/// # Errors
+///
+/// Fails if the folder can't be created or the file can't be written.
+pub fn write_atomically(path: &Path, parts: &[&[u8]]) -> io::Result<()> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let folder = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(folder)?;
+    let name = path
+        .file_name()
+        .map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned());
+    let temporary = folder.join(format!(
+        ".{name}.{}-{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = (|| {
+        let mut file = File::create(&temporary)?;
+        for part in parts {
+            file.write_all(part)?;
+        }
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
 }
 
 /// The checksum of a file: its header, with the checksum field read as

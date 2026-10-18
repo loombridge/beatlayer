@@ -30,7 +30,7 @@ enum Work {
     /// Notes and controller moves added to the clip playing in a slot.
     Merge {
         scene: SceneId,
-        clip: Clip,
+        clip: Box<Clip>,
         notes: Vec<Note>,
         moves: Vec<(Ticks, MidiMessage)>,
     },
@@ -177,7 +177,7 @@ impl Shell {
                     *track,
                     Work::Merge {
                         scene,
-                        clip,
+                        clip: Box::new(clip),
                         notes,
                         moves,
                     },

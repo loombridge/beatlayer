@@ -4,11 +4,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
-use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};
-use rtrb::Producer;
+use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
 
 use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
-use crate::output::{Output, OutputStats};
+use crate::output::{OutputBus, OutputStats};
 use crate::queue::InputSender;
 
 /// A port's switches in the Tempo & MIDI settings' MIDI ports table
@@ -134,7 +133,7 @@ pub struct MidiPorts {
     sender: InputSender,
     ports: Vec<Entry>,
     /// The open outputs and the thread that sends to them.
-    output: Arc<Output>,
+    output: OutputBus,
 }
 
 impl MidiPorts {
@@ -146,20 +145,23 @@ impl MidiPorts {
             backend,
             sender,
             ports: Vec::new(),
-            output: Output::new(),
+            output: OutputBus::new(),
         }
     }
 
-    /// Starts a fresh queue of `capacity` messages from the engine to the
-    /// output ports and returns its producing end, for the next engine's
-    /// processor (`bl_engine::Processor::set_midi_output`). The MIDI output
-    /// thread hands each message to its port, with the time stamp it
-    /// carries, while the port is open with its Track switch on
-    /// (`docs/specs/external-devices.md`, R5). What the old queue held goes
-    /// with it.
+    /// These ports on `output` from now on, the bus the engine's queue and
+    /// the output thread belong to (`docs/specs/external-devices.md`, R5).
+    /// Call it before any port opens.
     #[must_use]
-    pub fn attach_output(&self, capacity: usize) -> Producer<MidiOutputEvent> {
-        self.output.attach(capacity)
+    pub fn with_output(mut self, output: OutputBus) -> Self {
+        self.output = output;
+        self
+    }
+
+    /// The MIDI output bus the open outputs are on.
+    #[must_use]
+    pub fn output(&self) -> &OutputBus {
+        &self.output
     }
 
     /// The counts for everything the output thread has handled.
@@ -341,7 +343,8 @@ impl MidiPorts {
 
 impl Drop for MidiPorts {
     fn drop(&mut self) {
-        self.output.close();
+        // The ports this system opened close with it.
+        self.output.clear();
     }
 }
 

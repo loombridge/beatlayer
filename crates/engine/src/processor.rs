@@ -294,6 +294,9 @@ pub struct Processor {
     log: Writer,
     /// MIDI input from the MIDI threads (WP-2.2).
     midi: MidiIn,
+    /// The frames MIDI to ports is sent after its block starts to be heard
+    /// with the audio (WP-5.34): the device's reported output latency.
+    output_latency: u32,
     /// The notes monitoring MIDI tracks received, for Capture MIDI
     /// (WP-3.14).
     captured: Producer<CapturedMidi>,
@@ -347,6 +350,7 @@ impl Processor {
             cpu_load_max: 0.0,
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
+            output_latency: config.output_latency,
             captured,
             config,
         }
@@ -643,6 +647,7 @@ impl Processor {
                     self.last_take = None;
                     self.plan = Some(plan);
                 }
+                Message::OutputLatency(frames) => self.output_latency = frames,
             }
         }
     }
@@ -1578,7 +1583,7 @@ impl Processor {
                     &self.session_playback,
                 );
                 // Spec: external-devices R4, R5
-                self.midi.emit(&mut program.midi, self.config.output_latency);
+                self.midi.emit(&mut program.midi, self.output_latency);
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
                     let from = c.min(program.channels - 1);

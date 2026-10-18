@@ -212,6 +212,12 @@ impl Rig {
         Self::configured(max_frames, 0, 0, extend)
     }
 
+    /// A rig whose engine's settings `set` changes from the defaults for
+    /// blocks of up to `max_frames` frames at 48 kHz.
+    pub fn with_config(max_frames: usize, set: impl FnOnce(&mut EngineConfig)) -> Self {
+        Self::build(max_frames, set, |_| {})
+    }
+
     /// A rig whose registry has the test nodes and whatever `extend` adds.
     fn configured(
         max_frames: usize,
@@ -219,11 +225,23 @@ impl Rig {
         output_channels: usize,
         extend: impl FnOnce(&mut Registry),
     ) -> Self {
-        let config = EngineConfig {
-            input_channels,
-            output_channels,
-            ..EngineConfig::new(RATE, max_frames)
-        };
+        Self::build(
+            max_frames,
+            |config| {
+                config.input_channels = input_channels;
+                config.output_channels = output_channels;
+            },
+            extend,
+        )
+    }
+
+    fn build(
+        max_frames: usize,
+        set: impl FnOnce(&mut EngineConfig),
+        extend: impl FnOnce(&mut Registry),
+    ) -> Self {
+        let mut config = EngineConfig::new(RATE, max_frames);
+        set(&mut config);
         let probe = Arc::new(Probe::default());
         let collector = Collector::new();
         let mut registry = testing::registry(&probe);

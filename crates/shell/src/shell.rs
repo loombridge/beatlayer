@@ -634,7 +634,14 @@ impl Shell {
         // hardware. The queue has no engine yet; each engine attaches its own.
         let (midi_sender, _) = bl_midi_io::input_queue(1);
         audio.set_midi(midi_sender.clone());
-        let midi = MidiHost::new(Box::new(bl_midi_io::NullBackend), midi_sender, &prefs.midi);
+        let midi_output = bl_midi_io::OutputBus::new();
+        audio.set_midi_output(midi_output.clone());
+        let midi = MidiHost::new(
+            Box::new(bl_midi_io::NullBackend),
+            midi_sender,
+            midi_output,
+            &prefs.midi,
+        );
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
@@ -1126,6 +1133,7 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            midi_outputs: self.midi.output_names(),
         }
     }
 
@@ -1134,7 +1142,8 @@ impl Shell {
     /// the preferences hold.
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
-        self.midi = MidiHost::new(backend, sender, &self.prefs.midi);
+        let output = self.midi.output().clone();
+        self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.

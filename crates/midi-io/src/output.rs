@@ -2,8 +2,8 @@
 //! messages to the MIDI system, and the table of open output ports it reads
 //! (`docs/specs/external-devices.md`, R5).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -65,12 +65,31 @@ struct Slot {
     connection: Box<dyn OutputConnection>,
 }
 
+/// The MIDI output side that outlives the ports: the queue from the engine,
+/// the thread that hands its messages to the open output ports, and the
+/// counts. Cloning it shares it.
+///
+/// An engine takes its end of the queue with [`attach`](Self::attach); the
+/// ports ([`MidiPorts::with_output`](crate::MidiPorts::with_output)) put
+/// their open outputs in the table the thread reads, so the MIDI system can
+/// change underneath without the engine's side noticing. The thread ends
+/// when the last clone goes.
+#[derive(Clone)]
+pub struct OutputBus {
+    shared: Arc<Shared>,
+}
+
+impl Default for OutputBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// What the main thread and the output thread share.
-pub(crate) struct Output {
+struct Shared {
     table: Mutex<Vec<Slot>>,
     queue: Mutex<Option<Consumer<MidiOutputEvent>>>,
     stats: Arc<OutputStats>,
-    stop: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -78,24 +97,50 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-impl Output {
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
-            table: Mutex::new(Vec::new()),
-            queue: Mutex::new(None),
-            stats: Arc::new(OutputStats::default()),
-            stop: AtomicBool::new(false),
-            thread: Mutex::new(None),
-        })
+impl OutputBus {
+    /// A bus with no ports and no engine.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                table: Mutex::new(Vec::new()),
+                queue: Mutex::new(None),
+                stats: Arc::new(OutputStats::default()),
+                thread: Mutex::new(None),
+            }),
+        }
     }
 
-    pub(crate) fn stats(&self) -> &Arc<OutputStats> {
-        &self.stats
+    /// The counts for everything the output thread has handled.
+    #[must_use]
+    pub fn stats(&self) -> &Arc<OutputStats> {
+        &self.shared.stats
+    }
+
+    /// Starts a fresh queue of `capacity` messages and returns its
+    /// producing end, for the next engine's processor
+    /// (`bl_engine::Processor::set_midi_output`), starting the output thread
+    /// if it isn't running. What the queue before held, the note-offs of an
+    /// engine that stopped included, goes out first.
+    #[must_use]
+    pub fn attach(&self, capacity: usize) -> Producer<MidiOutputEvent> {
+        self.shared.drain();
+        let (producer, consumer) = RingBuffer::new(capacity);
+        *lock(&self.shared.queue) = Some(consumer);
+        let mut thread = lock(&self.shared.thread);
+        if thread.is_none() {
+            let shared = Arc::downgrade(&self.shared);
+            *thread = thread::Builder::new()
+                .name("bl-midi-out".to_owned())
+                .spawn(move || run(&shared))
+                .ok();
+        }
+        producer
     }
 
     /// Puts an open port in the table, or replaces the one there.
     pub(crate) fn insert(&self, port: PortId, track: bool, connection: Box<dyn OutputConnection>) {
-        let mut table = lock(&self.table);
+        let mut table = lock(&self.shared.table);
         table.retain(|slot| slot.port != port);
         table.push(Slot {
             port,
@@ -105,37 +150,30 @@ impl Output {
     }
 
     pub(crate) fn remove(&self, port: PortId) {
-        lock(&self.table).retain(|slot| slot.port != port);
+        lock(&self.shared.table).retain(|slot| slot.port != port);
     }
 
     pub(crate) fn set_track(&self, port: PortId, track: bool) {
-        if let Some(slot) = lock(&self.table).iter_mut().find(|s| s.port == port) {
+        if let Some(slot) = lock(&self.shared.table).iter_mut().find(|s| s.port == port) {
             slot.track = track;
         }
     }
 
-    /// Starts a fresh queue of `capacity` messages and returns its
-    /// producing end, for the next engine's processor, starting the output
-    /// thread if it isn't running. What the old queue held goes with it.
-    pub(crate) fn attach(self: &Arc<Self>, capacity: usize) -> Producer<MidiOutputEvent> {
-        // What the engine before queued, its stopping note-offs included,
-        // goes out first.
-        self.drain();
-        let (producer, consumer) = RingBuffer::new(capacity);
-        *lock(&self.queue) = Some(consumer);
-        let mut thread = lock(&self.thread);
-        if thread.is_none() {
-            let output = Arc::clone(self);
-            *thread = thread::Builder::new()
-                .name("bl-midi-out".to_owned())
-                .spawn(move || output.run())
-                .ok();
-        }
-        producer
+    /// Closes every port in the table: the ports that put them there went.
+    pub(crate) fn clear(&self) {
+        lock(&self.shared.table).clear();
     }
 
     /// Hands every queued message to its port; returns how many it took.
-    pub(crate) fn drain(&self) -> usize {
+    /// For tests that want the messages sent now.
+    #[doc(hidden)]
+    pub fn drain(&self) -> usize {
+        self.shared.drain()
+    }
+}
+
+impl Shared {
+    fn drain(&self) -> usize {
         let mut queue = lock(&self.queue);
         let Some(queue) = queue.as_mut() else {
             return 0;
@@ -167,22 +205,18 @@ impl Output {
             Err(_) => self.stats.refused.fetch_add(1, Relaxed),
         };
     }
+}
 
-    fn run(&self) {
-        while !self.stop.load(Relaxed) {
-            if self.drain() == 0 {
-                thread::park_timeout(POLL);
-            }
-        }
-        self.drain();
-    }
-
-    /// Stops the thread, after it sends what is queued.
-    pub(crate) fn close(&self) {
-        self.stop.store(true, Relaxed);
-        if let Some(thread) = lock(&self.thread).take() {
-            thread.thread().unpark();
-            let _ = thread.join();
+/// The output thread: it looks at the queue every millisecond while it is
+/// empty, and ends when the bus is gone.
+fn run(shared: &Weak<Shared>) {
+    loop {
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        if shared.drain() == 0 {
+            drop(shared);
+            thread::park_timeout(POLL);
         }
     }
 }

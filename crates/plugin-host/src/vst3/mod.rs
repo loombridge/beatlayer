@@ -517,6 +517,7 @@ impl Vst3Host {
                     role: describe::role(&subcategories),
                     description: DeviceDescription::new(params),
                     sidechain: false,
+                    external: false,
                 },
                 vendor,
                 version,

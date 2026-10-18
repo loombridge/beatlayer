@@ -10,8 +10,8 @@
 //! MIDI input ports the computer offers (WP-2.2).
 
 use bl_model::{
-    Chain, Channel, Device, DeviceId, DeviceRole, Document, Input, Monitor, Output, RackKind, Tap,
-    TrackId, TrackKind,
+    Chain, Channel, Device, DeviceId, DeviceRole, Document, Input, MidiTo, Monitor, Output,
+    RackKind, Tap, TrackId, TrackKind,
 };
 use bl_shell_spec::commands::APP_SETTINGS;
 use serde_json::{Value, json};
@@ -30,6 +30,9 @@ pub struct Interface {
     /// The names of the MIDI input ports, in the order the Settings window
     /// lists them (the MIDI I/O spec, R7).
     pub midi_inputs: Vec<String>,
+    /// The names of the MIDI output ports whose Track switch is on, in the
+    /// order the Settings window lists them (the external devices spec, R1).
+    pub midi_outputs: Vec<String>,
 }
 
 /// One line of a chooser's list.
@@ -283,25 +286,8 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
                 interface,
             ),
             monitor: monitor(track, t.routing().monitor),
-            output: midi_to(doc, track),
-            output_channel: Chooser {
-                name: "Output Channel",
-                text: if t.routing().midi_output.is_some() {
-                    "Track In".to_owned()
-                } else {
-                    String::new()
-                },
-                entries: match t.routing().midi_output {
-                    Some(_) => vec![Entry::Choice {
-                        label: "Track In".to_owned(),
-                        run: None,
-                        chosen: true,
-                        pending: None,
-                    }],
-                    None => Vec::new(),
-                },
-                pending: None,
-            },
+            output: midi_to(doc, track, &interface.midi_outputs),
+            output_channel: midi_to_channel(track, t.routing().midi_output.as_ref()),
         },
         TrackKind::Group | TrackKind::Return => InOut::Output {
             output: audio_to(doc, track),
@@ -677,28 +663,97 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
     chooser("Output Type", entries)
 }
 
-/// MIDI To (observed): Configure… ─ the other MIDI tracks ─ No Output.
-fn midi_to(doc: &Document, track: TrackId) -> Chooser {
-    let to = doc.track(track).and_then(|t| t.routing().midi_output);
+/// MIDI To (observed): the output ports whose Track switch is on (the
+/// external devices spec, R1; Beatlayer's own place for them), Configure…
+/// ─ the other MIDI tracks ─ No Output. A track that keeps the name of a
+/// port that is away or has Track off lists it too, dimmed (R2). Choosing
+/// a port takes channel 1, and choosing the same port again keeps its
+/// channel.
+fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
+    let to = doc.track(track).and_then(|t| t.routing().midi_output.clone());
     let set = |value: Value| {
         Invocation::new(
             "routing.set_midi_output",
             json!({ "track": track, "to": value }),
         )
     };
-    let mut entries = vec![configure("tempo-midi"), Entry::Separator];
+    let chosen_port = match &to {
+        Some(MidiTo::Port { name, .. }) => Some(name.as_str()),
+        _ => None,
+    };
+    let mut entries = Vec::new();
+    for name in ports {
+        let run = match &to {
+            Some(MidiTo::Port { name: kept, channel }) if kept == name => {
+                set(json!({ "name": name, "channel": channel }))
+            }
+            _ => set(json!({ "name": name, "channel": 1 })),
+        };
+        entries.push(Entry::choice(name, run, chosen_port == Some(name.as_str())));
+    }
+    if let Some(name) = chosen_port.filter(|name| !ports.iter().any(|p| p == name)) {
+        entries.push(Entry::Choice {
+            label: name.to_owned(),
+            run: None,
+            chosen: true,
+            pending: None,
+        });
+    }
+    entries.push(configure("tempo-midi"));
+    entries.push(Entry::Separator);
     for id in doc.track_order() {
         if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
                 track_label(doc, id),
                 set(json!(id)),
-                to == Some(id),
+                to == Some(MidiTo::Track(id)),
             ));
         }
     }
     entries.push(Entry::Separator);
     entries.push(Entry::choice("No Output", set(Value::Null), to.is_none()));
     chooser("Output Type", entries)
+}
+
+/// The channel of MIDI To: 1 to 16 with a port, Track In with a track, and
+/// nothing with No Output.
+fn midi_to_channel(track: TrackId, to: Option<&MidiTo>) -> Chooser {
+    match to {
+        Some(MidiTo::Track(_)) => Chooser {
+            name: "Output Channel",
+            text: "Track In".to_owned(),
+            entries: vec![Entry::Choice {
+                label: "Track In".to_owned(),
+                run: None,
+                chosen: true,
+                pending: None,
+            }],
+            pending: None,
+        },
+        Some(MidiTo::Port { name, channel }) => Chooser {
+            name: "Output Channel",
+            text: channel.to_string(),
+            entries: (1..=16u8)
+                .map(|n| {
+                    Entry::choice(
+                        n.to_string(),
+                        Invocation::new(
+                            "routing.set_midi_output",
+                            json!({ "track": track, "to": { "name": name, "channel": n } }),
+                        ),
+                        n == *channel,
+                    )
+                })
+                .collect(),
+            pending: None,
+        },
+        None => Chooser {
+            name: "Output Channel",
+            text: String::new(),
+            entries: Vec::new(),
+            pending: None,
+        },
+    }
 }
 
 /// The output channel: Track In with a track chosen (observed; in Live 12

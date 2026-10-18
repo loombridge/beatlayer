@@ -312,7 +312,7 @@ fn a_late_message_is_sent_at_once_and_counted() {
             },
         )
         .unwrap();
-    let mut producer = ports.attach_output(64);
+    let mut producer = ports.output().attach(64);
 
     let late = MidiMessage::note_on(0, 60, 100);
     let early = MidiMessage::note_on(0, 62, 100);

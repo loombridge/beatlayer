@@ -1198,7 +1198,7 @@ impl DeviceView {
         // track that can't hold it goes on a new MIDI track at the end.
         let new_track = !role.fits(kind);
         let id: DeviceId = editor.new_id();
-        let device = new_device(id, args);
+        let device = new_device(id, args, &self.types);
         let default = user_library
             .map(|library| preset::default_preset_path(library, &device))
             .filter(|path| path.is_file())
@@ -1284,7 +1284,7 @@ impl DeviceView {
             .index
             .unwrap_or_else(|| index_among(&roles, args.device.role, after));
         let id: DeviceId = editor.new_id();
-        let device = new_device(id, args);
+        let device = new_device(id, args, &self.types);
         let default = user_library
             .map(|library| preset::default_preset_path(library, &device))
             .filter(|path| path.is_file())
@@ -1531,14 +1531,20 @@ impl DeviceView {
 
 /// A new device as `device.add` makes it: a rack of its kind, or a device of
 /// the type and role the arguments name.
-fn new_device(id: DeviceId, args: &AddDeviceArgs) -> Device {
+fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Device {
     if let DeviceKind::Rack { kind } = args.device.kind {
         return Device::rack(id, kind);
     }
+    let known = types.iter().find(|t| t.kind == args.device.kind);
     let mut device = Device::new(id, args.device.name.clone(), args.device.kind.clone())
         .with_role(args.device.role);
-    if args.device.sidechain {
+    if args.device.sidechain || known.is_some_and(|t| t.sidechain) {
         device = device.with_sidechain();
+    }
+    // Spec: external-devices R9. A device whose type works with hardware
+    // starts with its routing, which `device.set_external` sets.
+    if known.is_some_and(|t| t.external) {
+        device = device.with_external();
     }
     device
 }

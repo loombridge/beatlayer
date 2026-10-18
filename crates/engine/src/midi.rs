@@ -358,12 +358,10 @@ impl MidiRoutes {
                 }
             }
         }
-        let outgoing = if outs.is_empty() {
-            Vec::new()
-        } else {
-            Vec::with_capacity(MIDI_OUT_PER_BLOCK)
-        };
-        let orphans = Vec::with_capacity(if outs.is_empty() { 0 } else { ORPHANS });
+        // Room even with no route of its own: the note-offs of routes this
+        // program removes leave through it.
+        let outgoing = Vec::with_capacity(MIDI_OUT_PER_BLOCK);
+        let orphans = Vec::with_capacity(ORPHANS);
         Self {
             routes,
             outs,

@@ -14,6 +14,7 @@
 //! | [`THROUGH`] | passes its input through untouched (WP-2.4) | none |
 //! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
 //! | [`DELAY`] | delays every sample by its frames, and reports that latency (WP-2.11) | the frames |
+//! | [`EXTERNAL`] | replaces its input with what an external device brings back from the interface (WP-5.34) | none |
 //!
 //! [`GAIN`] and [`THROUGH`] are offered as device types ([`gain_type`],
 //! [`through_type`]), audio effects named "Test Gain" and "Test
@@ -53,6 +54,8 @@ pub const KEY: &str = "test.key";
 pub const INSTRUMENT: &str = "test.instrument";
 /// The delay node's device type (WP-2.11).
 pub const DELAY: &str = "test.delay";
+/// The external instrument stand-in's device type (WP-5.34).
+pub const EXTERNAL: &str = "test.external";
 /// The transposing MIDI effect's device type (WP-5.1).
 pub const TRANSPOSE: &str = "test.transpose";
 /// The transposing MIDI effect's shift, in semitones.
@@ -88,6 +91,13 @@ pub fn through_type() -> DeviceType {
 #[must_use]
 pub fn key_type() -> DeviceType {
     DeviceType::native(KEY, "Test Sidechain", DeviceRole::AudioEffect).with_sidechain()
+}
+
+/// The external instrument stand-in as a device type: an instrument named
+/// "Test External", with routing to hardware.
+#[must_use]
+pub fn external_type() -> DeviceType {
+    DeviceType::native(EXTERNAL, "Test External", DeviceRole::Instrument).with_external()
 }
 
 /// A note event recorded by the test instrument with its song frame position.
@@ -179,6 +189,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         p.note_consumers.lock().unwrap().push(consumer);
         Box::new(TestInstrument {
             producer,
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(external_type(), move |_, _| {
+        Box::new(External {
             _tracked: Tracked::new(&p),
         })
     });
@@ -411,6 +427,24 @@ struct Through {
 
 impl Node for Through {
     fn process(&mut self, _block: &mut Block<'_>) {}
+}
+
+/// Plays what comes back from the interface: the channels its routing names,
+/// mapped by the program.
+#[derive(Debug)]
+struct External {
+    _tracked: Tracked,
+}
+
+impl Node for External {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for c in 0..block.channels() {
+            match block.external(c) {
+                Some(returned) => block.channel_mut(c).copy_from_slice(returned),
+                None => block.channel_mut(c).fill(0.0),
+            }
+        }
+    }
 }
 
 /// Multiplies its input by what its detector hears while its sidechain is

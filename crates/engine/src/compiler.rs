@@ -426,6 +426,30 @@ impl Compiler {
         self.compile_with(&document, &Resend::default())
     }
 
+    /// Reports the audio interface's round trip now (the device's reported
+    /// input and output latency, and Driver Error Compensation), as
+    /// the device reports it after a measurement or the compensation
+    /// changes: external devices report it to delay compensation (the
+    /// external devices spec, R13), so the last document is compiled again
+    /// with the new figure. Nothing if it is unchanged, or the set holds no
+    /// external device.
+    pub fn round_trip(&mut self, frames: u32) -> Update {
+        if self.config.round_trip_latency == frames {
+            return Update::default();
+        }
+        self.config.round_trip_latency = frames;
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        if !document
+            .tracks()
+            .any(|track| track.devices_deep().any(|d| d.external.is_some()))
+        {
+            return Update::default();
+        }
+        self.compile_with(&document, &Resend::default())
+    }
+
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
     fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {

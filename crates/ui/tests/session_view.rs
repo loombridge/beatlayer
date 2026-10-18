@@ -716,7 +716,8 @@ fn enter_launches_the_selected_clip_and_scene() {
 }
 
 // Spec: session-view R31. The launch buttons reach AccessKit named with
-// their track and scene; the follow-action switch is there, disabled.
+// their track and scene; the follow-action switch is there, on, and a click
+// turns it off.
 #[test]
 fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {
     let mut h = harness();
@@ -736,7 +737,17 @@ fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {
         assert!(!node.disabled, "{label}");
         assert!(node.bounds.is_some(), "{label}");
     }
+    // Spec: follow-actions R8
     let follow = common::Harness::node(&nodes, "Enable Follow Actions Globally");
-    assert!(follow.disabled);
-    assert!(follow.description.contains("WP-3.10"));
+    assert!(!follow.disabled);
+    assert_eq!(follow.toggled, Some(true));
+    let b = follow.bounds.unwrap();
+    h.click(egui::pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    assert!(!h.shell.launch_settings().follow_actions);
+    let nodes = common::Harness::nodes(&h.settle());
+    let follow = common::Harness::node(&nodes, "Enable Follow Actions Globally");
+    assert_eq!(follow.toggled, Some(false));
 }

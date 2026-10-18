@@ -1526,6 +1526,7 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
         .session(SessionCommand::SetQuantization(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         }));
 
     // Launch the slot's clip by ID. With the transport stopped the launch

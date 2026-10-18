@@ -20,6 +20,8 @@
 //! track's Arrangement clips silent, and only Back to Arrangement gives the
 //! track back; a clip that stops doesn't.
 
+mod follow;
+
 use core::fmt;
 
 use bl_commands::Context::{self, Global, Session};
@@ -29,6 +31,9 @@ use bl_model::{LaunchMode, LaunchQuantization, LaunchSettings, SceneId, TrackId}
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
+
+use follow::FollowState;
+pub(crate) use follow::FollowTable;
 
 /// How many launched scenes can wait for their frame at once (WP-3.5).
 const SCENE_APPLIES: usize = 8;
@@ -235,6 +240,17 @@ struct Slot {
     /// Whether the queued restart is one Repeat queued itself, which a
     /// release turns into the stop (R21).
     auto: bool,
+    /// Where the clip's follow action is (WP-3.10).
+    follow: FollowState,
+}
+
+/// The follow action of the scene launched last, which runs from the line it
+/// launched on (WP-3.10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SceneRun {
+    scene: SceneId,
+    line: Ticks,
+    follow: FollowState,
 }
 
 impl Slot {
@@ -286,6 +302,8 @@ pub(crate) struct SessionLauncher {
     pub(crate) log: Vec<SessionEvent>,
     /// Launches dropped because every slot was taken.
     pub(crate) overflowed: u64,
+    /// The follow action of the scene launched last (WP-3.10).
+    scene_run: Option<SceneRun>,
 }
 
 impl SessionLauncher {
@@ -301,6 +319,7 @@ impl SessionLauncher {
             marks: Vec::with_capacity(capacity),
             log: Vec::with_capacity(capacity * 4),
             overflowed: 0,
+            scene_run: None,
         }
     }
 
@@ -324,6 +343,7 @@ impl SessionLauncher {
         self.overridden.clear();
         self.stopped.clear();
         self.marks.clear();
+        self.scene_run = None;
     }
 
     /// The tick of the grid line a launch or a stop asked for now waits for:
@@ -411,6 +431,7 @@ impl SessionLauncher {
         for &(_, track, _) in slots {
             self.press_at(track, scene, LaunchMode::Trigger, line, at);
         }
+        self.start_scene_run(scene, line);
         at
     }
 
@@ -463,6 +484,16 @@ impl SessionLauncher {
             slot.started = slot.started.map(&convert);
             slot.due = slot.due.map(&convert);
             slot.then_stop = slot.then_stop.map(&convert);
+            if let FollowState::Armed { due, .. } = &mut slot.follow {
+                *due = convert(*due);
+            }
+        }
+        if let Some(SceneRun {
+            follow: FollowState::Armed { due, .. },
+            ..
+        }) = &mut self.scene_run
+        {
+            *due = convert(*due);
         }
         for (_, due) in &mut self.scenes {
             *due = convert(*due);
@@ -483,6 +514,10 @@ impl SessionLauncher {
     pub(crate) fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
         if self.find_mut(track, scene).is_none() {
             self.press_at(track, scene, LaunchMode::Trigger, Ticks::ZERO, at);
+            // The launch tick is unknown, so a recorded clip follows nothing.
+            if let Some(slot) = self.find_mut(track, scene) {
+                slot.follow = FollowState::Spent;
+            }
         }
     }
 
@@ -513,6 +548,7 @@ impl SessionLauncher {
                 line,
                 repeating,
                 auto: false,
+                follow: FollowState::Unarmed,
             });
             return;
         };
@@ -569,7 +605,10 @@ impl SessionLauncher {
         let at = self.frame_for(playhead);
         match track {
             Some(track) => self.mark(track, at),
-            None => tracks.iter().for_each(|&track| self.mark(track, at)),
+            None => {
+                tracks.iter().for_each(|&track| self.mark(track, at));
+                self.scene_run = None;
+            }
         }
         for slot in &mut self.slots {
             if track.is_some_and(|only| slot.track != only) {
@@ -656,6 +695,9 @@ impl SessionLauncher {
             }
         }
         self.slots.retain(|slot| !returned(slot.track));
+        if track.is_none() {
+            self.scene_run = None;
+        }
         self.marks.retain(|&(t, _)| !returned(t));
         self.overridden.retain(|&t| !returned(t));
         self.stopped.retain(|&(t, _)| !returned(t));
@@ -706,6 +748,7 @@ impl SessionLauncher {
                 slot.started = Some(due);
                 slot.restart = false;
                 slot.auto = false;
+                slot.follow = FollowState::Unarmed;
                 let then_stop = slot.then_stop.take();
                 if let Some(stop) = then_stop {
                     slot.due = Some(stop);
@@ -765,6 +808,8 @@ impl SessionLauncher {
             .filter_map(|slot| slot.due)
             .chain(self.scenes.iter().map(|&(_, due)| due))
             .chain(self.marks.iter().map(|&(_, due)| due))
+            .chain(self.slots.iter().filter_map(|slot| slot.follow.due()))
+            .chain(self.scene_run.and_then(|run| run.follow.due()))
             .filter(|&due| due > at)
             .min()
     }
@@ -1400,6 +1445,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.press(
             track,
@@ -1427,6 +1473,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::Sixteenth,
             enabled: true,
+            ..LaunchSettings::default()
         });
         assert_eq!(
             launcher.next_due(Frames::ZERO),
@@ -1536,6 +1583,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.release(
             track,
@@ -1646,6 +1694,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::Quarter,
             enabled: true,
+            ..LaunchSettings::default()
         });
         let on = |at| playhead(&tempo, &sigs, true, at);
         launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::ZERO));
@@ -1679,6 +1728,7 @@ mod tests {
         launcher.set_settings(LaunchSettings {
             quantization: LaunchQuantization::None,
             enabled: true,
+            ..LaunchSettings::default()
         });
         launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::QUARTER * 5));
         launcher.apply_due(frame(Ticks::QUARTER * 5));

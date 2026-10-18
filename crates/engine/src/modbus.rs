@@ -11,8 +11,11 @@
 //! No allocation, lock or blocking call is involved: the rows are one buffer
 //! made with the program.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use bl_core::time::{SampleRate, TempoMap};
-use bl_model::modulator::SLOTS;
+use bl_model::modulator::{Mapping, ModTarget, SLOTS};
+use bl_model::{Device, DeviceId, Document, Track, TrackId};
 
 use crate::node::{NodeEvent, TransportInfo};
 
@@ -116,6 +119,78 @@ impl Control<'_> {
             let value = if index % 2 == 0 { 0.0 } else { NOT_HELD };
             self.row_mut(index).fill(value);
         }
+    }
+}
+
+/// Where a modulator's rows sit on the bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModRow {
+    /// The first row of its [`ROWS`]: what it writes for the part being run.
+    pub(crate) direct: u32,
+    /// For a modulator driven by audio, notes or MIDI, the first row of the
+    /// [`ROWS`] holding what it wrote 32 frames ago (WP-5.11; the modulation
+    /// spec, R28), for a target that runs before it in its own chain.
+    pub(crate) late: Option<u32>,
+}
+
+/// The modulators of a program: where their rows sit and which tracks wait
+/// on which (WP-5.11).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ModRows {
+    pub(crate) rows: BTreeMap<DeviceId, ModRow>,
+    /// `(a, b)`: track `b`, which holds a parameter a modulator on track `a`
+    /// maps, runs after `a` (R28).
+    pub(crate) waits: BTreeSet<(TrackId, TrackId)>,
+}
+
+impl ModRows {
+    /// The row the slot of `device`, on `owner`, mapping `mapping`, is read
+    /// from: its direct row, its late row where the target runs before the
+    /// modulator in the same chain (R28), or none where the mapping carries
+    /// nothing because the tracks would wait on each other.
+    pub(crate) fn row_of(
+        &self,
+        document: &Document,
+        owner: &Track,
+        device: &Device,
+        mapping: &Mapping,
+    ) -> Option<u32> {
+        let row = self.rows.get(&device.id)?;
+        let Some(late) = row.late else {
+            return Some(row.direct);
+        };
+        let track = document.target_track(mapping.target)?;
+        if track != owner.id() {
+            return self
+                .waits
+                .contains(&(owner.id(), track))
+                .then_some(row.direct);
+        }
+        let position = |id: DeviceId| owner.devices_deep().position(|d| d.id == id);
+        // Sends run as their return track's inputs, before its chain; a
+        // mixer after it; a device in the order of the chain.
+        let lagged = match mapping.target {
+            ModTarget::Mixer { .. } => false,
+            ModTarget::Send { .. } => true,
+            ModTarget::Device { device: target, .. } => position(target)
+                .zip(position(device.id))
+                .is_some_and(|(t, m)| t <= m),
+        };
+        Some(if lagged { late } else { row.direct })
+    }
+
+    /// Whether any mapping of a modulator driven by audio, notes or MIDI
+    /// reads a late row: the program then runs in parts of at most 32 frames.
+    pub(crate) fn any_late(&self, document: &Document) -> bool {
+        document.tracks().any(|owner| {
+            owner.devices_deep().any(|device| {
+                self.rows.get(&device.id).is_some_and(|r| r.late.is_some())
+                    && device.mappings.iter().any(|mapping| {
+                        self.row_of(document, owner, device, mapping)
+                            .is_some_and(|row| Some(row) == self.rows[&device.id].late)
+                    })
+            })
+        })
     }
 }
 

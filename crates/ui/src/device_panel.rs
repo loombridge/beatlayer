@@ -200,7 +200,27 @@ pub fn show(
         }
         // Spec: device-framework R36. The device's own drawing fills its
         // first cell, and a screen reader hears its readings.
-        let shown = display.filter(|d| index == 0 && has_drawing(d));
+        // A cell named like one of the display's series draws only that
+        // series (the Play Mod's tabs); otherwise the first cell draws it all.
+        let own;
+        let shown = match display {
+            Some(d) if d.series.iter().any(|s| s.name == name) => {
+                own = DeviceDisplay {
+                    series: d
+                        .series
+                        .iter()
+                        .filter(|s| s.name == name)
+                        .cloned()
+                        .collect(),
+                    markers: Vec::new(),
+                    readings: Vec::new(),
+                    ..d.clone()
+                };
+                Some(&own)
+            }
+            Some(d) if index == 0 && has_drawing(d) => Some(d),
+            _ => None,
+        };
         if let Some(display) = shown {
             crate::device_display::draw(
                 ui,

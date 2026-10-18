@@ -150,8 +150,16 @@ pub struct EngineProgram {
     /// The slots of the modulators, in the order their rows sit on the bus:
     /// run before any task, each over the block's frames (WP-5.10).
     pub(crate) modulators: Vec<u32>,
-    /// The modulators' rows: [`ROWS`] per modulator, one value per frame,
-    /// `max_frames` apart.
+    /// Which of the modulators work their output out while their tracks run
+    /// (WP-5.11): their places among `modulators`, in order. After the
+    /// modulators' rows the bus holds, for each, the rows of what it wrote
+    /// 32 frames ago.
+    pub(crate) signals: Vec<u32>,
+    /// Whether a target reads such a late row, so the program runs in parts
+    /// of at most 32 frames (R28).
+    pub(crate) lagged: bool,
+    /// The modulators' rows: [`ROWS`] per modulator, then per signal
+    /// modulator, one value per frame, `max_frames` apart.
     pub(crate) bus: Vec<f32>,
     /// The note-offs of devices that were removed or moved when this program
     /// replaced the last, waiting for the first block.
@@ -160,6 +168,10 @@ pub struct EngineProgram {
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
 }
+
+/// The frames a late row (WP-5.11) lags its modulator's by, and the longest
+/// part a program with one runs in.
+pub(crate) const LAG_FRAMES: usize = 32;
 
 /// How many note-offs a program swap holds for the devices it removed or
 /// moved; more are dropped and counted.
@@ -324,10 +336,22 @@ pub(crate) struct NodeSlot {
     /// The frames a parameter change aimed at this node is held back, so
     /// automation lines up with the compensated audio (WP-2.11).
     pub(crate) delay: u32,
-    /// Whether the node is a modulator: [`EngineProgram::run`] works its
-    /// output out before the tasks (WP-5.10), and it leaves the chain's
-    /// signal as it is.
-    pub(crate) modulator: bool,
+    /// Whether the node is a modulator, and how it works its output out.
+    pub(crate) modulator: ModKind,
+}
+
+/// How a modulator node works its rows out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModKind {
+    /// Not a modulator.
+    None,
+    /// [`EngineProgram::run`] works its output out before the tasks
+    /// (WP-5.10), and it leaves the chain's signal as it is.
+    Control,
+    /// It works its output out while its track runs, hearing the audio,
+    /// notes or MIDI at its place in the chain (WP-5.11); its rows sit at
+    /// this place among the bus's modulators.
+    Signal(u32),
 }
 
 /// A node that moves from the program before into this one.
@@ -924,6 +948,7 @@ impl EngineProgram {
                         notes_out: Some(&mut self.note_buffers[0]),
                         session,
                         modulation: Bus::new(&self.bus, stride, frames),
+                        rows: None,
                     });
                 }
             }
@@ -1117,6 +1142,7 @@ impl EngineProgram {
                     notes_out: None,
                     session,
                     modulation: Bus::new(&self.bus, stride, frames),
+                    rows: None,
                 });
             }
         }
@@ -1127,7 +1153,10 @@ impl EngineProgram {
     /// Works out every modulator's rows over `frames` frames, in the order of
     /// their rows, before any task runs (WP-5.10; the modulation spec, R20).
     /// A modulator switched off, or one that doesn't give rows, leaves its
-    /// rows idle. Returns how many changes reached a modulator.
+    /// rows idle. A modulator driven by the signal (WP-5.11) leaves its
+    /// rows idle here, to be written when its track runs; it fills the
+    /// rows of what it wrote 32 frames ago instead. Returns how many
+    /// changes reached a modulator.
     fn run_modulators(
         &mut self,
         frames: usize,
@@ -1141,11 +1170,14 @@ impl EngineProgram {
         let mut delivered = 0;
         for m in 0..self.modulators.len() {
             let slot = self.modulators[m];
-            delivered += gather(events, slot, from, until, scratch);
+            let signal = matches!(self.slots[slot as usize].modulator, ModKind::Signal(_));
+            if !signal {
+                delivered += gather(events, slot, from, until, scratch);
+            }
             let (earlier, rest) = self.bus.split_at_mut(m * ROWS * stride);
             let mut ctl = Control {
                 frames,
-                events: scratch.as_slice(),
+                events: if signal { &[] } else { scratch.as_slice() },
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
@@ -1158,10 +1190,34 @@ impl EngineProgram {
                 ctl.idle();
                 continue;
             };
-            if *bypass {
+            if signal {
+                ctl.idle();
+            } else if *bypass {
                 node.flush(ctl.events);
                 ctl.idle();
             } else if !node.control(&mut ctl) {
+                ctl.idle();
+            }
+        }
+        for k in 0..self.signals.len() {
+            let slot = self.modulators[self.signals[k] as usize];
+            let at = (self.modulators.len() + k) * ROWS * stride;
+            let mut ctl = Control {
+                frames,
+                events: &[],
+                transport,
+                sample_rate: self.sample_rate,
+                tempo: &self.tempo,
+                earlier: Bus::EMPTY,
+                out: &mut self.bus[at..at + ROWS * stride],
+                stride,
+            };
+            let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
+            let wrote = match node.as_mut().and_then(Instance::as_node) {
+                Some(node) if !*bypass => node.control(&mut ctl),
+                _ => false,
+            };
+            if !wrote {
                 ctl.idle();
             }
         }
@@ -1435,7 +1491,8 @@ impl EngineProgram {
             }
             // A modulator worked out its rows before the tasks ran and
             // leaves the chain's audio and notes as they are.
-            if self.slots[slot as usize].modulator {
+            let modulator = self.slots[slot as usize].modulator;
+            if modulator == ModKind::Control {
                 let [in_buf, out_buf] = self
                     .note_buffers
                     .get_disjoint_mut([pair + note_idx, pair + 1 - note_idx])
@@ -1468,6 +1525,13 @@ impl EngineProgram {
                 note_idx = 1 - note_idx;
                 continue;
             }
+            // A modulator driven by the signal writes its own rows, and
+            // hears the rows of the modulators before it.
+            let split = match modulator {
+                ModKind::Signal(m) => m as usize * ROWS * stride,
+                _ => self.bus.len(),
+            };
+            let (earlier, rest) = self.bus.split_at_mut(split);
             node.process(&mut Block {
                 data: &mut self.pool[own.clone()],
                 channels,
@@ -1483,7 +1547,8 @@ impl EngineProgram {
                 notes: in_buf.notes(),
                 notes_out: Some(out_buf),
                 session: pass.session,
-                modulation: Bus::new(&self.bus, stride, frames),
+                modulation: Bus::new(earlier, stride, frames),
+                rows: matches!(modulator, ModKind::Signal(_)).then(|| &mut rest[..ROWS * stride]),
             });
             note_idx = 1 - note_idx;
             // Sidechain Listen: the device's output is what it heard.
@@ -1598,6 +1663,7 @@ impl EngineProgram {
                         notes_out: None,
                         session: pass.session,
                         modulation: Bus::new(&self.bus, stride, frames),
+                        rows: None,
                     });
                 } else {
                     mixer.flush(pass.scratch);

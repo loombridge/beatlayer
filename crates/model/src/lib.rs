@@ -69,6 +69,7 @@ mod document;
 mod editor;
 mod error;
 pub mod fader;
+pub mod graph;
 mod ids;
 mod launch;
 mod metronome;

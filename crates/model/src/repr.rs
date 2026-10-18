@@ -543,6 +543,7 @@ mod tests {
             x: 0.0,
             y: 0.5,
             bend: 0.25,
+            sustain: false,
         }]);
         doc.apply(&Command::InsertDevice {
             track: audio,

@@ -222,3 +222,126 @@ pub fn notes_through(
     bl_rt::rt_test!({ node.process(&mut block) });
     out.notes().to_vec()
 }
+
+/// What a signal modulator wrote over a run (WP-5.11): the rows it wrote for
+/// its own frames, the rows of what it wrote 32 frames before, which
+/// [`Node::control`] gives before each part, and the notes it sent on.
+pub struct Signal {
+    pub rows: Rows,
+    pub late: Rows,
+    pub notes: Vec<bl_engine::NoteEvent>,
+    /// The audio, each channel.
+    pub audio: Vec<Vec<f32>>,
+}
+
+/// Runs a modulator driven by the signal over `frames` frames in parts of
+/// `block` (at most 32, where a late row is read): each part is `control`
+/// then `process`, each a real-time section. `input` is each channel's
+/// audio (silence past its end), `sidechain` what its detector hears if it
+/// has one, `notes` what it plays (offsets from the run's start) and
+/// `events` its parameter changes.
+#[allow(clippy::too_many_arguments)]
+pub fn signal(
+    node: &mut dyn Node,
+    frames: usize,
+    block: usize,
+    input: &[Vec<f32>],
+    sidechain: Option<&[Vec<f32>]>,
+    notes: &[bl_engine::NoteEvent],
+    events: &[NodeEvent],
+    tempo: &TempoMap,
+    transport: impl Fn(usize) -> TransportInfo,
+) -> Signal {
+    use bl_engine::modbus::{Bus, Control, ROWS};
+
+    let mut rows: Vec<Vec<f32>> = (0..ROWS).map(|_| Vec::with_capacity(frames)).collect();
+    let mut late: Vec<Vec<f32>> = (0..ROWS).map(|_| Vec::with_capacity(frames)).collect();
+    let mut sent = Vec::new();
+    let mut audio: Vec<Vec<f32>> = (0..CHANNELS).map(|_| Vec::with_capacity(frames)).collect();
+    let mut done = 0;
+    while done < frames {
+        let length = block.min(frames - done);
+        let at = transport(done);
+        let here: Vec<NodeEvent> = events
+            .iter()
+            .filter(|e| (e.offset as usize) >= done && (e.offset as usize) < done + length)
+            .map(|e| NodeEvent {
+                offset: e.offset - done as u32,
+                ..*e
+            })
+            .collect();
+        let played: Vec<bl_engine::NoteEvent> = notes
+            .iter()
+            .filter(|n| (n.offset as usize) >= done && (n.offset as usize) < done + length)
+            .map(|n| bl_engine::NoteEvent {
+                offset: n.offset - done as u32,
+                ..*n
+            })
+            .collect();
+        // The part's late rows, before it runs.
+        let mut out = vec![0.0f32; ROWS * length];
+        {
+            let mut ctl = Control {
+                frames: length,
+                events: &[],
+                transport: at,
+                sample_rate: RATE,
+                tempo,
+                earlier: Bus::EMPTY,
+                out: &mut out,
+                stride: length,
+            };
+            let node = &mut *node;
+            bl_rt::rt_test!({
+                assert!(node.control(&mut ctl), "the node writes late rows");
+            });
+        }
+        for (row, values) in late.iter_mut().zip(out.chunks(length)) {
+            row.extend_from_slice(values);
+        }
+        let slice = |source: &[Vec<f32>], c: usize| -> Vec<f32> {
+            (done..done + length)
+                .map(|i| {
+                    source
+                        .get(c)
+                        .and_then(|ch| ch.get(i))
+                        .copied()
+                        .unwrap_or(0.0)
+                })
+                .collect()
+        };
+        let mut data: Vec<f32> = (0..CHANNELS).flat_map(|c| slice(input, c)).collect();
+        let key: Option<Vec<f32>> =
+            sidechain.map(|s| (0..CHANNELS).flat_map(|c| slice(s, c)).collect());
+        let mut rows_out = vec![0.0f32; ROWS * length];
+        let mut notes_out = bl_engine::NoteBuffer::with_capacity(8192);
+        {
+            let mut block = Block::new(&mut data, CHANNELS, length, length, &here, at, RATE)
+                .with_tempo(tempo)
+                .with_notes(&played, &mut notes_out)
+                .with_rows(&mut rows_out);
+            if let Some(key) = &key {
+                block = block.with_sidechain(key);
+            }
+            let node = &mut *node;
+            bl_rt::rt_test!({ node.process(&mut block) });
+        }
+        for (row, values) in rows.iter_mut().zip(rows_out.chunks(length)) {
+            row.extend_from_slice(values);
+        }
+        sent.extend(notes_out.notes().iter().map(|n| bl_engine::NoteEvent {
+            offset: n.offset + done as u32,
+            ..*n
+        }));
+        for (channel, values) in audio.iter_mut().zip(data.chunks(length)) {
+            channel.extend_from_slice(values);
+        }
+        done += length;
+    }
+    Signal {
+        rows: Rows(rows),
+        late: Rows(late),
+        notes: sent,
+        audio,
+    }
+}

@@ -1452,6 +1452,13 @@ impl Processor {
             .filter(|&ahead| ahead > 0 && ahead < remaining as u64)
             .min()
             .map_or(remaining, |ahead| ahead as usize);
+        // Spec: modulation R28. A target that runs before the modulator
+        // driven by its signal takes the modulator's output from 32 frames
+        // before, which the modulator has written by the part's start only
+        // if the part is no longer than that.
+        if self.program.as_ref().is_some_and(|p| p.get().lagged) {
+            next = next.min(crate::program::LAG_FRAMES);
+        }
         if !self.playing {
             return next;
         }

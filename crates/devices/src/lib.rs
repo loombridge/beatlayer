@@ -34,19 +34,24 @@ pub mod delay;
 pub mod dice;
 pub mod eq;
 mod framework;
+pub mod gate_mod;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
+pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+mod signal_mod;
 pub mod stack;
+pub mod strike_mod;
 pub mod testing;
 pub mod touch;
 pub mod utility;
@@ -88,6 +93,14 @@ pub fn display(
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
+        bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
+        bl_model::modulator::STRIKE_MOD => {
+            Some(strike_mod::display(device, description, values, data))
+        }
+        bl_model::modulator::GATE_MOD => Some(gate_mod::display(device, description, values, data)),
+        bl_model::modulator::LEVEL_MOD => {
+            Some(level_mod::display(device, description, values, data))
+        }
         _ => None,
     }
 }
@@ -106,6 +119,10 @@ pub fn register(registry: &mut Registry) {
     sampler::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
+    level_mod::register(registry);
+    gate_mod::register(registry);
+    strike_mod::register(registry);
+    play_mod::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);

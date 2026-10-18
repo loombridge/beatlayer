@@ -19,8 +19,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, ModKind,
+    NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -154,7 +154,7 @@ pub struct Compiler {
     sources: ClipSources,
     /// Where each modulator's rows sit on the last program's bus
     /// (WP-5.10).
-    modulator_rows: BTreeMap<DeviceId, u32>,
+    modulator_rows: crate::modbus::ModRows,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
 }
@@ -191,7 +191,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
-            modulator_rows: BTreeMap::new(),
+            modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
         }
     }
@@ -299,7 +299,11 @@ impl Compiler {
         };
         let changes = ChangeSet::between(&old, document);
         let mut params = Vec::new();
-        let recompile = needs_program(&changes, &old, document, &mut params);
+        // Spec: modulation R28. A mapping of a modulator driven by audio,
+        // notes or MIDI changes which track waits for which, and which rows
+        // its target reads.
+        let recompile = needs_program(&changes, &old, document, &mut params)
+            || signal_mappings(&old) != signal_mappings(document);
         route_events(&changes, &old, document, &mut params);
         // Tracks that held or hold a clip that changed: their players get
         // their clips again, and their nodes their envelopes again, since a
@@ -361,7 +365,7 @@ impl Compiler {
                 let shape = after
                     .shape
                     .clone()
-                    .unwrap_or_else(bl_model::modulator::default_shape);
+                    .unwrap_or_else(|| bl_model::modulator::default_shape_of(&after.kind));
                 update.data.push((
                     NodeKey::Device(id),
                     self.gc.data(crate::modbus::Shape(shape)),
@@ -556,7 +560,17 @@ impl Compiler {
                 _ => None,
             })
             .collect();
-        let (order, dependents) = run_order(&build);
+        // Spec: modulation R28. A track holding a parameter a modulator
+        // driven by audio, notes or MIDI maps waits for the modulator's.
+        let waits = graph.modulator_edges(document);
+        let wait_tasks: Vec<(u32, u32)> = waits
+            .iter()
+            .filter_map(|(from, to)| Some((*task_of.get(from)?, *task_of.get(to)?)))
+            .collect();
+        for &(_, to) in &wait_tasks {
+            build.tasks[to as usize].dependencies += 1;
+        }
+        let (order, dependents) = run_order(&build, &wait_tasks);
         compensate(&mut build, &order);
         // Automation is placed with each node's delay in it (WP-2.11), so
         // remember what every node's turned out to be.
@@ -599,6 +613,27 @@ impl Compiler {
             || document.settings().time_signatures.clone(),
             |(_, map)| map.clone(),
         );
+        let modulators = build.modulators.len();
+        let mod_rows = crate::modbus::ModRows {
+            rows: build
+                .modulators
+                .iter()
+                .enumerate()
+                .map(|(m, &(_, device))| {
+                    let late = build
+                        .signals
+                        .iter()
+                        .position(|&s| s as usize == m)
+                        .map(|k| ((modulators + k) * crate::modbus::ROWS) as u32);
+                    let row = crate::modbus::ModRow {
+                        direct: crate::modbus::row(m as u32, 0),
+                        late,
+                    };
+                    (device, row)
+                })
+                .collect(),
+            waits: waits.iter().copied().collect(),
+        };
         let program = EngineProgram {
             generation,
             base,
@@ -648,14 +683,16 @@ impl Compiler {
             releases: crate::program::Releases::new(),
             midi,
             modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
-            bus: vec![0.0; build.modulators.len() * crate::modbus::ROWS * self.config.max_frames],
+            lagged: mod_rows.any_late(document),
+            bus: vec![
+                0.0;
+                (build.modulators.len() + build.signals.len())
+                    * crate::modbus::ROWS
+                    * self.config.max_frames
+            ],
+            signals: build.signals,
         };
-        self.modulator_rows = build
-            .modulators
-            .iter()
-            .enumerate()
-            .map(|(row, &(_, device))| (device, row as u32))
-            .collect();
+        self.modulator_rows = mod_rows;
         self.generation = generation;
         self.layout = build.layout;
         self.displays
@@ -1016,7 +1053,14 @@ impl Compiler {
             // Spec: modulation R20. A modulator works its rows out before
             // any task runs.
             if bl_model::modulator::is_modulator_kind(&device.kind) {
-                build.slots[slot as usize].modulator = true;
+                let row = build.modulators.len() as u32;
+                build.slots[slot as usize].modulator =
+                    if bl_model::modulator::is_signal_kind(&device.kind) {
+                        build.signals.push(row);
+                        ModKind::Signal(row)
+                    } else {
+                        ModKind::Control
+                    };
                 build.modulators.push((slot, device.id));
             }
             steps.push(Step::Node(slot));
@@ -1191,7 +1235,7 @@ fn claim(
         // device is switched on again.
         latency: if bypass { 0 } else { latency },
         delay: 0,
-        modulator: false,
+        modulator: ModKind::None,
     });
     build.layout.insert(
         key,
@@ -1235,6 +1279,9 @@ struct Build {
     /// The modulators' slots and devices, in the order their rows sit on the
     /// bus (WP-5.10).
     modulators: Vec<(u32, DeviceId)>,
+    /// Which of the modulators are driven by the signal (WP-5.11): their
+    /// places among `modulators`.
+    signals: Vec<u32>,
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
@@ -1282,7 +1329,7 @@ fn clips_audible(track: &Track) -> bool {
 /// The order to run the tasks in, each after every task that feeds it and
 /// otherwise in display order (Kahn's algorithm, taking the first ready
 /// task each time), and the tasks waiting on each task.
-fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
+fn run_order(build: &Build, waits: &[(u32, u32)]) -> (Vec<u32>, Vec<Vec<u32>>) {
     let tasks = &build.tasks;
     let mut dependents: Vec<Vec<u32>> = vec![Vec::new(); tasks.len()];
     let mut waiting: Vec<u32> = vec![0; tasks.len()];
@@ -1297,6 +1344,10 @@ fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
             dependents[input.from as usize].push(t as u32);
             waiting[t] += 1;
         }
+    }
+    for &(from, to) in waits {
+        dependents[from as usize].push(to);
+        waiting[to as usize] += 1;
     }
     let mut left = waiting;
     let mut ready: BTreeSet<u32> = (0..tasks.len() as u32)
@@ -1628,6 +1679,17 @@ fn needs_program(
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
     recompile || scene_slots(old) != scene_slots(new)
+}
+
+/// Every modulator driven by audio, notes or MIDI with its mappings: what
+/// decides which tracks wait for which (WP-5.11).
+fn signal_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_signal_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
 }
 
 /// Every modulator in track and chain order with its mappings: what decides

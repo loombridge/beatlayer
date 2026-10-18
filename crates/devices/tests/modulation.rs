@@ -1,5 +1,5 @@
 //! A modulator in an engine (WP-5.10; the modulation spec, R14, R16, R19 and
-//! R20): a LFO on one track modulates or holds a device on another, on
+//! R20): an LFO on one track modulates or holds a device on another, on
 //! the same frames at any block size, whether the song plays or not; a
 //! mapping edited in the document reaches the target without a new program.
 //! Every block runs as a real-time section under the allocation trap.

@@ -99,6 +99,9 @@ pub fn add_folder_id() -> Id {
 pub struct BrowserDrag {
     /// The audio files dragged, in the list's order.
     pub paths: Vec<String>,
+    /// The plug-in dragged, by its Plug-Ins row's key (WP-2.9b): dropped
+    /// on a track, it loads there.
+    pub plugin: Option<String>,
 }
 
 /// What the last frame built.
@@ -692,8 +695,27 @@ impl BrowserUi {
         } else {
             theme.colors.text.0.gamma_multiply(0.92)
         };
+        // Spec: plugin-scanning R11. A plug-in's row shows its format as a
+        // badge before its name, as Live's does.
+        let mut name_left = indent + 12.0;
+        if let Some(format) = item.format {
+            let badge = painter.text(
+                pos2(name_left + 2.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                format_badge(format),
+                theme.small_font(),
+                ink,
+            );
+            painter.rect_stroke(
+                badge.expand2(vec2(2.0, 0.0)),
+                2.0,
+                Stroke::new(1.0, ink),
+                StrokeKind::Inside,
+            );
+            name_left = badge.right() + 6.0;
+        }
         let name = painter.text(
-            pos2(indent + 12.0, rect.center().y),
+            pos2(name_left, rect.center().y),
             Align2::LEFT_CENTER,
             &item.name,
             theme.small_font(),
@@ -738,15 +760,15 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                // Spec: modulation R12. A device loads onto the selected
-                // track.
-                ItemKind::Device => {
+                // Spec: modulation R12, plugin-scanning R11. A device or a
+                // plug-in loads onto the selected track.
+                ItemKind::Device | ItemKind::Plugin => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                ItemKind::Set | ItemKind::Plugin => {}
+                ItemKind::Set => {}
             }
         } else if response.clicked() {
             ui.memory_mut(|m| {
@@ -771,8 +793,22 @@ impl BrowserUi {
             };
             paths.retain(|p| is_audio(p) || is_sfz(p));
             paths.sort_by_key(|p| view.position_of(Path::new(p)));
-            if !paths.is_empty() {
-                DragAndDrop::set_payload(ui.ctx(), BrowserDrag { paths });
+            if item.kind == ItemKind::Plugin {
+                DragAndDrop::set_payload(
+                    ui.ctx(),
+                    BrowserDrag {
+                        paths: Vec::new(),
+                        plugin: Some(item.path.clone()),
+                    },
+                );
+            } else if !paths.is_empty() {
+                DragAndDrop::set_payload(
+                    ui.ctx(),
+                    BrowserDrag {
+                        paths,
+                        plugin: None,
+                    },
+                );
             }
         }
         if response.dragged()
@@ -780,6 +816,7 @@ impl BrowserUi {
             && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         {
             let text = match drag.paths.as_slice() {
+                _ if drag.plugin.is_some() => item.name.clone(),
                 [one] => Path::new(one)
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -811,7 +848,13 @@ impl BrowserUi {
             ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
-            ItemKind::Plugin => "plug-in",
+            ItemKind::Plugin => match item.format {
+                Some(bl_model::PluginFormat::Clap) => "CLAP plug-in",
+                Some(bl_model::PluginFormat::Vst3) => "VST3 plug-in",
+                Some(bl_model::PluginFormat::AudioUnit) => "Audio Unit plug-in",
+                Some(bl_model::PluginFormat::Lv2) => "LV2 plug-in",
+                None => "plug-in",
+            },
             ItemKind::Device => "device",
         };
         response
@@ -1245,6 +1288,30 @@ impl BrowserUi {
                 ignore_snap,
             )
         });
+        let plugin = payload.as_ref().and_then(|p| p.plugin.clone());
+        if let Some(key) = plugin {
+            // Spec: plugin-scanning R11. A plug-in dropped on a track loads
+            // onto it.
+            let track = target.as_ref().and_then(|t| t.track);
+            if track.is_none() && pointer.is_some_and(|p| main_view.contains(p)) {
+                ctx.set_cursor_icon(CursorIcon::NoDrop);
+            }
+            if released {
+                DragAndDrop::clear_payload(&ctx);
+                if let Some(track) = track
+                    && shell.browser_view().plugin(Path::new(&key)).is_some()
+                {
+                    invoke(events, ids::SELECT, json!({ "paths": [key] }));
+                    invoke(
+                        events,
+                        bl_shell::arrangement_commands::SELECT_TRACKS,
+                        json!({ "tracks": [track] }),
+                    );
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+            }
+            return;
+        }
         if let Some(target) = target {
             draw_target(ui, theme, lanes, view, doc, &target, kind);
         } else if pointer.is_some_and(|p| main_view.contains(p)) {
@@ -1427,6 +1494,16 @@ enum Glyph {
     Preset,
     Plugin,
     Speaker,
+}
+
+/// The short name a plug-in row's badge shows for its format.
+fn format_badge(format: bl_model::PluginFormat) -> &'static str {
+    match format {
+        bl_model::PluginFormat::Clap => "CLAP",
+        bl_model::PluginFormat::Vst3 => "VST3",
+        bl_model::PluginFormat::AudioUnit => "AU",
+        bl_model::PluginFormat::Lv2 => "LV2",
+    }
 }
 
 fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {

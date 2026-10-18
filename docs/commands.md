@@ -252,7 +252,7 @@ Each command has:
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
 | [`device.sort_layers`](#devicesort_layers) | Sort Samples | `edit` |  |  |
-| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Simpler | `edit` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
 | [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.update_layers`](#deviceupdate_layers) | Change Sample Settings | `edit` |  |  |
@@ -1826,7 +1826,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
 
 Default keys:
 
@@ -1842,7 +1842,7 @@ Result: [`AddResult`](#addresult).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -1925,7 +1925,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Select in Browser**. Permission: `external`. Contexts: `browser`.
 
-Selects items in the browser's content pane by path, replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
+Selects items in the browser's content pane by path (or, in the Plug-Ins label, by the row's key), replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
 
 Default keys: none.
 
@@ -3290,7 +3290,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Audition Sample**. Permission: `read`. Contexts: `device-view`.
 
-Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Simpler, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
+Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Snapshot, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
 
 Default keys: none.
 
@@ -3363,7 +3363,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Convert Sampler**. Permission: `edit`. Contexts: `device-view`.
 
-Converts Simpler to a multisampler (`to: multisampler`) or a multisampler to Simpler (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Simpler becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Simpler in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
+Converts Snapshot to a multisampler (`to: multisampler`) or a multisampler to Snapshot (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Snapshot becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Snapshot in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
 
 Default keys: none.
 
@@ -3400,7 +3400,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Crop Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the sample outside Simpler's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
+Removes the sample outside Snapshot's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
 
 Default keys: none.
 
@@ -3526,7 +3526,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Simpler's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Simpler and as `edits` in each layer of `layers` for the multisampler.
+Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Snapshot's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Snapshot and as `edits` in each layer of `layers` for the multisampler.
 
 Default keys: none.
 
@@ -3536,7 +3536,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
 | `kind` | [`SampleEditKind`](#sampleeditkind) or null | no | What the edit does. Leave it out with `revert`. |
-| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Simpler has one sample and no layers. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Snapshot has one sample and no layers. |
 | `range` | [`SampleRange`](#samplerange) or null | no | The selection it acts on, in frames of the sample as the earlier edits left it, at its own rate. Left out it acts on the whole sample; Trim and Cut need one. |
 | `revert` | boolean | no | Clears the sample's edit list instead of adding to it. |
 
@@ -4470,9 +4470,9 @@ Result: [`ChangeSet`](#changeset).
 
 #### `device.swap_to_snapshot`
 
-**Swap to Simpler**. Permission: `edit`. Contexts: `device-view`.
+**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces a Drum Sampler with Simpler in One-Shot mode, as Drum Sampler's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Simpler's default. One undo step, named Swap to Simpler, and the new device is selected. A device that isn't a Drum Sampler is refused.
+Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
 
 Default keys: none.
 
@@ -5374,7 +5374,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Map Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+Maps one of a modulator's slots (`slot`, 0 to 7; the Expression Control's are 0 to 4) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. A modulator driven by audio, notes or MIDI (the Envelope Follower, Envelope MIDI, Shaper MIDI and Expression Control) doesn't map another modulator's parameters, nor one on a track that feeds its own track, which would make the two tracks wait on each other. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
 
 Default keys: none.
 
@@ -5392,7 +5392,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Shape**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces the breakpoint shape of a Shaper, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+Replaces the breakpoint shape of a Shaper or a Shaper MIDI, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
 
 Default keys: none.
 
@@ -5409,7 +5409,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Expression Control's are 0 to 4), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
 
 Default keys: none.
 
@@ -5693,7 +5693,7 @@ Result: [`PluginLoaded`](#pluginloaded).
 
 **Rescan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report.
+Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report; with `background`, returns at once and the browser lists what was found when the scan is done.
 
 Default keys: none.
 
@@ -5701,6 +5701,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5709,7 +5710,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Scan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths`, or each format's own system plug-in folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') when `paths` is left out. Plug-ins of every hosted format are scanned. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
+Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
 
 Default keys: none.
 
@@ -5717,6 +5718,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5760,7 +5762,7 @@ Result: [`PluginInfo`](#plugininfo).
 
 **Plug-In Settings**. Permission: `edit`. Contexts: `global`.
 
-Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
+Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and `vst3_system_folders`, all off in a new install; the browser lists a format's plug-ins only while its switch is on (CLAP has none and is always listed), and turning one on scans that format in the background. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
 
 Default keys: none.
 
@@ -5771,6 +5773,9 @@ Arguments:
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The format to prefer when a plug-in exists in several. |
 | `hidden` | array or null | no | The hidden plug-ins to remember, as `format/plugin_id` keys (IMP-07); empty hides none. |
 | `show_hidden` | boolean or null | no | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean or null | no | Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units on macOS. Turning it on scans them. |
+| `use_audio_units_v3` | boolean or null | no | Use Audio Units v3 (Settings ▸ Plug-Ins). Kept; app-extension Audio Units aren't scanned yet. |
+| `vst3_system_folders` | boolean or null | no | Use VST3 Plug-In System Folders (Settings ▸ Plug-Ins): scan and list the VST3 plug-ins in the format's system folders. Turning it on scans them. |
 
 Result: [`PluginSettings`](#pluginsettings).
 
@@ -11556,8 +11561,8 @@ What `device.convert` makes.
 
 One of:
 
-- `"snapshot"`: Simpler, from a multisampler.
-- `"multisampler"`: A multisampler, from Simpler.
+- `"snapshot"`: Snapshot, from a multisampler.
+- `"multisampler"`: A multisampler, from Snapshot.
 
 <details><summary>JSON Schema</summary>
 
@@ -11567,12 +11572,12 @@ One of:
   "oneOf": [
     {
       "const": "snapshot",
-      "description": "Simpler, from a multisampler.",
+      "description": "Snapshot, from a multisampler.",
       "type": "string"
     },
     {
       "const": "multisampler",
-      "description": "A multisampler, from Simpler.",
+      "description": "A multisampler, from Snapshot.",
       "type": "string"
     }
   ]
@@ -12092,7 +12097,7 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
-| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
@@ -12246,7 +12251,7 @@ One device as the Device View shows it.
     },
     "swaps_to_snapshot": {
       "default": false,
-      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
       "type": "boolean"
     },
     "takes_sample": {
@@ -14628,12 +14633,13 @@ One row of the content pane.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | Its path on disk. |
+| `path` | string | yes | Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11). |
 | `name` | string | yes | Its name, as the Name column shows it. |
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
+| `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
 <details><summary>JSON Schema</summary>
 
@@ -14655,6 +14661,17 @@ One row of the content pane.
         "null"
       ]
     },
+    "format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginFormat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -14669,7 +14686,7 @@ One row of the content pane.
       "type": "boolean"
     },
     "path": {
-      "description": "Its path on disk.",
+      "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
     }
   },
@@ -18658,6 +18675,9 @@ What `plugin.settings` returns.
 |---|---|---|---|
 | `hidden` | array of string | yes | The hidden plug-ins, as `format/plugin_id` keys. |
 | `show_hidden` | boolean | yes | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean | yes | Use Audio Units v2. |
+| `use_audio_units_v3` | boolean | yes | Use Audio Units v3. |
+| `vst3_system_folders` | boolean | yes | Use VST3 Plug-In System Folders. |
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The preferred format, if one is chosen. |
 
 <details><summary>JSON Schema</summary>
@@ -18687,11 +18707,26 @@ What `plugin.settings` returns.
     "show_hidden": {
       "description": "Whether the browser shows hidden plug-ins.",
       "type": "boolean"
+    },
+    "use_audio_units_v2": {
+      "description": "Use Audio Units v2.",
+      "type": "boolean"
+    },
+    "use_audio_units_v3": {
+      "description": "Use Audio Units v3.",
+      "type": "boolean"
+    },
+    "vst3_system_folders": {
+      "description": "Use VST3 Plug-In System Folders.",
+      "type": "boolean"
     }
   },
   "required": [
     "hidden",
-    "show_hidden"
+    "show_hidden",
+    "use_audio_units_v2",
+    "use_audio_units_v3",
+    "vst3_system_folders"
   ],
   "type": "object"
 }
@@ -20179,7 +20214,7 @@ What `device.edit_sample` returns.
 | `device` | [`DeviceId`](#deviceid) | yes | The sampler device. |
 | `edits` | array of [`SampleEdit`](#sampleedit) | yes | The sample's edit list now. |
 | `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Simpler's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Snapshot's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20207,7 +20242,7 @@ What `device.edit_sample` returns.
           "type": "null"
         }
       ],
-      "description": "The layer edited; none for Simpler's sample."
+      "description": "The layer edited; none for Snapshot's sample."
     },
     "length": {
       "description": "The edited sample's length in frames at its own rate.",
@@ -20237,7 +20272,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
 | `media` | [`ContentHash`](#contenthash) | yes | The processed copy, now the sample's media. |
 | `path` | string | yes | Where the copy is in the project folder. |
 | `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Simpler's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Snapshot's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20258,7 +20293,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
           "type": "null"
         }
       ],
-      "description": "The layer; none for Simpler's sample."
+      "description": "The layer; none for Snapshot's sample."
     },
     "length": {
       "description": "Its length in frames at its own rate.",
@@ -21252,6 +21287,7 @@ One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there
 | `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
 | `y` | number | yes | The output there, from 0 to 1. |
 | `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+| `sustain` | boolean | no | Whether it is the Shaper MIDI's sustain breakpoint (R26): at most one in a shape. |
 
 <details><summary>JSON Schema</summary>
 
@@ -21263,6 +21299,10 @@ One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there
       "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
       "format": "double",
       "type": "number"
+    },
+    "sustain": {
+      "description": "Whether it is the Shaper MIDI's sustain breakpoint (R26): at most one in a shape.",
+      "type": "boolean"
     },
     "x": {
       "description": "Where in the cycle, from 0 (its start) to 1 (its end).",

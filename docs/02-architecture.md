@@ -173,6 +173,11 @@ How WP-5.10 added modulators ([the modulation spec](specs/modulation.md), R12 to
 - **Targets read the bus.** The compiler gives each target node, on any track, the list of bus rows that map each of its parameters (`AutomationList`); `ParamBank::advance`, the mixer and a send's route add the rows to the clips' modulation in the parameter's travel, and a hold replaces the base. A mapping edit sends the affected lists as node data without a new program. A plug-in's driven parameters read the same rows.
 - **Mappings are the document's.** A mapping lives on its modulator (`Device::mappings`), names its target by track, send or device, goes with its target when it is deleted, and follows a device that moves.
 
+How WP-5.11 added modulators driven by audio, notes and MIDI (the modulation spec, R24 to R29):
+
+- **They work their output out in their track.** The Envelope Follower hears the audio at its place in a chain, the Gate, Strike and Play Mods the notes and MIDI; so they run as nodes in the chain (`ModKind::Signal`), not in the pre-pass, and write their rows into the program's bus through the block (`Block::row_mut`) as they go. The pre-pass idles their rows each part. Their output follows the same 32-frame grid, one step behind its level, so it doesn't depend on the block size.
+- **Waits and the lag.** `Graph::modulator_edges` (the routing graph now lives in `bl-model`, so `modulator.map` can refuse a loop) lists the tracks that wait for a signal modulator's, after every route and with a loop left out; the compiler adds them to the task graph (`run_order`). A target earlier in its modulator's own chain reads a second set of rows (`ModRows::late`) that the modulator fills before each part from what it wrote 32 frames before, and a program that has one runs in parts of at most 32 frames (`Processor::until_next_event`), so the lag is the same at any block size.
+
 ### The mixer
 
 How the mixer works, as WP-1.6 built it ([the mixer spec](specs/mixer.md)):

@@ -48,7 +48,7 @@ impl Key {
 
     /// Whether `note` is about the note this key names: the same channel
     /// and key, and the same ID unless one side has none.
-    fn names(&self, note: &NoteEvent) -> bool {
+    pub(crate) fn names(&self, note: &NoteEvent) -> bool {
         self.channel == note.channel
             && self.key == note.key
             && (self.id.is_none() || note.note_id.is_none() || self.id == note.note_id)

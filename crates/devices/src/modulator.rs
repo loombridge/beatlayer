@@ -107,7 +107,13 @@ pub fn wave_mod_type() -> DeviceType {
             .describe("Freezes the output. Released, it carries on from the held value."),
     ];
     params.extend(shared_params());
-    params.extend(mapping_params());
+    params.extend(mapping_params(
+        SLOTS,
+        (
+            "Depth",
+            "How far the modulator reaches: 0 % none, 100 % full.",
+        ),
+    ));
     DeviceType::native(WAVE_MOD, "LFO", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(wave_layout()))
 }
@@ -135,7 +141,13 @@ pub fn curve_mod_type() -> DeviceType {
             .describe("Snaps breakpoints to the grid as they are placed and dragged."),
     ];
     params.extend(shared_params());
-    params.extend(mapping_params());
+    params.extend(mapping_params(
+        SLOTS,
+        (
+            "Depth",
+            "How far the modulator reaches: 0 % none, 100 % full.",
+        ),
+    ));
     DeviceType::native(CURVE_MOD, "Shaper", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(curve_layout()))
 }
@@ -173,8 +185,9 @@ fn shared_params() -> Vec<ParamDescriptor> {
     ]
 }
 
-/// Mod, Polarity, Depth and each slot's Amount, Min and Max (R13, R14, R16).
-fn mapping_params() -> Vec<ParamDescriptor> {
+/// Mod, Polarity, Depth (named `depth.0`, described by `depth.1`) and each
+/// of `slots` slots' Amount, Min and Max (R13, R14, R16).
+pub(crate) fn mapping_params(slots: u8, depth: (&str, &str)) -> Vec<ParamDescriptor> {
     let mut params = vec![
         ParamDescriptor::choice(MODE, "Mod", &["Modulation", "Remote Control"], 0).describe(
             "Modulation moves each target round its own value. Remote Control sets each target between its Min and Max.",
@@ -182,11 +195,11 @@ fn mapping_params() -> Vec<ParamDescriptor> {
         ParamDescriptor::choice(POLARITY, "Polarity", &["Bipolar", "Unipolar"], 0).describe(
             "Bipolar swings both ways round the target's value, Unipolar one way from it.",
         ),
-        ParamDescriptor::continuous(DEPTH, "Depth", (0.0, 100.0), 100.0, ParamUnit::Percent)
+        ParamDescriptor::continuous(DEPTH, depth.0, (0.0, 100.0), 100.0, ParamUnit::Percent)
             .decimals(0)
-            .describe("How far the modulator reaches: 0 % none, 100 % full."),
+            .describe(depth.1),
     ];
-    for slot in 0..SLOTS {
+    for slot in 0..slots {
         let n = slot + 1;
         params.push(
             ParamDescriptor::continuous(
@@ -225,9 +238,9 @@ fn mapping_params() -> Vec<ParamDescriptor> {
     params
 }
 
-/// The cells of the slots' mappings: slot 1's inside the body, the other
-/// seven in the part Show Multimap adds (R17).
-fn mapping_cells() -> (LayoutNode, LayoutNode) {
+/// The cells of the slots' mappings: slot 1's inside the body, the others
+/// in the part Show Multimap adds (R17).
+pub(crate) fn mapping_cells(slots: u8) -> (LayoutNode, LayoutNode) {
     let cell = |slot: u8| {
         LayoutNode::Cell(
             DisplayCell::new(&format!("Mapping {}", slot + 1), 180.0, BODY_HEIGHT, 1.0)
@@ -241,7 +254,7 @@ fn mapping_cells() -> (LayoutNode, LayoutNode) {
                 )),
         )
     };
-    (cell(0), LayoutNode::Row((1..SLOTS).map(cell).collect()))
+    (cell(0), LayoutNode::Row((1..slots).map(cell).collect()))
 }
 
 fn wave_layout() -> DeviceLayout {
@@ -276,7 +289,7 @@ fn wave_layout() -> DeviceLayout {
             (DEPTH, Widget::Knob),
         ],
     );
-    let (first, rest) = mapping_cells();
+    let (first, rest) = mapping_cells(SLOTS);
     DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(wave),
         LayoutNode::Cell(DisplayCell::new("Wave", 150.0, BODY_HEIGHT, 1.0)),
@@ -323,7 +336,7 @@ fn curve_layout() -> DeviceLayout {
             (DEPTH, Widget::Knob),
         ],
     );
-    let (first, rest) = mapping_cells();
+    let (first, rest) = mapping_cells(SLOTS);
     DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(controls),
         LayoutNode::Cell(display),

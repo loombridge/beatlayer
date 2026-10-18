@@ -204,7 +204,7 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
 
 // Spec: modulation R12.
 #[test]
-fn the_modulators_label_lists_the_two_modulators() {
+fn the_modulators_label_lists_the_six_modulators() {
     let mut shell = Shell::headless();
     let state: BrowserState = run(
         &mut shell,
@@ -212,7 +212,17 @@ fn the_modulators_label_lists_the_two_modulators() {
         json!({ "label": "modulators" }),
     );
     let names: Vec<&str> = state.rows.iter().map(|row| row.name.as_str()).collect();
-    assert_eq!(names, ["LFO", "Shaper"]);
+    assert_eq!(
+        names,
+        [
+            "LFO",
+            "Shaper",
+            "Envelope Follower",
+            "Envelope MIDI",
+            "Shaper MIDI",
+            "Expression Control"
+        ]
+    );
     assert!(
         state
             .rows

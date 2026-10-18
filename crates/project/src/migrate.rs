@@ -132,6 +132,10 @@ const RENAMED_DEVICES: &[(&str, &str, &str)] = &[
     ("beatlayer.stack", "Stack", "Chord"),
     ("beatlayer.touch", "Touch", "Velocity"),
     ("beatlayer.veer", "Veer", "Shifter"),
+    ("beatlayer.level_mod", "Level Mod", "Envelope Follower"),
+    ("beatlayer.gate_mod", "Gate Mod", "Envelope MIDI"),
+    ("beatlayer.strike_mod", "Strike Mod", "Shaper MIDI"),
+    ("beatlayer.play_mod", "Play Mod", "Expression Control"),
 ];
 
 /// The name now for a device of `device_type` called `name` before T197, or

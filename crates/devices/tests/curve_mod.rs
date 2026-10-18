@@ -39,7 +39,12 @@ fn curve(shape: &[ShapePoint], params: &[(ParamId, f64)]) -> Box<dyn Node> {
     node(&registry(), &device, 4_800)
 }
 
-const P: fn(f64, f64, f64) -> ShapePoint = |x, y, bend| ShapePoint { x, y, bend };
+const P: fn(f64, f64, f64) -> ShapePoint = |x, y, bend| ShapePoint {
+    x,
+    y,
+    bend,
+    sustain: false,
+};
 
 // Spec: modulation R23
 #[test]

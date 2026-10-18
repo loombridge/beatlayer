@@ -58,7 +58,7 @@
 //! The rules taken from Live are in the tracks and undo spec.
 
 pub mod automation;
-mod base64;
+pub mod base64;
 mod changes;
 mod clip;
 mod command;

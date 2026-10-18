@@ -16,6 +16,9 @@
 //! preset's name is its file's name. Plug-ins' own state (WP-2.6) will be
 //! a new field, read as absent from schema 1 files.
 //!
+//! Rack and chain presets are schema 2 of the same format
+//! ([`crate::rack_preset`]).
+//!
 //! Presets live in the User Library: `Presets/<category>/<device name>/`
 //! for Save Preset, and `Defaults/<category>/<device name>.blpreset` for Save
 //! as Default Preset, where the category is `Audio Effects`, `Instruments`,
@@ -188,6 +191,11 @@ impl Preset {
     pub fn decode(bytes: &[u8]) -> Result<Self, PresetError> {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| PresetError::Invalid(e.to_string()))?;
+        if value.get("rack").is_some() || value.get("chain").is_some() {
+            return Err(PresetError::Invalid(
+                "it holds a rack or a chain, not a device".to_owned(),
+            ));
+        }
         if value.get("format").and_then(serde_json::Value::as_str) != Some(PRESET_FORMAT) {
             return Err(PresetError::Invalid(format!(
                 "its format isn't \"{PRESET_FORMAT}\""
@@ -247,35 +255,41 @@ impl Preset {
         Self::decode(&fs::read(path).map_err(io)?)
     }
 
-    /// Writes the preset to `path`, making its folder if need be. The file
-    /// is written beside it under a hidden name and renamed into place, so
-    /// `path` holds a whole preset, old or new, whenever the write stops.
+    /// Writes the preset to `path`, making its folder if need be, whole or
+    /// not at all.
     ///
     /// # Errors
     ///
     /// [`PresetError::Io`] if it can't be written.
     pub fn save(&self, path: &Path) -> Result<(), PresetError> {
-        let io = |error| PresetError::Io {
-            path: path.to_owned(),
-            error,
-        };
-        let folder = path.parent().unwrap_or(Path::new("."));
-        fs::create_dir_all(folder).map_err(io)?;
-        let name = path
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let hidden = folder.join(format!(".{name}.saving"));
-        let written = (|| {
-            let mut file = fs::File::create(&hidden)?;
-            file.write_all(&self.encode())?;
-            file.sync_all()?;
-            fs::rename(&hidden, path)
-        })();
-        if written.is_err() {
-            fs::remove_file(&hidden).ok();
-        }
-        written.map_err(io)
+        write_whole(path, &self.encode())
     }
+}
+
+/// Writes `bytes` to `path`, making its folder if need be. The file is
+/// written beside it under a hidden name and renamed into place, so `path`
+/// holds a whole file, old or new, whenever the write stops.
+pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), PresetError> {
+    let io = |error| PresetError::Io {
+        path: path.to_owned(),
+        error,
+    };
+    let folder = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(folder).map_err(io)?;
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let hidden = folder.join(format!(".{name}.saving"));
+    let written = (|| {
+        let mut file = fs::File::create(&hidden)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        fs::rename(&hidden, path)
+    })();
+    if written.is_err() {
+        fs::remove_file(&hidden).ok();
+    }
+    written.map_err(io)
 }
 
 /// The preset's name: its file's name without the extension.
@@ -330,13 +344,16 @@ pub fn presets_folder(user_library: &Path, device: &Device) -> PathBuf {
 /// `<User Library>/Defaults/<category>/<device's own name>.blpreset`.
 #[must_use]
 pub fn default_preset_path(user_library: &Path, device: &Device) -> PathBuf {
+    default_path(user_library, device.role, device.own_name())
+}
+
+/// The default preset's path for a device with this role and own name.
+#[must_use]
+pub fn default_path(user_library: &Path, role: DeviceRole, own_name: &str) -> PathBuf {
     user_library
         .join("Defaults")
-        .join(category(device.role))
-        .join(format!(
-            "{}.{PRESET_EXTENSION}",
-            file_safe(device.own_name())
-        ))
+        .join(category(role))
+        .join(format!("{}.{PRESET_EXTENSION}", file_safe(own_name)))
 }
 
 /// A path in `folder` for a new preset named `name` that no file has yet:

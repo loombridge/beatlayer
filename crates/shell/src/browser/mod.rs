@@ -209,17 +209,94 @@ pub struct BrowserView {
     plugins: Vec<bl_plugin_host::scan::ScannedPlugin>,
 }
 
-/// Beatlayer's modulator devices, as the Modulators label lists them: each
-/// with its type ID and name.
-fn modulator_devices() -> Vec<(String, String)> {
-    bl_devices::device_types()
-        .into_iter()
-        .filter(|t| bl_model::modulator::is_modulator_kind(&t.kind))
-        .filter_map(|t| match t.kind {
-            bl_model::DeviceKind::Native { device_type } => Some((device_type, t.name)),
-            bl_model::DeviceKind::Plugin { .. } | bl_model::DeviceKind::Rack { .. } => None,
+/// A device the browser lists under a Library label (spec: racks R43,
+/// modulation R12).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrowserDevice {
+    /// The row's ID, in place of a path: a native device's type ID, or
+    /// `rack:` and the rack kind.
+    pub id: String,
+    /// The name the row shows.
+    pub name: String,
+    /// What it is.
+    pub kind: bl_model::DeviceKind,
+    /// Where it goes in a chain.
+    pub role: bl_model::DeviceRole,
+    /// Whether it has a sidechain input.
+    pub sidechain: bool,
+}
+
+/// The devices a label lists: under Modulators, Beatlayer's modulator
+/// devices; under Drums, Instruments, Audio Effects and MIDI Effects, an
+/// empty rack of the label's kind and the native devices of its role.
+fn label_devices(label: &Label) -> Vec<BrowserDevice> {
+    use bl_model::{DeviceKind, DeviceRole, RackKind};
+    let (rack, role) = match label {
+        Label::Modulators => (None, None),
+        Label::Drums => (Some(RackKind::Drum), None),
+        Label::Instruments => (Some(RackKind::Instrument), Some(DeviceRole::Instrument)),
+        Label::AudioEffects => (Some(RackKind::AudioEffect), Some(DeviceRole::AudioEffect)),
+        Label::MidiEffects => (Some(RackKind::MidiEffect), Some(DeviceRole::MidiEffect)),
+        _ => return Vec::new(),
+    };
+    let mut devices: Vec<BrowserDevice> = rack
+        .map(|kind| BrowserDevice {
+            id: format!("rack:{}", rack_id(kind)),
+            name: kind.name().to_owned(),
+            kind: DeviceKind::Rack { kind },
+            role: kind.role(),
+            sidechain: false,
         })
-        .collect()
+        .into_iter()
+        .collect();
+    devices.extend(bl_devices::device_types().into_iter().filter_map(|t| {
+        let modulator = bl_model::modulator::is_modulator_kind(&t.kind);
+        let listed = if *label == Label::Modulators {
+            modulator
+        } else {
+            !modulator && Some(t.role) == role
+        };
+        match t.kind {
+            DeviceKind::Native { device_type } if listed => Some(BrowserDevice {
+                id: device_type.clone(),
+                name: t.name,
+                kind: DeviceKind::Native { device_type },
+                // A modulator goes in a chain as an audio effect does.
+                role: if modulator {
+                    DeviceRole::AudioEffect
+                } else {
+                    t.role
+                },
+                sidechain: t.sidechain,
+            }),
+            _ => None,
+        }
+    }));
+    devices
+}
+
+fn rack_id(kind: bl_model::RackKind) -> &'static str {
+    match kind {
+        bl_model::RackKind::Instrument => "instrument",
+        bl_model::RackKind::AudioEffect => "audio_effect",
+        bl_model::RackKind::MidiEffect => "midi_effect",
+        bl_model::RackKind::Drum => "drum",
+    }
+}
+
+/// The device a row ID names, under any label that lists devices.
+#[must_use]
+pub fn device_by_id(id: &str) -> Option<BrowserDevice> {
+    [
+        Label::Modulators,
+        Label::Drums,
+        Label::Instruments,
+        Label::AudioEffects,
+        Label::MidiEffects,
+    ]
+    .iter()
+    .flat_map(label_devices)
+    .find(|device| device.id == id)
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, BrowserError> {
@@ -516,16 +593,15 @@ impl BrowserView {
     fn rebuild(&mut self) {
         self.note = None;
         let label = self.label.clone();
-        if label == Label::Modulators {
-            // Spec: modulation R12. The Modulators label lists Beatlayer's
-            // modulator devices.
+        if !label_devices(&label).is_empty() {
+            // Spec: modulation R12, racks R43. These labels list devices.
             let query = self.search.trim().to_ascii_lowercase();
-            let items: Vec<Item> = modulator_devices()
+            let items: Vec<Item> = label_devices(&label)
                 .into_iter()
-                .filter(|(_, name)| query.is_empty() || name.to_ascii_lowercase().contains(&query))
-                .map(|(id, name)| Item {
-                    path: id,
-                    name,
+                .filter(|d| query.is_empty() || d.name.to_ascii_lowercase().contains(&query))
+                .map(|d| Item {
+                    path: d.id,
+                    name: d.name,
                     kind: ItemKind::Device,
                     depth: 0,
                     open: false,
@@ -926,14 +1002,10 @@ impl BrowserView {
         self.playing = None;
     }
 
-    /// The modulator device selected under the Modulators label, as its type
-    /// ID and name.
+    /// The device selected under a label that lists devices.
     #[must_use]
-    pub fn selected_device(&self) -> Option<(String, String)> {
-        let selected = self.selected.last()?.to_string_lossy().into_owned();
-        modulator_devices()
-            .into_iter()
-            .find(|(id, _)| *id == selected)
+    pub fn selected_device(&self) -> Option<BrowserDevice> {
+        device_by_id(&self.selected.last()?.to_string_lossy())
     }
 
     /// Whether no audio file is selected.
@@ -1071,7 +1143,7 @@ impl BrowserView {
                 let SelectArgs { paths, add } = parse(args)?;
                 // A modulator under the Modulators label is named by its
                 // type ID, which isn't a path.
-                let is_device = |p: &str| modulator_devices().iter().any(|(id, _)| id == p);
+                let is_device = |p: &str| device_by_id(p).is_some();
                 let paths = paths
                     .iter()
                     .map(|p| {

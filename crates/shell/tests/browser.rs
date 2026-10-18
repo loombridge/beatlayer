@@ -192,12 +192,9 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
             "{left_out} (D21)"
         );
     }
-    // A Library label without content says what fills it.
-    let sounds: BrowserState = run(
-        &mut shell,
-        ids::OPEN_PLACE,
-        json!({ "label": "instruments" }),
-    );
+    // A Library label without content says what fills it (Instruments lists
+    // the instrument rack since WP-5.8, so Sounds stands for it).
+    let sounds: BrowserState = run(&mut shell, ids::OPEN_PLACE, json!({ "label": "sounds" }));
     assert!(sounds.rows.is_empty());
     assert!(sounds.note.unwrap().contains("M2"));
 }

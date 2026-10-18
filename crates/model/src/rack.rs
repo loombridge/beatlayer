@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::error::ModelError;
-use crate::ids::{ChainId, DeviceId, ParamId};
+use crate::ids::{ChainId, ContentHash, DeviceId, ParamId};
 use crate::layers::{Zone, ZoneKind};
 use crate::param::{DeviceDescription, ParamDescriptor, ParamUnit};
 
@@ -472,6 +472,12 @@ impl Chain {
         }
     }
 
+    /// The samples the chain's devices play ([`Device::media_used`]).
+    #[must_use]
+    pub fn media_used(&self) -> BTreeSet<ContentHash> {
+        self.devices.iter().flat_map(Device::media_used).collect()
+    }
+
     /// Every device in the chain, those inside its racks included, in
     /// signal order.
     pub fn devices_deep(&self) -> impl Iterator<Item = &Device> {
@@ -509,6 +515,18 @@ impl Device {
     #[must_use]
     pub fn walk(&self) -> Walk<'_> {
         Walk { stack: vec![self] }
+    }
+
+    /// The samples this device and everything in it play, by content hash:
+    /// sample slots and multisampler layers.
+    #[must_use]
+    pub fn media_used(&self) -> BTreeSet<ContentHash> {
+        self.walk()
+            .flat_map(|d| {
+                let layers = d.layers.list.iter().map(|layer| layer.media);
+                d.media.iter().flatten().copied().chain(layers)
+            })
+            .collect()
     }
 
     /// The device with this ID, this one or one inside it.

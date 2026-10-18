@@ -839,7 +839,8 @@ impl DeviceViewUi {
         } else if has_window {
             c.text_dim.0
         } else {
-            c.separator.0
+            // Dimmed, but still drawn: Live always shows the wrench.
+            c.text_dim.0.gamma_multiply(0.55)
         };
         // A wrench: a handle from the lower left to a ring at the upper
         // right.
@@ -1135,6 +1136,10 @@ impl DeviceViewUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
+        if let Some(drag) = DragAndDrop::payload::<crate::browser::DevicesDrag>(ui.ctx()) {
+            browser_drop(ui, theme, state, placed, rect, &drag.paths, events);
+            return;
+        }
         let device = DragAndDrop::payload::<DeviceDrag>(ui.ctx()).map(|d| d.device);
         let chains = DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx());
         if device.is_none() && chains.is_none() {
@@ -1508,6 +1513,63 @@ fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
             Stroke::new(1.0, theme.colors.focus.0),
             StrokeKind::Outside,
         );
+    }
+}
+
+/// Presets and devices dragged from the browser over the Device View, outside
+/// any rack, are added to the shown track on release (the racks spec, R43):
+/// as `device.add_preset` and `device.add` add them.
+fn browser_drop(
+    ui: &Ui,
+    theme: &Theme,
+    state: &DeviceViewState,
+    placed: &[(DeviceId, Rect)],
+    rect: Rect,
+    paths: &[String],
+    events: &mut Vec<UiEvent>,
+) {
+    let (Some(pointer), Some(track)) = (ui.input(|i| i.pointer.interact_pos()), state.track) else {
+        return;
+    };
+    let over_rack = placed
+        .iter()
+        .zip(&state.devices)
+        .any(|((_, at), d)| d.rack.is_some() && at.contains(pointer));
+    if !rect.contains(pointer) || over_rack {
+        return;
+    }
+    ui.painter().rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, theme.colors.accent.0),
+        StrokeKind::Inside,
+    );
+    if !ui.input(|i| i.pointer.any_released()) {
+        return;
+    }
+    DragAndDrop::clear_payload(ui.ctx());
+    for path in paths {
+        match bl_shell::browser::device_by_id(path) {
+            Some(device) => invoke(
+                events,
+                ids::ADD,
+                json!({
+                    "track": track,
+                    "device": {
+                        "kind": device.kind,
+                        "name": device.name,
+                        "role": device.role,
+                        "sidechain": device.sidechain,
+                        "midi_sidechain": device.midi_sidechain,
+                    },
+                }),
+            ),
+            None => invoke(
+                events,
+                "device.add_preset",
+                json!({ "track": track, "path": path }),
+            ),
+        }
     }
 }
 

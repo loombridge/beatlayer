@@ -47,7 +47,7 @@ serde_json = "1"
 
 # A plug-in editor's host window (WP-2.10): an HWND on Windows, and an X11
 # window on Linux and the other X11 Unixes (a Wayland session serves it
-# through XWayland). macOS builds no host window yet.
+# through XWayland); on macOS an AppKit panel, from the dependencies below.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
@@ -101,11 +101,14 @@ objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
     "AVAudioTypes",
 ] }
 # A unit's own editor is a view controller in an AppKit window of its own
-# (WP-2.8's second part). AppKit is already built for this app's windows.
+# (WP-2.8's second part), and a CLAP editor that only embeds is a view in a
+# utility panel of Beatlayer's own (WP-2.10). AppKit is already built for
+# this app's windows.
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "NSApplication",
     "NSGraphics",
+    "NSPanel",
     "NSResponder",
     "NSView",
     "NSViewController",
@@ -127,6 +130,13 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSPropertyList",
 ] }
 block2 = "0.6.2"
+
+# `mac_editor` opens host windows, which AppKit makes only on the main
+# thread; the test harness runs a `#[test]` on a worker thread, so it is a
+# binary with the harness off instead.
+[[test]]
+name = "mac_editor"
+harness = false
 
 [lints]
 workspace = true

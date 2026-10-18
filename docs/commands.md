@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-443 commands in 35 areas.
+447 commands in 35 areas.
 
 ## Permission classes
 
@@ -124,10 +124,12 @@ Each command has:
 | [`chain.drop_on_track`](#chaindrop_on_track) | Drop Chain on Track | `edit` |  |  |
 | [`chain.duplicate`](#chainduplicate) | Duplicate Chain | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`chain.hot_swap`](#chainhot_swap) | Hot-Swap Chain | `read` |  |  |
+| [`chain.load_preset`](#chainload_preset) | Load Chain Preset | `external` |  |  |
 | [`chain.move`](#chainmove) | Move Chain | `edit` |  |  |
 | [`chain.paste`](#chainpaste) | Paste Chain | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`chain.remove`](#chainremove) | Delete Chain | `destructive` |  |  |
 | [`chain.rename`](#chainrename) | Rename Chain | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`chain.save_preset`](#chainsave_preset) | Save Chain Preset | `external` |  |  |
 | [`chain.select`](#chainselect) | Select Chain | `read` |  |  |
 | [`chain.set_colour`](#chainset_colour) | Set Chain Colour | `edit` |  |  |
 | [`chain.set_enabled`](#chainset_enabled) | Chain Activator | `edit` |  |  |
@@ -193,6 +195,7 @@ Each command has:
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
+| [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
@@ -211,7 +214,7 @@ Each command has:
 | [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
-| [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
+| [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` | `Q`; `Q` | `Q`; `Q` |
 | [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
 | [`device.import_sfz`](#deviceimport_sfz) | Import SFZ | `external` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
@@ -228,6 +231,7 @@ Each command has:
 | [`device.remove`](#deviceremove) | Delete Device | `destructive` | `Delete` | `Delete` |
 | [`device.rename`](#devicerename) | Rename Device | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`device.rename_layer`](#devicerename_layer) | Rename Sample | `edit` |  |  |
+| [`device.replace`](#devicereplace) | Replace Device | `external` |  |  |
 | [`device.reverse_sample`](#devicereverse_sample) | Reverse Sample | `edit` |  |  |
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
@@ -1838,7 +1842,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. A selected preset file, or a device or rack listed under a label (Drums, Instruments, Audio Effects, MIDI Effects or Modulators), is added to the shown track as `device.add_preset` and `device.add` add it, and a chain preset to the chain list's rack (`chain.load_preset`). While a device is being hot-swapped (`device.hot_swap`), a selected preset or device replaces it instead (`device.replace`), as does a chain preset the chain armed by its Hot-Swap button (`chain.load_preset`); a selected audio file loads into it if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
 
 Default keys:
 
@@ -2040,7 +2044,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Create Chain**. Permission: `edit`. Contexts: `device-view`.
 
-Makes a chain in a rack at `index` (the end if left out), as the chain list's drop area does, named after what it holds, and selects it: holding a new `device`, a device made from a `preset` file, or the existing device `move_device` moved out of where it is; with none of them it is empty. The chain must fit the rack's kind. One undo step (Insert Chain).
+Makes a chain in a rack at `index` (the end if left out), as the chain list's drop area does, named after what it holds, and selects it: holding a new `device`, a device made from a `preset` file, or the existing device `move_device` moved out of where it is; with none of them it is empty. A `preset` that holds a rack makes a chain holding the rack, and one that holds a chain is loaded as `chain.load_preset` loads it. The chain must fit the rack's kind. One undo step (Insert Chain).
 
 Default keys: none.
 
@@ -2138,7 +2142,7 @@ Result: [`ChainAdded`](#chainadded).
 
 **Hot-Swap Chain**. Permission: `read`. Contexts: `device-view`.
 
-Arms a chain for hot-swap, as its Hot-Swap button does, or disarms it; arming it ends the hot-swap of a device, and the other way round. Only the armed state is built so far: it shows on the chain's row in `device_view.state`. It changes only the view.
+Arms a chain for hot-swap, as its Hot-Swap button does, or disarms it; arming it ends the hot-swap of a device, and the other way round. It shows on the chain's row in `device_view.state`. While it is armed, loading a chain preset from the browser replaces the chain (`chain.load_preset`), and loading a device or a preset gives the chain that device as its only one (`device.replace`). It changes only the view.
 
 Default keys: none.
 
@@ -2150,6 +2154,25 @@ Arguments:
 | `on` | boolean or null | no | Arm (true) or disarm (false); switches if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.load_preset`
+
+**Load Chain Preset**. Permission: `external`. Contexts: `device-view`.
+
+Loads a chain preset file (.blpreset) into a rack as a new chain at `index` (the end if left out), as dropping it on the rack's chain list does, with new IDs for it and its devices, and selects it. With `chain` (or, with no `rack`, the chain armed by its Hot-Swap button) it replaces that chain in its place instead, and the new chain stays armed. The chain must fit the rack's kind. One undo step, named Insert Chain, or Load Preset when it replaces a chain. Reads a file outside the project; the samples the preset carries are written to the User Library's Samples/Preset Samples folder if the set's media store lacks them.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The chain preset file. |
+| `chain` | [`ChainId`](#chainid) or null | no | A chain to replace in its place, instead of adding one; the chain armed by its Hot-Swap button, if there is one and no `rack` is given. |
+| `index` | integer or null | no | Where the new chain goes in the rack's list; the end if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack that takes it as a new chain; the chain list's rack, or the rack being hot-swapped, if left out. |
+
+Result: [`ChainAdded`](#chainadded).
 
 #### `chain.move`
 
@@ -2226,6 +2249,24 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `chain.save_preset`
+
+**Save Chain Preset**. Permission: `external`. Contexts: `device-view`.
+
+Saves a chain as a Beatlayer chain preset file (.blpreset), as dragging its row into the browser's User Library or a folder in Places does: to `path`, or to a new file named after the chain in `folder`, or, with neither, in the User Library, under Presets/<its rack's category>/<its rack's name>/, numbered if the name is taken. The preset holds the chain's name, colour, info text and mixer, every device in it with its state (nested racks whole, plug-ins' own state included) and the samples they play. The file is written whole or not at all. Writes a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) or null | no | The chain; the selected one if left out. |
+| `folder` | string or null | no | Instead of `path`, a folder to put a new file named after the chain in, numbered if the name is taken: where dragging the row onto a folder in the browser drops it. |
+| `path` | string or null | no | The file to write, ending `.blpreset`; a new file named after the chain in the User Library's folder for its rack's presets if left out. |
+
+Result: [`ChainPresetResult`](#chainpresetresult).
 
 #### `chain.select`
 
@@ -3406,6 +3447,25 @@ Arguments:
 
 Result: [`LayersAdded`](#layersadded).
 
+#### `device.add_preset`
+
+**Add Preset**. Permission: `external`. Contexts: `device-view`.
+
+Adds the device or rack a preset file (.blpreset) holds, as choosing it in the browser (Enter, a double-click or a drag) does: where `device.add` puts a device of its role, on `track` (the shown track if left out) or in the rack chain `chain`, after the selected device if that keeps the chain's order. A device takes the preset's values and name; a rack comes whole, with new IDs for its chains and devices. One undo step, named Insert Device (Insert Device and Track when it goes on a new MIDI track). The new device is selected. A chain preset is refused: `chain.load_preset` loads it. Reads a file outside the project; the samples a rack preset carries are written to the User Library's Samples/Preset Samples folder if the set's media store lacks them.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The preset file: a device's or a rack's. |
+| `chain` | [`ChainId`](#chainid) or null | no | The rack chain that takes it, instead of a track's own chain. |
+| `index` | integer or null | no | Where it goes in the chain; after the selected device, or at the end of its role's place, if left out. |
+| `track` | [`TrackId`](#trackid) or null | no | The track, as `device.add` takes it; the shown track if left out. |
+
+Result: [`DeviceAdded`](#deviceadded).
+
 #### `device.add_sample_edit`
 
 **Edit Sample**. Permission: `edit`. Contexts: `device-view`.
@@ -3741,11 +3801,16 @@ Result: [`Grouped`](#grouped).
 
 #### `device.hot_swap`
 
-**Hot-Swap Presets**. Permission: `read`. Contexts: `device-view`.
+**Hot-Swap Presets**. Permission: `read`. Contexts: `device-view`, `browser`.
 
-Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap Presets button does; switches unless `on` says which. While it lasts, the browser shows a bar (Swapping Audio Effect) and opens the User Library's folder of the device's presets, and loading a preset from the browser (Enter or a double-click) loads it into the device. Changes only the view.
+Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap Presets button does; switches unless `on` says which. While it lasts, the browser shows a bar (Swapping Audio Effect) and opens the User Library's folder of the device's presets, and loading a preset from the browser (Enter or a double-click) loads it into the device. Any device, preset or rack preset of the same role replaces it (`device.replace`), and hot-swap stays on after each load. With no `device` and none selected, it arms the first audio effect of the shown track, or its instrument on a MIDI track. Changes only the view.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-008 | `Q` | `Q` | `device-view` | Hot-swap the selected device | runs it |
+| S-VIEW-006 | `Q` | `Q` | `global` | Toggle hot-swap mode for the selected device or item | runs it |
 
 Arguments:
 
@@ -3850,7 +3915,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Load Preset**. Permission: `external`. Contexts: `device-view`.
 
-Loads a Beatlayer preset file (.blpreset) into a device of the kind it was saved from, as choosing it while hot-swapping does: every parameter takes the preset's value (or its default, if the preset doesn't set it), and the device's title shows the preset's name. One undo step. A preset for another kind of device is refused. Reads a file outside the project.
+Loads a Beatlayer preset file (.blpreset) into a device of the kind it was saved from, as choosing it while hot-swapping does: every parameter takes the preset's value (or its default, if the preset doesn't set it), and the device's title shows the preset's name. One undo step. A preset for another kind of device is refused. A rack preset loads into a rack of the kind it was saved from and replaces the rack with the preset's, as one undo step (the rack's ID changes; `device.replace` loads a preset into a device of another kind). A chain preset loads with `chain.load_preset`. Reads a file outside the project.
 
 Default keys: none.
 
@@ -4050,6 +4115,25 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.replace`
+
+**Replace Device**. Permission: `external`. Contexts: `device-view`.
+
+Replaces a device or rack with another of the same role, in its place, as loading from the browser does while the device is hot-swapped (an audio effect or audio effect rack for an audio effect; an instrument, an instrument rack or a drum rack for an instrument; a MIDI effect or MIDI effect rack for a MIDI effect). Give a `preset` file, or a `new_device` as `device.add` describes one. `device` is the one being hot-swapped, else the selected one, if left out. A device preset of the device's own kind loads into it as `device.load_preset` does, keeping its ID and automation; anything else replaces it with a new device with new IDs, without the automation of a device of another kind, and a rack's chains go with it. With `chain`, the new device becomes the only one in that chain, which keeps its name and mixer. One undo step, named Load Preset for a preset and Insert Device for a device. Hot-swap stays on for the replacement. Reads a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) or null | no | A chain to give the new device to as its only one, instead of replacing a device: the chain keeps its mixer and name. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device or rack to replace; the device being hot-swapped, or else the selected one, if left out. |
+| `new_device` | [`NewDevice`](#newdevice) or null | no | A new device, as `device.add` describes one. |
+| `preset` | string or null | no | A preset file: a device's or a rack's. |
+
+Result: [`DeviceAdded`](#deviceadded).
+
 #### `device.reverse_sample`
 
 **Reverse Sample**. Permission: `edit`. Contexts: `device-view`.
@@ -4071,7 +4155,7 @@ Result: [`SampleProcessed`](#sampleprocessed).
 
 **Save as Default Preset**. Permission: `external`. Contexts: `device-view`.
 
-Saves a device's state as the default preset for its type, as the context menu's Save as Default Preset does: to the User Library's Defaults/<Audio Effects, Instruments, or MIDI Effects>/<the device's own name>.blpreset, replacing any default saved before. Every device of that type added from then on (`device.add`) starts with it. Writes a file outside the project.
+Saves a device's state as the default preset for its type, as the context menu's Save as Default Preset does: to the User Library's Defaults/<Audio Effects, Instruments, or MIDI Effects>/<the device's own name>.blpreset, replacing any default saved before. Every device of that type added from then on (`device.add`) starts with it; for a rack, every new rack of its kind starts as the saved one is, chains and all. Writes a file outside the project.
 
 Default keys: none.
 
@@ -4087,7 +4171,7 @@ Result: [`PresetResult`](#presetresult).
 
 **Save Preset**. Permission: `external`. Contexts: `device-view`.
 
-Saves a device's state (its parameter values) as a Beatlayer preset file (.blpreset), as the title bar's Save Preset button does: to `path`, or to a new file named after the device's title in the User Library, under Presets/<Audio Effects, Instruments, or MIDI Effects>/<the device's own name>/, numbered if the name is taken. The device's title then shows the preset's name. Writes a file outside the project.
+Saves a device's state (its parameter values) as a Beatlayer preset file (.blpreset), as the title bar's Save Preset button does: to `path`, or to a new file named after the device's title in the User Library, under Presets/<Audio Effects, Instruments, or MIDI Effects>/<the device's own name>/, numbered if the name is taken. The device's title then shows the preset's name. A rack is saved whole, as a rack preset: its chains in order with their names, colours and mixers, every device in them (nested racks too) with its state, a plug-in's own state included, and the samples its devices play, so it loads in a set that lacks them. The file is written whole or not at all. Writes a file outside the project.
 
 Default keys: none.
 
@@ -8305,6 +8389,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`chain.delete`](#chaindelete) | the query tool's `device` | `chains` |
 | [`chain.drop_on_track`](#chaindrop_on_track) | the query tool's `track` | `devices` |
 | [`chain.duplicate`](#chainduplicate) | the query tool's `device` | `chains` |
+| [`chain.load_preset`](#chainload_preset) | the query tool's `device` | `chains` |
 | [`chain.move`](#chainmove) | the query tool's `device` | `chains` |
 | [`chain.paste`](#chainpaste) | the query tool's `device` | `chains` |
 | [`chain.remove`](#chainremove) | the query tool's `device` | `chains` |
@@ -8369,6 +8454,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
+| [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
@@ -8396,6 +8482,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.remove`](#deviceremove) | the query tool's `track` | `devices` |
 | [`device.rename`](#devicerename) | the query tool's `device` | `name` |
 | [`device.rename_layer`](#devicerename_layer) | the query tool's `device` | `layers` |
+| [`device.replace`](#devicereplace) | the query tool's `track` | `devices` |
 | [`device.reverse_sample`](#devicereverse_sample) | the query tool's `device` | `media` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
@@ -8558,6 +8645,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
+| [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
@@ -10680,6 +10768,46 @@ A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to
       "type": "number"
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChainPresetResult`
+
+What `chain.save_preset` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain saved. |
+| `path` | string | yes | The preset file written. |
+| `name` | string | yes | The preset's name: its file's name without the extension. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `chain.save_preset` returns.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain saved."
+    },
+    "name": {
+      "description": "The preset's name: its file's name without the extension.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The preset file written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "chain",
+    "path",
+    "name"
+  ],
   "type": "object"
 }
 ```

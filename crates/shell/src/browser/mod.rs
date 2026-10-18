@@ -223,7 +223,8 @@ pub struct BrowserDevice {
     /// Where it goes in a chain.
     pub role: bl_model::DeviceRole,
     /// Whether it has a sidechain input.
-    pub sidechain: bool,    /// Whether it has a MIDI sidechain input.
+    pub sidechain: bool,
+    /// Whether it has a MIDI sidechain input.
     pub midi_sidechain: bool,
 }
 

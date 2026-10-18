@@ -415,7 +415,8 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.7 | done | 16 October 2026 | [#37](https://github.com/loombridge/beatlayer/pull/37), [#52](https://github.com/loombridge/beatlayer/pull/52) and [#54](https://github.com/loombridge/beatlayer/pull/54): VST3 hosting, its state and the scanner ([the spec](specs/vst3-hosting.md)) |
 | 2.8 | done | 15 October 2026 | [#44](https://github.com/loombridge/beatlayer/pull/44) and [#60](https://github.com/loombridge/beatlayer/pull/60): Audio Unit hosting on macOS, with the scanner and the unit's editor ([the spec](specs/au-hosting.md)) |
 | 2.9 | done | 14 October 2026 | [#19](https://github.com/loombridge/beatlayer/pull/19) and [#52](https://github.com/loombridge/beatlayer/pull/52): the plug-in scanner process, with its timeout, blocklist and cache ([the spec](specs/plugin-scanning.md)) |
-| 2.10 | done | 15 October 2026 | [#36](https://github.com/loombridge/beatlayer/pull/36) and [#46](https://github.com/loombridge/beatlayer/pull/46): plug-in editor windows and their saved place and size ([the spec](specs/clap-hosting.md)) |
+| 2.9b | done | 18 October 2026 | [#131](https://github.com/loombridge/beatlayer/pull/131): plug-ins in the packaged app. The scanner ships in the bundle and scans at start, Settings ▸ Plug-Ins has Rescan and the Plug-In Sources switches, the Plug-Ins label is filed by vendor with format badges, and a plug-in selected in the browser loads with Enter, a drop or a hot-swap |
+| 2.10 | done | 18 October 2026 | [#36](https://github.com/loombridge/beatlayer/pull/36), [#46](https://github.com/loombridge/beatlayer/pull/46) and [#191](https://github.com/loombridge/beatlayer/pull/191): plug-in editor windows and their saved place and size, and the plug-in device panel in the Device View with its window button (L-DEV-010) ([the spec](specs/clap-hosting.md)) |
 | 2.11 | done | 14 October 2026 | [#21](https://github.com/loombridge/beatlayer/pull/21): plug-in delay compensation ([the spec](specs/delay-compensation.md)) |
 | 2.12 | done | 16 October 2026 | [#43](https://github.com/loombridge/beatlayer/pull/43), [#59](https://github.com/loombridge/beatlayer/pull/59) and [#63](https://github.com/loombridge/beatlayer/pull/63): automation in the model and engine, the arrangement's lanes and automation recording ([the spec](specs/automation.md)) |
 | 2.13 | done | 17 October 2026 | [#41](https://github.com/loombridge/beatlayer/pull/41), [#57](https://github.com/loombridge/beatlayer/pull/57), [#68](https://github.com/loombridge/beatlayer/pull/68), [#70](https://github.com/loombridge/beatlayer/pull/70), [#72](https://github.com/loombridge/beatlayer/pull/72) and [#73](https://github.com/loombridge/beatlayer/pull/73): duplex audio and input routing, arm and recording to disk, recording-latency compensation and punch, loop recording into take lanes and the "Warp recorded audio" setting, the audio backends reporting the driver's latency, and a track's Audio To set to Ext. Out ([routing](specs/routing.md), [recording](specs/recording.md)) |
@@ -464,7 +465,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.6 | todo |  |  |
 | 4.7 | todo |  |  |
 | 4.8 | todo |  |  |
-| 4.9 | todo |  |  |
+| 4.9 | done | 18 October 2026 | [#184](https://github.com/loombridge/beatlayer/pull/184); a file's tempo and beats in its analysis, the three Warp/Fades settings, auto-warp of dropped and recorded clips, Set 1.1.1 Here, Warp From Here and Warp as Loop, and Save Default Clip writing a `.beatlayer-clip` file beside the sample; a drop still waits for the analysis rather than showing its place pending; [the spec](specs/warping.md) |
 | 4.10 | todo |  |  |
 | 4.10b | todo |  |  |
 | 4.11 | todo |  |  |

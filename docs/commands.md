@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-435 commands in 35 areas.
+444 commands in 35 areas.
 
 ## Permission classes
 
@@ -140,6 +140,7 @@ Each command has:
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
+| [`clip.defaults`](#clipdefaults) | Clip Defaults | `read` |  |  |
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
@@ -156,7 +157,9 @@ Each command has:
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
+| [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
+| [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
@@ -184,6 +187,9 @@ Each command has:
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
+| [`clip.warp_as_loop`](#clipwarp_as_loop) | Warp as Loop | `edit` |  |  |
+| [`clip.warp_from_here`](#clipwarp_from_here) | Warp From Here | `edit` |  |  |
+| [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
@@ -396,10 +402,13 @@ Each command has:
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
+| [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
+| [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
@@ -2433,6 +2442,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.defaults`
+
+**Clip Defaults**. Permission: `read`. Contexts: `clip-view`.
+
+Reads the defaults saved for an audio clip's file by `clip.save_default`: its `file`, the `<sample file name>.beatlayer-clip` beside the sample, and the `defaults` in it, or `null` when none are saved or the file does not hold settings for this content. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.delete`
 
 **Delete Clip**. Permission: `destructive`. Contexts: `arrangement`.
@@ -2723,6 +2748,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.save_default`
+
+**Save Default Clip**. Permission: `external`. Contexts: `clip-view`.
+
+Saves an audio clip's Warp switch, warp markers and tempo, warp mode and mode controls (which hold its Transpose and Detune), and gain as its file's defaults, as the Save button in the clip's title bar does: into a small file of Beatlayer's own, `<sample file name>.beatlayer-clip`, beside the sample, so the defaults travel with it, replacing any saved before. A clip made from the file afterwards (dropped from the browser, loaded with Enter or imported) starts with them and is not auto-warped; clips already in the set don't change. Fails with the reason, and writes nothing, if the folder can't be written or the clip's file isn't known. Changes nothing in the set and is no undo step; writes a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.scale_tempo`
 
 **Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
@@ -2737,6 +2778,25 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
 | `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_1_1_1_here`
+
+**Set 1.1.1 Here**. Permission: `edit`. Contexts: `clip-view`.
+
+Makes a point of a warped audio clip's file its 1.1.1, the downbeat of its first bar: at the selected warp marker (`marker`, its place in the map, the first being 0) or at the Sample Editor's insert marker (`beat`, ticks from the clip's current 1.1.1, or `time`, seconds in the file); give one of the three. A warp marker is made there if there was none. Every marker, the End marker and the loop brace then move by the same ticks, so no segment changes tempo and each keeps its place in the audio, and the Start marker goes to 1.1.1. Refused for a clip that isn't warped, or if the End marker or the loop brace would end up before 1.1.1. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `beat` | [`Ticks`](#ticks) or null | no | The Sample Editor's insert marker as a beat, in ticks from the clip's 1.1.1: a warp marker is made there, at the time the map already places it. |
+| `marker` | integer or null | no | The selected warp marker, by its place in the map, the first being 0. |
+| `time` | number or null | no | The insert marker as a time in the file, in seconds: a warp marker is made there, on the beat the map already places it. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3227,6 +3287,63 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `start` | [`Ticks`](#ticks) | yes | Where its left edge goes, before its end. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.warp_as_loop`
+
+**Warp as Loop**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps a warped audio clip's whole file as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: a warp marker at the start of the file on 1.1.1 and one at its end on the last bar's end, the Start and End markers and the loop brace on the whole file, the loop on, and that tempo as the clip's. The clip keeps its place and length in the arrangement. Refused for a clip that isn't warped, or while the file's analysis is not ready. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `analysis` | [`FileBeats`](#filebeats) or null | no | The file's length. Left out, the app reads it from the file, and refuses while the file's analysis is not ready. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.warp_from_here`
+
+**Warp From Here**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps a warped audio clip from a point on: at the selected warp marker (`marker`) or at a new one at the insert marker (`beat` or `time`, as for `clip.set_1_1_1_here`). The markers before it stay and those after it are replaced. `method` is `auto`, a marker on the first beat of every bar after the point from the tempo found there; `start_at`, the same starting from the tempo `bpm`, the set's tempo at the point unless given, which settles whether a beat is counted at double or half the speed; `straight`, which deletes the markers after the point and sets the clip's tempo to the tempo found after it; or `bpm`, which deletes them and sets the clip's tempo to `bpm`, the set's tempo at the point unless given. The file's tempo and beats come from its analysis (`analysis` gives them), so every method but `bpm` is refused while it is not ready. Refused for a clip that isn't warped. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `method` | [`WarpFrom`](#warpfrom) | yes | How the audio after the point is warped. |
+| `analysis` | [`FileBeats`](#filebeats) or null | no | The file's tempo and beats. Left out, the app uses the file's analysis, and refuses while it is not ready. |
+| `beat` | [`Ticks`](#ticks) or null | no | The Sample Editor's insert marker as a beat, in ticks from the clip's 1.1.1: a warp marker is made there, at the time the map already places it. |
+| `bpm` | number or null | no | The tempo for `start_at` and `bpm`: the set's tempo at the point unless given. |
+| `marker` | integer or null | no | The selected warp marker, by its place in the map, the first being 0. |
+| `time` | number or null | no | The insert marker as a time in the file, in seconds: a warp marker is made there, on the beat the map already places it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.warp_selection_as_loop`
+
+**Warp Selection as Loop**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps the part of a warped audio clip's file from `from` to `to` (seconds in the file) as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: a warp marker at each end of the part, the Start and End markers and the loop brace on it, the loop on. The clip keeps its place and length in the arrangement. Refused for a clip that isn't warped. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `from` | number, at least 0 | yes | The start of the part, in seconds in the file. |
+| `to` | number, at least 0 | yes | The end of the part, in seconds, after `from`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6979,6 +7096,22 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_auto_warp_long_samples`
+
+**Auto-Warp Long Samples**. Permission: `edit`. Contexts: `settings`.
+
+Switches Auto-Warp Long Samples on the Settings window's Record, Warp & Launch page; it's on in a new install, as Live's is. While it's on, a new audio clip of a long sample, one of 60 seconds or more, is warped with a warp marker on the first beat of every bar its analysis finds, and its 1.1.1 on the first beat; off, it is left unwarped. Clips already in the set keep their settings. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
 #### `settings.set_continuous_save`
 
 **Save Continuously**. Permission: `edit`. Contexts: `settings`.
@@ -7040,6 +7173,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The quantisation new clips start with; `null` (or nothing) follows the global one, Live's "Global". |
+
+Result: nothing (`null`).
+
+#### `settings.set_default_warp_mode`
+
+**Default Warp Mode**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Default Warp Mode on the Settings window's Record, Warp & Launch page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro`) a new warped clip takes. It's `beats` in a new install, as Live's is. Clips already in the set keep their modes. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_loop_warp_short_samples`
+
+**Loop/Warp Short Samples**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Loop/Warp Short Samples on the Settings window's Record, Warp & Launch page: what a new audio clip of a short sample, one under 60 seconds, gets when it is dropped from the browser, loaded with Enter or imported. `unwarped_one_shot` leaves Warp and the loop off; `warped_one_shot` warps it as a loop of whole bars, the loop off; `warped_loop` does the same with the loop on; `auto`, what a new install has, makes a warped loop when the file's analysis finds a steady beat that fits 1, 2, 4, 8 or 16 bars, and an unwarped one-shot otherwise. Clips already in the set keep their settings. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`LoopWarpShortSamples`](#loopwarpshortsamples) | yes | What a new clip of a short sample gets. |
 
 Result: nothing (`null`).
 
@@ -8199,7 +8364,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
+| [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
+| [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
@@ -8226,6 +8393,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
+| [`clip.warp_as_loop`](#clipwarp_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.warp_from_here`](#clipwarp_from_here) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
@@ -8354,9 +8524,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
+| [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
+| [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
@@ -11062,6 +11235,72 @@ One of:
 
 </details>
 
+### `ClipDefaults`
+
+An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `warp` | boolean | yes | The Warp switch. |
+| `warp_markers` | array of [`WarpMarker`](#warpmarker) | yes | The warp markers. |
+| `tempo` | number or null | yes | The clip's tempo in BPM; given whenever there are markers. |
+| `warp_mode` | [`WarpMode`](#warpmode) | yes | The warp mode. |
+| `warp_settings` | [`WarpSettings`](#warpsettings) | yes | Every mode's controls. |
+| `gain` | number | yes | The gain, as a linear gain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.",
+  "properties": {
+    "gain": {
+      "description": "The gain, as a linear gain.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The clip's tempo in BPM; given whenever there are markers.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "warp": {
+      "description": "The Warp switch.",
+      "type": "boolean"
+    },
+    "warp_markers": {
+      "description": "The warp markers.",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
+    },
+    "warp_mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode."
+    },
+    "warp_settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Every mode's controls."
+    }
+  },
+  "required": [
+    "warp",
+    "warp_markers",
+    "tempo",
+    "warp_mode",
+    "warp_settings",
+    "gain"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipEnvelope`
 
 An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).
@@ -11829,6 +12068,61 @@ One of:
     {
       "const": "b",
       "description": "On the crossfader's B side.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `DefaultWarpMode`
+
+Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the warp mode a new warped clip takes (the warping spec, R29 and R33).
+
+One of:
+
+- `"beats"`: Beats. What a new install has.
+- `"tones"`: Tones.
+- `"texture"`: Texture.
+- `"re_pitch"`: Re-Pitch.
+- `"complex"`: Complex.
+- `"complex_pro"`: Complex Pro.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the warp mode a new warped clip takes (the warping spec, R29 and R33).",
+  "oneOf": [
+    {
+      "const": "beats",
+      "description": "Beats. What a new install has.",
+      "type": "string"
+    },
+    {
+      "const": "tones",
+      "description": "Tones.",
+      "type": "string"
+    },
+    {
+      "const": "texture",
+      "description": "Texture.",
+      "type": "string"
+    },
+    {
+      "const": "re_pitch",
+      "description": "Re-Pitch.",
+      "type": "string"
+    },
+    {
+      "const": "complex",
+      "description": "Complex.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro",
+      "description": "Complex Pro.",
       "type": "string"
     }
   ]
@@ -13906,6 +14200,54 @@ What `export.audio` returns.
     "took_seconds",
     "speed",
     "missing_media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileBeats`
+
+A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `seconds` | number | yes | The file's length in seconds. |
+| `beats` | array of number | yes | The times in seconds of its beats, in increasing order. |
+| `bpm` | number or null | no | Its tempo in BPM, or `null` if it has no rhythm to measure. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.",
+  "properties": {
+    "beats": {
+      "description": "The times in seconds of its beats, in increasing order.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "bpm": {
+      "description": "Its tempo in BPM, or `null` if it has no rhythm to measure.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "seconds": {
+      "description": "The file's length in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "seconds",
+    "beats"
   ],
   "type": "object"
 }
@@ -16332,6 +16674,49 @@ One of:
     {
       "const": "release",
       "description": "The release loop's point.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LoopWarpShortSamples`
+
+Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018): what a new clip of a short sample gets (the warping spec, R29 and R32).
+
+One of:
+
+- `"unwarped_one_shot"`: Warp and the loop off.
+- `"warped_one_shot"`: Warped, the loop off.
+- `"warped_loop"`: Warped, the loop on over the whole file.
+- `"auto"`: A loop when its analysis finds a steady beat that fits whole bars, a one-shot otherwise. What a new install has.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018): what a new clip of a short sample gets (the warping spec, R29 and R32).",
+  "oneOf": [
+    {
+      "const": "unwarped_one_shot",
+      "description": "Warp and the loop off.",
+      "type": "string"
+    },
+    {
+      "const": "warped_one_shot",
+      "description": "Warped, the loop off.",
+      "type": "string"
+    },
+    {
+      "const": "warped_loop",
+      "description": "Warped, the loop on over the whole file.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "A loop when its analysis finds a steady beat that fits whole bars, a one-shot otherwise. What a new install has.",
       "type": "string"
     }
   ]
@@ -20538,6 +20923,53 @@ One of:
 
 </details>
 
+### `SavedDefaults`
+
+What `clip.save_default` and `clip.defaults` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The defaults file beside the clip's sample, where the defaults are or would be kept. |
+| `defaults` | [`ClipDefaults`](#clipdefaults) or null | yes | The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.save_default` and `clip.defaults` return.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content."
+    },
+    "file": {
+      "description": "The defaults file beside the clip's sample, where the defaults are or would be kept.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "defaults"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ScannedItem`
 
 A plug-in the scanner found.
@@ -21165,6 +21597,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
+| `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
@@ -21231,6 +21664,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/ThemeChoice",
       "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
     },
+    "warp": {
+      "$ref": "#/$defs/WarpPrefs",
+      "description": "Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode."
+    },
     "warp_recorded_audio": {
       "description": "Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it.",
       "type": "boolean"
@@ -21244,6 +21681,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "tempo_midi",
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
+    "warp",
     "launch",
     "record_session_automation_in",
     "file_folder",
@@ -23242,6 +23680,49 @@ What `view.state` returns: what the view commands switch, without switching any 
 
 </details>
 
+### `WarpFrom`
+
+How Warp From Here warps what follows its point (the warping spec, R39).
+
+One of:
+
+- `"auto"`: Warp From Here: a marker on every bar after it, from the tempo found there.
+- `"start_at"`: Warp From Here (Start At …): the same, starting from the tempo `bpm` (the set's tempo there unless given).
+- `"straight"`: Warp From Here (Straight): no markers after it, the clip's tempo the tempo found after it.
+- `"bpm"`: Warp … BPM From Here: no markers after it, the clip's tempo `bpm` (the set's tempo there unless given).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How Warp From Here warps what follows its point (the warping spec, R39).",
+  "oneOf": [
+    {
+      "const": "auto",
+      "description": "Warp From Here: a marker on every bar after it, from the tempo found there.",
+      "type": "string"
+    },
+    {
+      "const": "start_at",
+      "description": "Warp From Here (Start At …): the same, starting from the tempo `bpm` (the set's tempo there unless given).",
+      "type": "string"
+    },
+    {
+      "const": "straight",
+      "description": "Warp From Here (Straight): no markers after it, the clip's tempo the tempo found after it.",
+      "type": "string"
+    },
+    {
+      "const": "bpm",
+      "description": "Warp … BPM From Here: no markers after it, the clip's tempo `bpm` (the set's tempo there unless given).",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `WarpMarker`
 
 A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).
@@ -23328,6 +23809,49 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `WarpPrefs`
+
+The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the defaults observed in Live 12.4.6. They are preferences, kept between starts and not saved with a set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `loop_warp_short_samples` | [`LoopWarpShortSamples`](#loopwarpshortsamples) | yes | Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples` sets it. |
+| `auto_warp_long_samples` | boolean | yes | Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets it. |
+| `default_warp_mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | Default Warp Mode, as `settings.set_default_warp_mode` sets it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the defaults observed in Live 12.4.6. They are preferences, kept between starts and not saved with a set.",
+  "properties": {
+    "auto_warp_long_samples": {
+      "default": true,
+      "description": "Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets it.",
+      "type": "boolean"
+    },
+    "default_warp_mode": {
+      "$ref": "#/$defs/DefaultWarpMode",
+      "default": "beats",
+      "description": "Default Warp Mode, as `settings.set_default_warp_mode` sets it."
+    },
+    "loop_warp_short_samples": {
+      "$ref": "#/$defs/LoopWarpShortSamples",
+      "default": "auto",
+      "description": "Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples` sets it."
+    }
+  },
+  "required": [
+    "loop_warp_short_samples",
+    "auto_warp_long_samples",
+    "default_warp_mode"
+  ],
+  "type": "object"
 }
 ```
 

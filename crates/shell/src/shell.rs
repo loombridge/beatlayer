@@ -32,14 +32,16 @@ use crate::assistant::{
     SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetPanelWidthArgs, SetProviderArgs, keychain_account,
 };
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
+use crate::auto_warp;
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
-    DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RecordSessionAutomationInArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
-    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
+    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
+    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
+    ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -49,8 +51,8 @@ use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
-    OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
-    zoom_factor, zoom_percent, zoom_step,
+    OnByDefault, Preferences, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
@@ -1483,6 +1485,13 @@ impl Shell {
         self.prefs.create_fades_on_clip_edges.0
     }
 
+    /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp
+    /// Mode (WP-4.9).
+    #[must_use]
+    pub fn warp_prefs(&self) -> WarpPrefs {
+        self.prefs.warp
+    }
+
     /// The Launch section of Record, Warp & Launch (WP-3.4).
     #[must_use]
     pub fn launch_prefs(&self) -> LaunchPrefs {
@@ -1511,6 +1520,7 @@ impl Shell {
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
@@ -2324,6 +2334,14 @@ impl Shell {
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// What `plugin.info` reports for a plug-in device, for the Device
+    /// View's window button (WP-2.10): whether it has an editor and whether
+    /// its window is open. None for a device that isn't a loaded plug-in.
+    #[must_use]
+    pub fn plugin_info(&self, device: bl_model::DeviceId) -> Option<plugin_ids::PluginInfo> {
+        crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
     }
 
     /// How the Browser shows plug-ins, and the Plug-In Sources switches:
@@ -3163,6 +3181,7 @@ impl Shell {
     /// Runs a browser command and carries out what it asks of the rest of
     /// the shell.
     fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.analysis_cache();
         let context = browser::Context {
             insert_marker: self.arrangement.insert_marker(),
             selected_track: self.arrangement.selected_tracks().first().copied(),
@@ -3170,6 +3189,10 @@ impl Shell {
             audio: &mut self.audio,
             media: &self.media,
             edge_fades: self.prefs.create_fades_on_clip_edges.0,
+            warping: auto_warp::Warping {
+                prefs: self.prefs.warp,
+                analysis: self.analysis.as_ref(),
+            },
         };
         let outcome = self
             .browser_view
@@ -3843,6 +3866,8 @@ impl Shell {
         let start = tempo.frames_to_ticks(take.start + Frames((-delay).max(0)), rate);
         let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
+        let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         // shortcut: a take that went round the loop copies no Session
         // clips; upgrade when Live's behaviour there is observed.
@@ -3893,6 +3918,12 @@ impl Shell {
                         // on, a new recorded clip's edges fade over 4 ms, like a
                         // dropped file's.
                         let audio = AudioData::new(*hash);
+                        // Spec: warping R37.
+                        let audio = if warp_recorded {
+                            auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
+                        } else {
+                            audio
+                        };
                         let audio = if edge_fades {
                             audio.with_edge_fades()
                         } else {
@@ -3990,6 +4021,8 @@ impl Shell {
         // early; upgrade by moving each pass by it.
         let tempo = self.editor.document().settings().tempo.clone();
         let edge_fades = self.create_fades_on_clip_edges();
+        let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         let (lead_in, passes) = crate::recording::passes(take, frames);
         let seconds = |frames: u64| frames as f64 / rate.as_f64();
@@ -4005,6 +4038,14 @@ impl Shell {
                 loop_start: from,
                 loop_end: Some(to),
                 ..AudioData::new(hash)
+            };
+            // Spec: warping R37.
+            let audio = if warp_recorded {
+                let start = ticks(pass.song_start);
+                let end = ticks(pass.song_start + Frames(pass.frames as i64));
+                auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
+            } else {
+                audio
             };
             if edge_fades {
                 audio.with_edge_fades()
@@ -5061,6 +5102,20 @@ impl Shell {
         }
     }
 
+    /// Checks a document edit against the media and fills in what only the
+    /// app knows, before it runs (the warping spec, R7, R11, R23 to R27 and
+    /// R39 to R41). [`Shell::run`] does it for every edit; an agent's batch,
+    /// which runs edits with the registry, calls it for each of its steps.
+    ///
+    /// # Errors
+    ///
+    /// If the edit names media it can't use, or needs an analysis that isn't
+    /// ready.
+    pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.check_warp_files(id, &args)?;
+        self.prepare_warping(id, args)
+    }
+
     /// Spec: warping R7, R11. A warp marker edit on several clips needs
     /// files as long as each other's, and a marker can't leave its file; the
     /// document doesn't hold the media, so the check is made here, when the
@@ -5202,8 +5257,7 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
-            self.check_warp_files(id, &args)?;
-            let args = self.prepare_warping(id, args)?;
+            let args = self.prepare_edit(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
@@ -5403,6 +5457,7 @@ impl Shell {
                 .map(|scene| scene.id)
                 .collect();
             let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            self.analysis_cache();
             // Spec: session-view R24. Capture and Insert Scene copies the
             // clips the engine plays, whichever scene they sit in.
             let capture = crate::session_view::Capture {
@@ -5427,6 +5482,10 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        warping: auto_warp::Warping {
+                            prefs: self.prefs.warp,
+                            analysis: self.analysis.as_ref(),
+                        },
                         launch_mode: self.prefs.launch.default_mode,
                         capture,
                         launch_quantization: self.prefs.launch.default_quantization,
@@ -6535,6 +6594,24 @@ impl Shell {
                 Ok(to_value(&TemporaryFolderResult {
                     path: self.temporary_folder().to_string_lossy().into_owned(),
                 }))
+            }
+            ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES => {
+                let LoopWarpShortSamplesArgs { mode } = Self::args(id, args)?;
+                self.prefs.warp.loop_warp_short_samples = mode;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_AUTO_WARP_LONG_SAMPLES => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.warp.auto_warp_long_samples = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_DEFAULT_WARP_MODE => {
+                let DefaultWarpModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.warp.default_warp_mode = mode;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
                 let SwitchArgs { on } = Self::args(id, args)?;

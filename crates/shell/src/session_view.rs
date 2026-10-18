@@ -16,8 +16,8 @@ use std::path::Path;
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, LaunchQuantization, MidiData,
-    SceneId, TrackId,
+    ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, LaunchQuantization, MidiData, SceneId,
+    TrackId,
 };
 use bl_shell_spec::session_view::{
     self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
@@ -56,6 +56,9 @@ pub struct Context<'a> {
     /// Whether a new clip's edges fade (Settings ▸ Create Fades on Clip
     /// Edges).
     pub edge_fades: bool,
+    /// What a new clip's warp settings are made from (the warping spec,
+    /// R33).
+    pub warping: crate::auto_warp::Warping<'a>,
     /// The launch mode a new clip starts with (Settings ▸ Default Launch
     /// Mode).
     pub launch_mode: LaunchMode,
@@ -811,8 +814,14 @@ impl SessionView {
         let before = ctx.editor.document().clone();
         ctx.editor.transact("Insert Clip", |editor| {
             for ((media, name, seconds), (track, scene)) in prepared.iter().zip(&targets) {
-                let length = arrange::length_at(editor.document(), Ticks::ZERO, *seconds);
-                let audio = AudioData::new(media.hash);
+                let new = crate::auto_warp::new_clip(
+                    media,
+                    *seconds,
+                    editor.document(),
+                    Ticks::ZERO,
+                    ctx.warping,
+                );
+                let (length, audio) = (new.length, new.audio);
                 let audio = if ctx.edge_fades {
                     audio.with_edge_fades()
                 } else {

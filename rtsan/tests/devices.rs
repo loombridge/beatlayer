@@ -12,7 +12,8 @@
 //! test binary, fails the test at any heap use it sees.
 //!
 //! The lo-fi effects (WP-5.24: Degrade, Crush and Wax) run after a test tone
-//! with every parameter changing the same way.
+//! with every parameter changing the same way, as do Singe, Grit and Valve
+//! (WP-5.23) with their curves, Hi-Quality and envelopes changing.
 
 bl_rt::install_trap!();
 
@@ -749,5 +750,46 @@ fn stutter_passes_under_rtsan() {
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0
+    );
+}
+
+// Spec: saturator R14, overdrive R8, tube-distortion R11
+#[test]
+fn the_saturation_devices_pass_under_rtsan() {
+    use bl_devices::{overdrive as grit, saturator as singe, tube as valve};
+    run_lo_fi_device(
+        singe::SATURATOR,
+        &[
+            (singe::CURVE, &[0.0, 2.0, 5.0, 7.0]),
+            (singe::DRIVE, &[-12.0, 12.0, 30.0]),
+            (singe::COLOR, &[1.0, 0.0]),
+            (singe::AMT_LO, &[80.0, -60.0]),
+            (singe::AMT_HI, &[-70.0, 90.0]),
+            (singe::WS_DEPTH, &[0.0, 70.0]),
+            (singe::POST_CLIP, &[0.0, 1.0, 2.0]),
+            (singe::HI_QUALITY, &[1.0, 0.0]),
+            (singe::PRE_DC, &[1.0, 0.0]),
+        ],
+    );
+    run_lo_fi_device(
+        grit::OVERDRIVE,
+        &[
+            (grit::DRIVE, &[0.0, 60.0, 100.0]),
+            (grit::TONE, &[0.0, 100.0]),
+            (grit::FREQUENCY, &[200.0, 3_000.0]),
+            (grit::WIDTH, &[0.5, 3.0]),
+            (grit::DYNAMICS, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        valve::TUBE,
+        &[
+            (valve::MODEL, &[0.0, 1.0, 2.0]),
+            (valve::DRIVE, &[0.0, 24.0]),
+            (valve::BIAS, &[0.0, 80.0]),
+            (valve::ENVELOPE, &[-80.0, 80.0]),
+            (valve::ATTACK, &[1.0, 200.0]),
+            (valve::HI_QUALITY, &[1.0, 0.0]),
+        ],
     );
 }

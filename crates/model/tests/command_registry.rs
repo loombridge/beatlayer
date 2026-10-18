@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        151,
+        153,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -190,6 +190,13 @@ fn every_command_runs_by_id() {
     let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
     assert!(changes.settings);
     agent.run("mixer.set_crossfader", json!({ "position": 0.75 }));
+    agent.run(
+        "routing.set_cue_out",
+        json!({ "channel": { "type": "pair", "channel": 3 } }),
+    );
+    let changes = agent.run("mixer.set_cue_mode", json!({ "enabled": true }));
+    assert!(changes.settings);
+    agent.run("mixer.set_cue_volume", json!({ "volume": 0.5 }));
     let changes = agent.run(
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
@@ -1682,6 +1689,11 @@ fn schemas_match_what_commands_serialise() {
             "mixer.set_crossfader",
             Command::SetCrossfader { position: 0.25 },
         ),
+        ("mixer.set_cue_mode", Command::SetCueMode { enabled: true }),
+        (
+            "mixer.set_cue_volume",
+            Command::SetCueVolume { volume: 0.5 },
+        ),
         (
             "mixer.set_crossfade_assign",
             Command::SetCrossfadeAssign {
@@ -2676,7 +2688,7 @@ fn bad_requests_change_nothing() {
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 16] = [
+    let cases: [(&str, Value, Expected<'_>); 18] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -2743,6 +2755,19 @@ fn bad_requests_change_nothing() {
             matches!(
                 e,
                 RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        // Spec: mixer R24, R27
+        ("mixer.set_cue_volume", json!({ "volume": 2.5 }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        ("mixer.set_cue_mode", json!({ "enabled": true }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::CueOverlapsMain))
             )
         }),
         (

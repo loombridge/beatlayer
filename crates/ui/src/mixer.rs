@@ -636,9 +636,6 @@ fn midi_only(doc: &Document, track: TrackId) -> bool {
         .is_some_and(|t| t.kind() == TrackKind::Midi && t.devices().len() == 0)
 }
 
-/// A control another package brings: drawn and named where Live has it,
-/// disabled, and saying which package brings it.
-#[expect(clippy::too_many_arguments, reason = "one control, described in full")]
 /// Headphones in `rect`: a band over two ear cups.
 fn headphones(painter: &egui::Painter, rect: Rect, ink: Color32) {
     let (centre, size) = (rect.center(), rect.height().min(rect.width()) * 0.7);
@@ -662,6 +659,9 @@ fn headphones(painter: &egui::Painter, rect: Rect, ink: Color32) {
     }
 }
 
+/// A control another package brings: drawn and named where Live has it,
+/// disabled, and saying which package brings it.
+#[expect(clippy::too_many_arguments, reason = "one control, described in full")]
 pub fn pending(
     ui: &mut Ui,
     theme: &Theme,

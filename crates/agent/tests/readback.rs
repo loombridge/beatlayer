@@ -108,6 +108,11 @@ fn fixture() -> Project {
         },
         Command::SetCrossfader { position: 0.25 },
         Command::SetSoloInPlace { enabled: false },
+        Command::SetCueOut {
+            channel: Channel::Pair(3),
+        },
+        Command::SetCueMode { enabled: true },
+        Command::SetCueVolume { volume: 0.5 },
     ] {
         apply(&mut editor, command);
     }

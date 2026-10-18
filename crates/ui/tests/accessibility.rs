@@ -2608,6 +2608,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "mixer.set_send_tap",
             main(nothing, session_main, "Return A Pre/Post", Key::Enter),
         ),
+        // Main's Cue Volume knob (WP-3.18): Up and Down step it.
+        (
+            "mixer.set_cue_volume",
+            main(nothing, session_main, "Cue Volume", Key::ArrowDown),
+        ),
         // The Crossfader section (WP-3.17): Main's crossfader and each
         // track's A and B buttons. Live's own key for them and their place
         // in the mixers' Tab order, with the section shown, aren't observed

@@ -230,7 +230,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-026 | Show Similar Files | ⇧⌘F | S-BRW-010 | disabled | |
 | M-VIEW-027 | Show Filter View | ⌥⌘G | S-BRW-013 | disabled | |
 | | — | | | | |
-| M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b) |
+| M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b), with every plug-in editor window the device's window button opens (L-DEV-010, WP-2.10) |
 | M-VIEW-029 | Video Window | ⌥⇧⌘V | S-VIEW-009 | ticked, disabled | Not the manual's ⌥⌘V, which Live shows for Paste Bounced Audio (M-EDIT-031) |
 | | — | | | | |
 | M-VIEW-030 | Show the Max for Live Window | ⌥⇧⌘M | S-VIEW-023 | | Max-specific; Beatlayer's extension host takes this place in M9 or drops it. Left out of Beatlayer's menu (D21) |

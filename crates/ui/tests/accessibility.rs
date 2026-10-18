@@ -1111,6 +1111,35 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The test plug-in on audio track 3, the selected track, once it offers
+/// its editor, with no device selected (WP-2.10).
+fn a_plugin(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let loaded = h
+        .shell
+        .run(
+            "plugin.load",
+            json!({ "path": bl_test_clap::bundle(), "track": track }),
+        )
+        .unwrap();
+    let device: bl_model::DeviceId = serde_json::from_value(loaded["device"].clone()).unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !h.shell.plugin_info(device).is_some_and(|i| i.has_window) {
+        assert!(
+            std::time::Instant::now() < until,
+            "the plug-in never offered its editor"
+        );
+        h.shell.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// An audio effect rack with two chains, Pad and Lead, on audio track 3, the
 /// selected track, with no device selected (WP-5.2).
 fn a_rack(h: &mut Harness) {
@@ -2544,8 +2573,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         // Plug-ins (WP-2.6): loaded by path until the browser lists them
-        // (WP-2.9); the window's button is the plug-in device panel's
-        // (WP-2.10).
+        // (WP-2.9); the window's button is in the plug-in device's title
+        // bar (WP-2.10, L-DEV-010).
         ("plugin.info", Exception(Query)),
         (
             "plugin.load",
@@ -2560,7 +2589,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "plugin.show_window",
-            Exception(LaterView("the plug-in device panel (WP-2.10)")),
+            main(
+                a_plugin,
+                device_view,
+                "Show/Hide Plug-In Window",
+                Key::Enter,
+            ),
         ),
         (
             "plugin.set_window",

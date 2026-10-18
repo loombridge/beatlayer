@@ -4,11 +4,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
-use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
+use bl_core::midi::{MidiInputEvent, MidiMessage, MidiOutputEvent, MidiSource, PortId};
+use rtrb::Producer;
 
-use crate::backend::{
-    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
-};
+use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
+use crate::output::{Output, OutputStats};
 use crate::queue::InputSender;
 
 /// A port's switches in the Tempo & MIDI settings' MIDI ports table
@@ -92,12 +92,14 @@ struct Entry {
     /// While open: the input's connection and the switches its handler
     /// reads, so a switch takes effect without reopening.
     input: Option<(Box<dyn InputConnection>, Arc<AtomicU8>)>,
-    output: Option<Box<dyn OutputConnection>>,
+    /// Whether the output is open; its connection is in the output
+    /// thread's table.
+    output: bool,
 }
 
 impl Entry {
     fn is_open(&self) -> bool {
-        self.input.is_some() || self.output.is_some()
+        self.input.is_some() || self.output
     }
 
     fn state(&self) -> PortState {
@@ -131,6 +133,8 @@ pub struct MidiPorts {
     backend: Box<dyn MidiBackend>,
     sender: InputSender,
     ports: Vec<Entry>,
+    /// The open outputs and the thread that sends to them.
+    output: Arc<Output>,
 }
 
 impl MidiPorts {
@@ -142,7 +146,26 @@ impl MidiPorts {
             backend,
             sender,
             ports: Vec::new(),
+            output: Output::new(),
         }
+    }
+
+    /// Starts a fresh queue of `capacity` messages from the engine to the
+    /// output ports and returns its producing end, for the next engine's
+    /// processor (`bl_engine::Processor::set_midi_output`). The MIDI output
+    /// thread hands each message to its port, with the time stamp it
+    /// carries, while the port is open with its Track switch on
+    /// (`docs/specs/external-devices.md`, R5). What the old queue held goes
+    /// with it.
+    #[must_use]
+    pub fn attach_output(&self, capacity: usize) -> Producer<MidiOutputEvent> {
+        self.output.attach(capacity)
+    }
+
+    /// The counts for everything the output thread has handled.
+    #[must_use]
+    pub fn output_stats(&self) -> &Arc<OutputStats> {
+        self.output.stats()
     }
 
     /// The MIDI system's name.
@@ -170,7 +193,7 @@ impl MidiPorts {
                 present: false,
                 error: None,
                 input: None,
-                output: None,
+                output: false,
             }),
         }
     }
@@ -209,7 +232,7 @@ impl MidiPorts {
                         present: true,
                         error: None,
                         input: None,
-                        output: None,
+                        output: false,
                     });
                 }
             }
@@ -225,9 +248,12 @@ impl MidiPorts {
     fn apply(&mut self, index: usize) {
         let entry = &mut self.ports[index];
         let wanted = entry.present && entry.switches.any();
+        let port = PortId::from_name(&entry.name);
         if !wanted {
             entry.input = None;
-            entry.output = None;
+            if std::mem::take(&mut entry.output) {
+                self.output.remove(port);
+            }
             if !entry.present {
                 entry.error = None;
             }
@@ -237,7 +263,8 @@ impl MidiPorts {
             switches.store(entry.switches.bits(), Relaxed);
             return;
         }
-        if entry.output.is_some() {
+        if entry.output {
+            self.output.set_track(port, entry.switches.track);
             return;
         }
         let opened = match entry.direction {
@@ -248,10 +275,10 @@ impl MidiPorts {
                     .open_input(&entry.name, handler)
                     .map(|connection| entry.input = Some((connection, switches)))
             }
-            Direction::Output => self
-                .backend
-                .open_output(&entry.name)
-                .map(|connection| entry.output = Some(connection)),
+            Direction::Output => self.backend.open_output(&entry.name).map(|connection| {
+                self.output.insert(port, entry.switches.track, connection);
+                entry.output = true;
+            }),
         };
         entry.error = opened.err().map(|error| error.to_string());
     }
@@ -309,6 +336,12 @@ impl MidiPorts {
             .iter()
             .find(|e| e.direction == direction && e.name == name)
             .map(Entry::state)
+    }
+}
+
+impl Drop for MidiPorts {
+    fn drop(&mut self) {
+        self.output.close();
     }
 }
 

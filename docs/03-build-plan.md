@@ -466,7 +466,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.7 | todo |  |  |
 | 4.8 | todo |  |  |
 | 4.9 | done | 18 October 2026 | [#184](https://github.com/loombridge/beatlayer/pull/184); a file's tempo and beats in its analysis, the three Warp/Fades settings, auto-warp of dropped and recorded clips, Set 1.1.1 Here, Warp From Here and Warp as Loop, and Save Default Clip writing a `.beatlayer-clip` file beside the sample; a drop still waits for the analysis rather than showing its place pending; [the spec](specs/warping.md) |
-| 4.10 | todo |  |  |
+| 4.10 | done | 18 October 2026 | [#190](https://github.com/loombridge/beatlayer/pull/190); the Sample Editor in the Clip View, its waveform drawn through the warp map (in the Arrangement too), warp markers, transients and pseudo-warp markers made, moved and deleted by mouse, keys and menus, each drag one undo step; the side-by-side layout check waits for the new L-CLIP rows, and Quantize for WP-4.12; [the spec](specs/sample-editor.md) |
 | 4.10b | todo |  |  |
 | 4.11 | todo |  |  |
 | 4.12 | todo |  |  |

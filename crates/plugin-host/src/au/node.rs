@@ -424,11 +424,15 @@ fn collect(
     for event in block.events() {
         change(events, event.offset, event.param.0, event.value);
     }
-    processor
-        .drive
-        .play(list, transport, block.frames(), |play| {
+    processor.drive.play(
+        list,
+        transport,
+        block.frames(),
+        block.modulation(),
+        |play| {
             push(events, play.offset, In::Param(play.id, play.played));
-        });
+        },
+    );
     for note in block.notes() {
         push(events, note.offset, In::Note(*note));
     }

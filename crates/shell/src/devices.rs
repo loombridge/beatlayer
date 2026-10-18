@@ -17,8 +17,8 @@ use bl_engine::DeviceType;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout,
-    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, ParamId, RackKind, TrackId,
-    TrackKind,
+    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, LayerId, MultisamplerView,
+    MultisamplerViews, ParamId, RackKind, TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
@@ -30,6 +30,8 @@ use bl_shell_spec::devices::{
     SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
     Ungrouped,
 };
+use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
+use bl_shell_spec::multisampler::MultisamplerState;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -54,6 +56,8 @@ pub struct DeviceView {
     slots: std::collections::BTreeMap<DeviceId, u32>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
+    /// The lit Map button, if one is (WP-5.10).
+    armed: Option<(DeviceId, u8)>,
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
@@ -69,6 +73,17 @@ pub struct DeviceView {
     /// (WP-2.10, D19), by `format/plugin_id`: absent entries keep the
     /// plug-in's own parameter at that place. Synced from the preferences.
     plugin_panels: std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    /// What each multisampler's views show (WP-5.13): saved with the set,
+    /// never an undo step.
+    multisamplers: MultisamplerViews,
+    /// Each multisampler's selected layers, in the layer list (R11).
+    selections: std::collections::BTreeMap<DeviceId, Vec<LayerId>>,
+    /// The multisampler layer whose sample the browser's next load replaces
+    /// (WP-5.13, R10).
+    layer_hot_swap: Option<(DeviceId, LayerId)>,
+    /// With Auto Select on, the layers each held key plays (R7): while a
+    /// note is held they are the selection.
+    held: std::collections::BTreeMap<DeviceId, std::collections::BTreeMap<u8, Vec<LayerId>>>,
 }
 
 /// Why a device command didn't run.
@@ -379,6 +394,10 @@ impl DeviceView {
         self.folded.retain(exists);
         self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.selections.retain(|device, _| exists(device));
+        self.held.retain(|device, _| exists(device));
+        self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
+        self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
     }
@@ -414,6 +433,71 @@ impl DeviceView {
                 })
             }),
             can_paste: self.clipboard.is_some(),
+            armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
+        }
+    }
+
+    /// The lit Map button, if one is: its modulator and slot (WP-5.10).
+    #[must_use]
+    pub fn armed(&self) -> Option<(DeviceId, u8)> {
+        self.armed
+    }
+
+    /// What a modulator's panel shows beside its parameters.
+    fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
+        use bl_model::modulator::{CURVE_MOD, default_shape, is_modulator_kind};
+        if !is_modulator_kind(&d.kind) {
+            return None;
+        }
+        let curve =
+            matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
+        Some(ModulatorFrame {
+            mappings: d
+                .mappings
+                .iter()
+                .map(|m| MappingRow {
+                    slot: m.slot,
+                    target: m.target,
+                    label: self.target_label(doc, m.target),
+                })
+                .collect(),
+            armed: self
+                .armed
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, slot)| slot),
+            shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
+        })
+    }
+
+    /// How a mapping's slot names its target: a device's title and the
+    /// parameter's name, or a track's label and its control.
+    fn target_label(&self, doc: &Document, target: bl_model::modulator::ModTarget) -> String {
+        use bl_model::MixerParam;
+        use bl_model::modulator::ModTarget;
+        match target {
+            ModTarget::Device { device, param } => {
+                doc.device(device).map_or_else(String::new, |d| {
+                    let name = self
+                        .description(&d.kind)
+                        .and_then(|description| description.param(param))
+                        .map_or_else(|| format!("Parameter {}", param.0), |p| p.name.clone());
+                    format!("{} / {name}", d.title())
+                })
+            }
+            ModTarget::Mixer { track, param } => format!(
+                "{} {}",
+                crate::routing::track_label(doc, track),
+                match param {
+                    MixerParam::Volume => "Volume",
+                    MixerParam::Pan => "Pan",
+                    MixerParam::Mute => "Track Activator",
+                }
+            ),
+            ModTarget::Send { track, to } => format!(
+                "{} Send {}",
+                crate::routing::track_label(doc, track),
+                crate::routing::track_label(doc, to)
+            ),
         }
     }
 
@@ -508,6 +592,140 @@ impl DeviceView {
         FloatingWindows { windows }
     }
 
+    /// Whether `device` is a multisampler (WP-5.13).
+    #[must_use]
+    pub fn is_multisampler(device: &Device) -> bool {
+        matches!(
+            &device.kind,
+            DeviceKind::Native { device_type } if device_type == bl_devices::multisampler::MULTISAMPLER
+        )
+    }
+
+    /// What a multisampler's views show: a new device's until a command
+    /// changes them.
+    #[must_use]
+    pub fn multisampler_view(&self, device: DeviceId) -> MultisamplerView {
+        self.multisamplers.get(&device).copied().unwrap_or_default()
+    }
+
+    /// Changes what a multisampler's views show.
+    pub fn set_multisampler_view(&mut self, device: DeviceId, view: MultisamplerView) {
+        if view == MultisamplerView::default() {
+            self.multisamplers.remove(&device);
+        } else {
+            self.multisamplers.insert(device, view);
+        }
+    }
+
+    /// Every multisampler's views, for the next save.
+    #[must_use]
+    pub fn multisampler_views(&self) -> &MultisamplerViews {
+        &self.multisamplers
+    }
+
+    /// Takes the views an opened set saved, or none for a new set.
+    pub fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        self.multisamplers = views;
+        self.selections.clear();
+        self.held.clear();
+        self.layer_hot_swap = None;
+    }
+
+    /// A multisampler's selected layers that are still in it, in list
+    /// order: the layers of the notes held while Auto Select is on, else the
+    /// ones picked in the list.
+    #[must_use]
+    pub fn layer_selection(&self, doc: &Document, device: DeviceId) -> Vec<LayerId> {
+        doc.device(device)
+            .map_or_else(Vec::new, |d| self.layer_selection_of(d))
+    }
+
+    /// The layer a load from the browser replaces the sample of, if one is
+    /// being hot-swapped.
+    #[must_use]
+    pub fn layer_hot_swap(&self) -> Option<(DeviceId, LayerId)> {
+        self.layer_hot_swap
+    }
+
+    /// Starts or ends hot-swapping a layer's sample.
+    pub fn set_layer_hot_swap(&mut self, layer: Option<(DeviceId, LayerId)>) {
+        self.layer_hot_swap = layer;
+    }
+
+    /// Picks a multisampler's layers in the list.
+    pub fn select_layers(&mut self, device: DeviceId, layers: Vec<LayerId>) {
+        self.selections.insert(device, layers);
+    }
+
+    /// A key went down or up on the computer keyboard: with Auto Select on,
+    /// a multisampler on `track` selects the layers the note plays for as
+    /// long as it's held (R7). Plays nothing in the set.
+    pub fn note(&mut self, doc: &Document, track: TrackId, key: u8, velocity: u8, down: bool) {
+        // A key goes up on every track, in case the view moved while it was
+        // held.
+        if !down {
+            for held in self.held.values_mut() {
+                held.remove(&key);
+            }
+            return;
+        }
+        let Some(track) = doc.track(track) else {
+            return;
+        };
+        for device in track.devices().filter(|d| Self::is_multisampler(d)) {
+            let held = self.held.entry(device.id).or_default();
+            if self
+                .multisamplers
+                .get(&device.id)
+                .is_some_and(|v| v.auto_select)
+            {
+                let selector = device
+                    .params
+                    .get(&bl_devices::multisampler::SELECTOR)
+                    .map_or(0, |v| *v as u8);
+                held.insert(key, device.layers.matching(key, velocity, selector));
+            }
+        }
+    }
+
+    /// A multisampler's views and selection, as `device_view.state` reports
+    /// them.
+    fn multisampler_state(&self, d: &Device) -> Option<MultisamplerState> {
+        Self::is_multisampler(d).then(|| MultisamplerState {
+            view: self.multisampler_view(d.id),
+            selection: self.layer_selection_of(d),
+            layers: d.layers.list.len(),
+            hot_swap: self
+                .layer_hot_swap
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, layer)| layer),
+        })
+    }
+
+    /// As [`layer_selection`](Self::layer_selection), for a device already
+    /// in hand.
+    fn layer_selection_of(&self, d: &Device) -> Vec<LayerId> {
+        let held: std::collections::BTreeSet<LayerId> = self
+            .held
+            .get(&d.id)
+            .into_iter()
+            .flat_map(|keys| keys.values().flatten().copied())
+            .collect();
+        let picked = self.selections.get(&d.id);
+        d.layers
+            .list
+            .iter()
+            .map(|l| l.id)
+            .filter(|id| {
+                if held.is_empty() {
+                    picked.is_some_and(|p| p.contains(id))
+                } else {
+                    held.contains(id)
+                }
+            })
+            .collect()
+    }
+
     /// One device as the Device View, or its floating window, shows it.
     fn frame(&self, doc: &Document, d: &Device) -> DeviceFrame {
         DeviceFrame {
@@ -521,6 +739,10 @@ impl DeviceView {
                 &d.kind,
                 DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
             ),
+            swaps_to_snapshot: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER
+            ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             expandable: self.expandable(d),
@@ -529,10 +751,11 @@ impl DeviceView {
             b_active: d.b_active,
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
+            multisampler: self.multisampler_state(d),
             panel: self.panel(d),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
-                    bl_model::Input::Track { track, tap } => {
+                    bl_model::Input::Track { track, tap, .. } => {
                         (crate::routing::track_label(doc, *track), Some(*tap))
                     }
                     _ => ("No Input".to_owned(), None),
@@ -548,6 +771,7 @@ impl DeviceView {
                 }
             }),
             display_view: self.display_view(d),
+            modulator: self.modulator_frame(doc, d),
         }
     }
 
@@ -645,6 +869,10 @@ impl DeviceView {
             ids::CHAIN_PASTE => self.chain_clipboard.is_some(),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
             ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
+            ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+            }),
             ids::SET_WINDOW => named
                 .and_then(|device| doc.device(device))
                 .is_some_and(|d| d.floating),
@@ -907,6 +1135,14 @@ impl DeviceView {
                 outcome.value = to_value(&added);
                 return Ok(outcome);
             }
+            ids::SWAP_TO_SNAPSHOT => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let added = self.swap_to_snapshot(editor, device)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
             ids::GROUP => {
                 let args: GroupArgs = parse(args)?;
                 let grouped = self.group(editor, args)?;
@@ -1004,6 +1240,37 @@ impl DeviceView {
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
             }
+            ids::ARM_MAP => {
+                let ArmMapArgs {
+                    device,
+                    slot,
+                    armed,
+                } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if !editor
+                    .document()
+                    .device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} isn't a modulator"
+                    )));
+                }
+                if slot >= bl_model::modulator::SLOTS {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "a modulator's slots are 0 to {}",
+                        bl_model::modulator::SLOTS - 1
+                    )));
+                }
+                let lit = self.armed == Some((device, slot));
+                self.armed = if armed.unwrap_or(!lit) {
+                    Some((device, slot))
+                } else if lit {
+                    None
+                } else {
+                    self.armed
+                };
+            }
             ids::DISPLAY => {
                 let DeviceArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -1065,6 +1332,67 @@ impl DeviceView {
         }
         outcome.value = state(self, editor, arrangement);
         Ok(outcome)
+    }
+
+    /// Replaces the Strike drum sampler `device` with Snapshot in One-Shot
+    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
+    /// same place, sample and on or off state, and the same Start and
+    /// Length, in one undo step.
+    fn swap_to_snapshot(
+        &mut self,
+        editor: &mut Editor,
+        device: DeviceId,
+    ) -> Result<DeviceAdded, DeviceError> {
+        use bl_devices::{drum_sampler, sampler};
+        let doc = editor.document();
+        let old = doc.device(device).expect("the target exists");
+        let strike = drum_sampler::drum_sampler_type();
+        if old.kind != strike.kind {
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't a drum sampler"
+            )));
+        }
+        let place = doc.device_place(device).expect("the target has a place");
+        let kept = |id| {
+            strike
+                .description
+                .value(&old.params, id)
+                .expect("Strike describes it")
+        };
+        let (enabled, media) = (old.enabled, old.media.clone());
+        let (start, length) = (kept(drum_sampler::START), kept(drum_sampler::LENGTH));
+        let id: DeviceId = editor.new_id();
+        let mut snapshot = sampler::sampler_type().device(id);
+        snapshot.enabled = enabled;
+        snapshot.media = media;
+        snapshot.params.insert(sampler::MODE, 1.0);
+        snapshot.params.insert(sampler::START, start);
+        snapshot.params.insert(sampler::LENGTH, length);
+        // A chain holds one instrument, so the old one goes first.
+        editor
+            .transact("Swap to Snapshot", |editor| {
+                editor.apply(Command::RemoveDevice { device })?;
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                }
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(id);
+        Ok(DeviceAdded {
+            device: id,
+            track: place.track,
+            new_track: false,
+            default_preset: None,
+        })
     }
 
     /// Adds a device as a person does (`device.add`).
@@ -1135,6 +1463,7 @@ impl DeviceView {
                     device: id,
                     params: self.sanitize(&args.device.kind, preset.params.clone()),
                     name: preset::preset_name(path),
+                    shape: preset.shape.clone(),
                 })?;
             }
             Ok::<_, bl_model::EditError>(())
@@ -1200,6 +1529,7 @@ impl DeviceView {
                         device: id,
                         params: self.sanitize(&args.device.kind, preset.params.clone()),
                         name: preset::preset_name(path),
+                        shape: preset.shape.clone(),
                     })?;
                 }
                 Ok::<_, bl_model::EditError>(())
@@ -1227,19 +1557,28 @@ impl DeviceView {
         // A copy goes in the chain, docked, whether or not the original
         // floats (WP-5.1, WP-2.5b), and so does everything inside a rack.
         copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        // Spec: modulation R19. A modulator copied alone keeps its settings
+        // and no mappings; one copied inside a rack maps the copies of its
+        // targets inside it.
+        let pairs: Vec<(&Device, DeviceId)> =
+            device.walk().zip(copy.walk().map(|d| d.id)).collect();
+        copy.clear_mappings();
         let id = copy.id;
         editor
-            .transact(label, |editor| match place.chain {
-                None => editor.apply(Command::InsertDevice {
-                    track: place.track,
-                    index: place.index,
-                    device: copy,
-                }),
-                Some(chain) => editor.apply(Command::InsertChainDevice {
-                    chain,
-                    index: place.index,
-                    device: copy,
-                }),
+            .transact(label, |editor| {
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: copy,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: copy,
+                    }),
+                }?;
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         self.selected = Some(id);
@@ -1262,12 +1601,21 @@ impl DeviceView {
     ) -> Result<ChainAdded, DeviceError> {
         let mut copy = chain.clone();
         copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        let pairs: Vec<(&Device, DeviceId)> = chain
+            .devices_deep()
+            .zip(copy.devices_deep().map(|d| d.id))
+            .collect();
+        copy.devices.iter_mut().for_each(Device::clear_mappings);
         let id = copy.id;
+        let command = Command::AddChain {
+            rack,
+            index,
+            chain: copy,
+        };
         editor
-            .apply(Command::AddChain {
-                rack,
-                index,
-                chain: copy,
+            .transact(command.label(), |editor| {
+                editor.apply(command)?;
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         Ok(ChainAdded { chain: id, rack })
@@ -1454,6 +1802,7 @@ fn load_preset(
             device,
             params: view.sanitize(&loaded.kind, loaded.params),
             name: preset::preset_name(path),
+            shape: loaded.shape,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))
@@ -1518,4 +1867,35 @@ pub fn load_hot_swapped(
         .ok_or_else(|| DeviceError::Unavailable("no device is being hot-swapped".to_owned()))?;
     load_preset(view, editor, device, path)?;
     Ok(preset_result(device, path))
+}
+
+/// Maps the copies of the modulators in a copied rack or chain to the
+/// copies of their targets inside it (the modulation spec, R19); a mapping
+/// whose target is outside the copy isn't copied. `pairs` pairs each
+/// original with its copy's ID.
+fn map_inner_copies(
+    editor: &mut Editor,
+    pairs: &[(&Device, DeviceId)],
+) -> Result<(), bl_model::EditError> {
+    use bl_model::modulator::ModTarget;
+    let copy_of = |original: DeviceId| {
+        pairs
+            .iter()
+            .find(|(o, _)| o.id == original)
+            .map(|(_, c)| *c)
+    };
+    for &(original, copy) in pairs {
+        for mapping in &original.mappings {
+            if let ModTarget::Device { device, param } = mapping.target
+                && let Some(device) = copy_of(device)
+            {
+                editor.apply(Command::MapModulator {
+                    device: copy,
+                    slot: mapping.slot,
+                    target: ModTarget::Device { device, param },
+                })?;
+            }
+        }
+    }
+    Ok(())
 }

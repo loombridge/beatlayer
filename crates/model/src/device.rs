@@ -11,6 +11,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::layers::Layers;
+use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
 use crate::track::Input;
 
@@ -95,6 +97,19 @@ pub struct Device {
         deserialize_with = "media_slots"
     )]
     pub media: Vec<Option<ContentHash>>,
+    /// A multisampler's layers and the options of its layer list (WP-5.13,
+    /// the multisampler spec, R2). Left out of the saved set for a device
+    /// that holds none.
+    #[serde(default, skip_serializing_if = "Layers::is_default")]
+    pub layers: Layers,
+    /// The parameters a modulator maps, one per slot (the modulation spec,
+    /// R19). Left out of the saved set for a device that maps none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<Mapping>,
+    /// The breakpoints of a Curve Mod's shape (R23); `None` plays the
+    /// default shape. Left out of the saved set while it is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<ShapePoint>>,
     /// A rack's chains, in order (WP-5.1). Empty for every device that
     /// isn't a rack, and left out of the saved set then, so sets saved
     /// before racks load unchanged.
@@ -304,6 +319,9 @@ impl Device {
             floating: false,
             plugin: None,
             media: Vec::new(),
+            layers: Layers::default(),
+            mappings: Vec::new(),
+            shape: None,
             chains: Vec::new(),
         }
     }
@@ -415,13 +433,18 @@ impl Device {
     }
 
     /// What its title bar shows: its preset's or given name while Show
-    /// Preset Name is on, and its own name while it's off.
+    /// Preset Name is on, and its own name while it's off. A multisampler
+    /// that nothing has named shows its first layer's name while it's on.
     #[must_use]
     pub fn title(&self) -> &str {
-        if self.show_preset_name {
-            &self.name
-        } else {
-            self.own_name()
+        if !self.show_preset_name {
+            return self.own_name();
+        }
+        // A multisampler no preset or Rename has named shows its first
+        // layer's name (the multisampler spec, R29).
+        match self.layers.list.first() {
+            Some(layer) if self.own_name.is_empty() => &layer.name,
+            _ => &self.name,
         }
     }
 

@@ -53,6 +53,10 @@ pub struct Preset {
     pub device_name: String,
     /// The parameter values set, each finite.
     pub params: OrdMap<ParamId, f64>,
+    /// A Curve Mod's breakpoint shape (the modulation spec, R12, R23);
+    /// `None` for the default shape and for any other device. A preset
+    /// holds no mappings.
+    pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,6 +67,8 @@ struct File {
     saved_by: String,
     device: DeviceInfo,
     params: Vec<(ParamId, f64)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shape: Option<Vec<bl_model::modulator::ShapePoint>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -127,6 +133,7 @@ impl Preset {
             role: device.role,
             device_name: device.own_name().to_owned(),
             params: device.params.clone(),
+            shape: device.shape.clone(),
         }
     }
 
@@ -165,6 +172,7 @@ impl Preset {
                 name: self.device_name.clone(),
             },
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
+            shape: self.shape.clone(),
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -216,6 +224,7 @@ impl Preset {
             role: file.device.role,
             device_name: file.device.name,
             params,
+            shape: file.shape,
         })
     }
 

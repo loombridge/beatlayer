@@ -913,6 +913,7 @@ version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
+ "bl-stretch",
  "imbl",
  "lspk-params",
  "proptest",
@@ -1018,6 +1019,7 @@ name = "bl-stretch"
 version = "0.1.0"
 dependencies = [
  "bl-dsp",
+ "proptest",
 ]
 
 [[package]]

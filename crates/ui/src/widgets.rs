@@ -27,6 +27,9 @@ pub struct Look {
     /// Whether a value is being typed into the element, which it draws as
     /// an entry.
     pub entry: bool,
+    /// Whether a live element can't be used now: it is drawn quieter and
+    /// assistive technology reads it as disabled.
+    pub disabled: bool,
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
@@ -93,7 +96,7 @@ fn paint(
         };
         painter.rect_filled(rect, corner, face);
     }
-    let ink = if !live {
+    let ink = if !live || look.disabled {
         c.pending.0
     } else if look.on {
         c.accent_text.0
@@ -369,6 +372,9 @@ fn describe(ui: &Ui, placement: &Placement, look: &Look, response: &Response) {
         if !live {
             node.remove_action(accesskit::Action::Click);
             node.remove_action(accesskit::Action::Focus);
+        }
+        if look.disabled {
+            node.set_disabled();
         }
     });
 }

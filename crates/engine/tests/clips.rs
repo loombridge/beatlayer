@@ -112,12 +112,12 @@ fn a_split_clips_parts_play_on_from_where_the_whole_clip_was() {
 
     let mut whole = Editor::new();
     let a = track(&mut whole, TrackKind::Audio, None);
-    clip(&mut whole, a, start, length, audio);
+    clip(&mut whole, a, start, length, audio.clone());
     let expected = play(&whole, &media, 96_000, 512, &[]);
 
     let mut parts = Editor::new();
     let b = track(&mut parts, TrackKind::Audio, None);
-    clip(&mut parts, b, start, split - start, audio);
+    clip(&mut parts, b, start, split - start, audio.clone());
     let whole = Clip::new(parts.new_id(), start, length, ClipData::Audio(audio));
     let piece = Clip {
         id: parts.new_id(),
@@ -186,7 +186,7 @@ fn trimmed_and_split_clips_play_exactly_what_the_whole_clip_did() {
                 })
                 .unwrap();
             let a = track(&mut editor, TrackKind::Audio, None);
-            let id = clip(&mut editor, a, start, length, audio);
+            let id = clip(&mut editor, a, start, length, audio.clone());
             edit(&mut editor, a, id);
             editor
         };

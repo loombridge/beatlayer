@@ -29,10 +29,10 @@ const MIN_LENGTH: Ticks = Ticks::SIXTEENTH;
 /// Where one armed track records, before the slot exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Pick {
-    track: TrackId,
+    pub(super) track: TrackId,
     /// The scene whose slot it is; `None` for a scene inserted at the end.
-    scene: Option<SceneId>,
-    overdub: bool,
+    pub(super) scene: Option<SceneId>,
+    pub(super) overdub: bool,
 }
 
 /// One slot a recording goes into.
@@ -53,7 +53,11 @@ pub(super) struct SessionRun {
 }
 
 /// Whether the engine is playing a slot's clip.
-fn playing(states: &[SlotStatus], track: TrackId, scene: SceneId) -> Option<&SlotStatus> {
+pub(super) fn playing(
+    states: &[SlotStatus],
+    track: TrackId,
+    scene: SceneId,
+) -> Option<&SlotStatus> {
     states.iter().find(|status| {
         status.track == track
             && status.scene == scene
@@ -66,44 +70,53 @@ fn playing(states: &[SlotStatus], track: TrackId, scene: SceneId) -> Option<&Slo
 /// track records a new clip into the scene `from`'s slot if it is empty, else
 /// into the next empty slot below, else into a scene inserted at the end.
 fn picks(doc: &Document, from: Option<SceneId>, states: &[SlotStatus]) -> Vec<Pick> {
+    doc.track_order()
+        .into_iter()
+        .filter(|&id| {
+            doc.track(id).is_some_and(|track| {
+                track.mixer().arm && matches!(track.kind(), TrackKind::Midi | TrackKind::Audio)
+            })
+        })
+        .filter_map(|id| pick(doc, id, from, states))
+        .collect()
+}
+
+/// Where one track's recording goes (`picks`' rule, for one track), which
+/// Capture MIDI uses too.
+pub(super) fn pick(
+    doc: &Document,
+    id: TrackId,
+    from: Option<SceneId>,
+    states: &[SlotStatus],
+) -> Option<Pick> {
     let scenes: Vec<SceneId> = doc.scenes().map(|scene| scene.id).collect();
     let first = from
         .and_then(|from| scenes.iter().position(|&scene| scene == from))
         .unwrap_or(0);
-    let mut picked = Vec::new();
-    for id in doc.track_order() {
-        let Some(track) = doc.track(id) else {
-            continue;
-        };
-        if !track.mixer().arm || !matches!(track.kind(), TrackKind::Midi | TrackKind::Audio) {
-            continue;
-        }
-        if track.kind() == TrackKind::Midi
-            && let Some(status) = scenes.iter().find_map(|&scene| {
-                let clip = track.slot(scene)?;
-                matches!(clip.data, ClipData::Midi(_))
-                    .then(|| playing(states, id, scene))
-                    .flatten()
-            })
-        {
-            picked.push(Pick {
-                track: id,
-                scene: Some(status.scene),
-                overdub: true,
-            });
-            continue;
-        }
-        let empty = scenes[first..]
-            .iter()
-            .copied()
-            .find(|&scene| track.slot(scene).is_none());
-        picked.push(Pick {
+    let track = doc.track(id)?;
+    if track.kind() == TrackKind::Midi
+        && let Some(status) = scenes.iter().find_map(|&scene| {
+            let clip = track.slot(scene)?;
+            matches!(clip.data, ClipData::Midi(_))
+                .then(|| playing(states, id, scene))
+                .flatten()
+        })
+    {
+        return Some(Pick {
             track: id,
-            scene: empty,
-            overdub: false,
+            scene: Some(status.scene),
+            overdub: true,
         });
     }
-    picked
+    let empty = scenes[first..]
+        .iter()
+        .copied()
+        .find(|&scene| track.slot(scene).is_none());
+    Some(Pick {
+        track: id,
+        scene: empty,
+        overdub: false,
+    })
 }
 
 impl Shell {
@@ -196,7 +209,7 @@ impl Shell {
 
     /// The scene Session Record starts from: the selected scene, else the
     /// selected slot's, else the first.
-    fn session_scene(&self) -> Option<SceneId> {
+    pub(super) fn session_scene(&self) -> Option<SceneId> {
         let state = self.session.state();
         state
             .scenes

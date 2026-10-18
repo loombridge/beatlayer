@@ -83,17 +83,20 @@
 bl_rt::install_trap!();
 
 mod automation;
+pub mod capture;
 pub mod clips;
 mod compiler;
 pub mod display;
 mod engine;
 mod gc;
 mod input;
+mod layers;
 mod message;
 mod metronome;
 mod midi;
 pub mod midi_clips;
 pub mod mixer;
+pub mod modbus;
 mod node;
 pub mod nodes;
 mod offline;
@@ -115,6 +118,7 @@ pub mod testing;
 use bl_core::time::SampleRate;
 
 pub use automation::{AutomationList, clip_envelope_value_at, target_node};
+pub use capture::{CAPTURE_RING, CapturedMidi};
 pub use clips::{
     ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
 };
@@ -123,6 +127,7 @@ pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_c
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
+pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
 pub use message::{
     Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
 };

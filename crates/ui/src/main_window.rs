@@ -331,6 +331,10 @@ impl MainWindowUi {
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
         crate::menus::menu_keys(ctx);
+        // Spec: modulation R15. A lit Map button tints the parameters it can
+        // map, and Esc puts it out.
+        crate::mapping::set_armed(ctx, shell.armed_map());
+        crate::mapping::escape(ctx, self.is_typing(), &mut events);
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
         if let Some(step) = self.focus_move.take() {
@@ -403,6 +407,12 @@ impl MainWindowUi {
             } else {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
+            }
+            if !shell.clip_view().visible() && shell.scene_view_scene().is_none() {
+                // Spec: multisampler R1. The zone editor sits above the
+                // Device View.
+                self.devices
+                    .show_zone_editor(ui, shell, theme, layout.detail, &mut events);
             }
             self.device_titles = shell
                 .device_view_state()

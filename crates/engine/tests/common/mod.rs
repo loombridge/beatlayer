@@ -247,6 +247,7 @@ impl Rig {
         let synced = Synced {
             program: update.program.is_some(),
             params: update.params.len(),
+            data: update.data.len(),
         };
         self.sender.send_update(update);
         assert!(self.sender.flush(), "the queue is full");
@@ -320,6 +321,8 @@ pub struct Synced {
     pub program: bool,
     /// How many parameter changes it sent.
     pub params: usize,
+    /// How many nodes it sent data.
+    pub data: usize,
 }
 
 /// The key of a device's node.

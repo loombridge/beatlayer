@@ -97,6 +97,8 @@ pub mod transport;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+/// Capture MIDI's command ID and its result types (WP-3.14).
+pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;
@@ -111,6 +113,8 @@ pub use bl_shell_spec::midi_io as midi_io_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
+/// The multisampler's commands that run on the shell (WP-5.13).
+pub use bl_shell_spec::multisampler as multisampler_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;

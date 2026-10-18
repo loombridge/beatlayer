@@ -101,6 +101,17 @@ impl Buffer {
             .any(|m| m.message.is_note_on())
     }
 
+    /// How many notes have been released: the note-offs kept, on every
+    /// track.
+    #[must_use]
+    pub fn released(&self) -> usize {
+        self.tracks
+            .values()
+            .flatten()
+            .filter(|m| m.message.is_note_off())
+            .count()
+    }
+
     /// The messages per track, oldest first, leaving the buffer empty.
     pub fn take(&mut self) -> BTreeMap<TrackId, Vec<CapturedMidi>> {
         std::mem::take(&mut self.tracks)

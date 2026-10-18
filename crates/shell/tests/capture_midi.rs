@@ -71,7 +71,25 @@ fn midi_track(shell: &mut Shell, name: &str) -> TrackId {
     shell
         .run("mixer.set_arm", json!({ "track": track, "arm": true }))
         .unwrap();
+    settle(shell);
     track
+}
+
+/// Waits until the engine plays the set as it is now: the change has
+/// reached the audio thread and a couple of blocks have run with it, so a
+/// key played next reaches a track just armed, however busy the machine.
+fn settle(shell: &mut Shell) {
+    assert!(
+        shell.audio().flush(Duration::from_secs(10)),
+        "the engine never took the set"
+    );
+    let blocks = |shell: &Shell| shell.audio().stats().map_or(0, |s| s.blocks);
+    let start = blocks(shell);
+    let until = Instant::now() + Duration::from_secs(10);
+    while blocks(shell) < start + 2 {
+        assert!(Instant::now() < until, "the stream stopped");
+        pass_time(shell, 5);
+    }
 }
 
 fn scenes(shell: &Shell) -> Vec<SceneId> {
@@ -94,6 +112,8 @@ fn pass_time(shell: &mut Shell, millis: u64) {
 /// Plays the keyboard's A key `count` times, a tenth of a second long each,
 /// a quarter of a second apart.
 fn play_a(shell: &mut Shell, count: usize) {
+    shell.poll_engine();
+    let before = shell.capture_midi_released();
     for _ in 0..count {
         for pressed in [true, false] {
             shell
@@ -104,6 +124,13 @@ fn play_a(shell: &mut Shell, count: usize) {
                 .unwrap();
             pass_time(shell, if pressed { 100 } else { 150 });
         }
+    }
+    // The engine logs the keys on its own thread, which a busy machine can
+    // hold up past the waits above: wait until it has every release.
+    let until = Instant::now() + Duration::from_secs(10);
+    while shell.capture_midi_released() < before + count {
+        assert!(Instant::now() < until, "the engine never logged every note");
+        pass_time(shell, 5);
     }
 }
 

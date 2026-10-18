@@ -64,6 +64,14 @@ impl Shell {
         self.capture.has_notes()
     }
 
+    /// How many played notes Capture MIDI holds, counted by their releases,
+    /// as of the last [`Shell::poll_engine`]. A test waits on it, since the
+    /// engine logs what the keyboard sends on its own thread.
+    #[must_use]
+    pub fn capture_midi_released(&self) -> usize {
+        self.capture.released()
+    }
+
     /// Runs `midi.capture`.
     pub(super) fn run_capture_midi(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         Self::args::<NoArgs>(id, args)?;

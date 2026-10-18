@@ -849,6 +849,17 @@ impl AudioHost {
         reports
     }
 
+    /// Waits until everything sent to the running engine so far, the last
+    /// document change among it, has reached the audio thread, which takes
+    /// it at its next block. Returns whether it did within `timeout`; with
+    /// no engine running there's nothing to wait for. Tests use it before
+    /// playing into a track they just armed.
+    pub fn flush(&self, timeout: std::time::Duration) -> bool {
+        self.engine
+            .as_ref()
+            .is_none_or(|engine| engine.flush(timeout))
+    }
+
     /// How many engines have started: each time a device opens, a new
     /// engine starts with none of the last one's scheduled commands.
     #[must_use]

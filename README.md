@@ -18,9 +18,9 @@ If you know Live, you already know Beatlayer. It's written from scratch in Rust 
 
 ## 
 
-## What 0.1 can do
+## What 0.2 can do
 
-Alpha 0.1 makes a whole song. Write MIDI in the piano roll, play a sampler and a polysynth, and host CLAP, VST3 and Audio Unit plug-ins. Record audio and MIDI with punch, count-in and loop takes. Automate anything, route sends and sidechains, then export to WAV or MP3. The assistant can build a 16-bar track from a sentence on a local model. Oh, and stem separation works. Today. CPU only for now, GPU accelerated  seperation will come a bit later.
+Alpha 0.2 makes a whole song and plays it live. Launch clips and scenes in the Session View, with follow actions. Write MIDI in the piano roll, play a sampler and a polysynth, and host CLAP, VST3 and Audio Unit plug-ins. Record audio and MIDI with punch, count-in and loop takes. Automate anything, route sends and sidechains, then export to WAV or MP3. The assistant can build a 16-bar track from a sentence on a local model. Oh, and stem separation works. Today. CPU only for now, GPU accelerated  seperation will come a bit later.
 
 It's an alpha: the builds are unsigned and you'll find rough edges.
 
@@ -34,8 +34,8 @@ macOS and Windows warn you before they open an unsigned build. The [release note
 
 ## Coming
 
-- **0.2:** Session View performance, with clip and scene launching, follow actions, and recording a set into the Arrangement.
-- **0.3 and 0.4:** warping at any tempo, then racks with macros and drum racks.
+- **0.3:** every warp mode, so loops and recordings sound right at any tempo, plus slice to MIDI, freeze and bounce.
+- **0.4:** racks with macros, modulation, and every core effect and MIDI effect.
 - **Beta 0.5:** comping, MIDI generators, scales and tunings, and projects from other DAWs through DAWproject.
 - **On to 1.0:** Link and controller support including Push 2; wavetable, FM, physical-modelling and granular instruments; stem separation on your GPU; audio to MIDI that needs little clean-up; Live set import; and a plug-in sandbox, so a crashing plug-in can't take your song with it.
 
@@ -57,7 +57,7 @@ Feature requests are welcome too!
 
 ## Documents
 
-- [Roadmap](docs/01-roadmap.md): the phases and milestones, from alpha 0.1 to 1.0.
+- [Roadmap](docs/01-roadmap.md): the phases and milestones, from alpha 0.2 to 1.0.
 - [Architecture](docs/02-architecture.md): the engine, the document model, plug-in hosting and the UI.
 - [Build plan](docs/03-build-plan.md): every work package, with its acceptance criteria and status.
 - [Parity matrix](docs/04-parity-matrix.md): Live 12's features and the milestone that brings each one.

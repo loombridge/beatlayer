@@ -34,6 +34,7 @@ use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
+use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -833,6 +834,45 @@ pub enum Command {
         clip: ClipId,
         /// What to multiply by: 2 for ×2, 0.5 for ÷2.
         factor: f64,
+    },
+    /// Sets a warped or unwarped audio clip's warp mode (WP-4.2).
+    SetClipWarpMode {
+        /// The audio clip.
+        clip: ClipId,
+        /// The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro.
+        mode: WarpMode,
+    },
+    /// Sets controls of an audio clip's warp modes (WP-4.2): any of them, by
+    /// mode, in one step.
+    SetClipWarpSettings {
+        /// The audio clip.
+        clip: ClipId,
+        /// Beats' controls to change.
+        #[serde(default)]
+        beats: Option<BeatsUpdate>,
+        /// Tones' controls to change.
+        #[serde(default)]
+        tones: Option<TonesUpdate>,
+        /// Texture's controls to change.
+        #[serde(default)]
+        texture: Option<TextureUpdate>,
+        /// Complex Pro's controls to change.
+        #[serde(default)]
+        complex_pro: Option<ComplexProUpdate>,
+    },
+    /// Switches an audio clip's RAM mode (WP-4.2).
+    SetClipRamMode {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip's whole file is held in memory.
+        ram: bool,
+    },
+    /// Switches an audio clip's high-quality interpolation (WP-4.2).
+    SetClipHighQuality {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip is resampled by the band-limited interpolator.
+        high_quality: bool,
     },
     /// Switches a Session clip's Legato: on, it takes over the play position
     /// of the clip playing on its track when it launches.
@@ -1636,6 +1676,11 @@ impl Command {
             Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
             Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
             Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
+            // WP-4.2. Live's names for these are to observe.
+            Self::SetClipWarpMode { .. } => "Change Warp Mode",
+            Self::SetClipWarpSettings { .. } => "Change Warp Settings",
+            Self::SetClipRamMode { .. } => "Switch RAM Mode",
+            Self::SetClipHighQuality { .. } => "Switch High Quality",
             // WP-3.4. Live's undo names for the Launch panel's controls are
             // to observe; Beatlayer's name the edit.
             Self::SetClipLegato { .. } => "Switch Legato",
@@ -2195,6 +2240,12 @@ impl Document {
                 })
             }
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
+                // Spec: warping R14. Only a warped audio clip can switch its
+                // loop on; an older set's looped unwarped clip can switch it
+                // off.
+                ClipData::Audio(audio) if *enabled && !audio.warp => Err(ModelError::InvalidInput(
+                    "only a warped audio clip can loop: switch Warp on first",
+                )),
                 ClipData::Audio(_) => self.edit_markers(*clip, |audio| audio.looping = *enabled),
                 ClipData::Midi(_) => self.edit_midi_markers(*clip, |midi| midi.looping = *enabled),
             },
@@ -2274,6 +2325,31 @@ impl Document {
             }
             Command::DeleteWarpMarkers { clips, markers } => {
                 self.edit_each(clips, |audio| audio.with_markers_deleted(markers))
+            }
+            Command::SetClipWarpMode { clip, mode } => {
+                self.edit_audio(*clip, |audio| audio.warp_mode = *mode)
+            }
+            Command::SetClipWarpSettings {
+                clip,
+                beats,
+                tones,
+                texture,
+                complex_pro,
+            } => {
+                let ClipData::Audio(audio) = &self.clip_ref(*clip)?.data else {
+                    return Err(ModelError::NotAudioClip(*clip));
+                };
+                let settings =
+                    audio
+                        .warp_settings
+                        .updated(*beats, *tones, *texture, *complex_pro)?;
+                self.edit_audio(*clip, |audio| audio.warp_settings = settings)
+            }
+            Command::SetClipRamMode { clip, ram } => {
+                self.edit_audio(*clip, |audio| audio.ram = *ram)
+            }
+            Command::SetClipHighQuality { clip, high_quality } => {
+                self.edit_audio(*clip, |audio| audio.high_quality = *high_quality)
             }
             Command::SetSegmentBpm { clip, marker, bpm } => {
                 self.edit_markers_with(*clip, |audio| audio.with_segment_bpm(*marker, *bpm))
@@ -4674,6 +4750,7 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
     if audio.warp || !audio.warp_markers.is_empty() {
         audio.warp_map()?;
     }
+    audio.warp_settings.check()?;
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
         "fade-in length",
@@ -5525,9 +5602,23 @@ mod tests {
             ticks: false,
         })
         .unwrap();
-        song.apply(Command::SetClipLoopEnabled {
+        // Spec: warping R14. The Loop switch can't come on for an unwarped
+        // clip; an older set's looped clip arrives with it on, through its
+        // data, which is what this checks the markers of.
+        assert!(matches!(
+            song.reject(Command::SetClipLoopEnabled {
+                clip,
+                enabled: true,
+            }),
+            ModelError::InvalidInput(_)
+        ));
+        let looped = AudioData {
+            looping: true,
+            ..audio(&song)
+        };
+        song.apply(Command::SetClipData {
             clip,
-            enabled: true,
+            data: ClipData::Audio(looped),
         })
         .unwrap();
         song.apply(Command::SetClipGain { clip, gain: 0.5 })
@@ -5623,13 +5714,15 @@ mod tests {
             ticks: false,
         })
         .unwrap();
-        // And then the loop can't come on.
+        // And then the loop can't come on (an unwarped clip can't loop, R14,
+        // and for a warped one the Start marker must be before the brace's
+        // end, which `warped_clips_loop_only_inside_their_brace` checks).
         assert!(matches!(
             song.reject(Command::SetClipLoopEnabled {
                 clip,
                 enabled: true,
             }),
-            ModelError::InvalidValue { .. }
+            ModelError::InvalidInput(_)
         ));
 
         // A MIDI clip has none of these settings.

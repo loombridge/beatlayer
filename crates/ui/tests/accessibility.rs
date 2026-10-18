@@ -2785,7 +2785,7 @@ fn on_menus(keymap: &Keymap) -> BTreeMap<String, String> {
         for menu in menu_bar(platform) {
             for item in menu.walk().filter(|item| item.is_shown()) {
                 let ids: Vec<String> = match item.action {
-                    Action::Command(id) => vec![id.to_owned()],
+                    Action::Command(id) | Action::Choice(id, _) => vec![id.to_owned()],
                     Action::Shortcut(shortcuts) => shortcuts
                         .iter()
                         .filter_map(|s| keymap.command_for(s, &every_context))

@@ -471,6 +471,20 @@ pub enum Command {
         /// Whether soloing a track keeps the return tracks audible.
         enabled: bool,
     },
+    /// Switches Cue mode: the tracks' Solo switches become Cue switches
+    /// that feed the Cue Out. Needs a Cue Out that shares no channel with
+    /// Main Out to turn on. It is no undo step.
+    SetCueMode {
+        /// Whether the Solo switches are Cue switches.
+        enabled: bool,
+    },
+    /// Sets the Cue Volume, the Preview/Cue Volume knob on Main's strip.
+    SetCueVolume {
+        /// The gain: 1 is unity (0 dB, where a new set starts) and 0 silence,
+        /// up to 1.995 (+6 dB).
+        #[schemars(range(min = 0.0, max = 1.995_262_314_968_879_5))]
+        volume: f64,
+    },
     /// Sets the Main track's crossfader, from 0 (the A end) through 0.5
     /// (the centre) to 1 (the B end).
     SetCrossfader {
@@ -1630,6 +1644,8 @@ impl Command {
             Self::SetCrossfader { .. } => "Change crossfader",
             Self::SetCrossfadeAssign { .. } => "Assign crossfade",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
+            Self::SetCueMode { .. } => "Switch Cue mode",
+            Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
             | Self::SetMidiOutput { .. }
@@ -1779,6 +1795,13 @@ impl Command {
             Self::SetChainEnabled { .. } => "Change \"Chain On\"",
             Self::SetChainSolo { .. } => "Solo chain",
         }
+    }
+
+    /// Whether running the command outside a transaction is an undo step.
+    /// Cue mode is not: Live's Solo/Cue button and Options items add none.
+    #[must_use]
+    pub fn records_undo(&self) -> bool {
+        !matches!(self, Self::SetCueMode { .. })
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -2095,6 +2118,22 @@ impl Document {
             }
             Command::SetSoloInPlace { enabled } => {
                 self.settings.solo_in_place = *enabled;
+                Ok(())
+            }
+            Command::SetCueMode { enabled } => {
+                if *enabled && !self.cue_available() {
+                    return Err(ModelError::CueOverlapsMain);
+                }
+                self.settings.cue_mode = *enabled;
+                Ok(())
+            }
+            Command::SetCueVolume { volume } => {
+                check_value(
+                    "cue volume",
+                    *volume,
+                    (0.0..=crate::MAX_CUE_VOLUME).contains(volume),
+                )?;
+                self.settings.cue_volume = *volume;
                 Ok(())
             }
             Command::SetCrossfader { position } => {

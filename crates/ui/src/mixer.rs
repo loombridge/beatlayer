@@ -639,6 +639,29 @@ fn midi_only(doc: &Document, track: TrackId) -> bool {
 /// A control another package brings: drawn and named where Live has it,
 /// disabled, and saying which package brings it.
 #[expect(clippy::too_many_arguments, reason = "one control, described in full")]
+/// Headphones in `rect`: a band over two ear cups.
+fn headphones(painter: &egui::Painter, rect: Rect, ink: Color32) {
+    let (centre, size) = (rect.center(), rect.height().min(rect.width()) * 0.7);
+    let r = size * 0.4;
+    let band: Vec<egui::Pos2> = (0..=12)
+        .map(|i| {
+            let angle = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+            pos2(
+                centre.x + r * angle.cos(),
+                centre.y + size * 0.1 + r * angle.sin(),
+            )
+        })
+        .collect();
+    painter.add(Shape::line(band, Stroke::new(1.5, ink)));
+    for side in [-1.0, 1.0] {
+        let cup = Rect::from_center_size(
+            pos2(centre.x + side * r, centre.y + size * 0.15),
+            egui::vec2(size * 0.22, size * 0.36),
+        );
+        painter.rect_filled(cup, 1.0, ink);
+    }
+}
+
 pub fn pending(
     ui: &mut Ui,
     theme: &Theme,
@@ -908,26 +931,10 @@ impl StripParts<'_> {
         }
         match kind {
             ColumnKind::Main => {
-                pending(
-                    ui,
-                    self.theme,
-                    strip.activator,
-                    Id::new(("mixer-cue-volume", self.place)),
-                    Role::Slider,
-                    "Cue Volume",
-                    "Cue",
-                    "Phase 3",
-                );
-                pending(
-                    ui,
-                    self.theme,
-                    strip.solo,
-                    Id::new(("mixer-solo-cue", self.place)),
-                    Role::Button,
-                    "Solo/Cue Mode",
-                    "Solo",
-                    "Phase 3",
-                );
+                // Main has no activator or Solo: its cue volume and Solo/Cue
+                // button take their places in the Tab order.
+                self.cue_volume(ui, strip.activator, events);
+                self.cue_mode_button(ui, strip.solo, events);
             }
             _ => {
                 for (switch, rect) in [
@@ -1676,6 +1683,182 @@ impl StripParts<'_> {
         }
     }
 
+    /// The Preview/Cue Volume knob on Main's strip (L-MIX-004): a drag moves
+    /// it along the fader's scale, Up and Down step it, and a double-click or
+    /// Delete resets it to 0 dB (observed 18 October 2026).
+    fn cue_volume(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let volume = self.doc().settings().cue_volume;
+        let id = Id::new(("mixer-cue-volume", self.place));
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.register(ui, id, crate::focus::Slot::Activator);
+        self.escape_to_title(ui, &response);
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
+        let drag = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag, (volume, 0.0f64)));
+            events.push(UiEvent::BeginGesture(controls::CUE_VOLUME_GESTURE));
+        }
+        if response.dragged() {
+            let dy = response.drag_delta().y;
+            let fine = ui.input(|i| i.modifiers.shift);
+            let (start, moved) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(f64, f64)>(drag);
+                if dy != 0.0 {
+                    drag.1 += f64::from(-dy / if fine { FINE } else { 1.0 });
+                }
+                *drag
+            });
+            if dy != 0.0 {
+                let change = controls::cue_volume_moved(start, moved);
+                if let Some(gain) = change.args["volume"].as_f64() {
+                    ui.data_mut(|d| {
+                        d.insert_temp(readout_id(), controls::cue_volume_readout(gain))
+                    });
+                }
+                events.push(UiEvent::Invoke(change));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(f64, f64)>(drag));
+            events.push(UiEvent::EndGesture);
+        }
+        let mut steps = ui.input(|i| {
+            i.num_accesskit_action_requests(id, Action::Increment) as i32
+                - i.num_accesskit_action_requests(id, Action::Decrement) as i32
+        });
+        let mut fine = false;
+        let mut reset = response.double_clicked();
+        if response.has_focus() {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        escape: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            ui.input(|i| {
+                for event in &i.events {
+                    if let Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        match key {
+                            Key::ArrowUp => steps += 1,
+                            Key::ArrowDown => steps -= 1,
+                            Key::Delete => reset = true,
+                            _ => continue,
+                        }
+                        fine |= modifiers.shift;
+                    }
+                }
+            });
+        }
+        let change = if reset {
+            Some(controls::set_cue_volume(1.0))
+        } else if steps != 0 {
+            Some(controls::cue_volume_stepped(volume, steps, fine))
+        } else {
+            None
+        };
+        if let Some(change) = change {
+            events.push(UiEvent::BeginGesture(controls::CUE_VOLUME_GESTURE));
+            events.push(UiEvent::Invoke(change));
+            events.push(UiEvent::EndGesture);
+        }
+        // The knob: a ring, and a line from its centre to where the volume
+        // sits on the fader's scale, in the accent colour (Live's is blue).
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let centre = rect.center();
+        let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
+        painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
+        let tip = ring_point(centre, radius, controls::fader_position(volume) as f32);
+        painter.line_segment([centre, tip], Stroke::new(2.0, c.accent.0));
+        focus_ring(&painter, self.theme, rect, &response);
+        self.describe_value(
+            ui,
+            &response,
+            "Cue Volume",
+            controls::volume_spoken(volume),
+            volume,
+            (0.0, bl_model::MAX_CUE_VOLUME),
+        );
+    }
+
+    /// The global Solo/Cue button on Main's strip (L-MIX-004): it reads Solo
+    /// or Cue and toggles the mode. It does nothing, and is dimmed, while Cue
+    /// Out and Main Out share a channel (observed 18 October 2026).
+    fn cue_mode_button(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let doc = self.doc();
+        let (available, cue) = (doc.cue_available(), doc.cue_active());
+        let id = Id::new(("mixer-solo-cue", self.place));
+        let response = ui.interact(
+            rect,
+            id,
+            if available {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        self.register(ui, id, crate::focus::Slot::Solo);
+        self.escape_to_title(ui, &response);
+        let pressed = available
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+        if pressed {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "mixer.set_cue_mode",
+                json!({ "enabled": !cue }),
+            )));
+        }
+        let c = &self.theme.colors;
+        let text = if cue { "Cue" } else { "Solo" };
+        let painter = ui.painter_at(rect.expand(2.0));
+        let face = if !available {
+            c.control.0.gamma_multiply(0.6)
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            self.theme.small_font(),
+            if available { c.text.0 } else { c.pending.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Button, available, "Solo/Cue Mode"));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Solo/Cue Mode".to_owned());
+            node.set_value(text.to_owned());
+            node.set_description(
+                if available {
+                    "Switches the tracks' Solo switches to Cue switches, which feed the Cue Out"
+                } else {
+                    "Needs a Cue Out that shares no output channel with Main Out"
+                }
+                .to_owned(),
+            );
+            if !available {
+                node.set_disabled();
+            }
+        });
+    }
+
     /// A switch (R7, R8): the activator, Solo, or Arm. Tracks without it
     /// show nothing in its place; a deactivated activator shows its number
     /// on grey (observed).
@@ -1729,8 +1912,12 @@ impl StripParts<'_> {
             Self::run_all(events, switch.gesture(), invocations);
         }
         let c = &self.theme.colors;
+        // In Cue mode the Solo switch is a Cue switch and shows headphones
+        // (observed 18 October 2026).
+        let cue = switch == Switch::Solo && doc.cue_active();
         let (name, text, lit) = match switch {
             Switch::Activator => ("Track Activator", self.activator, c.accent.0),
+            Switch::Solo if cue => ("Cue", "", c.accent.0),
             Switch::Solo => ("Solo", "S", c.accent.0),
             Switch::Arm => ("Arm Recording", "●", c.record.0),
         };
@@ -1743,13 +1930,18 @@ impl StripParts<'_> {
             c.control.0
         };
         painter.rect_filled(rect, self.theme.sizes.corner, face);
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            self.theme.small_font(),
-            if on { c.accent_text.0 } else { c.text.0 },
-        );
+        let ink = if on { c.accent_text.0 } else { c.text.0 };
+        if cue {
+            headphones(&painter, rect, ink);
+        } else {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                text,
+                self.theme.small_font(),
+                ink,
+            );
+        }
         focus_ring(&painter, self.theme, rect, &response);
         response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, name));
         ui.ctx().accesskit_node_builder(id, |node| {

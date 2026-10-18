@@ -340,7 +340,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-021 | MIDI Envelope Auto-Reset | | | | |
 | M-OPT-022 | Retune Set On Loading Tuning Systems | | | | |
 | | — | | | | |
-| M-OPT-023 | Solo Switches | | | disabled | One of two choices with M-OPT-024 |
+| M-OPT-023 | Solo Switches | | | disabled | One of two choices with M-OPT-024, and one setting with the Main strip's Solo/Cue button; both are greyed while Cue Out and Main Out share a channel, with this one ticked |
 | M-OPT-024 | Cue Switches | | | disabled | |
 | M-OPT-025 | Solo in Place | | | | |
 | | — | | | | |

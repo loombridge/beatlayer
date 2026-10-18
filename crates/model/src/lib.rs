@@ -104,7 +104,7 @@ pub use device::{
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
-pub use document::{ArrangementLoop, Document, Settings};
+pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
 pub use follow::{

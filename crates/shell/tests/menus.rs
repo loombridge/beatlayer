@@ -47,6 +47,10 @@ fn every_item_reaches_a_command_or_is_pending() {
             for item in menu.walk() {
                 match item.action {
                     Action::Command(id) => assert!(registry.contains(id), "{}: {id}", item.row),
+                    Action::Choice(id, args) => {
+                        assert!(registry.contains(id), "{}: {id}", item.row);
+                        serde_json::from_str::<serde_json::Value>(args).expect(item.row);
+                    }
                     Action::Shortcut(ids) => {
                         assert!(!ids.is_empty());
                         for id in ids {

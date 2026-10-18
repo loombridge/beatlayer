@@ -79,6 +79,10 @@ pub enum Action {
     /// Runs whatever the first of these shortcuts runs in the focused
     /// context; disabled if none runs anything there.
     Shortcut(&'static [&'static str]),
+    /// Runs a command with these arguments (JSON), one of a radio group of
+    /// items that run the same command: the one the command's state
+    /// matches is checked.
+    Choice(&'static str, &'static str),
     /// Its command isn't built yet: shown, disabled. It may name the
     /// shortcut menus.md records for it, which the item displays.
     Pending(Option<&'static str>),
@@ -129,7 +133,7 @@ impl MenuItem {
     #[must_use]
     pub fn command(&self) -> Option<&'static str> {
         match self.action {
-            Action::Command(id) => Some(id),
+            Action::Command(id) | Action::Choice(id, _) => Some(id),
             _ => None,
         }
     }
@@ -194,7 +198,7 @@ impl Menu {
     }
 }
 
-use Action::{Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu, System};
+use Action::{Choice, Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu, System};
 
 pub(crate) type Row = (&'static str, &'static str, Action);
 
@@ -720,8 +724,16 @@ const OPTIONS: &[Row] = &[
         Pending(None),
     ),
     SEPARATOR,
-    ("M-OPT-023", "Solo Switches", Pending(None)),
-    ("M-OPT-024", "Cue Switches", Pending(None)),
+    (
+        "M-OPT-023",
+        "Solo Switches",
+        Choice("mixer.set_cue_mode", r#"{"enabled":false}"#),
+    ),
+    (
+        "M-OPT-024",
+        "Cue Switches",
+        Choice("mixer.set_cue_mode", r#"{"enabled":true}"#),
+    ),
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,

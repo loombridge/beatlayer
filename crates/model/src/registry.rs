@@ -607,8 +607,9 @@ const ENTRIES: &[Entry] = &[
             use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the \
             groups that hold them, and the tracks inside soloed groups are heard. Return \
             tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a \
-            return silences every other track's output but keeps their sends to it. Every \
-            track but Main can be soloed.",
+            return silences every other track's output but keeps their sends to it. In Cue mode \
+            (`mixer.set_cue_mode`) the switch is the track's Cue switch and silences nothing. \
+            Every track but Main can be soloed.",
     },
     Entry {
         id: "mixer.solo_exclusive",
@@ -684,6 +685,36 @@ const ENTRIES: &[Entry] = &[
             the soloed track is heard with its sends' effects; off, soloing such a track \
             silences the returns too. It doesn't change what soloing a return does. The \
             setting is saved with the set.",
+    },
+    Entry {
+        id: "mixer.set_cue_mode",
+        action: Action::Apply("set_cue_mode"),
+        label: "Cue Switches",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Cue mode, as the Main strip's Solo/Cue button and the Options \
+            menu's Solo Switches and Cue Switches do: with `enabled` true, every track's Solo \
+            switch becomes a Cue switch (`mixer.set_solo` sets it) that feeds the Cue Out at \
+            the Cue Volume (`mixer.set_cue_volume`) instead of silencing the other tracks, \
+            and Main plays what the activators leave. A cue-switched track is heard on the \
+            Cue Out after its devices and before its volume, pan and activator. It needs a \
+            Cue Out that shares no output channel with Main Out (`routing.set_cue_out`, \
+            `routing.set_main_out`): turning it on with an overlap is refused, and an overlap \
+            made later switches it off in effect. A new set is in Solo mode. The mode is \
+            saved with the set and is no undo step.",
+    },
+    Entry {
+        id: "mixer.set_cue_volume",
+        action: Action::Apply("set_cue_volume"),
+        label: "Set Cue Volume",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the Preview/Cue Volume knob on Main's strip, which scales the Cue \
+            Out in Cue mode, as a linear gain from 0 (-inf dB) to 1.995 (+6 dB); 1 (0 dB) is \
+            where a new set starts. The engine glides to the new value over 20 ms. The \
+            volume is saved with the set, and each change is one undo step.",
     },
     Entry {
         id: "mixer.set_crossfader",

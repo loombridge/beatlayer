@@ -646,6 +646,26 @@ impl Compiler {
             }
         }
 
+        // Cue mode (WP-3.18): every track's signal after its devices and
+        // before its mixer reaches the Cue Out's task through its Cue
+        // switch.
+        let mut cue_inputs = Vec::new();
+        if document.cue_active() {
+            for track in order.iter().filter_map(|&id| document.track(id)) {
+                if track.kind() == TrackKind::Main {
+                    continue;
+                }
+                cue_inputs.push(Input {
+                    route: self.cue_route(&mut build, track),
+                    from: task_of[&track.id()],
+                    tap: Tap::PostFx,
+                    chain: NO_CHAIN,
+                    delay: NO_DELAY,
+                });
+                taps.insert((track.id(), Tap::PostFx));
+            }
+        }
+
         // A task per track, in display order.
         for &id in &order {
             let track = document
@@ -660,6 +680,15 @@ impl Compiler {
                 clips_audible(track),
             );
         }
+        // The Cue Out's task comes last, and plays on the device channels
+        // Cue Out names, as an Ext. Out track does.
+        let cue_out = document.cue_active().then(|| {
+            self.add_cue_task(&mut build, document, cue_inputs);
+            ExtOut {
+                task: build.tasks.len() as u32 - 1,
+                channel: document.main().routing().cue_out,
+            }
+        });
 
         // Tasks that are tapped before their devices or their mixer keep a
         // copy there.
@@ -708,6 +737,7 @@ impl Compiler {
                 }),
                 _ => None,
             })
+            .chain(cue_out)
             .collect();
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
@@ -779,6 +809,7 @@ impl Compiler {
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
+            cue: cue_out.map(|out| out.task),
             ext_outs,
             tempo,
             time_signatures,
@@ -993,6 +1024,65 @@ impl Compiler {
                 Route::new(level, muted, &config).closed(closed).auto(auto),
             ))
         })
+    }
+
+    /// The slot of `track`'s cue switch: a route that is closed while the
+    /// track's Solo switch, which Cue mode makes the Cue switch, is off.
+    fn cue_route(&self, build: &mut Build, track: &Track) -> u32 {
+        let key = NodeKey::Cue(track.id());
+        let muted = !track.mixer().solo;
+        if self.previous(key, &Identity::Route).is_some() {
+            build
+                .restate
+                .push(ParamEvent::now(key, route::SOLO_MUTE, switch(muted)));
+        }
+        let config = self.config.node_config();
+        self.place(build, key, Identity::Route, 0, || {
+            Instance::Route(Box::new(Route::new(1.0, muted, &config)))
+        })
+    }
+
+    /// Adds the Cue Out's task: it sums `inputs`, the cue-switched tracks,
+    /// and its mixer sets the Cue Volume. It has no devices, and stands in
+    /// Main's place in the track list, which it doesn't add to.
+    fn add_cue_task(&self, build: &mut Build, document: &Document, inputs: Vec<Input>) {
+        let dependencies = inputs.len() as u32;
+        let start = build.inputs.len() as u32;
+        build.inputs.extend(inputs);
+        let inputs = Span {
+            start,
+            end: build.inputs.len() as u32,
+        };
+        let config = self.config.node_config();
+        let volume = document.settings().cue_volume;
+        if self.previous(NodeKey::CueMixer, &Identity::Mixer).is_some() {
+            build.restate.push(ParamEvent::now(
+                NodeKey::CueMixer,
+                mixer::track::VOLUME,
+                volume,
+            ));
+        }
+        let mixer = self.place(build, NodeKey::CueMixer, Identity::Mixer, 0, || {
+            let mixer = Mixer {
+                volume,
+                ..Mixer::default()
+            };
+            Instance::Mixer(Box::new(TrackMixer::new(&mixer, 0.5, &config)))
+        });
+        build.tasks.push(Task {
+            track: document.main_id(),
+            inputs,
+            device_input: None,
+            player: None,
+            chain: Span::default(),
+            sidechains: Span::default(),
+            mixer,
+            clip_delay: NO_DELAY,
+            pre_fx: None,
+            post_fx: None,
+            dependents: Span::default(),
+            dependencies,
+        });
     }
 
     /// Adds the task for one track, fed by `inputs` and, into its devices'
@@ -1756,7 +1846,21 @@ fn needs_program(
             .collect::<Vec<_>>()
     };
     let scenes = !changes.scenes.is_empty() && scene_maps(old) != scene_maps(new);
-    let mut recompile = settings || changes.layout || scenes;
+    // Cue mode (WP-3.18): switching it on or off, or moving the Cue Out,
+    // changes the program; the Cue Volume reaches the Cue Out's mixer as a
+    // parameter, and the Cue switches reach their routes (see
+    // `route_events`).
+    let cue = (old.cue_active(), new.cue_active());
+    let cue_moved =
+        cue.0 != cue.1 || (cue.1 && old.main().routing().cue_out != new.main().routing().cue_out);
+    if cue == (true, true) && before.cue_volume != after.cue_volume {
+        params.push(ParamEvent::now(
+            NodeKey::CueMixer,
+            mixer::track::VOLUME,
+            after.cue_volume,
+        ));
+    }
+    let mut recompile = settings || changes.layout || scenes || cue_moved;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
             (Change::Modified, Some(before), Some(after)) => {
@@ -1953,6 +2057,20 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
     }
     let (was, is) = (Graph::of(old), Graph::of(new));
     let (before, after) = (Solo::with(old, &was), Solo::with(new, &is));
+    // In Cue mode the Solo switches are the Cue switches, which open and
+    // close their routes to the Cue Out.
+    if old.cue_active() && new.cue_active() {
+        for track in new.tracks().filter(|t| t.kind() != TrackKind::Main) {
+            let then = old.track(track.id()).map(|t| t.mixer().solo);
+            if then.is_some_and(|solo| solo != track.mixer().solo) {
+                params.push(ParamEvent::now(
+                    NodeKey::Cue(track.id()),
+                    route::SOLO_MUTE,
+                    switch(!track.mixer().solo),
+                ));
+            }
+        }
+    }
     let state = |document: &Document, solo: &Solo, edge: &Edge| {
         let closed = edge.monitored
             && document

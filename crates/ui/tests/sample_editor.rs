@@ -1183,17 +1183,23 @@ fn the_other_arrow_keys_move_the_insert_marker_the_region_and_the_selection() {
     s.run("arrangement.set_grid", json!({ "fixed": "quarter" }));
     let g = s.geometry();
     let quarter = Ticks::QUARTER.get();
-    let alt = if cfg!(target_os = "macos") {
-        Modifiers::ALT
-    } else {
-        Modifiers::CTRL | Modifiers::COMMAND
-    };
     s.click_with(at_beat(&g, 4, 0.8), Modifiers::NONE);
     let insert = |s: &mut Sample| {
         s.run("clip_view.sample_editor", json!({}))["insert_marker"]["beat"].clone()
     };
     assert_eq!(insert(&mut s), 4 * quarter);
-    // Option+Right and Option+Left (Ctrl on Windows) move the insert marker.
+    // Cmd+Right (Ctrl+Right on Windows and Linux, where it is S-A11Y-012's
+    // key too) selects a marker, since a warped clip always has one.
+    s.h.key(Key::ArrowRight, Modifiers::CTRL | Modifiers::COMMAND);
+    assert_eq!(s.h.shell.clip_view().sample().markers(), &[0]);
+    assert_eq!(insert(&mut s), 4 * quarter);
+    let clip = s.clip;
+    s.run(
+        "clip_view.select_warp_markers",
+        json!({ "clip": clip, "markers": [] }),
+    );
+    // Option+Right and Option+Left (Alt) move the insert marker.
+    let alt = Modifiers::ALT;
     s.h.key(Key::ArrowRight, alt);
     assert_eq!(insert(&mut s), 5 * quarter);
     s.h.key(Key::ArrowLeft, alt);

@@ -246,6 +246,14 @@ pub enum GesturePhase {
     Cancel,
 }
 
+/// What the browser's selection loads into the Device View.
+enum DevicesLoad {
+    /// A preset file.
+    Preset(PathBuf),
+    /// A device listed under a label.
+    Device(browser::BrowserDevice),
+}
+
 /// A gesture under way: what the selection was when it began, and the last
 /// command that ran, to fall back on when a frame's command is refused.
 #[derive(Debug)]
@@ -2502,7 +2510,12 @@ impl Shell {
         }
         if matches!(
             id,
-            device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
+            device_ids::CUT
+                | device_ids::COPY
+                | device_ids::DUPLICATE
+                | device_ids::SAVE_PRESET
+                | device_ids::SAVE_DEFAULT_PRESET
+                | device_ids::CHAIN_SAVE_PRESET
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
@@ -2529,12 +2542,17 @@ impl Shell {
                 editor: &mut self.editor,
                 arrangement: &mut self.arrangement,
                 user_library: user_library.as_deref(),
+                media: &self.media,
                 zoom,
                 auto_hide,
                 windows_shown: self.plug_in_windows,
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: racks R42. Samples a rack or chain preset brought in.
+        for file in &outcome.media {
+            self.store.add_media(file.hash, &file.path, file.size);
+        }
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
@@ -2848,13 +2866,64 @@ impl Shell {
         }
     }
 
-    /// The browser's selection, if it's one preset file and a device is
-    /// being hot-swapped: what Enter or a double-click loads into it.
-    fn hot_swap_preset(&self) -> Option<PathBuf> {
-        self.devices.hot_swap()?;
+    /// What the browser's selection loads into the Device View: one preset
+    /// file, or a device listed under a label (device chains R19, racks R43
+    /// and R45).
+    fn devices_load(&self) -> Option<DevicesLoad> {
         match self.browser_view.selected() {
-            [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            [one] if bl_project::preset::is_preset(one) => Some(DevicesLoad::Preset(one.clone())),
+            _ if self.browser_view.selected_audio_is_empty() => {
+                self.browser_view.selected_device().map(DevicesLoad::Device)
+            }
             _ => None,
+        }
+    }
+
+    /// Loads what the browser has selected: added where `device.add` puts
+    /// a device, or, while a device, rack or chain is hot-swapped, in place
+    /// of it.
+    fn load_into_devices(&mut self, load: DevicesLoad) -> Result<Value, ShellError> {
+        let armed_chain = self.devices.hot_swap_chain();
+        let swapping = self.devices.hot_swap().is_some() || armed_chain.is_some();
+        match load {
+            DevicesLoad::Preset(path) => {
+                let path = path.to_string_lossy().into_owned();
+                if devices::is_chain_preset(Path::new(&path)) {
+                    self.run_devices(device_ids::CHAIN_LOAD_PRESET, json!({ "path": path }))
+                } else if swapping {
+                    self.run_devices(
+                        device_ids::REPLACE,
+                        json!({ "preset": path, "chain": armed_chain }),
+                    )
+                } else {
+                    self.run_devices(device_ids::ADD_PRESET, json!({ "path": path }))
+                }
+            }
+            DevicesLoad::Device(device) => {
+                let new = device_ids::NewDevice {
+                    kind: device.kind,
+                    name: device.name,
+                    role: device.role,
+                    sidechain: device.sidechain,
+                    midi_sidechain: device.midi_sidechain,
+                };
+                if swapping {
+                    self.run_devices(
+                        device_ids::REPLACE,
+                        json!({ "new_device": new, "chain": armed_chain }),
+                    )
+                } else {
+                    self.run_devices(
+                        device_ids::ADD,
+                        to_value(&device_ids::AddDeviceArgs {
+                            device: new,
+                            track: None,
+                            chain: None,
+                            index: None,
+                        }),
+                    )
+                }
+            }
         }
     }
 
@@ -4395,7 +4464,7 @@ impl Shell {
             return true;
         }
         if id == browser_ids::LOAD_SELECTED
-            && (self.hot_swap_preset().is_some()
+            && (self.devices_load().is_some()
                 || self.hot_swapped_layer_file().is_some()
                 || self.hot_swap_sample().is_some()
                 || self.browser_view.selected_plugin().is_some())
@@ -5573,40 +5642,13 @@ impl Shell {
             );
         }
         if id == browser_ids::LOAD_SELECTED
-            && self.browser_view.selected_audio_is_empty()
-            && let Some((device_type, name)) = self.browser_view.selected_device()
+            && let Some(load) = self.devices_load()
         {
-            // Spec: modulation R12. A modulator selected under the
-            // Modulators label loads as `device.add` adds a device.
+            // Spec: modulation R12, racks R43 and R45. A modulator, a rack
+            // or a preset selected in the browser loads as `device.add`
+            // adds a device, or replaces the one being hot-swapped.
             Self::args::<NoArgs>(id, args)?;
-            return self.run_devices(
-                device_ids::ADD,
-                to_value(&device_ids::AddDeviceArgs {
-                    device: device_ids::NewDevice {
-                        kind: bl_model::DeviceKind::Native { device_type },
-                        name,
-                        role: bl_model::DeviceRole::AudioEffect,
-                        sidechain: false,
-                        midi_sidechain: false,
-                    },
-                    track: None,
-                    chain: None,
-                    index: None,
-                }),
-            );
-        }
-        if id == browser_ids::LOAD_SELECTED
-            && let Some(path) = self.hot_swap_preset()
-        {
-            // Spec: device-chains R19. Loading a preset while hot-swapping
-            // loads it into the device.
-            Self::args::<NoArgs>(id, args)?;
-            let loaded = devices::load_hot_swapped(&self.devices, &mut self.editor, &path)
-                .map_err(|error| device_error(id, error))?;
-            self.dirty = true;
-            self.document_changed();
-            self.touch();
-            return Ok(to_value(&loaded));
+            return self.load_into_devices(load);
         }
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);

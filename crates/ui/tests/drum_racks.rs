@@ -197,14 +197,20 @@ fn the_pad_view_shows_sixteen_pads_and_moves_by_group_or_row() {
     drag(&mut h, from, to);
     assert_ne!(pads(&h, rack).first, 36, "the selector moved the pads");
     assert_eq!(pads(&h, rack).first % 4, 0);
-    // Up and Down with a pad focused move a group, and with Cmd a row.
+    // Up and Down with a pad focused move a group, and with Cmd (Alt on
+    // Windows and Linux) a row.
     let layout = pad_layout_of(&mut h, rack);
     let first = pads(&h, rack).first;
     click(&mut h, layout.pads[0].pad.center());
     h.key(Key::ArrowUp, Modifiers::NONE);
     assert_eq!(pads(&h, rack).first, (first + 16).min(112));
     let first = pads(&h, rack).first;
-    h.key(Key::ArrowDown, Modifiers::COMMAND);
+    let rows = if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD
+    } else {
+        Modifiers::ALT
+    };
+    h.key(Key::ArrowDown, rows);
     assert_eq!(pads(&h, rack).first, first - 4);
     // The view is no undo step, and the set keeps it.
     assert_ne!(last_step(&h), "Change \"Chain On\"");

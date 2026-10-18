@@ -205,8 +205,27 @@ fn dropped_items(ui: &Ui, released: bool) -> Option<(Vec<String>, bool)> {
                 .collect()
         })
     };
-    let layer = ui.input(|i| i.modifiers.command);
+    let layer = ui.input(|i| layers(i.modifiers));
     (!paths.is_empty()).then_some((paths, layer))
+}
+
+/// Whether Cmd is held on macOS, Alt on Windows and Linux: what layers a
+/// drop or a pad drag and moves the pads by rows (R11, R15, R16).
+fn layers(modifiers: egui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.mac_cmd
+    } else {
+        modifiers.alt
+    }
+}
+
+/// The modifier [`layers`] reads, for a key.
+fn layer_key() -> egui::Modifiers {
+    if cfg!(target_os = "macos") {
+        egui::Modifiers::MAC_CMD
+    } else {
+        egui::Modifiers::ALT
+    }
 }
 
 impl DeviceViewUi {
@@ -268,7 +287,7 @@ impl DeviceViewUi {
         for (key, sign) in [(Key::ArrowUp, 1), (Key::ArrowDown, -1)] {
             for command in [true, false] {
                 let modifiers = if command {
-                    egui::Modifiers::COMMAND
+                    layer_key()
                 } else {
                     egui::Modifiers::NONE
                 };
@@ -335,7 +354,7 @@ impl DeviceViewUi {
         {
             let from_bottom = (layout.overview.bottom() - pointer.y) / layout.overview.height();
             let centre = (from_bottom * 128.0 - f32::from(PADS_SHOWN) / 2.0).round();
-            let per_row = ui.input(|i| i.modifiers.command);
+            let per_row = ui.input(|i| layers(i.modifiers));
             let first = if per_row {
                 centre / 4.0 * 4.0
             } else {
@@ -798,7 +817,7 @@ impl DeviceViewUi {
         if let Some(pad_drag) = drag {
             if released && pad_drag.rack == frame.id && pad_drag.note != pad.note {
                 DragAndDrop::clear_payload(ui.ctx());
-                let layer = ui.input(|i| i.modifiers.command);
+                let layer = ui.input(|i| layers(i.modifiers));
                 invoke(
                     events,
                     "pad.swap",

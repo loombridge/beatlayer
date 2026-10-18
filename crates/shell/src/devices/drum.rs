@@ -165,17 +165,7 @@ impl DeviceView {
             occupied,
             selected,
             hot_swap,
-            focused: self.pad_focus && self.focus_rack_is(rack.id),
         }
-    }
-
-    /// Whether `rack` is the rack the commands act on.
-    fn focus_rack_is(&self, rack: DeviceId) -> bool {
-        self.selected == Some(rack)
-            || self
-                .chain_anchor
-                .is_some_and(|c| self.chains_selected.contains(&c))
-                && self.pads_selected.contains_key(&rack)
     }
 
     /// A drum chain's row (drum racks spec, R21).
@@ -271,7 +261,6 @@ impl DeviceView {
             self.chains_selected.extend(chains);
         }
         self.chain_list_focus = false;
-        self.pad_focus = true;
         Ok(())
     }
 

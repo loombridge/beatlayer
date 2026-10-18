@@ -131,6 +131,11 @@ const DEVICE: &[Row] = &[
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
     ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
+    (
+        "C-DEVICE-013",
+        "Group to Drum Rack",
+        Cmd(crate::pads::GROUP_TO_DRUM_RACK),
+    ),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
     (IMP_14, "Float", Cmd(SET_FLOATING)),
     (

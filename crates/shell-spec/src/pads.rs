@@ -167,8 +167,6 @@ pub struct PadFrame {
     pub selected: Option<u8>,
     /// The pad hot-swap targets, while it does.
     pub hot_swap: Option<u8>,
-    /// Whether the pad view has the keyboard focus, so Up and Down move it.
-    pub focused: bool,
 }
 
 /// A drum chain's row in the chain list (drum racks spec, R21).

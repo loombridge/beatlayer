@@ -597,7 +597,7 @@ impl RackFrame {
     /// hidden, so it folds into its view column (racks spec, R19).
     #[must_use]
     pub fn is_strip(&self) -> bool {
-        self.views.all_hidden()
+        self.views.all_hidden() && !(self.pads.is_some() && self.views.pads)
     }
 }
 

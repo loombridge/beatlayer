@@ -91,7 +91,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["D"]
 win = ["D"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.switch_hot_swap_target", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-008"

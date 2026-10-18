@@ -293,12 +293,13 @@ impl RackViews {
         self
     }
 
-    /// Whether every view is hidden, so the rack folds into its view column
-    /// (racks spec, R19). The switches only decide what the chain list
-    /// shows.
+    /// Whether every view every rack has is hidden, so the rack folds into
+    /// its view column (racks spec, R19). A drum rack's pad view counts too,
+    /// which only the rack's frame knows; the switches only decide what the
+    /// chain list shows.
     #[must_use]
     pub fn all_hidden(self) -> bool {
-        !(self.macros || self.chain_list || self.devices || self.pads)
+        !(self.macros || self.chain_list || self.devices)
     }
 }
 

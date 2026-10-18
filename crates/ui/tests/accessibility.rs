@@ -1144,6 +1144,66 @@ fn a_rack(h: &mut Harness) {
         .unwrap();
 }
 
+/// A drum rack on the first MIDI track, the selected track, with a pad on C1
+/// (a chain named Gain), a return chain named Reverb, and the rack's
+/// Input/Output, Send and Return switches on, no device selected (WP-5.6).
+fn a_drum_rack(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "drum" } },
+                "name": "Drum Rack",
+                "role": "instrument",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let t = bl_engine::testing::gain_type();
+    let effect = json!({ "kind": t.kind, "name": t.name, "role": t.role });
+    h.shell
+        .run(
+            "pad.drop",
+            json!({ "rack": rack, "note": 36, "device": effect }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "pad.rename",
+            json!({ "rack": rack, "note": 36, "name": "Gain" }),
+        )
+        .unwrap();
+    let made = h
+        .shell
+        .run(
+            "chain.create",
+            json!({ "rack": rack, "device": effect, "returns": true }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "chain.rename",
+            json!({ "chain": made["chain"], "name": "Reverb" }),
+        )
+        .unwrap();
+    for view in ["input_output", "send", "returns"] {
+        h.shell
+            .run(
+                "rack.set_view",
+                json!({ "rack": rack, "view": view, "shown": true }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The eight-slot drum sampler on the third track, the selected track, no
 /// device selected (WP-5.17).
 fn a_drum_sampler(h: &mut Harness) {
@@ -2217,6 +2277,135 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "chain.hot_swap",
             main(a_rack, device_view, "Hot-Swap of Pad", Key::Enter),
+        ),
+        // WP-5.6: a drum rack's pad view and the chain list's columns.
+        (
+            "pad.select",
+            main(a_drum_rack, device_view, "Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "rack.move_pads",
+            main(a_drum_rack, device_view, "Pad C1: Gain", Key::ArrowDown),
+        ),
+        (
+            "pad.set_mute",
+            main(a_drum_rack, device_view, "Mute of Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "pad.set_solo",
+            main(a_drum_rack, device_view, "Solo of Pad C1: Gain", Key::Enter),
+        ),
+        (
+            "pad.preview",
+            main(
+                a_drum_rack,
+                device_view,
+                "Preview of Pad C1: Gain",
+                Key::Enter,
+            ),
+        ),
+        (
+            "pad.hot_swap",
+            main(
+                a_drum_rack,
+                device_view,
+                "Hot-Swap of Pad C1: Gain",
+                Key::Enter,
+            ),
+        ),
+        (
+            "chain.preview",
+            main(a_drum_rack, device_view, "Preview of Gain", Key::Enter),
+        ),
+        (
+            "chain.set_receive",
+            main(a_drum_rack, device_view, "Receive of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_play",
+            main(a_drum_rack, device_view, "Play of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_choke",
+            main(a_drum_rack, device_view, "Choke of Gain", Key::ArrowDown),
+        ),
+        (
+            "chain.set_send",
+            main(
+                a_drum_rack,
+                device_view,
+                "Send of Gain to Reverb",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "chain.set_audio_to",
+            main(
+                a_drum_rack,
+                device_view,
+                "Audio To of Reverb",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "device.group_to_drum_rack",
+            Exception(Equivalent(
+                "the device's context menu (Group to Drum Rack, C-DEVICE-013), from its Show \
+                 Options button (Enter, then the arrows), as in Live",
+            )),
+        ),
+        (
+            "pad.hot_swap_sample",
+            Exception(Equivalent(
+                "the pad's Hot-Swap button (`pad.hot_swap`) and the browser: the Hot-Swap \
+                 Sample button shows only while the pointer is over the pad (drum racks R19)",
+            )),
+        ),
+        (
+            "pad.drop",
+            Exception(Equivalent(
+                "a drag from the browser or the desktop onto a pad; the keyboard hot-swaps the \
+                 pad (`pad.hot_swap`) and loads from the browser (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "pad.swap",
+            Exception(Equivalent(
+                "a drag from one pad to another; changing a chain's Receive moves it to \
+                 another pad (`chain.set_receive`)",
+            )),
+        ),
+        (
+            "pad.rename",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002)",
+            )),
+        ),
+        (
+            "pad.delete",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002), or Delete in \
+                 the chain list (`chain.delete`)",
+            )),
+        ),
+        (
+            "pad.save_default",
+            Exception(Equivalent(
+                "the pad's context menu, from the pad with Shift-F10 (S-CTX-002)",
+            )),
+        ),
+        (
+            "chain.extract",
+            Exception(LaterView(
+                "the Session mixer's chain strips, from which a chain is dragged out (WP-5.19)",
+            )),
+        ),
+        (
+            "chain.extract_return",
+            Exception(LaterView(
+                "the Session mixer's chain strips, from which a return chain is dragged onto \
+                 the returns (WP-5.19)",
+            )),
         ),
         (
             "device.load_sample",

@@ -111,8 +111,6 @@ pub struct DeviceView {
     previewing: BTreeSet<ChainId>,
     /// The chain Save as Default Pad kept (R17).
     default_pad: Option<Chain>,
-    /// Whether a pad view has the keyboard focus, so Up and Down move it.
-    pad_focus: bool,
     /// How many notes had reached each drum chain when Auto Select last
     /// looked (R20).
     hit_counts: std::collections::BTreeMap<ChainId, u64>,

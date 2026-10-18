@@ -352,6 +352,8 @@ pub struct Shell {
     value_focused: bool,
     effects: Vec<Effect>,
     message: Option<Message>,
+    /// What the pointer is over says about itself, while there's no message.
+    hint: Option<String>,
     revision: u64,
     agent_status: AgentServerStatus,
     /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
@@ -706,6 +708,7 @@ impl Shell {
             value_focused: false,
             effects: Vec::new(),
             message: None,
+            hint: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
             keychain: Arc::new(OsKeychain::new()),
@@ -1546,6 +1549,22 @@ impl Shell {
             action: None,
         });
         self.touch();
+    }
+
+    /// The line the Status Bar shows while it has no message: what the
+    /// pointer is over says about itself, such as a drum rack's pad
+    /// (WP-5.6).
+    #[must_use]
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
+
+    /// Sets, or with `None` clears, the Status Bar's hint.
+    pub fn set_hint(&mut self, hint: Option<String>) {
+        if self.hint != hint {
+            self.hint = hint;
+            self.touch();
+        }
     }
 
     /// Clears the Status Bar's message.

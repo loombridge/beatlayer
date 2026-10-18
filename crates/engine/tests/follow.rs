@@ -241,6 +241,48 @@ fn a_target_with_its_own_quantisation_waits_for_its_grid_and_global_is_ignored()
     });
     play(&mut rig, BAR_FRAMES * 2, 512);
     assert_eq!(starts(&mut rig), vec![(0, 60), (BAR_FRAMES, 61)]);
+
+    // The clip that followed stops at the follow time, so the track is
+    // silent until the target's grid line: its notes on beats 3 and 4 never
+    // play.
+    let (mut rig, track, scenes) = self::rig();
+    let id = rig.editor.new_id();
+    let notes: Vec<_> = (0..4)
+        .map(|beat| Note::new(60, Ticks::QUARTER * beat, Ticks::SIXTEENTH, 100))
+        .collect();
+    rig.editor
+        .apply(Command::CreateSlotClip {
+            track,
+            scene: scenes[0],
+            clip: Clip::new(id, Ticks::ZERO, BAR, ClipData::Midi(MidiData::new(notes))),
+        })
+        .unwrap();
+    let second = clip(&mut rig.editor, track, scenes[1], 61);
+    rig.editor
+        .apply(Command::SetClipLaunchQuantization {
+            clip: second,
+            quantization: Some(LaunchQuantization::Bar),
+        })
+        .unwrap();
+    follow(
+        &mut rig.editor,
+        id,
+        FollowPatch {
+            linked: Some(false),
+            time: Some(Ticks::QUARTER * 2),
+            ..on()
+        },
+    );
+    start(&mut rig, true);
+    rig.sender.session(SessionCommand::Launch {
+        track,
+        scene: scenes[0],
+    });
+    play(&mut rig, BAR_FRAMES + BEAT_FRAMES, 512);
+    assert_eq!(
+        starts(&mut rig),
+        vec![(0, 60), (BEAT_FRAMES, 60), (BAR_FRAMES, 61)]
+    );
 }
 
 // Spec: follow-actions R6

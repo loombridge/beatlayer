@@ -389,6 +389,13 @@ impl SessionLauncher {
                 let quantization = table.slot(slot.track, scene).and_then(|i| i.quantization);
                 let (line, at) = start_of(quantization, tick, playhead);
                 self.press_at(slot.track, scene, LaunchMode::Trigger, line, at);
+                // A target waiting for its own grid leaves the track silent
+                // from the follow time (observed in Live 12.4.3).
+                if scene != slot.scene
+                    && let Some(old) = self.find_mut(slot.track, slot.scene)
+                {
+                    old.stop_at(due);
+                }
             }
         }
     }

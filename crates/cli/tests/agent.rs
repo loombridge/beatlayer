@@ -1735,3 +1735,97 @@ fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
         (json!(1.0), json!(true), json!(true))
     );
 }
+
+// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
+// reads its parameters with its two menu options, switches one by ID, and
+// swaps it to Snapshot, by command ID.
+#[test]
+fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id() {
+    use bl_devices::drum_sampler::{ENV_FOLLOWS_PITCH, PER_NOTE_BEND, drum_sampler_type};
+
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("strike-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let strike = drum_sampler_type();
+    let added = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": { "kind": strike.kind, "name": strike.name, "role": strike.role },
+            },
+        }] }),
+    );
+    let device = added["results"][0]["result"]["device"].clone();
+    let read = |client: &mut Client<InProcess>, device: &serde_json::Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let option = |params: &serde_json::Value, name: &str| {
+        let param = params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()
+            .clone();
+        (param["value"].clone(), param["menu_option"].clone())
+    };
+    let params = read(&mut client, &device);
+    assert_eq!(
+        option(&params, "Enable Per-Note Pitch Bend"),
+        (json!(1.0), json!(true)),
+        "on in a new device"
+    );
+    assert_eq!(
+        option(&params, "Envelope Follows Pitch"),
+        (json!(0.0), json!(true))
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.set_param",
+            "args": { "device": device, "param": ENV_FOLLOWS_PITCH, "value": 1.0 },
+        }, {
+            "command": "device.set_param",
+            "args": { "device": device, "param": PER_NOTE_BEND, "value": 0.0 },
+        }] }),
+    );
+    let params = read(&mut client, &device);
+    assert_eq!(option(&params, "Envelope Follows Pitch").0, json!(1.0));
+    assert_eq!(option(&params, "Enable Per-Note Pitch Bend").0, json!(0.0));
+
+    let swapped = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.swap_to_snapshot",
+            "args": { "device": device },
+        }] }),
+    );
+    let snapshot = swapped["results"][0]["result"]["device"].clone();
+    assert_ne!(snapshot, device);
+    let params = read(&mut client, &snapshot);
+    let mode = params
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Mode")
+        .unwrap();
+    assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
+}

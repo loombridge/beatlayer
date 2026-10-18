@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-371 commands in 34 areas.
+372 commands in 34 areas.
 
 ## Permission classes
 
@@ -188,6 +188,7 @@ Each command has:
 | [`device.set_display_view`](#deviceset_display_view) | Set Display View | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | Switch Device and Contents | `edit` | `Option+click a device activator` | `Alt+click a device activator` |
+| [`device.set_external`](#deviceset_external) | Set External Device | `edit` |  |  |
 | [`device.set_floating`](#deviceset_floating) | Float | `edit` | `Option+F` | `Ctrl+Alt+F` |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
@@ -3218,6 +3219,26 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_external`
+
+**Set External Device**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the routing of a device that works with hardware outside the computer (the Hardware Instrument), as the choosers in its title bar do; give only the settings to change. `midi_to` is `{ "type": "none" }` (No Output, a new device's) or `{ "type": "port", "name": ... }` with a MIDI output port's name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio interface's inputs the hardware's sound comes back on, a channel or a pair (`{ "type": "pair", "channel": 1 }`, the first pair on a new device); `hardware_latency` is the delay the hardware adds that the computer can't detect, in the unit the unit switch is on: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000, kept in samples); to switch the unit, send the converted value. Each change recompiles the song's audio, so these are settings, not parameters. Read them back in `device.list`'s `external`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `audio_from` | [`Channel`](#channel) or null | no | Audio From: the audio interface's inputs it comes back on. |
+| `channel` | integer or null | no | The MIDI channel, 1 to 16. |
+| `hardware_latency` | [`HardwareLatency`](#hardwarelatency) or null | no | Hardware Latency with its unit: the unit switch is the unit given, so switching the unit sends the converted value. |
+| `midi_to` | [`ExternalPort`](#externalport) or null | no | MIDI To: `none` for No Output, or `port` with the MIDI output port's name. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_floating`
 
 **Float**. Permission: `edit`. Contexts: `device-view`.
@@ -4775,7 +4796,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set MIDI Output**. Permission: `edit`. Contexts: `session`, `arrangement`.
 
-Sets where a MIDI track's MIDI goes, as its MIDI To chooser does: another MIDI track (its Track In), or `null` for No Output (a new MIDI track's).
+Sets where a MIDI track's MIDI goes, as its MIDI To chooser does: another MIDI track (give its ID; it arrives at its Track In), an output port (`{ "name": "Synth", "channel": 1 }`: the port's name as `midi.ports` lists it, with its Track switch on, and the channel to send on, 1 to 16), or `null` for No Output (a new MIDI track's). A track sends to a port the notes and controller, pitch bend, pressure and program change messages that reach the end of its device chain (a track with an instrument sends none, the instrument playing them), at the moment their frame is heard at the audio interface's output; it keeps a missing port's name and sends again when the port returns. Choosing a port takes channel 1.
 
 Default keys: none.
 
@@ -4784,7 +4805,7 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The MIDI track. |
-| `to` | [`TrackId`](#trackid) or null | no | Another MIDI track, or `null` (or nothing) for No Output. |
+| `to` | [`MidiTo`](#midito) or null | no | Another MIDI track (its ID), an output port with its channel (`{ "name": "Synth", "channel": 1 }`), or `null` (or nothing) for No Output. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6946,6 +6967,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.rename`](#devicerename) | the query tool's `device` | `name` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
+| [`device.set_external`](#deviceset_external) | the query tool's `device` | `external` |
 | [`device.set_floating`](#deviceset_floating) | the query tool's `device` | `floating` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -9827,6 +9849,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
+| `external` | [`External`](#external) or null | no | The device's routing to external hardware, if its type declares one (WP-5.34): an external instrument's output port and channel, the interface inputs it comes back on, and its Hardware Latency. Left out of the saved set for a device without one. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
@@ -9858,6 +9881,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "enabled": {
       "description": "Whether the device is switched on. A device that's off passes its input through unchanged.",
       "type": "boolean"
+    },
+    "external": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/External"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device's routing to external hardware, if its type declares one (WP-5.34): an external instrument's output port and channel, the interface inputs it comes back on, and its Hardware Latency. Left out of the saved set for a device without one."
     },
     "floating": {
       "description": "Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]).",
@@ -10187,6 +10221,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `external` | [`ExternalSection`](#externalsection) or null | no | Its routing to hardware, if it is an external device (WP-5.34). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
@@ -10221,6 +10256,17 @@ One device as the Device View shows it.
       "default": false,
       "description": "Whether its expanded part is shown. Never while it has none.",
       "type": "boolean"
+    },
+    "external": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExternalSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its routing to hardware, if it is an external device (WP-5.34)."
     },
     "floating": {
       "default": false,
@@ -11513,6 +11559,7 @@ What `export.audio` returns.
 | `speed` | number | yes | How many times faster than real time it ran. |
 | `missing_media` | array of string | yes | Media that clips name and that couldn't be found, by content hash: those clips are silent in the export. |
 | `files` | array of string | no | Every file written by the export: one for Main or a single track, or one per track for all-tracks or selected-tracks exports. |
+| `silenced_external_devices` | array of string | no | The devices that work with hardware (an external instrument), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence. |
 
 <details><summary>JSON Schema</summary>
 
@@ -11604,6 +11651,13 @@ What `export.audio` returns.
       "format": "double",
       "type": "number"
     },
+    "silenced_external_devices": {
+      "description": "The devices that work with hardware (an external instrument), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "speed": {
       "description": "How many times faster than real time it ran.",
       "format": "double",
@@ -11637,6 +11691,156 @@ What `export.audio` returns.
     "took_seconds",
     "speed",
     "missing_media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `External`
+
+An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `audio_from` | [`Channel`](#channel) | no | Audio From: the interface's inputs the sound comes back on, the first pair on a new device. |
+| `channel` | integer from 0 to 255 | no | The MIDI channel, 1 to 16: 1 on a new device. |
+| `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | no | Hardware Latency: 0 ms on a new device. |
+| `port` | string or null | no | MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.",
+  "properties": {
+    "audio_from": {
+      "$ref": "#/$defs/Channel",
+      "description": "Audio From: the interface's inputs the sound comes back on, the first pair on a new device."
+    },
+    "channel": {
+      "description": "The MIDI channel, 1 to 16: 1 on a new device.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "hardware_latency": {
+      "$ref": "#/$defs/HardwareLatency",
+      "description": "Hardware Latency: 0 ms on a new device."
+    },
+    "port": {
+      "description": "MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExternalPort`
+
+An external device's MIDI To: `none` (No Output), or `port` with the MIDI output port's `name` as the MIDI settings list it.
+
+One of:
+
+- an object with `type` = `"none"`: No Output.
+- an object with `type` = `"port"`, `name` (string): An output port, by name.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An external device's MIDI To: `none` (No Output), or `port` with the MIDI output port's `name` as the MIDI settings list it.",
+  "oneOf": [
+    {
+      "description": "No Output.",
+      "properties": {
+        "type": {
+          "const": "none",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An output port, by name.",
+      "properties": {
+        "name": {
+          "description": "The port's name.",
+          "type": "string"
+        },
+        "type": {
+          "const": "port",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ExternalSection`
+
+An external device's routing section, drawn at the left of its body (WP-5.34; the external devices spec, R9): the choosers and Hardware Latency, whose choices the shell lists.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `port` | string or null | yes | MIDI To: the output port's name, or none for No Output. |
+| `channel` | integer from 0 to 255 | yes | The MIDI channel, 1 to 16. |
+| `audio_from` | string | yes | What Audio From shows: a channel `3` or a pair `3/4`. |
+| `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | yes | Hardware Latency, in the unit its switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An external device's routing section, drawn at the left of its body (WP-5.34; the external devices spec, R9): the choosers and Hardware Latency, whose choices the shell lists.",
+  "properties": {
+    "audio_from": {
+      "description": "What Audio From shows: a channel `3` or a pair `3/4`.",
+      "type": "string"
+    },
+    "channel": {
+      "description": "The MIDI channel, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "hardware_latency": {
+      "$ref": "#/$defs/HardwareLatency",
+      "description": "Hardware Latency, in the unit its switch is on."
+    },
+    "port": {
+      "description": "MIDI To: the output port's name, or none for No Output.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "port",
+    "channel",
+    "audio_from",
+    "hardware_latency"
   ],
   "type": "object"
 }
@@ -12042,6 +12246,66 @@ What `device.group` returns.
     "chain"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `HardwareLatency`
+
+Hardware Latency: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000; kept in samples).
+
+One of:
+
+- an object with `unit` = `"milliseconds"`, `value` (number): Milliseconds, 0 to 1000: for analogue connections.
+- an object with `unit` = `"samples"`, `value` (integer, at least 0): Samples, 0 to 192,000: for digital connections.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Hardware Latency: `{ \"unit\": \"milliseconds\", \"value\": 12.5 }` (0 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ \"unit\": \"samples\", \"value\": 600 }` (0 to 192000; kept in samples).",
+  "oneOf": [
+    {
+      "description": "Milliseconds, 0 to 1000: for analogue connections.",
+      "properties": {
+        "unit": {
+          "const": "milliseconds",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Samples, 0 to 192,000: for digital connections.",
+      "properties": {
+        "unit": {
+          "const": "samples",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -13821,6 +14085,52 @@ What `midi.ports` returns.
     "keyboard"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `MidiTo`
+
+Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ "name": "Synth", "channel": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16.
+
+One of:
+
+- [`TrackId`](#trackid): Another MIDI track's Track In.
+- an object with `name` (string), `channel` (integer from 0 to 255): A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "$ref": "#/$defs/TrackId",
+      "description": "Another MIDI track's Track In."
+    },
+    {
+      "description": "A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The port's name, as the MIDI settings list it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "channel"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
 }
 ```
 

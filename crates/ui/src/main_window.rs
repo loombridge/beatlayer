@@ -69,6 +69,10 @@ pub enum UiEvent {
     /// A device's value control gained (true) or lost (false) the keyboard
     /// focus, for [`Shell::set_value_focused`] (WP-2.5).
     FocusValue(bool),
+    /// The pointer is over something with a line for the Status Bar, such
+    /// as a drum rack's pad (`Some`), or left it (`None`), for
+    /// [`Shell::set_hint`] (WP-5.6).
+    StatusHint(Option<String>),
 }
 
 /// What the Info View is showing: the control under the pointer, the
@@ -1354,13 +1358,17 @@ fn look(element: Element, shell: &Shell) -> Look {
                 ..Look::default()
             }
         }
-        Element::Message => match shell.message() {
-            Some(message) => Look {
+        Element::Message => match (shell.message(), shell.hint()) {
+            (Some(message), _) => Look {
                 text: Some(message.text.clone()),
                 on: message.error,
                 ..Look::default()
             },
-            None => Look {
+            (None, Some(hint)) => Look {
+                text: Some(hint.to_owned()),
+                ..Look::default()
+            },
+            (None, None) => Look {
                 text: Some(String::new()),
                 ..Look::default()
             },

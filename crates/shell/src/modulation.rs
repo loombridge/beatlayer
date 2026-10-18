@@ -47,6 +47,9 @@ fn travel_of<'a>(
                 MixerParam::Mute => (Travel::Switch, f64::from(u8::from(!mixer.enabled))),
             }
         }
+        AutomationTarget::ChainSend { chain, to } => {
+            (Travel::Send, track.find_chain(chain)?.send(to))
+        }
         AutomationTarget::Device { device, param } => {
             let device = track.find_device(device)?;
             let description = devices.description(&device.kind)?.param(param)?;

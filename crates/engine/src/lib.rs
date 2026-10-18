@@ -90,6 +90,7 @@ mod compiler;
 pub mod controller_take;
 mod disjoint;
 pub mod display;
+pub mod drum;
 mod engine;
 mod gc;
 mod input;
@@ -134,6 +135,7 @@ pub use clips::{
 };
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
+pub use drum::ChainHits;
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};

@@ -384,15 +384,19 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
 }
 
 /// A chain tap names a chain of an instrument or audio effect rack on the
-/// source track (the racks spec, R38).
+/// source track (the racks spec, R38), or a return chain of a drum rack (the
+/// drum racks spec, R10).
 fn check_chain_tap(doc: &Document, from: TrackId, chain: ChainId) -> Result<(), ModelError> {
     if doc.chain_track(chain) != Some(from) {
         return Err(ModelError::NoSuchChain(chain));
     }
+    let returned = doc.chain(chain).is_some_and(|c| c.is_return);
     match doc.chain_rack(chain).and_then(crate::Device::rack_kind) {
         Some(RackKind::Instrument | RackKind::AudioEffect) => Ok(()),
+        Some(RackKind::Drum) if returned => Ok(()),
         _ => Err(ModelError::InvalidInput(
-            "only a chain of an instrument or audio effect rack can be tapped",
+            "only a chain of an instrument or audio effect rack, or a drum rack's return chain, \
+             can be tapped",
         )),
     }
 }

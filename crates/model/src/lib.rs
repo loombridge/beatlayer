@@ -135,7 +135,9 @@ pub use layers::{
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{
-    CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
+    CHAIN_COLOURS, Chain, ChainMixer, ChainSend, DEFAULT_PLAY, DevicePlace, FIRST_PAD,
+    MAX_RETURN_CHAINS, RackKind, RackView, RackViewMap, RackViews, Receive, general_midi_drum,
+    note_name, receive_choices, receive_label,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};

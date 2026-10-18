@@ -36,6 +36,7 @@ use bl_shell_spec::devices::{
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
+use bl_shell_spec::pads as pad_ids;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -47,6 +48,9 @@ mod rack_presets;
 
 use rack_presets::Ready;
 pub use rack_presets::is_chain_preset;
+
+mod drum;
+pub use drum::PadSample;
 
 /// What the Device View shows besides the set: the selected device, the
 /// folded devices, the clipboard, and hot-swapping; and the device types
@@ -108,6 +112,17 @@ pub struct DeviceView {
     /// With Auto Select on, the layers each held key plays (R7): while a
     /// note is held they are the selection.
     held: std::collections::BTreeMap<DeviceId, std::collections::BTreeMap<u8, Vec<LayerId>>>,
+    /// The pad selected in each drum rack (WP-5.6, R13).
+    pads_selected: std::collections::BTreeMap<DeviceId, u8>,
+    /// The pad the browser's next load lands on, with its drum rack (R18).
+    hot_swap_pad: Option<(DeviceId, u8)>,
+    /// The drum chains whose Preview button is held (R5).
+    previewing: BTreeSet<ChainId>,
+    /// The chain Save as Default Pad kept (R17).
+    default_pad: Option<Chain>,
+    /// How many notes had reached each drum chain when Auto Select last
+    /// looked (R20).
+    hit_counts: std::collections::BTreeMap<ChainId, u64>,
 }
 
 /// Why a device command didn't run.
@@ -133,6 +148,9 @@ pub struct Outcome {
     pub view_changed: bool,
     /// A line for the Status Bar.
     pub message: Option<String>,
+    /// Preview buttons pressed (true) and released (false), which the shell
+    /// tells the engine (the drum racks spec, R5).
+    pub previews: Vec<(ChainId, bool)>,
     /// Folders for the browser to open, outermost first, with the User
     /// Library's label chosen: hot-swapping's way to the device's presets.
     pub browse: Option<Vec<PathBuf>>,
@@ -452,6 +470,9 @@ impl DeviceView {
         self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
+        self.pads_selected.retain(|d, _| exists(d));
+        self.hot_swap_pad = self.hot_swap_pad.filter(|(d, _)| exists(d));
+        self.previewing.retain(chain_exists);
     }
 
     /// Whether `device`'s type has an expanded part.
@@ -481,7 +502,11 @@ impl DeviceView {
             hot_swap: self.hot_swap.and_then(|device| {
                 doc.device(device).map(|d| HotSwap {
                     device,
-                    label: format!("Swapping {}", d.role.label()),
+                    label: if self.hot_swap_pad.is_some() {
+                        "Swapping Pad".to_owned()
+                    } else {
+                        format!("Swapping {}", d.role.label())
+                    },
                 })
             }),
             can_paste: self.clipboard.is_some(),
@@ -670,19 +695,33 @@ impl DeviceView {
             chains: rack
                 .chains
                 .iter()
-                .map(|c| ChainRow {
-                    id: c.id,
-                    name: c.name.clone(),
-                    colour: c.colour,
-                    enabled: c.mixer.enabled,
-                    solo: c.mixer.solo,
-                    hot_swap: self.hot_swap_chain == Some(c.id),
-                    volume: c.mixer.volume,
-                    pan: c.mixer.pan,
-                    has_mixer: kind.chains_have_volume_and_pan(),
-                    selected: selected.contains(&c.id),
+                .map(|c| {
+                    let mut row = ChainRow {
+                        id: c.id,
+                        name: c.name.clone(),
+                        colour: c.colour,
+                        enabled: c.mixer.enabled,
+                        solo: c.mixer.solo,
+                        hot_swap: self.hot_swap_chain == Some(c.id),
+                        volume: c.mixer.volume,
+                        pan: c.mixer.pan,
+                        has_mixer: kind.chains_have_volume_and_pan(),
+                        selected: selected.contains(&c.id),
+                        drum: None,
+                        output: None,
+                    };
+                    self.fill_drum_row(doc, rack, c, &mut row);
+                    row
                 })
                 .collect(),
+            pads: (kind == RackKind::Drum).then(|| self.pad_frame(rack)),
+            return_tracks: if kind == RackKind::Drum {
+                Self::return_tracks(doc)
+            } else {
+                Vec::new()
+            },
+            can_add_return: kind == RackKind::Drum
+                && rack.chains.iter().filter(|c| c.is_return).count() < bl_model::MAX_RETURN_CHAINS,
             note: (selected.len() > 1).then(|| format!("{} chains selected", selected.len())),
             chain_list_focused: self.chain_list_focus
                 && self
@@ -1140,6 +1179,31 @@ impl DeviceView {
                     },
                 )
             }
+            pad_ids::SWITCH_HOT_SWAP_TARGET => {
+                self.hot_swap_pad.is_some()
+                    || self.hot_swap.is_some_and(|rack| {
+                        doc.device(rack)
+                            .is_some_and(|d| d.rack_kind() == Some(RackKind::Drum))
+                            && self.pads_selected.contains_key(&rack)
+                    })
+            }
+            pad_ids::GROUP_TO_DRUM_RACK => {
+                let devices: Vec<DeviceId> = args
+                    .get("devices")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let devices = if devices.is_empty() {
+                    self.selected.into_iter().collect()
+                } else {
+                    devices
+                };
+                !devices.is_empty()
+                    && devices.iter().all(|d| {
+                        doc.device_place(*d)
+                            .and_then(|p| doc.track(p.track))
+                            .is_some_and(|t| t.kind() == TrackKind::Midi)
+                    })
+            }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
             ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
             ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
@@ -1502,6 +1566,8 @@ impl DeviceView {
                     // shows, with every rack around it.
                     self.folded.remove(&rack);
                     outcome.view_changed = self.reveal(editor, rack);
+                    // Spec: drum-racks R13. The chain's pad is selected.
+                    self.follow_chain_selection(editor.document(), chain);
                 }
             }
             ids::CHAIN_SOLO => {
@@ -1518,6 +1584,7 @@ impl DeviceView {
                 if on.unwrap_or(self.hot_swap_chain != Some(chain)) {
                     self.hot_swap_chain = Some(chain);
                     self.hot_swap = None;
+                    self.hot_swap_pad = None;
                 } else if self.hot_swap_chain == Some(chain) {
                     self.hot_swap_chain = None;
                 }
@@ -1538,6 +1605,85 @@ impl DeviceView {
                 let args: DropChainOnTrackArgs = parse(args)?;
                 self.drop_chain_on_track(editor, &args)?;
                 outcome.document_changed = true;
+            }
+            pad_ids::MOVE_PADS => {
+                let args: pad_ids::MovePadsArgs = parse(args)?;
+                self.move_pads(editor.document(), args)?;
+                outcome.view_changed = true;
+            }
+            pad_ids::PAD_SELECT => {
+                let args: pad_ids::PadArgs = parse(args)?;
+                self.select_pad(editor.document(), args)?;
+            }
+            pad_ids::PAD_SET_MUTE | pad_ids::PAD_SET_SOLO => {
+                let args: pad_ids::PadSwitchArgs = parse(args)?;
+                self.set_pad_switch(editor, args, id == pad_ids::PAD_SET_SOLO)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_PREVIEW => {
+                let pad_ids::PadPreviewArgs { rack, note, on } = parse(args)?;
+                let chains = self.pad_chain_ids(editor.document(), rack, note)?;
+                self.preview(editor.document(), &chains, on, &mut outcome)?;
+            }
+            pad_ids::CHAIN_PREVIEW => {
+                let pad_ids::ChainPreviewArgs { chain, on } = parse(args)?;
+                self.preview(editor.document(), &[chain], on, &mut outcome)?;
+            }
+            pad_ids::PAD_SWAP => {
+                let args: pad_ids::PadSwapArgs = parse(args)?;
+                self.swap_pads(editor, args)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_SAVE_DEFAULT => {
+                let args: pad_ids::PadArgs = parse(args)?;
+                self.save_default_pad(editor.document(), args, user_library)?;
+            }
+            pad_ids::PAD_DELETE => {
+                let args: pad_ids::PadArgs = parse(args)?;
+                let chains = self.pad_chain_ids(editor.document(), args.rack, args.note)?;
+                if chains.is_empty() {
+                    return Err(DeviceError::Unavailable(
+                        "the pad holds no chain".to_owned(),
+                    ));
+                }
+                self.delete_chains(editor, &chains)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_RENAME => {
+                let args: pad_ids::PadRenameArgs = parse(args)?;
+                self.rename_pad(editor, args)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_HOT_SWAP => {
+                let args: pad_ids::PadHotSwapArgs = parse(args)?;
+                self.hot_swap_pad(editor.document(), args)?;
+            }
+            pad_ids::SWITCH_HOT_SWAP_TARGET => {
+                parse::<bl_commands::NoArgs>(args)?;
+                self.switch_hot_swap_target(editor.document())?;
+            }
+            pad_ids::GROUP_TO_DRUM_RACK => {
+                let args: pad_ids::GroupToDrumRackArgs = parse(args)?;
+                outcome.value = to_value(&self.group_to_drum_rack(editor, args)?);
+                outcome.document_changed = true;
+                return Ok(outcome);
+            }
+            pad_ids::CHAIN_EXTRACT => {
+                let args: pad_ids::ExtractChainArgs = parse(args)?;
+                outcome.value = to_value(&self.extract_chain(editor, args)?);
+                outcome.document_changed = true;
+                return Ok(outcome);
+            }
+            pad_ids::CHAIN_EXTRACT_RETURN => {
+                let args: pad_ids::ExtractChainArgs = parse(args)?;
+                outcome.value = to_value(&self.extract_return(editor, args)?);
+                outcome.document_changed = true;
+                return Ok(outcome);
+            }
+            pad_ids::PAD_DROP | pad_ids::PAD_HOT_SWAP_SAMPLE => {
+                return Err(DeviceError::Unavailable(format!(
+                    "`{id}` needs the shell's media store"
+                )));
             }
             ids::RACK_SET_VIEW => {
                 let SetRackViewArgs { rack, view, shown } = parse(args)?;
@@ -1710,6 +1856,7 @@ impl DeviceView {
                 let on = on.unwrap_or(
                     self.hot_swap.is_none() || device.is_some_and(|d| Some(d) != self.hot_swap),
                 );
+                self.hot_swap_pad = None;
                 if on {
                     // Spec: racks R44. With none named or selected, the
                     // shown track's first audio effect or its instrument.
@@ -2318,6 +2465,7 @@ impl DeviceView {
             device,
             preset,
             move_device,
+            returns,
         } = args;
         if [device.is_some(), preset.is_some(), move_device.is_some()]
             .iter()
@@ -2334,9 +2482,34 @@ impl DeviceView {
             .device(rack)
             .filter(|d| d.rack_kind().is_some())
             .ok_or_else(|| DeviceError::InvalidArgs(format!("{rack} isn't a rack")))?;
+        let drum = holder.rack_kind() == Some(RackKind::Drum);
+        if returns && !drum {
+            return Err(DeviceError::InvalidArgs(format!(
+                "{rack} isn't a drum rack, so it has no return chains"
+            )));
+        }
+        // A drum rack's chains go before its return chains, and a return
+        // chain after them.
+        let drum_end = holder.chains.iter().take_while(|c| !c.is_return).count();
         let index = index
-            .unwrap_or(holder.chains.len())
+            .unwrap_or(if returns || !drum {
+                holder.chains.len()
+            } else {
+                drum_end
+            })
             .min(holder.chains.len());
+        let pad = (drum && !returns).then(|| {
+            let first = self.views_of(rack).first_pad;
+            (first..=127)
+                .chain(0..first)
+                .find(|note| {
+                    !holder
+                        .chains
+                        .iter()
+                        .any(|c| !c.is_return && c.receive == bl_model::Receive::Note(*note))
+                })
+                .unwrap_or(first)
+        });
         let moved_title = move_device
             .map(|moved| {
                 doc.device(moved)
@@ -2389,11 +2562,12 @@ impl DeviceView {
             .collect();
         editor
             .transact("Insert Chain", |editor| {
-                editor.apply(Command::AddChain {
-                    rack,
-                    index,
-                    chain: Chain::new(chain_id, name).with_devices(held.into_iter().collect()),
-                })?;
+                let mut chain = Chain::new(chain_id, name).with_devices(held.into_iter().collect());
+                chain.is_return = returns;
+                if let Some(note) = pad {
+                    chain.receive = bl_model::Receive::Note(note);
+                }
+                editor.apply(Command::AddChain { rack, index, chain })?;
                 if let (Some(device), Some((params, name, shape))) = (device_id, state) {
                     editor.apply(Command::SetDeviceState {
                         device,
@@ -2535,6 +2709,12 @@ impl DeviceView {
             .device(rack)
             .and_then(Device::rack_kind)
             .ok_or_else(|| DeviceError::InvalidArgs(format!("{rack} isn't a rack")))?;
+        if kind == RackKind::Drum {
+            // Spec: drum-racks R26. A drum rack's chains group into one
+            // drum chain holding an instrument rack.
+            let holder = doc.device(rack).cloned().expect("the rack exists");
+            return self.group_drum_chains(editor, &holder, chains);
+        }
         let (inner, outer): (DeviceId, ChainId) = (editor.new_id(), editor.new_id());
         editor
             .transact("Group", |editor| {

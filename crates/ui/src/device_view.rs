@@ -43,8 +43,8 @@ pub const EMPTY_TEXT: &str = "Drop an Instrument or Sample Here";
 
 /// A device being dragged by its title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct DeviceDrag {
-    device: DeviceId,
+pub(crate) struct DeviceDrag {
+    pub(crate) device: DeviceId,
 }
 
 /// The Device View's state between frames: a name being typed and the
@@ -52,10 +52,18 @@ struct DeviceDrag {
 pub struct DeviceViewUi {
     multisampler: crate::multisampler::MultisamplerUi,
     renaming: Option<Renaming>,
+    pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
     scroll: f32,
-    keymap: Keymap,
-    platform: Platform,
+    /// The device that was selected when the last frame was drawn, so a new
+    /// selection scrolls into view (racks spec, R25).
+    seen_selected: Option<DeviceId>,
+    /// How far each rack's chain list is scrolled, in points.
+    pub(crate) chain_scrolls: std::collections::HashMap<DeviceId, f32>,
+    pub(crate) keymap: Keymap,
+    pub(crate) platform: Platform,
     menu: Vec<MenuItem>,
+    rack_menu: Vec<MenuItem>,
+    pub(crate) chain_menu: Vec<MenuItem>,
 }
 
 struct Renaming {
@@ -227,17 +235,32 @@ impl DeviceViewUi {
         Self {
             multisampler: crate::multisampler::MultisamplerUi::default(),
             renaming: None,
+            renaming_chain: None,
             scroll: 0.0,
+            seen_selected: None,
+            chain_scrolls: std::collections::HashMap::new(),
             keymap: Keymap::live12(),
             platform: Platform::current(),
             menu: context_menus::device(),
+            rack_menu: context_menus::rack(),
+            chain_menu: context_menus::chain(),
         }
     }
 
     /// Whether a device's name is being typed, so keys go to it.
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.renaming.is_some()
+        self.renaming.is_some() || self.renaming_chain.is_some()
+    }
+
+    /// Starts typing a new name for `chain` in its row (Rename, S-EDIT-008),
+    /// from its name now.
+    pub fn start_chain_rename(&mut self, chain: bl_model::ChainId, name: &str) {
+        self.renaming_chain = Some(crate::rack_view::ChainRenaming {
+            chain,
+            text: name.to_owned(),
+            focused: false,
+        });
     }
 
     /// Starts typing a new name for `device` in its title bar (Rename,
@@ -282,9 +305,31 @@ impl DeviceViewUi {
             .devices
             .iter()
             .fold(DEVICE_GAP, |w, d| w + ids::frame_width(d) + DEVICE_GAP);
-        if background.hovered() || ui.rect_contains_pointer(rect) {
+        let over_chain_list = ui.ctx().pointer_hover_pos().is_some_and(|pointer| {
+            crate::rack_view::over_chain_list(&state, rect, self.scroll, pointer)
+        });
+        if (background.hovered() || ui.rect_contains_pointer(rect)) && !over_chain_list {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             self.scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
+        }
+        // Spec: racks R25. A device chosen from the list scrolls into view,
+        // wherever in its racks it is.
+        let selected = shell.devices().selected();
+        if selected != self.seen_selected {
+            self.seen_selected = selected;
+            let found = selected.and_then(|device| {
+                crate::rack_view::all_frames(&state, rect, 0.0)
+                    .into_iter()
+                    .find(|(id, _)| *id == device)
+            });
+            if let Some((_, at)) = found {
+                let (left, right) = (at.left() - rect.left(), at.right() - rect.left());
+                if left < self.scroll {
+                    self.scroll = left - DEVICE_GAP;
+                } else if right > self.scroll + rect.width() && right - left <= rect.width() {
+                    self.scroll = right + DEVICE_GAP - rect.width();
+                }
+            }
         }
         self.scroll = self.scroll.clamp(0.0, (content - rect.width()).max(0.0));
 
@@ -387,7 +432,7 @@ impl DeviceViewUi {
     /// One device's frame: in the chain, or filling its floating window
     /// (`window`).
     #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
-    fn device(
+    pub(crate) fn device(
         &mut self,
         ui: &mut Ui,
         shell: &Shell,
@@ -399,7 +444,15 @@ impl DeviceViewUi {
     ) {
         let c = &theme.colors;
         // A floating device's place in the chain is a strip (IMP-14).
-        let strip = !window && (frame.folded || frame.floating);
+        // A rack with every view hidden folds into its view column too
+        // (racks spec, R19).
+        let strip = !window
+            && (frame.folded
+                || frame.floating
+                || frame
+                    .rack
+                    .as_ref()
+                    .is_some_and(bl_shell::device_commands::RackFrame::is_strip));
         let id = if window {
             window_frame_id(frame.id)
         } else {
@@ -433,13 +486,17 @@ impl DeviceViewUi {
             c.control.0
         };
         let text_colour = if frame.selected { c.window.0 } else { c.text.0 };
-        let (bar, controls) = if strip {
+        let (bar, mut controls) = if strip {
             folded_layout(rect)
         } else if window {
             window_layout(rect, frame.expandable)
         } else {
             unfolded_layout(rect, frame.expandable)
         };
+        if strip && frame.rack.is_some() {
+            // A rack's strip holds its view selectors under the activator.
+            controls.title.min.y = controls.activator.bottom() + 6.0 + 3.0 * (BUTTON + 3.0);
+        }
         painter.rect_filled(bar, theme.sizes.corner, bar_colour);
         if frame.floating && !window {
             // Drawn as floating: outlined in the accent.
@@ -456,7 +513,11 @@ impl DeviceViewUi {
             |ui| {
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
-                if frame.panel.is_some() && !strip {
+                if let Some(rack) = &frame.rack {
+                    // Spec: racks R18. The rack's own frame holds its views;
+                    // a strip draws only the view selectors.
+                    self.rack_body(ui, shell, theme, frame, rack, rect, events);
+                } else if frame.panel.is_some() && !strip {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
@@ -645,9 +706,16 @@ impl DeviceViewUi {
         let response = ui.interact(rect, id, Sense::click());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+            // Spec: racks R12 (I-CLICK-024). Option-click (Alt-click) on a
+            // rack's activator switches everything inside it too.
+            let all = frame.rack.is_some() && ui.input(|i| i.modifiers.alt);
             invoke(
                 events,
-                "device.set_enabled",
+                if all {
+                    "device.set_enabled_all"
+                } else {
+                    "device.set_enabled"
+                },
                 json!({ "device": frame.id, "enabled": !frame.enabled }),
             );
         }
@@ -811,13 +879,28 @@ impl DeviceViewUi {
     /// shortcut runs in the Device View, or names the package that builds
     /// it.
     fn menu(&self, ui: &mut Ui, shell: &Shell, frame: &DeviceFrame, events: &mut Vec<UiEvent>) {
-        for item in shown(&self.menu) {
+        // Spec: racks R26. A rack's menu adds Ungroup and disables Compare.
+        let menu = if frame.rack.is_some() {
+            &self.rack_menu
+        } else {
+            &self.menu
+        };
+        for item in shown(menu) {
             if item.is_separator() {
                 ui.separator();
                 continue;
             }
             let response = crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+            let rack_compare =
+                frame.rack.is_some() && context_menus::RACK_COMPARE_ROWS.contains(&item.row);
             let response = match context_menus::pending_package(item.row) {
+                _ if rack_compare => {
+                    let text = "A/B compare doesn't apply to racks.".to_owned();
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_description(text.clone());
+                    });
+                    response.on_disabled_hover_text(text)
+                }
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");
                     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -898,7 +981,10 @@ impl DeviceViewUi {
 
     /// Dragging a device's title bar moves it: a line shows where it would
     /// go, at places that keep the chain in order, and the drop runs
-    /// `device.move`.
+    /// `device.move`, or `device.move_to_chain` inside a rack's devices view
+    /// (racks spec, R7). Dragging a chain's row over the track's own chain
+    /// drops its devices there, and the chain goes (`chain.drop_on_track`,
+    /// R24).
     #[expect(clippy::too_many_arguments, reason = "the drop's inputs")]
     fn drop_target(
         &self,
@@ -910,9 +996,11 @@ impl DeviceViewUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let Some(drag) = DragAndDrop::payload::<DeviceDrag>(ui.ctx()) else {
+        let device = DragAndDrop::payload::<DeviceDrag>(ui.ctx()).map(|d| d.device);
+        let chains = DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx());
+        if device.is_none() && chains.is_none() {
             return;
-        };
+        }
         let (Some(pointer), Some(track)) = (ui.input(|i| i.pointer.interact_pos()), state.track)
         else {
             return;
@@ -920,32 +1008,142 @@ impl DeviceViewUi {
         if !rect.contains(pointer) {
             return;
         }
-        let Some(index) = move_index(shell, state, placed, drag.device, track, pointer.x) else {
+        let mut slots = vec![Slot {
+            chain: None,
+            rack: None,
+            rack_kind: None,
+            area: rect,
+            frames: placed
+                .iter()
+                .zip(&state.devices)
+                .map(|((id, at), d)| (*id, *at, d.role))
+                .collect(),
+        }];
+        for (device, at) in state.devices.iter().zip(placed) {
+            nested_slots(device, at.1, &mut slots);
+        }
+        // The innermost devices view the pointer is over.
+        let Some(slot) = slots.iter().rev().find(|s| s.area.contains(pointer)) else {
             return;
         };
-        let gap = index.gap;
-        let x = match placed.get(gap) {
-            Some((_, frame)) => frame.left() - DEVICE_GAP / 2.0,
-            None => placed
+        let (gap, index, target) = match (device, &chains) {
+            (Some(device), _) => {
+                let Some(landing) = landing(shell, state, slot, device, track, pointer.x) else {
+                    return;
+                };
+                (landing.gap, landing.index, Some((device, landing.changes)))
+            }
+            (None, Some(drag)) if slot.chain.is_none() => {
+                // Spec: racks R24. Only a drop outside every rack spreads a
+                // chain's devices on the track.
+                let over_rack = placed
+                    .iter()
+                    .zip(&state.devices)
+                    .any(|((_, at), d)| d.rack.is_some() && at.contains(pointer));
+                if over_rack {
+                    return;
+                }
+                let Some((gap, ok)) = chain_landing(shell, state, drag, track, slot, pointer.x)
+                else {
+                    return;
+                };
+                if !ok {
+                    return;
+                }
+                (gap, gap, None)
+            }
+            _ => return,
+        };
+        let x = match slot.frames.get(gap) {
+            Some((_, frame, _)) => frame.left() - DEVICE_GAP / 2.0,
+            None => slot
+                .frames
                 .last()
-                .map_or(rect.left() + DEVICE_GAP / 2.0, |(_, f)| {
+                .map_or(slot.area.left() + DEVICE_GAP / 2.0, |(_, f, _)| {
                     f.right() + DEVICE_GAP / 2.0
                 }),
         };
         ui.painter().line_segment(
-            [pos2(x, rect.top() + 2.0), pos2(x, rect.bottom() - 2.0)],
+            [
+                pos2(x, slot.area.top() + 2.0),
+                pos2(x, slot.area.bottom() - 2.0),
+            ],
             Stroke::new(2.0, theme.colors.accent.0),
         );
-        if ui.input(|i| i.pointer.any_released()) {
-            DragAndDrop::clear_payload(ui.ctx());
-            if index.changes {
-                invoke(
+        if !ui.input(|i| i.pointer.any_released()) {
+            return;
+        }
+        DragAndDrop::clear_payload(ui.ctx());
+        match (target, chains) {
+            (Some((device, true)), _) => match slot.chain {
+                None => invoke(
                     events,
                     "device.move",
-                    json!({ "device": drag.device, "track": track, "index": index.index }),
-                );
+                    json!({ "device": device, "track": track, "index": index }),
+                ),
+                Some(chain) => invoke(
+                    events,
+                    "device.move_to_chain",
+                    json!({ "device": device, "chain": chain, "index": index }),
+                ),
+            },
+            (None, Some(drag)) => {
+                events.push(UiEvent::BeginNamedGesture("Move Chain".to_owned()));
+                let mut at = index;
+                for chain in &drag.chains {
+                    invoke(
+                        events,
+                        "chain.drop_on_track",
+                        json!({ "chain": chain, "track": track, "index": at }),
+                    );
+                    at += shell
+                        .editor()
+                        .document()
+                        .chain(*chain)
+                        .map_or(0, |c| c.devices.len());
+                }
+                events.push(UiEvent::EndGesture);
             }
+            _ => {}
         }
+    }
+}
+
+/// A place devices can be dropped: a track's own chain, or the devices
+/// view of a rack, with the frames it holds.
+struct Slot {
+    /// The rack's chain the frames are in; none for the track's own.
+    chain: Option<bl_model::ChainId>,
+    /// The rack, if this is a chain's.
+    rack: Option<DeviceId>,
+    rack_kind: Option<bl_model::RackKind>,
+    area: Rect,
+    frames: Vec<(DeviceId, Rect, DeviceRole)>,
+}
+
+/// Adds the devices view of `device`'s rack, and of the racks inside it, to
+/// `slots`, outermost first.
+fn nested_slots(device: &DeviceFrame, at: Rect, slots: &mut Vec<Slot>) {
+    let Some(rack) = &device.rack else {
+        return;
+    };
+    let here = crate::rack_view::layout(rack, at, 0.0);
+    if let (Some(area), [chain]) = (here.devices, rack.selected_chains.as_slice()) {
+        slots.push(Slot {
+            chain: Some(*chain),
+            rack: Some(device.id),
+            rack_kind: Some(rack.kind),
+            area,
+            frames: rack
+                .devices
+                .iter()
+                .zip(&here.device_frames)
+                .map(|(d, (id, at))| (*id, *at, d.role))
+                .collect(),
+        });
+    }
+    for (child, (_, child_at)) in rack.devices.iter().zip(&here.device_frames) {
+        nested_slots(child, *child_at, slots);
     }
 }
 
@@ -959,44 +1157,107 @@ struct MoveIndex {
     changes: bool,
 }
 
-/// Where a device dragged to `x` lands in the shown chain, if that keeps
-/// the chain in Live's order (the device chains spec, R2 and R3).
-fn move_index(
+/// Whether a device with `role` fits a rack of `kind` (racks spec, R1).
+fn rack_takes(kind: bl_model::RackKind, role: DeviceRole) -> bool {
+    match kind {
+        bl_model::RackKind::AudioEffect => role == DeviceRole::AudioEffect,
+        bl_model::RackKind::MidiEffect => role == DeviceRole::MidiEffect,
+        bl_model::RackKind::Instrument | bl_model::RackKind::Drum => true,
+    }
+}
+
+/// Where a device dragged to `x` lands in `slot`, if that keeps the chain in
+/// Live's order (the device chains spec, R2 and R3; the racks spec, R1).
+fn landing(
     shell: &Shell,
     state: &DeviceViewState,
-    placed: &[(DeviceId, Rect)],
+    slot: &Slot,
     device: DeviceId,
     track: TrackId,
     x: f32,
 ) -> Option<MoveIndex> {
     let doc = shell.editor().document();
-    let role = doc.device(device)?.role;
-    let kind = state.track_kind?;
-    if !role.fits(kind) {
-        return None;
+    let dragged = doc.device(device)?;
+    let role = dragged.role;
+    let place = doc.device_place(device);
+    match (slot.rack_kind, slot.rack) {
+        (None, _) => {
+            if !role.fits(state.track_kind?) {
+                return None;
+            }
+        }
+        (Some(kind), Some(rack)) => {
+            // A rack can't go into one of its own chains.
+            if !rack_takes(kind, role) || dragged.find(rack).is_some() {
+                return None;
+            }
+        }
+        (Some(_), None) => return None,
     }
-    let gap = placed.iter().filter(|(_, f)| f.center().x < x).count();
-    let from = state.devices.iter().position(|d| d.id == device);
+    let gap = slot
+        .frames
+        .iter()
+        .filter(|(_, f, _)| f.center().x < x)
+        .count();
+    let from = slot.frames.iter().position(|(id, ..)| *id == device);
     let index = match from {
         Some(from) if from < gap => gap - 1,
         _ => gap,
     };
-    let others: Vec<DeviceRole> = state
-        .devices
+    let others: Vec<DeviceRole> = slot
+        .frames
         .iter()
-        .filter(|d| d.id != device)
-        .map(|d| d.role)
+        .filter(|(id, ..)| *id != device)
+        .map(|(.., r)| *r)
         .collect();
     let fits = others[..index].iter().all(|r| *r <= role)
         && others[index..].iter().all(|r| *r >= role)
-        && !(role == DeviceRole::Instrument
-            && others.contains(&DeviceRole::Instrument)
-            && doc.device_track(device) != Some(track));
+        && !(role == DeviceRole::Instrument && others.contains(&DeviceRole::Instrument));
+    let moves = match slot.chain {
+        None => place.is_none_or(|p| p.chain.is_some() || p.track != track),
+        Some(chain) => place.is_none_or(|p| p.chain != Some(chain)),
+    };
     fits.then_some(MoveIndex {
         gap,
         index,
-        changes: from != Some(index) || doc.device_track(device) != Some(track),
+        changes: from != Some(index) || moves,
     })
+}
+
+/// Where chains dragged to `x` land in the track's own chain, and whether
+/// their devices fit there in order.
+fn chain_landing(
+    shell: &Shell,
+    state: &DeviceViewState,
+    drag: &crate::rack_view::ChainDrag,
+    track: TrackId,
+    slot: &Slot,
+    x: f32,
+) -> Option<(usize, bool)> {
+    let doc = shell.editor().document();
+    let kind = state.track_kind?;
+    let gap = slot
+        .frames
+        .iter()
+        .filter(|(_, f, _)| f.center().x < x)
+        .count();
+    let dropped: Vec<DeviceRole> = drag
+        .chains
+        .iter()
+        .filter_map(|c| doc.chain(*c))
+        .flat_map(|c| c.devices.iter().map(|d| d.role))
+        .collect();
+    let others: Vec<DeviceRole> = slot.frames.iter().map(|(.., r)| *r).collect();
+    let mut all = others[..gap].to_vec();
+    all.extend(&dropped);
+    all.extend(&others[gap..]);
+    let instruments = all.iter().filter(|r| **r == DeviceRole::Instrument).count();
+    let ok = !dropped.is_empty()
+        && dropped.iter().all(|r| r.fits(kind))
+        && all.windows(2).all(|pair| pair[0] <= pair[1])
+        && instruments <= 1
+        && doc.track(track).is_some();
+    Some((gap, ok))
 }
 
 /// Where a title bar's controls sit.

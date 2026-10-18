@@ -435,8 +435,8 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.26 | done | 15 October 2026 | [#2](https://github.com/loombridge/beatlayer/pull/2) and [#47](https://github.com/loombridge/beatlayer/pull/47): export of one track or the selected tracks, and MP3 at 320 kbps ([the spec](specs/export.md)) |
 | 2.27 | done | 15 October 2026 | [#32](https://github.com/loombridge/beatlayer/pull/32): Beatlayer's own Noise Shaped dither for 16- and 24-bit exports ([the spec](specs/export.md)) |
 | 2.28 | done | 13 October 2026 | [#1](https://github.com/loombridge/beatlayer/pull/1): previews and range analyses render on a worker thread in the app |
-| 2.29 | todo |  | [#110](https://github.com/loombridge/beatlayer/pull/110): [the spec](specs/midi-controller-data.md) R1 to R9; waits on WP-5.44 |
-| 2.29b | todo |  | [#110](https://github.com/loombridge/beatlayer/pull/110): [the spec](specs/midi-controller-data.md) R10 to R16; waits on WP-2.29 and WP-3.14 |
+| 2.29 | done | 18 October 2026 | [#145](https://github.com/loombridge/beatlayer/pull/145): a MIDI clip's MIDI Ctrl envelopes and per-note pressure, saved, edited by the clip envelope commands, played to the track's devices as channel messages and polyphonic pressure, and the Envelopes tab's MIDI Ctrl entry ([the spec](specs/midi-controller-data.md) R1 to R9) |
+| 2.29b | todo |  | [#110](https://github.com/loombridge/beatlayer/pull/110): [the spec](specs/midi-controller-data.md) R10 to R16 |
 | 3.1 | done | 15 October 2026 | [#53](https://github.com/loombridge/beatlayer/pull/53); clip slots and scenes in the document |
 | 3.2 | done | 16 October 2026 | [#62](https://github.com/loombridge/beatlayer/pull/62); clip launching, launch quantisation and stop buttons; [the spec](specs/launch-quantisation.md) |
 | 3.3 | done | 17 October 2026 | [#80](https://github.com/loombridge/beatlayer/pull/80); Trigger, Gate, Toggle and Repeat in the engine, the clip's mode set by command and saved, and `session.release`; the launch buttons don't send the release yet; [the spec](specs/launch-quantisation.md) |
@@ -446,9 +446,9 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.7 | done | 15 October 2026 | [#58](https://github.com/loombridge/beatlayer/pull/58); the Session View grid; [the spec](specs/session-view.md) |
 | 3.8 | done | 17 October 2026 | [#87](https://github.com/loombridge/beatlayer/pull/87); the grid launches and stops through commands: slot and scene launch buttons, the status row's stop buttons, Stop All Clips, Back to Arrangement, and Enter; [the spec](specs/session-view.md) |
 | 3.9 | done | 17 October 2026 | [#96](https://github.com/loombridge/beatlayer/pull/96); a Session clip in the Clip View shows the Launch Properties panel, whose launch mode, Legato, Quantize and Velocity controls run the clip launch commands; the follow-action and nudge controls are drawn disabled, and the tab still needs measuring in Live; [the spec](specs/launch-quantisation.md) |
-| 3.10 | todo |  |  |
+| 3.10 | done | 18 October 2026 | [#150](https://github.com/loombridge/beatlayer/pull/150); follow actions on Session clips and scenes, seeded so renders repeat, with the global switch, Shift+Enter, Create Follow Action Chain and live controls in the Launch Properties panel and the Scene View; the nudge controls stay disabled; [the spec](specs/follow-actions.md) |
 | 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |
-| 3.12 | todo |  |  |
+| 3.12 | done | 18 October 2026 | [#135](https://github.com/loombridge/beatlayer/pull/135); with Automation Arm on, control moves during a Session recording become Automation envelopes in the recorded or overdubbed MIDI clip, which set their parameter over the Arrangement while the clip plays and hold after it stops until Back to Arrangement; [the spec](specs/session-automation.md) |
 | 3.13 | done | 17 October 2026 | [#116](https://github.com/loombridge/beatlayer/pull/116); Session clips played during Arrangement Record are copied to their tracks as one `Record` undo step, with loop settings, mid-take edits split and control moves written with Automation Arm off; [the spec](specs/session-to-arrangement.md) |
 | 3.14 | done | 17 October 2026 | [#129](https://github.com/loombridge/beatlayer/pull/129); Capture MIDI brings back the notes played on monitoring MIDI tracks as a new Session clip or into the playing clip, with the observed loop and tempo rules, as one undo step; its controller data is WP-2.29b; [the spec](specs/capture-midi.md) |
 | 3.15 | done | 16 October 2026 | [#61](https://github.com/loombridge/beatlayer/pull/61); clip envelopes in the document and the engine; [the spec](specs/clip-envelopes.md) |
@@ -457,7 +457,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
 | 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
 | 4.2 | todo |  |  |
-| 4.3 | todo |  |  |
+| 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
 | 4.4 | todo |  |  |
 | 4.5 | todo |  |  |
 | 4.6 | todo |  |  |
@@ -479,7 +479,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.21 | done | 17 October 2026 | [#104](https://github.com/loombridge/beatlayer/pull/104); the VST3 and Audio Unit hosts lend their instances to exports, previews and analysis as the CLAP host does, with one loan across the three formats; [the spec](specs/offline-plugin-renders.md) |
 | 4.22 | done | 17 October 2026 | [#108](https://github.com/loombridge/beatlayer/pull/108); right-clicking a track's title bar in the Arrangement, the Session View or a mixer, or S-CTX-002, opens C-TRACK in Live's order: the items with commands work on the selected tracks, Delete and Rename among them, and the rest are disabled and name their package; [the spec](specs/track-context-menu.md) |
 | 5.1 | done | 17 October 2026 | [#105](https://github.com/loombridge/beatlayer/pull/105); racks of the four kinds hold parallel chains, each with its own mixer, nest to any depth, run inside their track's task with delay compensation at the sum, and group and ungroup with Cmd+G and Cmd+Shift+G; the Device View's rack is WP-5.2's; [the spec](specs/racks.md) |
-| 5.2 | todo |  |  |
+| 5.2 | done | 18 October 2026 | [#141](https://github.com/loombridge/beatlayer/pull/141); a rack in the Device View shows its view column, chain list and selected chain's devices in nested brackets, with Show and Hide Chains on Plus and Minus, chain selection, solo, drops and drags, the Device View selector's device list, and the rack and chain menus; the Macro Controls' place waits on WP-5.4; [the spec](specs/racks.md) |
 | 5.3 | todo |  |  |
 | 5.4 | todo |  | The stepped and radio-button styles wait on IMP-26's acceptance |
 | 5.5 | todo |  |  |
@@ -502,12 +502,12 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.20b | todo |  |  |
 | 5.20c | todo |  |  |
 | 5.21 | done | 18 October 2026 | [#148](https://github.com/loombridge/beatlayer/pull/148); Strip, Triad, Shutter and Bond, the channel EQ, three-band EQ, gate and bus compressor ([channel EQ](specs/channel-eq.md), [three-band EQ](specs/three-band-eq.md), [gate](specs/gate.md), [bus compressor](specs/bus-compressor.md)), with sidechains, look-ahead and oversampling latency, and gain reduction readable for the meters |
-| 5.22 | todo |  |  |
+| 5.22 | done | 18 October 2026 | [#149](https://github.com/loombridge/beatlayer/pull/149); Triband, the multiband dynamics ([the spec](specs/multiband-dynamics.md)), runs three bands split by zero-latency Linkwitz-Riley crossovers, each compressing or expanding above and below its own thresholds, with Time, Amount, per-band solos and a sidechain that drives every band's detector, and per-band gain reduction readable for the meters; reporting it through T168's hook waits |
 | 5.22b | todo |  |  |
-| 5.23 | todo |  |  |
-| 5.24 | todo |  |  |
-| 5.25 | todo |  |  |
-| 5.26 | todo |  |  |
+| 5.23 | done | 18 October 2026 | [#156](https://github.com/loombridge/beatlayer/pull/156); Singe, Grit and Valve, the saturator, overdrive and tube distortion ([saturator](specs/saturator.md), [overdrive](specs/overdrive.md), [tube distortion](specs/tube-distortion.md)), with Singe's eight curves, Color filters and Waveshaper, and Hi-Quality oversampling with its latency reported; the level-over-curve, Color-curve and X–Y drawings wait |
+| 5.24 | done | 18 October 2026 | [#155](https://github.com/loombridge/beatlayer/pull/155); Degrade, Crush and Wax, the digital-degradation effect, bit-crusher and vinyl distortion ([digital degradation](specs/digital-degradation.md), [bit-crusher](specs/bit-crusher.md), [vinyl distortion](specs/vinyl-distortion.md)), with seeded noise, jitter and crackle and the input's spectrum in Degrade's display; its X–Y drag waits |
+| 5.25 | done | 18 October 2026 | [#158](https://github.com/loombridge/beatlayer/pull/158); Trident, Scatter and Plumb, the filter, grain and alignment delays ([filter delay](specs/filter-delay.md), [grain delay](specs/grain-delay.md), [alignment delay](specs/alignment-delay.md)), sharing Reprise's line and synced timing, with Scatter's seeded spray and random pitch and its X–Y axes as parameters; displays wait |
+| 5.26 | done | 18 October 2026 | [#161](https://github.com/loombridge/beatlayer/pull/161); Stutter, the equivalent of Beat Repeat ([beat repeat](specs/beat-repeat.md)), capturing on the song's beat grid through the tempo map with seeded Chance and Variation, its Grid, Pitch, filter, Decay and three output modes; most ranges Beatlayer's own until Live is observed |
 | 5.26b | todo |  |  |
 | 5.27 | todo |  |  |
 | 5.28 | todo |  | The oscilloscope waits on IMP-26's acceptance |
@@ -519,7 +519,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.34 | todo |  |  |
 | 5.35 | todo |  |  |
 | 5.36 | todo |  |  |
-| 5.37 | todo |  |  |
+| 5.37 | done | 18 October 2026 | [#152](https://github.com/loombridge/beatlayer/pull/152); a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains beside the audio thread, bit-identical to one thread; 128 tracks with an EQ and a compressor played ten minutes on an M1 Pro without a dropout; exports still render on one thread |
 | 5.38 | todo |  | IMP-15 waits on its acceptance |
 | 5.39 | todo |  |  |
 | 5.40 | todo |  |  |

@@ -40,7 +40,7 @@
 use core::fmt;
 
 use bl_commands::Context::{
-    self, Arrangement, Browser, ClipView, DeviceView, Global, Session, TrackHeaders,
+    self, Arrangement, Browser, ClipView, DeviceView, Global, RackChains, Session, TrackHeaders,
 };
 use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
@@ -1167,7 +1167,72 @@ const ENTRIES: &[Entry] = &[
             Give one of the two. Nothing moves; the audio either side stays where it is. \
             Inserting where a marker is already changes nothing. Markers are named by their \
             place in the map (`data.audio.warp_markers`), the first being 0. The edit is made \
-            to every clip in one undo step, or to none if it's refused for one.",
+            to every clip in one undo step, or to none if it's refused for one. With \
+            `pin_neighbours` (Cmd or Ctrl held on a pseudo-warp marker) it also puts markers at \
+            the transients just before and just after the new one, read from the clip's \
+            transients (`clip.transients`) unless `transients` lists them; it works on one \
+            clip.",
+    },
+    Entry {
+        id: "clip.insert_warp_markers",
+        action: Action::Apply("insert_warp_markers"),
+        label: "Insert Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts warp markers in a range of a warped audio clip's contents, `from` to \
+            `to` (ticks from the clip's 1.1.1): at every transient of the clip in the range, or, \
+            when it holds none, at its start and its end. The transients are the clip's own \
+            (`clip.transients`) unless `transients` lists times in the file. Each marker sits \
+            on the beat the map already places its time, so nothing moves; a marker already \
+            there is left. Refused for a clip that isn't warped, or while the file's analysis \
+            is not ready and `transients` is left out. One undo step.",
+    },
+    Entry {
+        id: "clip.insert_transient",
+        action: Action::Apply("insert_transient"),
+        label: "Insert Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Puts a transient into an audio clip at `time`, seconds in its file: Insert \
+            Transient, at the Sample Editor's insert marker when the app runs it. Putting one \
+            where a detected transient was taken away brings that one back. The edit belongs to \
+            the clip, is saved with the set, and shows in `clip.transients`. One undo step.",
+    },
+    Entry {
+        id: "clip.delete_transients",
+        action: Action::Apply("delete_transients"),
+        label: "Delete Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes transients out of an audio clip: `times` are their times in the \
+            file, in seconds, as `clip.transients` lists them. A transient put in by hand is \
+            forgotten; a detected one is noted as taken away and stays away until \
+            `clip.reset_transients`. Refused for a time that is none of the clip's transients, \
+            once the file's analysis is ready. One undo step.",
+    },
+    Entry {
+        id: "clip.reset_transients",
+        action: Action::Apply("reset_transients"),
+        label: "Reset Transients",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Takes away all of an audio clip's transient edits: the transients put in \
+            by hand go, and the detected ones that were taken away come back. One undo step.",
+    },
+    Entry {
+        id: "clip.move_transient",
+        action: Action::Apply("move_transient"),
+        label: "Move Transient",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the transient at `from` (seconds in the file, as `clip.transients` \
+            lists it) to `to`, as Shift-dragging a pseudo-warp marker does. It changes no \
+            audio and no warp marker. One undo step.",
     },
     Entry {
         id: "clip.move_warp_markers",
@@ -1315,8 +1380,13 @@ const ENTRIES: &[Entry] = &[
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
             or a parameter of a device in its chain), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
-            own units. A parameter with no clip envelope gets one, linked to the clip, with \
-            this breakpoint as its first.",
+            own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
+            the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
+            31 or 33 to 119, value 0 to 127), `{\"type\": \"midi.pitch_bend\"}` (-8192 to 8191, \
+            0 at rest) or `{\"type\": \"midi.channel_pressure\"}` (0 to 127); the value is \
+            the message the clip sends to its track's devices while it plays, on any channel. \
+            A parameter with no clip envelope gets one, linked to the clip, with this \
+            breakpoint as its first.",
     },
     Entry {
         id: "clip.set_envelope_curve",
@@ -1978,8 +2048,8 @@ const ENTRIES: &[Entry] = &[
         action: Action::Apply("rename_chain"),
         label: "Rename Chain",
         permission: Permission::Edit,
-        contexts: &[DeviceView],
-        keys: &[],
+        contexts: &[RackChains],
+        keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
     },
     Entry {

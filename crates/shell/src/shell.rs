@@ -37,9 +37,9 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    RecordSessionAutomationInArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -85,6 +85,7 @@ mod capture;
 mod multisampler;
 mod processed_files;
 mod session_recording;
+mod warping;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -221,6 +222,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a chain in its row of the chain list; Return runs
+    /// `chain.rename` with the new name (WP-5.2).
+    RenameChain(bl_model::ChainId),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -386,6 +390,13 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// How files are analysed (WP-4.3): in memory only until the app says
+    /// otherwise.
+    analysis_options: bl_analysis::cache::AnalysisOptions,
+    /// The analysis cache, made when first used.
+    analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The files whose analysis has been started this session.
+    analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -471,6 +482,10 @@ pub struct Shell {
     capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// The control moves of the Session recording under way (WP-3.12).
+    session_automation: crate::automation_record::SessionTake,
+    /// The song frame the Session recording's take began on, once it has.
+    session_take_start: Option<Frames>,
     /// What the Session clips that played during the recording under way
     /// were (WP-3.13).
     session_watch: crate::session_capture::Watch,
@@ -675,6 +690,9 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
+            analysis: None,
+            analysed: std::collections::HashSet::new(),
             registry,
             editor,
             saved,
@@ -732,6 +750,8 @@ impl Shell {
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
+            session_automation: crate::automation_record::SessionTake::default(),
+            session_take_start: None,
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -1327,6 +1347,13 @@ impl Shell {
         }
     }
 
+    /// Record Session automation in (Record, Warp & Launch; WP-3.12): which
+    /// tracks a Session recording writes control moves into the clips of.
+    #[must_use]
+    pub fn record_session_automation_in(&self) -> crate::settings::SessionAutomationTracks {
+        self.prefs.record_session_automation_in
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -1373,6 +1400,7 @@ impl Shell {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
             launch: self.prefs.launch,
+            record_session_automation_in: self.prefs.record_session_automation_in,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -1570,6 +1598,7 @@ impl Shell {
         // finds its device's.
         self.kit.sync(self.editor.document());
         self.audio.sync(self.editor.document());
+        self.start_analyses();
         self.refresh_device_commands(false);
     }
 
@@ -2281,6 +2310,8 @@ impl Shell {
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
+        } else if outcome.view_changed {
+            self.dirty = true;
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
@@ -2774,6 +2805,15 @@ impl Shell {
             .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
             .collect();
         self.store.relink(&found);
+        // A relinked file's failed analysis is made again (R20).
+        for (hash, _) in &found {
+            let hash = bl_media::ContentHash::from_bytes(hash.0);
+            if let Some(cache) = &self.analysis {
+                cache.forget(hash);
+            }
+            self.analysed.remove(&hash);
+        }
+        self.start_analyses();
         found.len()
     }
 
@@ -3236,7 +3276,7 @@ impl Shell {
     /// its base.
     #[must_use]
     pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
-        let (node, param) = bl_engine::target_node(track, target);
+        let (node, param) = bl_engine::target_node(track, target)?;
         self.modulated
             .iter()
             .find(|entry| entry.node == node && entry.param == param)
@@ -3728,6 +3768,7 @@ impl Shell {
         // The control a drag moved is let go (automation R17).
         self.automation_take
             .release(self.arrangement.transport().position);
+        self.release_session_moves();
     }
 
     /// The effects commands have asked for since the last call.
@@ -3792,7 +3833,14 @@ impl Shell {
                             }
                         }
                     }
-                    Area::Detail => contexts.push(Context::DeviceView),
+                    Area::Detail => {
+                        // Spec: racks R22. A chain list with the focus
+                        // takes S and the edit keys.
+                        if self.devices.chain_list_focus() {
+                            contexts.push(Context::RackChains);
+                        }
+                        contexts.push(Context::DeviceView);
+                    }
                     Area::ControlBar | Area::StatusBar | Area::Assistant => {}
                 }
                 if self.prefs.tab_navigation {
@@ -4035,6 +4083,10 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "chain.rename" && args.get("name").is_none() {
+            // A person names the chain in its row.
+            return self.devices.selected_chains(self.editor.document()).len() == 1;
         }
         if id == "track.delete" && args.get("track").is_none() {
             return !self.deletable_tracks().is_empty();
@@ -4528,6 +4580,24 @@ impl Shell {
                 self.touch();
                 Ok(Value::Null)
             }
+            "chain.rename" if !has("name") => {
+                let chain = args
+                    .get("chain")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| {
+                        self.devices
+                            .selected_chains(self.editor.document())
+                            .first()
+                            .copied()
+                    })
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a chain first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameChain(chain));
+                self.touch();
+                Ok(Value::Null)
+            }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -4667,11 +4737,7 @@ impl Shell {
             else {
                 return None;
             };
-            let info = self
-                .media
-                .info(bl_media::ContentHash::from_bytes(audio.media.0))
-                .ok()?;
-            Some(info.frames? as f64 / f64::from(info.sample_rate))
+            self.file_seconds(audio)
         };
         let (clips, places) =
             match &command {
@@ -4793,6 +4859,7 @@ impl Shell {
         }
         if model::handles(id) {
             self.check_warp_files(id, &args)?;
+            let args = self.prepare_warping(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
@@ -4806,6 +4873,23 @@ impl Shell {
                 .and_then(|command| {
                     crate::automation_record::moved(self.editor.document(), &command)
                 });
+            // Spec: session-automation R1. With Automation Arm on and a
+            // Session recording running, a control move is noted for the
+            // clip it goes into.
+            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    let (track, target, value) =
+                        crate::automation_record::moved(self.editor.document(), &command)?;
+                    let before = crate::modulation::control_value(
+                        self.editor.document(),
+                        &self.devices,
+                        track,
+                        &target,
+                    )?;
+                    Some((track, target, before, value))
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
@@ -4818,6 +4902,9 @@ impl Shell {
                     self.arrangement.transport().position,
                     value,
                 );
+            }
+            if let Some((track, target, before, value)) = session_moved {
+                self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
                 // Spec: session-view R23. A launched scene's tempo and
@@ -4875,6 +4962,7 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            self.re_enable_launched_automation(command);
             if let engine_session::SessionCommand::LaunchScene(scene) = command {
                 // Spec: session-recording R10. Start Recording on Scene
                 // Launch.
@@ -5137,6 +5225,9 @@ impl Shell {
         }
         if perception_ids::handles(id) {
             return self.run_perception(id, args);
+        }
+        if bl_shell_spec::warping::handles(id) {
+            return self.run_warping(id, args);
         }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
@@ -5573,6 +5664,7 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices.set_rack_views(bl_model::RackViewMap::new());
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
@@ -5601,6 +5693,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: racks R19. So do the views each rack shows.
+                self.devices.set_rack_views(self.store.rack_views());
                 self.devices
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
@@ -5653,6 +5747,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -5672,6 +5767,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -5786,6 +5882,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -5956,7 +6053,8 @@ impl Shell {
                     let track = doc
                         .clip_track(clip)
                         .ok_or_else(|| failed("no track holds the clip".to_owned()))?;
-                    doc.check_automation_target(track, target)
+                    let shown = doc.clip(clip).ok_or_else(|| failed(format!("no {clip}")))?;
+                    doc.check_clip_target(track, shown, target)
                         .map_err(|error| failed(error.to_string()))?;
                 }
                 self.clip_view.set_envelope(target);
@@ -6145,6 +6243,12 @@ impl Shell {
                 self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
+                let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
+                self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;

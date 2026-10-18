@@ -1,13 +1,19 @@
-//! The framework's test effects device and Sweep under RealtimeSanitizer
-//! (WP-5.42, WP-5.20, WP-5.21). The test effects device runs the effects' shared
+//! The framework's test effects device, Sweep and Stutter under
+//! RealtimeSanitizer (WP-5.42, WP-5.20, WP-5.21, WP-5.26). The test effects device runs the effects' shared
 //! parts (an LFO that locks to the song's tempo map and position, an
 //! envelope follower, and a seeded random source) on a track that plays,
 //! while its waveform, rate mode, output, Hold, and menu option change.
 //! Sweep runs every filter type, the oversampled path, the LFO's waves,
 //! rate modes and quantiser, and Clip while they change. Strip, Triad,
-//! Shutter and Bond run with their parameters moving. RTSan stops the process at the first allocation, free, lock, or
+//! Shutter and Bond run with their parameters moving. Stutter runs its
+//! intervals, grids, Chance, Variation and its modes, output modes, filter
+//! and Repeat button while they change. RTSan stops the process at the first allocation, free, lock, or
 //! blocking call, and the allocation trap, installed as in every Beatlayer
 //! test binary, fails the test at any heap use it sees.
+//!
+//! The lo-fi effects (WP-5.24: Degrade, Crush and Wax) run after a test tone
+//! with every parameter changing the same way, as do Singe, Grit and Valve
+//! (WP-5.23) with their curves, Hi-Quality and envelopes changing.
 
 bl_rt::install_trap!();
 
@@ -397,5 +403,506 @@ fn the_bus_compressor_passes_under_rtsan() {
             (DRY_WET, [100.0, 40.0]),
             (SC_EQ, [0.0, 1.0]),
         ],
+    );
+}
+
+/// Runs `device_type` after a test tone for 2,000 blocks of 256 frames under
+/// RTSan, changing a parameter every few blocks to the next value of its
+/// list.
+fn run_lo_fi_device(device_type: &str, changes: &[(ParamId, &[f64])]) {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let effect = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: device_type.to_owned(),
+        },
+    );
+    let effect_id = effect.id;
+    for (index, device) in [tone, effect].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream.
+        if round % 4 == 0 {
+            let (param, values) = changes[(round / 4) as usize % changes.len()];
+            let value = values[(round / 4 / changes.len() as u64) as usize % values.len()];
+            editor
+                .apply(Command::SetDeviceParam {
+                    device: effect_id,
+                    param,
+                    value,
+                })
+                .unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of {device_type} under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
+#[test]
+fn degrade_passes_under_rtsan() {
+    use bl_devices::degrade::*;
+    run_lo_fi_device(
+        DEGRADE,
+        &[
+            (FREQ, &[40.0, 1_000.0, 12_000.0]),
+            (AMOUNT, &[0.0, 50.0, 100.0]),
+            (NOISE_BLEND, &[0.0, 60.0, 100.0]),
+            (FILTER_WIDTH, &[0.0, 50.0, 100.0]),
+            (STEREO_WIDTH, &[0.0, 100.0]),
+        ],
+    );
+}
+
+#[test]
+fn crush_passes_under_rtsan() {
+    use bl_devices::crusher::*;
+    run_lo_fi_device(
+        CRUSHER,
+        &[
+            (RATE, &[100.0, 6_000.0, 48_000.0]),
+            (JITTER, &[0.0, 100.0]),
+            (PRE, &[0.0, 1.0]),
+            (POST, &[0.0, 1.0]),
+            (POST_OCTAVE, &[-4.0, 0.0, 4.0]),
+            (BITS, &[2.0, 8.0, 16.0]),
+            (SHAPE, &[0.0, 100.0]),
+            (DC_SHIFT, &[-50.0, 0.0, 50.0]),
+            (DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+}
+
+#[test]
+fn wax_passes_under_rtsan() {
+    use bl_devices::wax::*;
+    run_lo_fi_device(
+        WAX,
+        &[
+            (TRACING_DRIVE, &[0.0, 100.0]),
+            (TRACING_FREQ, &[20.0, 3_000.0, 20_000.0]),
+            (PINCH_DRIVE, &[0.0, 100.0]),
+            (PINCH_WIDTH, &[0.25, 4.0]),
+            (DRIVE, &[0.0, 100.0]),
+            (SOFT_HARD, &[0.0, 1.0]),
+            (PINCH_MODE, &[0.0, 1.0]),
+            (CRACKLE_DENSITY, &[0.0, 250.0]),
+            (CRACKLE_VOLUME, &[0.0, 1.0]),
+        ],
+    );
+}
+
+/// The three delays (WP-5.25) on a track that plays, while their times,
+/// pitch, spray, feedback and modes change mid-stream.
+#[test]
+fn the_three_delays_pass_under_rtsan() {
+    use bl_devices::alignment_delay::{self, ALIGNMENT_DELAY};
+    use bl_devices::filter_delay::{self, FILTER_DELAY};
+    use bl_devices::grain_delay::{self, GRAIN_DELAY};
+    use bl_engine::nodes::TEST_TONE;
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = bl_engine::Registry::new();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut ids = Vec::new();
+    for (index, kind) in [TEST_TONE, FILTER_DELAY, GRAIN_DELAY, ALIGNMENT_DELAY]
+        .into_iter()
+        .enumerate()
+    {
+        let device = Device::new(
+            editor.new_id(),
+            "",
+            DeviceKind::Native {
+                device_type: kind.to_owned(),
+            },
+        );
+        ids.push(device.id);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    let (trident, scatter, plumb) = (ids[1], ids[2], ids[3]);
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    for round in 0..2_000u64 {
+        let step = (round / 12) as f64;
+        let command = match round % 12 {
+            0 => Some((
+                trident,
+                filter_delay::line_param(0, filter_delay::FREQ),
+                200.0 + step * 37.0 % 8_000.0,
+            )),
+            2 => Some((trident, filter_delay::FEEDBACK, step * 7.0 % 90.0)),
+            4 => Some((
+                trident,
+                filter_delay::line_param(1, filter_delay::SYNC),
+                step % 2.0,
+            )),
+            5 => Some((scatter, grain_delay::PITCH, step * 5.0 % 24.0 - 12.0)),
+            7 => Some((scatter, grain_delay::SPRAY, step * 31.0 % 400.0)),
+            8 => Some((scatter, grain_delay::FREQUENCY, 5.0 + step * 3.0 % 100.0)),
+            9 => Some((plumb, alignment_delay::MODE, step % 3.0)),
+            11 => Some((
+                plumb,
+                alignment_delay::side_param(0, alignment_delay::TIME),
+                step * 13.0 % 200.0,
+            )),
+            _ => None,
+        };
+        if let Some((device, param, value)) = command {
+            editor
+                .apply(Command::SetDeviceParam {
+                    device,
+                    param,
+                    value,
+                })
+                .unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of the three delays under RealtimeSanitizer: {} parameter changes",
+        state.counters.events_applied
+    );
+}
+
+#[test]
+fn stutter_passes_under_rtsan() {
+    use bl_devices::beat_repeat::{
+        BEAT_REPEAT, CHANCE, FILTER, GRID, INTERVAL, MODE, PITCH, REPEAT, VARIATION, VARIATION_MODE,
+    };
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut stutter = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: BEAT_REPEAT.to_owned(),
+        },
+    );
+    stutter.params.insert(INTERVAL, 1.0);
+    stutter.params.insert(VARIATION, 70.0);
+    stutter.params.insert(PITCH, 7.0);
+    stutter.params.insert(FILTER, 1.0);
+    let stutter_id = stutter.id;
+    for (index, device) in [tone, stutter].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: stutter_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // interval, the grid, Chance, Variation and its mode, the output
+        // mode, and the Repeat button.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(INTERVAL, (step % 8) as f64)),
+            2 => Some(set(GRID, (step % 7) as f64)),
+            4 => Some(set(CHANCE, ((step * 37) % 101) as f64)),
+            5 => Some(set(VARIATION_MODE, (step % 5) as f64)),
+            7 => Some(set(MODE, (step % 3) as f64)),
+            9 => Some(set(REPEAT, (step % 2) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Stutter under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
+// Spec: saturator R14, overdrive R8, tube-distortion R11
+#[test]
+fn the_saturation_devices_pass_under_rtsan() {
+    use bl_devices::{overdrive as grit, saturator as singe, tube as valve};
+    run_lo_fi_device(
+        singe::SATURATOR,
+        &[
+            (singe::CURVE, &[0.0, 2.0, 5.0, 7.0]),
+            (singe::DRIVE, &[-12.0, 12.0, 30.0]),
+            (singe::COLOR, &[1.0, 0.0]),
+            (singe::AMT_LO, &[80.0, -60.0]),
+            (singe::AMT_HI, &[-70.0, 90.0]),
+            (singe::WS_DEPTH, &[0.0, 70.0]),
+            (singe::POST_CLIP, &[0.0, 1.0, 2.0]),
+            (singe::HI_QUALITY, &[1.0, 0.0]),
+            (singe::PRE_DC, &[1.0, 0.0]),
+        ],
+    );
+    run_lo_fi_device(
+        grit::OVERDRIVE,
+        &[
+            (grit::DRIVE, &[0.0, 60.0, 100.0]),
+            (grit::TONE, &[0.0, 100.0]),
+            (grit::FREQUENCY, &[200.0, 3_000.0]),
+            (grit::WIDTH, &[0.5, 3.0]),
+            (grit::DYNAMICS, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        valve::TUBE,
+        &[
+            (valve::MODEL, &[0.0, 1.0, 2.0]),
+            (valve::DRIVE, &[0.0, 24.0]),
+            (valve::BIAS, &[0.0, 80.0]),
+            (valve::ENVELOPE, &[-80.0, 80.0]),
+            (valve::ATTACK, &[1.0, 200.0]),
+            (valve::HI_QUALITY, &[1.0, 0.0]),
+        ],
+    );
+}
+
+/// Triband (WP-5.22) on a track that plays, with its sidechain unused, while
+/// its band switches, detector, knee, Time, Amount, solos and thresholds
+/// change.
+#[test]
+fn triband_passes_under_rtsan() {
+    use bl_devices::multiband_dynamics::{
+        ABOVE_RATIO, ABOVE_THRESHOLD, AMOUNT, BELOW_RATIO, DETECTOR, HIGH, HIGH_ON, LOW, LOW_ON,
+        MID, MULTIBAND_DYNAMICS, SOFT_KNEE, SOLO, TIME, band_param,
+    };
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -10.0);
+    let mut triband = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: MULTIBAND_DYNAMICS.to_owned(),
+        },
+    );
+    for band in [LOW, MID, HIGH] {
+        triband
+            .params
+            .insert(band_param(band, ABOVE_THRESHOLD), -30.0);
+        triband.params.insert(band_param(band, ABOVE_RATIO), 4.0);
+        triband.params.insert(band_param(band, BELOW_RATIO), 0.5);
+    }
+    let triband_id = triband.id;
+    for (index, device) in [tone, triband].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: triband_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // band switches (the crossovers' topology), the detector, the
+        // knee, Time, Amount, a solo and a ratio.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(LOW_ON, (step % 2) as f64)),
+            2 => Some(set(HIGH_ON, (step / 2 % 2) as f64)),
+            4 => Some(set(DETECTOR, (step % 2) as f64)),
+            5 => Some(set(SOFT_KNEE, (step % 2) as f64)),
+            6 => Some(set(TIME, 25.0 + (step % 8) as f64 * 100.0)),
+            8 => Some(set(AMOUNT, (step % 5) as f64 * 50.0)),
+            9 => Some(set(
+                band_param(step as usize % 3, SOLO),
+                (step / 3 % 2) as f64,
+            )),
+            10 => Some(set(band_param(MID, ABOVE_RATIO), 1.0 + (step % 6) as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Triband under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
     );
 }

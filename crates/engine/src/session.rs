@@ -78,6 +78,21 @@ pub struct SessionPlayback {
     pub scene: Option<SceneId>,
     /// The song frame the clip launched on (zero when `scene` is `None`).
     pub frame: Frames,
+    /// For a taken-over track with nothing playing, the clip that stopped on
+    /// it last: its Automation envelopes hold the value they had there
+    /// until Back to Arrangement (WP-3.12).
+    pub last: Option<StoppedClip>,
+}
+
+/// A Session clip that stopped on a track that stays taken over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoppedClip {
+    /// The scene whose slot it was.
+    pub scene: SceneId,
+    /// The song frame it launched on.
+    pub launched: Frames,
+    /// The song frame it stopped on.
+    pub stopped: Frames,
 }
 
 /// A Session clip starting or ending, as an Arrangement recording sees it
@@ -274,6 +289,9 @@ pub(crate) struct SessionLauncher {
     /// The tracks a Session clip has taken over from the Arrangement, until
     /// a return (WP-3.6). Capacity as `slots`: a track is listed once.
     overridden: Vec<TrackId>,
+    /// The clip that stopped last on each taken-over track (WP-3.12). Capacity
+    /// as `overridden`.
+    stopped: Vec<(TrackId, StoppedClip)>,
     /// Stops that take a track over on a grid line without a Session clip
     /// playing on it: a stop button pressed on an idle track silences its
     /// Arrangement there.
@@ -297,6 +315,7 @@ impl SessionLauncher {
             slots: Vec::with_capacity(capacity),
             scenes: Vec::with_capacity(SCENE_APPLIES),
             overridden: Vec::with_capacity(capacity),
+            stopped: Vec::with_capacity(capacity),
             marks: Vec::with_capacity(capacity),
             log: Vec::with_capacity(capacity * 4),
             overflowed: 0,
@@ -322,6 +341,7 @@ impl SessionLauncher {
         self.slots.clear();
         self.scenes.clear();
         self.overridden.clear();
+        self.stopped.clear();
         self.marks.clear();
         self.scene_run = None;
     }
@@ -481,6 +501,10 @@ impl SessionLauncher {
         for (_, due) in &mut self.marks {
             *due = convert(*due);
         }
+        for (_, clip) in &mut self.stopped {
+            clip.launched = convert(clip.launched);
+            clip.stopped = convert(clip.stopped);
+        }
     }
 
     /// Launches `(track, scene)` to play from `at`, already worked out: a
@@ -637,6 +661,15 @@ impl SessionLauncher {
             .filter_map(|slot| Some((slot.track, slot.scene, slot.started?)))
     }
 
+    /// Notes the clip that stopped on `track`, replacing the one before.
+    fn remember_stop(&mut self, clip: StoppedClip, track: TrackId) {
+        if let Some((_, last)) = self.stopped.iter_mut().find(|(t, _)| *t == track) {
+            *last = clip;
+        } else if self.stopped.len() < self.stopped.capacity() {
+            self.stopped.push((track, clip));
+        }
+    }
+
     /// Lists `track` as taken over from the Arrangement.
     fn take_over(&mut self, track: TrackId) {
         if self.overridden.contains(&track) {
@@ -667,12 +700,14 @@ impl SessionLauncher {
         }
         self.marks.retain(|&(t, _)| !returned(t));
         self.overridden.retain(|&t| !returned(t));
+        self.stopped.retain(|&(t, _)| !returned(t));
     }
 
     /// Forgets the takeovers of tracks the running program no longer has,
     /// so a deleted track doesn't keep Back to Arrangement lit.
     pub(crate) fn retain_tracks(&mut self, tracks: &[TrackId]) {
         self.overridden.retain(|t| tracks.contains(t));
+        self.stopped.retain(|(t, _)| tracks.contains(t));
         self.marks.retain(|(t, _)| tracks.contains(t));
     }
 
@@ -723,7 +758,17 @@ impl SessionLauncher {
                 self.take_over(track);
             } else {
                 // A queued stop: the clip is done.
-                self.slots.swap_remove(i);
+                let slot = self.slots.swap_remove(i);
+                if let Some(launched) = slot.started {
+                    self.remember_stop(
+                        StoppedClip {
+                            scene: slot.scene,
+                            launched,
+                            stopped: due,
+                        },
+                        slot.track,
+                    );
+                }
             }
         }
         let mut i = 0;
@@ -796,6 +841,7 @@ impl SessionLauncher {
                     track: slot.track,
                     scene: Some(slot.scene),
                     frame,
+                    last: None,
                 });
             }
         }
@@ -805,6 +851,11 @@ impl SessionLauncher {
                     track,
                     scene: None,
                     frame: Frames::ZERO,
+                    last: self
+                        .stopped
+                        .iter()
+                        .find(|(t, _)| *t == track)
+                        .map(|&(_, clip)| clip),
                 });
             }
         }
@@ -1173,7 +1224,8 @@ mod tests {
             vec![SessionPlayback {
                 track,
                 scene: Some(scene),
-                frame: due
+                frame: due,
+                last: None,
             }]
         );
         // While stopped it plays at once.
@@ -1739,9 +1791,19 @@ mod tests {
             vec![SessionPlayback {
                 track,
                 scene: None,
-                frame: Frames::ZERO
+                frame: Frames::ZERO,
+                // Spec: session-automation R7. The clip that stopped is
+                // kept, with the frames it played between.
+                last: Some(StoppedClip {
+                    scene,
+                    launched: bar,
+                    stopped: tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000),
+                }),
             }]
         );
+        launcher.back_to_arrangement(None, Frames::ZERO);
+        launcher.playback(&mut playing);
+        assert!(playing.is_empty(), "Back to Arrangement forgets it");
     }
 
     #[test]

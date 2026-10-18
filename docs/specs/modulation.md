@@ -107,7 +107,7 @@ The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's
 
 ## Not built yet
 
-- A Session clip's Automation and Modulation switches (R9): they need Session clips' automation envelopes (WP-3.12), which the document doesn't hold yet. An Arrangement clip's editor edits modulation only, as R9 says.
+- A Session clip's Automation and Modulation switches (R9): the document holds Session clips' Automation envelopes now ([session-automation.md](session-automation.md), WP-3.12) and the envelope commands take `kind`, but the editor edits Modulation envelopes only. An Arrangement clip's editor edits modulation only, as R9 says.
 - A macro holding a parameter (R11): a macro holds one only once WP-5.4 lands; `modulation.state` reports the modulator in Remote Control that holds a parameter (`held_by`), and a macro will join it then. Mapping a rack's macros (R1, R17) waits for the racks (WP-5.1, WP-5.4).
 - A modulated Audio Unit parameter's test (R10): the Audio Unit host plays the value as the VST3 host does, with no test of its own yet.
 - A held control isn't drawn disabled (R16): it refuses hand moves and the commands that make them, and shows its played value, but its look doesn't change.

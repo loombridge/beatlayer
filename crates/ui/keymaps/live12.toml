@@ -697,6 +697,7 @@ win = ["Ctrl+X"]
 status = "bound"
 commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
+  { id = "chain.cut", contexts = ["rack-chains"] },
   { id = "device.cut", contexts = ["device-view"] },
 ]
 
@@ -712,6 +713,7 @@ win = ["Ctrl+C"]
 status = "bound"
 commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
+  { id = "chain.copy", contexts = ["rack-chains"] },
   { id = "device.copy", contexts = ["device-view"] },
 ]
 
@@ -727,6 +729,7 @@ win = ["Ctrl+V"]
 status = "bound"
 commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
+  { id = "chain.paste", contexts = ["rack-chains"] },
   { id = "device.paste", contexts = ["device-view"] },
 ]
 
@@ -742,6 +745,7 @@ win = ["Ctrl+D"]
 status = "bound"
 commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement"] },
+  { id = "chain.duplicate", contexts = ["rack-chains"] },
   { id = "device.duplicate", contexts = ["device-view"] },
 ]
 
@@ -757,6 +761,7 @@ win = ["Delete"]
 status = "bound"
 commands = [
   { id = "arrangement.delete", contexts = ["arrangement"] },
+  { id = "chain.delete", contexts = ["rack-chains"] },
   { id = "device.remove", contexts = ["device-view"] },
 ]
 
@@ -799,6 +804,7 @@ mac = ["Cmd+R"]
 win = ["Ctrl+R"]
 status = "bound"
 commands = [
+  { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
 ]
@@ -2430,7 +2436,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["S"]
 win = ["S"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "chain.solo", contexts = ["rack-chains"] },
+]
 
 [[shortcut]]
 id = "S-ARR-001"
@@ -4298,7 +4307,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Plus"]
 win = ["Plus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = true, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-013"
@@ -4309,7 +4321,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "rack.set_view", contexts = ["device-view"], args = { shown = false, view = "chain_list" } },
+]
 
 [[shortcut]]
 id = "S-DEV-014"

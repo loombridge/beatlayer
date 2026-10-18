@@ -60,8 +60,22 @@ fn every_gain_parameter_reaches_minus_infinity() {
             // Where the gain acts on the audio, at −∞ the audio is silent. A
             // gain that acts on one band of a device does so with the device's
             // other band gains: all at −∞, the device is silent.
-            let group = if device_type.name == "Triad" {
+            let band_gain = |p: &bl_model::ParamDescriptor| {
+                p.name.split_once(' ').map(|(_, gain)| gain.to_owned())
+            };
+            let group: Vec<_> = if device_type.name == "Triad" {
                 BAND_GAINS.to_vec()
+            } else if device_type.name == "Triband" && band_gain(param).is_some() {
+                let same = |p: &&bl_model::ParamDescriptor| {
+                    p.is_gain() && band_gain(p) == band_gain(param)
+                };
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(same)
+                    .map(|p| p.id)
+                    .collect()
             } else {
                 vec![param.id]
             };
@@ -171,6 +185,7 @@ fn every_parameter_is_modulatable_to_the_frame() {
                 .unwrap();
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
                     clip,
                     target: AutomationTarget::Device {
                         device: id,

@@ -836,7 +836,8 @@ impl DeviceViewUi {
         } else if has_window {
             c.text_dim.0
         } else {
-            c.separator.0
+            // Dimmed, but still drawn: Live always shows the wrench.
+            c.text_dim.0.gamma_multiply(0.55)
         };
         // A wrench: a handle from the lower left to a ring at the upper
         // right.

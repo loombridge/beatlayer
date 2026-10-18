@@ -88,6 +88,7 @@ pub mod clips;
 mod compiler;
 mod disjoint;
 pub mod display;
+pub mod drum;
 mod engine;
 mod gc;
 mod input;

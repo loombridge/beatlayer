@@ -52,7 +52,9 @@ pub enum MixerParam {
 #[schemars(
     description = "Which parameter of the track an envelope drives: `mixer` with a `param`, \
                    `send` with the return track it feeds (`to`), `device` with the device \
-                   and its `param`, or `chain` with a rack's chain and its mixer `param`. \
+                   and its `param`, `chain` with a rack's chain and its mixer `param`, or \
+                   `chain_send` with a drum rack's chain and the return chain it sends to \
+                   (`to`). \
                    A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` \
                    with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or \
                    `midi.channel_pressure`."
@@ -82,6 +84,14 @@ pub enum AutomationTarget {
         chain: ChainId,
         /// The control.
         param: MixerParam,
+    },
+    /// The level of a drum chain's send to a return chain of its rack
+    /// (drum racks R6, G2).
+    ChainSend {
+        /// The drum chain.
+        chain: ChainId,
+        /// The return chain.
+        to: ChainId,
     },
     /// A continuous controller of a MIDI clip's MIDI Ctrl envelopes
     /// (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's

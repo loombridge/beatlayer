@@ -87,6 +87,48 @@ pub fn rack(
     ids
 }
 
+/// Adds a drum rack with `drums` empty drum chains on the pads from note 36
+/// and `returns` empty return chains at the end of a track's chain
+/// (WP-5.6).
+pub fn drum_rack(
+    editor: &mut Editor,
+    track: TrackId,
+    drums: usize,
+    returns: usize,
+) -> (DeviceId, Vec<ChainId>, Vec<ChainId>) {
+    let mut rack = Device::rack(editor.new_id(), RackKind::Drum);
+    for n in 0..drums {
+        let id = editor.new_id();
+        rack = rack.with_chain(Chain::for_pad(id, format!("Pad {n}"), 36 + n as u8));
+    }
+    for n in 0..returns {
+        let id = editor.new_id();
+        rack = rack.with_chain(Chain::new_return(id, format!("Return {n}")));
+    }
+    let drum_ids = rack
+        .chains
+        .iter()
+        .filter(|c| !c.is_return)
+        .map(|c| c.id)
+        .collect();
+    let return_ids = rack
+        .chains
+        .iter()
+        .filter(|c| c.is_return)
+        .map(|c| c.id)
+        .collect();
+    let id = rack.id;
+    let index = editor.document().track(track).unwrap().devices().len();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index,
+            device: rack,
+        })
+        .unwrap();
+    (id, drum_ids, return_ids)
+}
+
 /// Adds a native device with `role` at the end of a rack's chain.
 pub fn in_chain(
     editor: &mut Editor,

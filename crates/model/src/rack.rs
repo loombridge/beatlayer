@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::error::ModelError;
-use crate::ids::{ChainId, DeviceId};
+use crate::ids::{ChainId, DeviceId, TrackId};
 
 /// How many colours a chain can take: the palette's 5 rows of 14 swatches
 /// (C-TRACK-015).
@@ -173,15 +173,32 @@ pub enum RackView {
     ChainList,
     /// The selected chain's devices.
     Devices,
+    /// A drum rack's pad view (drum racks spec, R11).
+    Pads,
+    /// A drum rack's Input/Output switch (R21).
+    InputOutput,
+    /// A drum rack's Send switch.
+    Send,
+    /// A drum rack's Return switch.
+    Returns,
+    /// A drum rack's Auto Select switch.
+    AutoSelect,
 }
 
 /// Which of a rack's views are shown (racks spec, R19): all of them in a new
 /// rack. It's view state kept beside the set's document ([`RackViewMap`]), so
-/// changing it is never an undo step.
+/// changing it is never an undo step. A drum rack has more (drum racks spec,
+/// R11, R21): the pad view, which notes it shows, and the switches that
+/// choose the chain list's columns and its return section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` \
-                   and `devices` (the selected chain's devices). All on in a new rack."
+                   and `devices` (the selected chain's devices). All on in a new rack. A drum \
+                   rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the \
+                   lowest note it shows, a multiple of 4, 36 in a new rack), and the switches \
+                   `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its \
+                   send sliders), `returns` (the return chains' section) and `auto_select` \
+                   (the chain list follows the notes), all off in a new rack."
 )]
 pub struct RackViews {
     /// The Macro Controls.
@@ -193,6 +210,39 @@ pub struct RackViews {
     /// The selected chain's devices.
     #[serde(default = "on")]
     pub devices: bool,
+    /// A drum rack's pad view.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub pads: bool,
+    /// The lowest note the pad view shows: 36 (C1) in a new drum rack.
+    #[serde(default = "first_pad", skip_serializing_if = "is_first_pad")]
+    pub first_pad: u8,
+    /// A drum rack's Input/Output switch.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub input_output: bool,
+    /// A drum rack's Send switch.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub send: bool,
+    /// A drum rack's Return switch.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub returns: bool,
+    /// A drum rack's Auto Select switch.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub auto_select: bool,
+}
+
+/// The first note a new drum rack's pad view shows (drum racks spec, R11).
+pub const FIRST_PAD: u8 = 36;
+
+fn first_pad() -> u8 {
+    FIRST_PAD
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_first_pad(value: &u8) -> bool {
+    *value == FIRST_PAD
 }
 
 impl Default for RackViews {
@@ -201,6 +251,12 @@ impl Default for RackViews {
             macros: true,
             chain_list: true,
             devices: true,
+            pads: true,
+            first_pad: FIRST_PAD,
+            input_output: false,
+            send: false,
+            returns: false,
+            auto_select: false,
         }
     }
 }
@@ -213,6 +269,11 @@ impl RackViews {
             RackView::Macros => self.macros,
             RackView::ChainList => self.chain_list,
             RackView::Devices => self.devices,
+            RackView::Pads => self.pads,
+            RackView::InputOutput => self.input_output,
+            RackView::Send => self.send,
+            RackView::Returns => self.returns,
+            RackView::AutoSelect => self.auto_select,
         }
     }
 
@@ -223,15 +284,21 @@ impl RackViews {
             RackView::Macros => self.macros = shown,
             RackView::ChainList => self.chain_list = shown,
             RackView::Devices => self.devices = shown,
+            RackView::Pads => self.pads = shown,
+            RackView::InputOutput => self.input_output = shown,
+            RackView::Send => self.send = shown,
+            RackView::Returns => self.returns = shown,
+            RackView::AutoSelect => self.auto_select = shown,
         }
         self
     }
 
     /// Whether every view is hidden, so the rack folds into its view column
-    /// (racks spec, R19).
+    /// (racks spec, R19). The switches only decide what the chain list
+    /// shows.
     #[must_use]
     pub fn all_hidden(self) -> bool {
-        !(self.macros || self.chain_list || self.devices)
+        !(self.macros || self.chain_list || self.devices || self.pads)
     }
 }
 
@@ -272,6 +339,159 @@ pub struct Chain {
     /// The chain's devices, in signal order.
     #[serde(default)]
     pub devices: Vec<Device>,
+    /// The note a drum rack's chain answers (drum racks spec, R1). Only a
+    /// drum rack's chains have one; any other chain keeps the default.
+    #[serde(default, skip_serializing_if = "Receive::is_default")]
+    pub receive: Receive,
+    /// The note a drum rack's chain passes on to its devices, from 0 to 127:
+    /// C3 (60) in a new chain.
+    #[serde(default = "play", skip_serializing_if = "is_play")]
+    pub play: u8,
+    /// The choke group a drum rack's chain is in, from 1 to 16, or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choke: Option<u8>,
+    /// A drum rack's drum chain's sends to its return chains, post-fader;
+    /// a return chain without an entry gets none (−∞ dB).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sends: Vec<ChainSend>,
+    /// Whether this is one of a drum rack's return chains, which sit after
+    /// its drum chains (drum racks spec, R7).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub is_return: bool,
+    /// Where a return chain's output goes: one of the set's return tracks,
+    /// or the rack's own output while there is none (drum racks spec, R8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_to: Option<TrackId>,
+}
+
+/// The note a drum rack's chain answers (drum racks spec, R1).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "What a drum chain answers: `all_notes`, or `{\"note\": n}` with a MIDI note \
+                   from 0 to 127 (36 is C1, which a new chain on the first pad answers)."
+)]
+pub enum Receive {
+    /// Every note, passed on as it came.
+    AllNotes,
+    /// One note.
+    Note(u8),
+}
+
+impl Default for Receive {
+    fn default() -> Self {
+        Self::Note(FIRST_PAD)
+    }
+}
+
+impl Receive {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Whether a note-on of `key` reaches a chain with this Receive.
+    #[must_use]
+    pub fn answers(self, key: u8) -> bool {
+        match self {
+            Self::AllNotes => true,
+            Self::Note(note) => note == key,
+        }
+    }
+}
+
+/// A drum chain's send to a return chain (drum racks spec, R6).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), \
+                   taken after the chain's Volume, Pan and activator."
+)]
+pub struct ChainSend {
+    /// The return chain.
+    pub to: ChainId,
+    /// The level as linear gain: 0 in a new send.
+    pub level: f64,
+}
+
+/// How many return chains a drum rack holds (drum racks spec, R7).
+pub const MAX_RETURN_CHAINS: usize = 6;
+
+/// The note a new drum chain plays: C3, which plays a sampler's sample at its
+/// own pitch (drum racks spec, R3).
+pub const DEFAULT_PLAY: u8 = 60;
+
+fn play() -> u8 {
+    DEFAULT_PLAY
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_play(value: &u8) -> bool {
+    *value == DEFAULT_PLAY
+}
+
+impl Chain {
+    /// A new drum chain for the pad `note`: it receives `note` and plays C3
+    /// (drum racks spec, R3).
+    #[must_use]
+    pub fn for_pad(id: ChainId, name: impl Into<String>, note: u8) -> Self {
+        let mut chain = Self::new(id, name);
+        chain.receive = Receive::Note(note);
+        chain
+    }
+
+    /// A new return chain, sent to the rack's own output.
+    #[must_use]
+    pub fn new_return(id: ChainId, name: impl Into<String>) -> Self {
+        let mut chain = Self::new(id, name);
+        chain.is_return = true;
+        chain
+    }
+
+    /// The level of the send to the return chain `to`, as linear gain.
+    #[must_use]
+    pub fn send(&self, to: ChainId) -> f64 {
+        self.sends
+            .iter()
+            .find(|s| s.to == to)
+            .map_or(0.0, |s| s.level)
+    }
+
+    /// Whether the chain holds only what any chain holds: no note, choke
+    /// group or send of a drum rack's.
+    fn has_no_drum_settings(&self) -> bool {
+        self.receive.is_default()
+            && self.play == DEFAULT_PLAY
+            && self.choke.is_none()
+            && self.sends.is_empty()
+            && !self.is_return
+            && self.audio_to.is_none()
+    }
+
+    /// Makes the chain fit `rack` after it moved there: a drum rack keeps
+    /// the sends to its own return chains, any other rack's chain loses
+    /// every setting only a drum rack's chains have.
+    pub fn fit_to(&mut self, rack: &Device) {
+        if rack.rack_kind() == Some(RackKind::Drum) {
+            self.sends
+                .retain(|s| rack.chains.iter().any(|c| c.is_return && c.id == s.to));
+            if self.is_return {
+                self.sends.clear();
+            }
+        } else {
+            self.receive = Receive::default();
+            self.play = DEFAULT_PLAY;
+            self.choke = None;
+            self.sends.clear();
+            self.is_return = false;
+        }
+        if !self.is_return {
+            self.audio_to = None;
+        }
+    }
 }
 
 impl Chain {
@@ -285,6 +505,12 @@ impl Chain {
             info: String::new(),
             mixer: ChainMixer::default(),
             devices: Vec::new(),
+            receive: Receive::default(),
+            play: DEFAULT_PLAY,
+            choke: None,
+            sends: Vec::new(),
+            is_return: false,
+            audio_to: None,
         }
     }
 
@@ -409,6 +635,8 @@ impl Device {
             && self.chains.len() == other.chains.len()
             && self.chains.iter().zip(&other.chains).all(|(a, b)| {
                 a.id == b.id
+                    && a.is_return == b.is_return
+                    && a.audio_to == b.audio_to
                     && a.devices.len() == b.devices.len()
                     && a.devices
                         .iter()
@@ -449,6 +677,25 @@ impl Device {
             .iter_mut()
             .flat_map(|c| c.devices.iter_mut())
             .find_map(|d| d.remove_chain(id))
+    }
+
+    /// Drops the sends of every drum rack in this device to return chains
+    /// that are no longer in it (drum racks spec, R6).
+    pub(crate) fn prune_sends(&mut self) {
+        self.walk_mut(&mut |device| {
+            if device.rack_kind() != Some(RackKind::Drum) {
+                return;
+            }
+            let returns: Vec<ChainId> = device
+                .chains
+                .iter()
+                .filter(|c| c.is_return)
+                .map(|c| c.id)
+                .collect();
+            for chain in &mut device.chains {
+                chain.sends.retain(|s| returns.contains(&s.to));
+            }
+        });
     }
 
     /// Gives this device, every device inside it and every chain a new ID
@@ -519,6 +766,7 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
         Some(_) => {}
     }
     check_order(device)?;
+    check_drum_chains(device)?;
     for chain in &device.chains {
         let mixer = &chain.mixer;
         crate::command::check_value(
@@ -544,6 +792,73 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
     Ok(())
 }
 
+/// Checks what only a drum rack's chains have (drum racks spec, R1, R6, R7):
+/// no other rack's chain has a note, a choke group, a send or a place to
+/// send its output; a drum rack's return chains come last, are at most six,
+/// and only hold audio effects; sends name the rack's return chains.
+fn check_drum_chains(rack: &Device) -> Result<(), ModelError> {
+    if rack.rack_kind() != Some(RackKind::Drum) {
+        return match rack.chains.iter().find(|c| !c.has_no_drum_settings()) {
+            Some(chain) => Err(ModelError::NotADrumChain(chain.id)),
+            None => Ok(()),
+        };
+    }
+    let first_return = rack
+        .chains
+        .iter()
+        .position(|c| c.is_return)
+        .unwrap_or(rack.chains.len());
+    if rack.chains[first_return..].iter().any(|c| !c.is_return) {
+        return Err(ModelError::ReturnChainOrder(rack.id));
+    }
+    if rack.chains.len() - first_return > MAX_RETURN_CHAINS {
+        return Err(ModelError::TooManyReturnChains(rack.id));
+    }
+    for chain in &rack.chains {
+        if let Receive::Note(note) = chain.receive {
+            crate::command::check_value("receive note", f64::from(note), note < 128)?;
+        }
+        crate::command::check_value("play note", f64::from(chain.play), chain.play < 128)?;
+        if let Some(group) = chain.choke {
+            crate::command::check_value(
+                "choke group",
+                f64::from(group),
+                (1..=16).contains(&group),
+            )?;
+        }
+        for send in &chain.sends {
+            crate::command::check_value(
+                "send level",
+                send.level,
+                send.level.is_finite() && send.level >= 0.0,
+            )?;
+            if !rack.chains[first_return..].iter().any(|c| c.id == send.to) {
+                return Err(ModelError::NoSuchChain(send.to));
+            }
+        }
+        let distinct = chain
+            .sends
+            .iter()
+            .enumerate()
+            .all(|(i, s)| chain.sends[..i].iter().all(|o| o.to != s.to));
+        if !distinct {
+            return Err(ModelError::NotADrumChain(chain.id));
+        }
+        if chain.is_return
+            && (!chain.sends.is_empty()
+                || chain.receive != Receive::default()
+                || chain.play != DEFAULT_PLAY
+                || chain.choke.is_some())
+        {
+            return Err(ModelError::NotADrumChain(chain.id));
+        }
+        if !chain.is_return && chain.audio_to.is_some() {
+            return Err(ModelError::NotADrumChain(chain.id));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that each chain of a rack holds only devices that fit its kind and
 /// holds them in order (racks spec, R1): an audio effect rack's chain only
 /// audio effects, a MIDI effect rack's only MIDI effects, and the others'
@@ -557,6 +872,7 @@ pub(crate) fn check_order(rack: &Device) -> Result<(), ModelError> {
         for device in &chain.devices {
             let fits = match kind {
                 RackKind::AudioEffect => device.role == DeviceRole::AudioEffect,
+                RackKind::Drum if chain.is_return => device.role == DeviceRole::AudioEffect,
                 RackKind::MidiEffect => device.role == DeviceRole::MidiEffect,
                 RackKind::Instrument | RackKind::Drum => true,
             };

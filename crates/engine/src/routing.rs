@@ -39,6 +39,9 @@ pub enum Via {
     Input,
     /// A device's sidechain Source, on the destination track (WP-2.19b).
     Sidechain(DeviceId),
+    /// A drum rack's return chain, in the source track, sent to a return
+    /// track by its Audio To (the drum racks spec, R8).
+    Chain(ChainId),
 }
 
 impl Via {
@@ -204,6 +207,27 @@ impl Graph {
                     _ => {}
                 }
                 if track.kind().has_sends() && !graph.hears_return.contains(&id) {
+                    // A drum rack's return chains sent to a return track
+                    // run after the track, as a send does.
+                    for device in track.devices_deep() {
+                        for chain in device.chains.iter().filter(|c| c.is_return) {
+                            let to = chain.audio_to.filter(|&to| {
+                                document
+                                    .track(to)
+                                    .is_some_and(|t| t.kind() == TrackKind::Return)
+                            });
+                            if let Some(to) = to {
+                                graph.edges.push(Edge {
+                                    from: id,
+                                    to,
+                                    via: Via::Chain(chain.id),
+                                    tap: Tap::PostMixer,
+                                    chain: Some(chain.id),
+                                    monitored: false,
+                                });
+                            }
+                        }
+                    }
                     for to in document.returns() {
                         let tap = match document.track(to).map(|r| r.mixer().tap) {
                             Some(SendTap::Pre) => Tap::PostFx,

@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bl_media::{
-    ContentHash, Decoder, MediaError, MediaStatus, MediaStore, converted_len, decode_file,
+    ContentHash, Decoder, Edit, EditKind, MediaError, MediaStatus, MediaStore, converted_len,
+    decode_file,
 };
 use common::{TempDir, fixtures_dir};
 
@@ -255,4 +256,44 @@ fn the_store_is_shared_between_threads() {
     for data in &results[1..] {
         assert_eq!(**data, *results[0]);
     }
+}
+
+#[test]
+fn the_same_source_with_the_same_edits_is_rendered_once_and_shared() {
+    // Spec: multisampler R57
+    let dir = TempDir::new("store-edited");
+    let path = copy_fixture("sine-44k1-s16-2ch.flac", dir.path());
+    let store = MediaStore::new();
+    let hash = store.import(&path).unwrap();
+    let source = store.load(hash).unwrap();
+    let trim = Edit {
+        kind: EditKind::Trim,
+        range: Some((100, 1_100)),
+    };
+    let first = store.load_edited(hash, &[trim]).unwrap();
+    assert_eq!(first.frames(), 1_000);
+    assert_eq!(
+        first.channel(0).unwrap(),
+        &source.channel(0).unwrap()[100..1_100]
+    );
+    // The same list shares the copy; a different list makes another.
+    assert!(Arc::ptr_eq(
+        &first,
+        &store.load_edited(hash, &[trim]).unwrap()
+    ));
+    let reverse = Edit {
+        kind: EditKind::Reverse,
+        range: None,
+    };
+    assert!(!Arc::ptr_eq(
+        &first,
+        &store.load_edited(hash, &[trim, reverse]).unwrap()
+    ));
+    // No edits is the source itself, and the file's bytes are untouched.
+    assert!(Arc::ptr_eq(&source, &store.load_edited(hash, &[]).unwrap()));
+    assert_eq!(ContentHash::of_file(&path).unwrap(), hash);
+    // At another rate the edits apply to the sample's own frames first.
+    let at_48k = store.load_edited_at_rate(hash, 48_000, &[trim]).unwrap();
+    assert_eq!(at_48k.sample_rate(), 48_000);
+    assert_eq!(at_48k.frames(), converted_len(1_000, 44_100, 48_000));
 }

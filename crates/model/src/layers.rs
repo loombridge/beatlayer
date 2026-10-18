@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ModelError;
 use crate::ids::ContentHash;
+use crate::sample_edits::{SampleEdit, SampleRange};
 
 /// The lowest gain a layer's Volume reaches: silence.
 pub const LAYER_GAIN_MIN: f64 = 0.0;
@@ -192,7 +193,7 @@ pub struct Layer {
     pub name: String,
     /// Its sample, which the media store holds.
     pub media: ContentHash,
-    /// The sample's length in frames at its own rate.
+    /// The sample's length in frames at its own rate, after its edits.
     pub length: u64,
     /// The sample's own rate, in hertz: the unit its markers count in.
     pub sample_rate: u32,
@@ -240,6 +241,11 @@ pub struct Layer {
     /// How the voice is retuned inside a loop, in cents (R19).
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub loop_detune: f64,
+    /// The sample's edits, applied in order to the media (WP-5.15, R55).
+    /// The markers, [`length`](Self::length) and the sample the engine
+    /// plays are the edited sample's; the source file is never written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<SampleEdit>,
 }
 
 #[expect(
@@ -298,7 +304,20 @@ impl Layer {
             release_loop: length,
             crossfade_ms: 0.0,
             loop_detune: 0.0,
+            edits: Vec::new(),
         }
+    }
+
+    /// Gives the layer a sample of `length` frames and puts each marker
+    /// where `map` sends it, kept in order inside the sample.
+    fn refit(&mut self, length: u64, map: impl Fn(u64) -> u64) {
+        self.length = length;
+        self.start = map(self.start).min(length - 1);
+        self.end = map(self.end).max(self.start + 1).min(length);
+        self.loop_start = map(self.loop_start).clamp(self.start, self.end - 1);
+        self.loop_end = map(self.loop_end).clamp(self.loop_start + 1, self.end);
+        self.release_loop = map(self.release_loop).clamp(self.loop_end, self.end);
+        self.crossfade_ms = self.crossfade_ms.min(self.crossfade_limit_ms());
     }
 
     /// The zone of `kind`.
@@ -824,17 +843,87 @@ impl Layers {
         }
         let mut next = self.list[at].clone();
         let (old, new) = (next.length.max(1) as f64, length as f64);
-        let scale = |frame: u64| ((frame as f64 * new / old).round() as u64).min(length);
         next.media = media;
-        next.length = length;
         next.sample_rate = sample_rate;
         next.channels = channels;
-        next.start = scale(next.start).min(length - 1);
-        next.end = scale(next.end).max(next.start + 1).min(length);
-        next.loop_start = scale(next.loop_start).clamp(next.start, next.end - 1);
-        next.loop_end = scale(next.loop_end).clamp(next.loop_start + 1, next.end);
-        next.release_loop = scale(next.release_loop).clamp(next.loop_end, next.end);
-        next.crossfade_ms = next.crossfade_ms.min(next.crossfade_limit_ms());
+        // Edits belong to the sample they were made on.
+        next.edits.clear();
+        next.refit(length, |frame| {
+            ((frame as f64 * new / old).round() as u64).min(length)
+        });
+        next.check()?;
+        self.list[at] = next;
+        Ok(())
+    }
+
+    /// Adds `edit` to a layer's list (R55): its length and markers follow
+    /// the audio (R56).
+    ///
+    /// # Errors
+    ///
+    /// No such layer, or an edit that doesn't fit the sample.
+    pub fn add_edit(&mut self, id: LayerId, edit: SampleEdit) -> Result<(), ModelError> {
+        let at = self.require(id)?;
+        let mut next = self.list[at].clone();
+        let length = edit.length_after(next.length)?;
+        next.refit(length, |frame| edit.follow(frame));
+        next.edits.push(edit);
+        next.check()?;
+        self.list[at] = next;
+        Ok(())
+    }
+
+    /// Clears a layer's edits (R58); the sample is `length` frames long
+    /// again, and the markers keep their share of it, as a replaced sample's
+    /// do.
+    ///
+    /// # Errors
+    ///
+    /// No such layer, or a length of 0.
+    pub fn clear_edits(&mut self, id: LayerId, length: u64) -> Result<(), ModelError> {
+        let at = self.require(id)?;
+        let (media, rate, channels) = {
+            let layer = &self.list[at];
+            (layer.media, layer.sample_rate, layer.channels)
+        };
+        self.replace_media(id, media, length, rate, channels)
+    }
+
+    /// Puts a processed copy of a layer's edited sample in its place (R59):
+    /// the copy already holds the edits, so the list empties. `crop` is the
+    /// span of the edited sample the copy keeps, which moves the markers as
+    /// a Trim does; a copy of the whole sample leaves them where they are.
+    ///
+    /// # Errors
+    ///
+    /// No such layer, or a copy that doesn't fit the markers.
+    pub fn set_processed(
+        &mut self,
+        id: LayerId,
+        media: ContentHash,
+        length: u64,
+        crop: Option<SampleRange>,
+    ) -> Result<(), ModelError> {
+        let at = self.require(id)?;
+        if length == 0 {
+            return Err(ModelError::InvalidValue {
+                what: "layer length",
+                value: 0.0,
+            });
+        }
+        let mut next = self.list[at].clone();
+        next.media = media;
+        next.edits.clear();
+        match crop {
+            Some(SampleRange { from, to }) => {
+                let trim = SampleEdit {
+                    kind: crate::sample_edits::SampleEditKind::Trim,
+                    range: Some(SampleRange { from, to }),
+                };
+                next.refit(length, |frame| trim.follow(frame));
+            }
+            None => next.refit(length, |frame| frame),
+        }
         next.check()?;
         self.list[at] = next;
         Ok(())
@@ -1005,6 +1094,98 @@ mod tests {
         let json = serde_json::to_string(&l).unwrap();
         assert_eq!(serde_json::from_str::<Layers>(&json).unwrap(), l);
         l.check().unwrap();
+    }
+
+    // Spec: multisampler R55, R56, R58, R59
+    #[test]
+    fn markers_follow_the_audio_through_a_cut_and_a_trim() {
+        use crate::sample_edits::{SampleEditKind, SampleRange};
+        let edit = |kind, from, to| SampleEdit {
+            kind,
+            range: Some(SampleRange { from, to }),
+        };
+        let mut l = layers(&[60]);
+        let id = LayerId(1);
+        l.update(
+            &[id],
+            &LayerSettings {
+                start: Some(1_000),
+                end: Some(40_000),
+                loop_start: Some(5_000),
+                loop_end: Some(30_000),
+                release_loop: Some(35_000),
+                ..LayerSettings::default()
+            },
+        )
+        .unwrap();
+        // A cut moves the markers after it earlier by its length, and the
+        // ones inside it to its start.
+        l.add_edit(id, edit(SampleEditKind::Cut, 20_000, 36_000))
+            .unwrap();
+        let cut = &l.list[0];
+        assert_eq!(cut.length, 32_000);
+        assert_eq!(
+            [
+                cut.start,
+                cut.loop_start,
+                cut.loop_end,
+                cut.release_loop,
+                cut.end
+            ],
+            [1_000, 5_000, 20_000, 20_000, 24_000]
+        );
+        // A trim moves the markers outside its span to the nearer end.
+        l.add_edit(id, edit(SampleEditKind::Trim, 4_000, 22_000))
+            .unwrap();
+        let trim = &l.list[0];
+        assert_eq!(trim.length, 18_000);
+        assert_eq!(
+            [
+                trim.start,
+                trim.loop_start,
+                trim.loop_end,
+                trim.release_loop,
+                trim.end
+            ],
+            [0, 1_000, 16_000, 16_000, 18_000]
+        );
+        assert_eq!(trim.edits.len(), 2);
+        trim.check().unwrap();
+        // An edit that keeps the length leaves the markers.
+        let before = l.list[0].clone();
+        l.add_edit(id, edit(SampleEditKind::Reverse, 0, 1_000))
+            .unwrap();
+        assert_eq!((l.list[0].start, l.list[0].end), (before.start, before.end));
+        // An edit that doesn't fit changes nothing.
+        let held = l.list[0].clone();
+        assert!(
+            l.add_edit(id, edit(SampleEditKind::Cut, 0, 18_000))
+                .is_err()
+        );
+        assert_eq!(l.list[0], held);
+        // Revert Edits brings the length back, the markers at their share.
+        l.clear_edits(id, 48_000).unwrap();
+        assert!(l.list[0].edits.is_empty());
+        assert_eq!(l.list[0].length, 48_000);
+        assert_eq!(l.list[0].end, 48_000);
+        // A processed copy holds the edits, so the list empties and a crop
+        // moves the markers as a trim does.
+        l.add_edit(id, edit(SampleEditKind::Reverse, 0, 100))
+            .unwrap();
+        l.set_processed(
+            id,
+            ContentHash([9; 32]),
+            10_000,
+            Some(SampleRange {
+                from: 2_000,
+                to: 12_000,
+            }),
+        )
+        .unwrap();
+        assert!(l.list[0].edits.is_empty());
+        assert_eq!(l.list[0].media, ContentHash([9; 32]));
+        assert_eq!(l.list[0].length, 10_000);
+        l.list[0].check().unwrap();
     }
 
     // Spec: multisampler R5

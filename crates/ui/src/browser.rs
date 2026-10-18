@@ -1296,6 +1296,9 @@ impl BrowserUi {
             match (pointer.filter(|p| lanes.contains(*p)), target) {
                 (Some(_), Some(target)) => add(events, &dropped, Some(target)),
                 (Some(_), None) => {}
+                // An instrument dropped outside the main view, on the
+                // Device View or the zone editor, is theirs to take.
+                (None, _) if sfz_drag && pointer.is_some_and(|p| !main_view.contains(p)) => {}
                 (None, _) => add(events, &dropped, None),
             }
         }

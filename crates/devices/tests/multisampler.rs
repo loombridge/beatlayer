@@ -2061,6 +2061,23 @@ fn routings_scale_by_their_spans_add_and_clamp() {
             &tone_samples(3000.0, 9600, 1.0),
         );
         assert!(db(amp(&out[0], 3000.0, 4800, 4800) / amp(&want, 3000.0, 4800, 4800)).abs() < 0.2);
+        // Filter Env Amount is held to its range, 0 to 72: 12 less 72 is 0,
+        // so the envelope leaves the cutoff at 1 kHz rather than pull it
+        // down five octaves.
+        let mut params = low_pass(1000.0);
+        params.extend([(FENV_ON, 1.0), (FENV_AMOUNT, 12.0)]);
+        params.extend(to(1, dest::FILTER_ENV, -100.0));
+        let mut rig = tone_rig(&params, 1500.0, block);
+        let out = rig.render(9600, &[on(0, 60, 1.0)]);
+        let want = kit_run(
+            FilterType::Lp12,
+            1000.0,
+            0.0,
+            0.0,
+            0.0,
+            &tone_samples(1500.0, 9600, 1.0),
+        );
+        assert!(db(amp(&out[0], 1500.0, 4800, 4800) / amp(&want, 1500.0, 4800, 4800)).abs() < 0.2);
         // Sample Start by up to the playback span: half of it starts the
         // ramp halfway.
         let mut rig = Rig::new(&to(1, dest::SAMPLE_START, 50.0), block);

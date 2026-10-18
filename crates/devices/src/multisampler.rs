@@ -1196,7 +1196,7 @@ impl Note {
         // The destinations a note starts with: R45's, from what is known
         // before it sounds.
         note.mods = start_mods(s, ctl, &note);
-        note.time_mul = time_mul(note.mods[dest::TIME]);
+        note.time_mul = time_mul(note.mods[dest::TIME], s.time);
         for (i, env) in note.envs.iter_mut().enumerate() {
             env.start(
                 &s.envs[i + 1],
@@ -1246,7 +1246,7 @@ impl Note {
             }
         }
         let prev = self.mods;
-        self.time_mul = time_mul(prev[dest::TIME]);
+        self.time_mul = time_mul(prev[dest::TIME], s.time);
         let scales: [f64; 4] =
             core::array::from_fn(|i| self.time_common * self.vel_factor[i + 1] * self.time_mul);
         let mut env_values = [0f32; 4];
@@ -1321,8 +1321,10 @@ impl Note {
             + s.tune
             + f64::from(ctl.bend + self.expr_bend) * s.bend_range
             + f64::from(mods[dest::PITCH]) * 24.0;
-        let env_amount = s.pitch_amount + f64::from(mods[dest::PITCH_ENV]) * 96.0;
-        delta += env_amount * f64::from(env_values[0]);
+        let env_amount =
+            (s.pitch_amount + f64::from(mods[dest::PITCH_ENV]) * 96.0).clamp(-48.0, 48.0);
+        let env_pitch = env_amount * f64::from(env_values[0]);
+        delta += env_pitch;
         if l1.on {
             delta += 12.0 * f64::from(l1.amounts[3] * lfo1_scale * lfo1);
         }
@@ -1337,8 +1339,9 @@ impl Note {
             } else {
                 440.0 * 2f64.powf((self.pitch + s.tune - 69.0) / 12.0) * s.osc.ratio
             };
-            if mods[dest::OSC_PITCH] != 0.0 {
-                hz *= 2f64.powf(f64::from(mods[dest::OSC_PITCH]) * 2.0);
+            // R35: the pitch envelope moves the oscillator with the voice.
+            if mods[dest::OSC_PITCH] != 0.0 || env_pitch != 0.0 {
+                hz *= 2f64.powf(f64::from(mods[dest::OSC_PITCH]) * 2.0 + env_pitch / 12.0);
             }
             let value = waves.value(s.osc.wave, self.osc_phase, &mut self.osc_rng);
             self.osc_phase += hz / s.rate;
@@ -1350,9 +1353,14 @@ impl Note {
             }
         }
         // R37, R38: the cutoff.
-        let mut cutoff = s.filter.pitch + mods[dest::FILTER_FREQ] * 96.0;
+        // R45: each sum is held to its parameter's range.
+        let mut cutoff = (s.filter.pitch + mods[dest::FILTER_FREQ] * 96.0).clamp(
+            pitch_of(20.0, REFERENCE_HZ),
+            pitch_of(20_000.0, REFERENCE_HZ),
+        );
         if s.filter.fenv_on {
-            cutoff += (s.filter.fenv_amount + mods[dest::FILTER_ENV] * 72.0) * env_values[1];
+            cutoff += (s.filter.fenv_amount + mods[dest::FILTER_ENV] * 72.0).clamp(0.0, 72.0)
+                * env_values[1];
         }
         if l1.on {
             cutoff += l1.amounts[2] * lfo1_scale * lfo1;
@@ -1393,12 +1401,13 @@ impl Note {
 }
 
 /// What the Time destination multiplies every envelope's times by (R26,
-/// R45): the Time control's own law over its whole range.
-fn time_mul(sum: f32) -> f64 {
+/// R45): the Time control's own law over its whole range, the control
+/// (`time`, −1 to 1) and the routings together held to that range.
+fn time_mul(sum: f32, time: f64) -> f64 {
     if sum == 0.0 {
         1.0
     } else {
-        10f64.powf(f64::from(sum) * 2.0)
+        10f64.powf((time + f64::from(sum) * 2.0).clamp(-1.0, 1.0) - time)
     }
 }
 

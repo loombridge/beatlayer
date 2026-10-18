@@ -412,3 +412,36 @@ fn a_damaged_file_never_panics() {
         "a missing file is an error, not a panic"
     );
 }
+
+// Spec: multisampler R53
+#[test]
+fn includes_defines_and_huge_numbers_stay_bounded() {
+    // A file that includes itself 20 times on every line would fan out to
+    // 20^8 reads under the depth cap alone; the total is capped too.
+    let reads = std::cell::Cell::new(0usize);
+    let fan = "#include \"fan.sfz\"\n".repeat(20);
+    let _ = sfz::parse(fan.as_bytes(), Path::new("/lib"), &|_| {
+        reads.set(reads.get() + 1);
+        Some(fan.as_bytes().to_vec())
+    });
+    assert!(reads.get() <= 256, "{} includes read", reads.get());
+    // Defines naming defines that come later grow only as a line is read;
+    // the growth is checked before each replacement, so this 10 KB file
+    // doesn't build an 11 GB line.
+    let bomb = format!(
+        "#define $CCC {}\n#define $BB {}\n#define $A {}\n<region> sample=$CCC\n",
+        "$BB".repeat(1365),
+        "$A".repeat(2048),
+        "x".repeat(4096)
+    );
+    assert!(read(&bomb).regions.is_empty());
+    // Crossfades and offsets at the ends of the number line.
+    for text in [
+        "<region> sample=a.wav xfin_lokey=-2147483648 xfin_hikey=2147483647\n",
+        "<region> sample=a.wav xfin_lovel=-1e12 xfin_hivel=1e12 xfout_lovel=-1e12 xfout_hivel=1e12\n",
+        "<control> note_offset=2147483647 octave_offset=1\n<region> sample=a.wav\n",
+        "<control> note_offset=-2147483648 octave_offset=-1\n<region> sample=a.wav\n",
+    ] {
+        let _ = read(text);
+    }
+}

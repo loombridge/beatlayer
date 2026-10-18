@@ -340,6 +340,8 @@ fn an_sfz_dropped_on_a_midi_tracks_device_view_makes_a_multisampler_or_adds_laye
             .devices()
             .count()
     };
+    let tracks = |h: &Harness| h.shell.editor().document().tracks().count();
+    let before = tracks(&h);
     assert_eq!(devices(&h), 0);
     // Dropped on an empty Device View: a multisampler on the track.
     h.frame(vec![Event::PointerMoved(view.center())]);
@@ -379,6 +381,7 @@ fn an_sfz_dropped_on_a_midi_tracks_device_view_makes_a_multisampler_or_adds_laye
     h.settle();
     assert_eq!(devices(&h), 1, "no second device");
     assert_eq!(layers(&h), 10);
+    assert_eq!(tracks(&h), before, "the drop makes no new track");
 }
 
 // Spec: multisampler R37

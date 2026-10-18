@@ -20,6 +20,9 @@ pub const MAX_REGIONS: usize = 16_384;
 /// How deep `#include` goes, and how much text a file and what it includes
 /// may expand to, so a damaged file can't grow without end.
 const MAX_INCLUDE_DEPTH: usize = 8;
+/// The most `#include`s one file may run in all, so a file that includes
+/// itself many times over can't fan out without end.
+const MAX_INCLUDES: usize = 256;
 const MAX_TEXT: usize = 32 << 20;
 const MAX_DEFINES: usize = 4096;
 const MAX_DEFINE_VALUE: usize = 4096;
@@ -280,7 +283,16 @@ pub fn read(path: &Path) -> std::io::Result<Sfz> {
 pub fn parse(bytes: &[u8], dir: &Path, include: &dyn Fn(&Path) -> Option<Vec<u8>>) -> Sfz {
     let mut defines = Vec::new();
     let mut budget = MAX_TEXT;
-    let text = expand(bytes, dir, include, &mut defines, 0, &mut budget);
+    let mut includes = MAX_INCLUDES;
+    let text = expand(
+        bytes,
+        dir,
+        include,
+        &mut defines,
+        0,
+        &mut budget,
+        &mut includes,
+    );
     read_text(&text, dir)
 }
 
@@ -301,6 +313,7 @@ fn expand(
     defines: &mut Vec<(String, String)>,
     depth: usize,
     budget: &mut usize,
+    includes: &mut usize,
 ) -> String {
     let text = strip_comments(&decode(bytes));
     let mut out = String::new();
@@ -315,24 +328,39 @@ fn expand(
                 // A later definition of a name replaces the earlier one. A
                 // value that grows past a line's worth is dropped, so
                 // defines built on defines can't double without end.
-                let value = substitute(value, defines);
+                let value = substitute(value, defines, MAX_DEFINE_VALUE);
                 defines.retain(|(n, _)| n != name);
-                if value.len() <= MAX_DEFINE_VALUE {
+                if let Some(value) = value {
                     defines.push((name.to_owned(), value));
                 }
             }
         } else if let Some(rest) = trimmed.strip_prefix("#include") {
             let name = rest.trim().trim_matches('"');
             // A path relative to the including file, never an absolute one.
-            if depth < MAX_INCLUDE_DEPTH && !name.is_empty() && Path::new(name).is_relative() {
+            if depth < MAX_INCLUDE_DEPTH
+                && *includes > 0
+                && !name.is_empty()
+                && Path::new(name).is_relative()
+            {
+                *includes -= 1;
                 let path = dir.join(name.replace('\\', "/"));
                 if let Some(bytes) = include(&path) {
                     let inner = path.parent().unwrap_or(dir);
-                    out.push_str(&expand(&bytes, inner, include, defines, depth + 1, budget));
+                    out.push_str(&expand(
+                        &bytes,
+                        inner,
+                        include,
+                        defines,
+                        depth + 1,
+                        budget,
+                        includes,
+                    ));
                 }
             }
         } else {
-            let line = substitute(line, defines);
+            let Some(line) = substitute(line, defines, *budget) else {
+                break;
+            };
             if line.len() >= *budget {
                 break;
             }
@@ -376,20 +404,27 @@ fn strip_comments(text: &str) -> String {
 }
 
 /// `line` with each defined `$NAME` replaced, the longest name first so
-/// `$KEY2` isn't taken for `$KEY` and a 2.
-fn substitute(line: &str, defines: &[(String, String)]) -> String {
+/// `$KEY2` isn't taken for `$KEY` and a 2; `None` once it would grow past
+/// `limit` bytes, checked before each replacement so values naming other
+/// values can't build a huge line first.
+fn substitute(line: &str, defines: &[(String, String)], limit: usize) -> Option<String> {
     if defines.is_empty() || !line.contains('$') {
-        return line.to_owned();
+        return (line.len() <= limit).then(|| line.to_owned());
     }
     let mut order: Vec<&(String, String)> = defines.iter().collect();
     order.sort_by_key(|(name, _)| std::cmp::Reverse(name.len()));
     let mut out = line.to_owned();
     for (name, value) in order {
-        if out.contains(name.as_str()) {
+        let count = out.matches(name.as_str()).count();
+        if count > 0 {
+            let grown = value.len().saturating_sub(name.len()).saturating_mul(count);
+            if out.len().saturating_add(grown) > limit {
+                return None;
+            }
             out = out.replace(name.as_str(), value);
         }
     }
-    out
+    (out.len() <= limit).then_some(out)
 }
 
 /// One thing in the text: a header, or an opcode with its value.
@@ -506,12 +541,12 @@ fn zone(
     if let Some((from, to)) = fade_in {
         lo = lo.min(from);
         hi = hi.max(to);
-        fade_low = (to - from).max(0);
+        fade_low = to.saturating_sub(from).max(0);
     }
     if let Some((from, to)) = fade_out {
         lo = lo.min(from);
         hi = hi.max(to);
-        fade_high = (to - from).max(0);
+        fade_high = to.saturating_sub(from).max(0);
     }
     // A range wholly off the scale is empty; one partly off is cut to it.
     if hi < i32::from(min) || lo > i32::from(max) || lo > hi {
@@ -593,11 +628,14 @@ fn read_text(text: &str, dir: &Path) -> Sfz {
                     "control" => match name.as_str() {
                         "default_path" => control.default_path = value,
                         "note_offset" => {
-                            control.offset += number(&value).map_or(0, |n| n as i32);
+                            control.offset = control
+                                .offset
+                                .saturating_add(number(&value).map_or(0, |n| n as i32));
                         }
                         "octave_offset" => {
-                            control.offset +=
-                                number(&value).map_or(0, |n| (n as i32).saturating_mul(12));
+                            control.offset = control.offset.saturating_add(
+                                number(&value).map_or(0, |n| (n as i32).saturating_mul(12)),
+                            );
                         }
                         _ => *control_unread.entry(name).or_default() += 1,
                     },

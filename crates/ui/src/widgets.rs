@@ -119,6 +119,8 @@ fn paint(
             ink
         };
         painter.text(pos, anchor, text, font, ink);
+    } else if placement.element == Element::MidiIndicators && live {
+        lamps(&painter, rect, look.number.unwrap_or_default() as u8, c.accent.0, ink);
     } else {
         icon(&painter, placement.element, rect, ink, theme);
     }
@@ -323,6 +325,24 @@ fn icon(painter: &egui::Painter, element: Element, rect: Rect, ink: Color32, the
             }
         }
         _ => {}
+    }
+}
+
+/// The MIDI track indicators' two lamps, the input's above the output's,
+/// each in the accent colour while `lit` (bit 0 and bit 1) says so.
+fn lamps(painter: &Painter, rect: Rect, lit: u8, on: Color32, off: Color32) {
+    let c = rect.center();
+    let lamp = Rect::from_center_size(
+        pos2(c.x, c.y - 2.5),
+        vec2(rect.width().min(8.0) - 2.0, 3.0),
+    );
+    for (n, lamp) in [lamp, lamp.translate(vec2(0.0, 5.0))].into_iter().enumerate() {
+        let colour = if lit & (1 << n) != 0 {
+            on
+        } else {
+            off.gamma_multiply(0.6)
+        };
+        painter.rect_filled(lamp, 1.0, colour);
     }
 }
 

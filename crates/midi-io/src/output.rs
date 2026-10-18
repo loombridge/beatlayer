@@ -59,6 +59,9 @@ impl OutputStats {
 
 /// An open output port in the table the output thread reads.
 struct Slot {
+    /// The set of ports that opened it ([`OutputBus::owner`]), so a set of
+    /// ports that closes takes only its own.
+    owner: u64,
     port: PortId,
     /// The port's Track switch: whether tracks' MIDI reaches it.
     track: bool,
@@ -87,6 +90,7 @@ impl Default for OutputBus {
 
 /// What the main thread and the output thread share.
 struct Shared {
+    owners: AtomicU64,
     table: Mutex<Vec<Slot>>,
     queue: Mutex<Option<Consumer<MidiOutputEvent>>>,
     stats: Arc<OutputStats>,
@@ -103,6 +107,7 @@ impl OutputBus {
     pub fn new() -> Self {
         Self {
             shared: Arc::new(Shared {
+                owners: AtomicU64::new(0),
                 table: Mutex::new(Vec::new()),
                 queue: Mutex::new(None),
                 stats: Arc::new(OutputStats::default()),
@@ -138,30 +143,45 @@ impl OutputBus {
         producer
     }
 
+    /// A number for a set of ports that opens outputs on this bus.
+    pub(crate) fn owner(&self) -> u64 {
+        self.shared.owners.fetch_add(1, Relaxed)
+    }
+
     /// Puts an open port in the table, or replaces the one there.
-    pub(crate) fn insert(&self, port: PortId, track: bool, connection: Box<dyn OutputConnection>) {
+    pub(crate) fn insert(
+        &self,
+        owner: u64,
+        port: PortId,
+        track: bool,
+        connection: Box<dyn OutputConnection>,
+    ) {
         let mut table = lock(&self.shared.table);
         table.retain(|slot| slot.port != port);
         table.push(Slot {
+            owner,
             port,
             track,
             connection,
         });
     }
 
-    pub(crate) fn remove(&self, port: PortId) {
-        lock(&self.shared.table).retain(|slot| slot.port != port);
+    pub(crate) fn remove(&self, owner: u64, port: PortId) {
+        lock(&self.shared.table).retain(|slot| !(slot.owner == owner && slot.port == port));
     }
 
-    pub(crate) fn set_track(&self, port: PortId, track: bool) {
-        if let Some(slot) = lock(&self.shared.table).iter_mut().find(|s| s.port == port) {
+    pub(crate) fn set_track(&self, owner: u64, port: PortId, track: bool) {
+        if let Some(slot) = lock(&self.shared.table)
+            .iter_mut()
+            .find(|s| s.owner == owner && s.port == port)
+        {
             slot.track = track;
         }
     }
 
-    /// Closes every port in the table: the ports that put them there went.
-    pub(crate) fn clear(&self) {
-        lock(&self.shared.table).clear();
+    /// Closes every port `owner` opened.
+    pub(crate) fn clear(&self, owner: u64) {
+        lock(&self.shared.table).retain(|slot| slot.owner != owner);
     }
 
     /// Hands every queued message to its port; returns how many it took.

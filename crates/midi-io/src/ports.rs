@@ -134,6 +134,8 @@ pub struct MidiPorts {
     ports: Vec<Entry>,
     /// The open outputs and the thread that sends to them.
     output: OutputBus,
+    /// What the bus knows these ports by.
+    owner: u64,
 }
 
 impl MidiPorts {
@@ -141,11 +143,13 @@ impl MidiPorts {
     /// Nothing is listed or opened until [`MidiPorts::refresh`].
     #[must_use]
     pub fn new(backend: Box<dyn MidiBackend>, sender: InputSender) -> Self {
+        let output = OutputBus::new();
         Self {
             backend,
             sender,
             ports: Vec::new(),
-            output: OutputBus::new(),
+            owner: output.owner(),
+            output,
         }
     }
 
@@ -154,6 +158,8 @@ impl MidiPorts {
     /// Call it before any port opens.
     #[must_use]
     pub fn with_output(mut self, output: OutputBus) -> Self {
+        self.output.clear(self.owner);
+        self.owner = output.owner();
         self.output = output;
         self
     }
@@ -254,7 +260,7 @@ impl MidiPorts {
         if !wanted {
             entry.input = None;
             if std::mem::take(&mut entry.output) {
-                self.output.remove(port);
+                self.output.remove(self.owner, port);
             }
             if !entry.present {
                 entry.error = None;
@@ -266,7 +272,7 @@ impl MidiPorts {
             return;
         }
         if entry.output {
-            self.output.set_track(port, entry.switches.track);
+            self.output.set_track(self.owner, port, entry.switches.track);
             return;
         }
         let opened = match entry.direction {
@@ -278,7 +284,8 @@ impl MidiPorts {
                     .map(|connection| entry.input = Some((connection, switches)))
             }
             Direction::Output => self.backend.open_output(&entry.name).map(|connection| {
-                self.output.insert(port, entry.switches.track, connection);
+                self.output
+                    .insert(self.owner, port, entry.switches.track, connection);
                 entry.output = true;
             }),
         };
@@ -344,7 +351,7 @@ impl MidiPorts {
 impl Drop for MidiPorts {
     fn drop(&mut self) {
         // The ports this system opened close with it.
-        self.output.clear();
+        self.output.clear(self.owner);
     }
 }
 

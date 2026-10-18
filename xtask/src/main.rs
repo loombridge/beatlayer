@@ -15,6 +15,7 @@ mod keymap;
 mod private_terms;
 mod progress;
 mod ui_parity;
+mod wiki;
 
 const USAGE: &str = "\
 Usage: cargo xtask <task>
@@ -52,6 +53,8 @@ Tasks:
   dashboard      Serve the progress page on http://localhost:4106 (or PORT, or --port N),
                  reading origin/main and fetching it every two minutes (--worktree reads
                  the files on disk). Localhost starts it from .claude/launch.json
+  wiki           Write docs/ as GitHub wiki pages into the given directory, a checkout
+                 of the wiki, replacing the pages there (.github/workflows/wiki.yml)
   package        Build this platform's packages with cargo-packager and check they start
   release-check  Fail unless the given tag is v followed by the workspace version
   rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
@@ -144,6 +147,10 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
         Some("golden") => golden(root, options).map(|()| ExitCode::SUCCESS),
         Some("progress") => dashboard::print(root, options).map(|()| ExitCode::SUCCESS),
         Some("dashboard") => dashboard::serve(root, options).map(|()| ExitCode::SUCCESS),
+        Some("wiki") => match options {
+            [out] => wiki::write(root, Path::new(out)).map(|()| ExitCode::SUCCESS),
+            _ => Err(format!("usage: cargo xtask wiki <dir>\n\n{USAGE}")),
+        },
         Some("package") => package::package(root).map(|()| ExitCode::SUCCESS),
         Some("release-check") => match options {
             [tag] => package::release_check(root, tag).map(|()| ExitCode::SUCCESS),

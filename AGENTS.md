@@ -12,6 +12,8 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 2. [CONTRIBUTING.md](CONTRIBUTING.md), and in it [Building without Ableton's code](CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
 3. The planning documents in [docs/](docs): [the roadmap](docs/01-roadmap.md), [the architecture](docs/02-architecture.md), [the build plan](docs/03-build-plan.md) ("How an agent uses this plan"), [the parity matrix](docs/04-parity-matrix.md), [the improvements over Live](docs/05-improvements.md), the behaviour specs in [docs/specs/](docs/specs), and [the UI parity reference](docs/ui-parity) before UI work.
 
+The [wiki](https://github.com/loombridge/beatlayer/wiki) is a copy of `docs/`, rewritten by `.github/workflows/wiki.yml` after every change on main. Change `docs/`, never the wiki.
+
 A change that alters a spec, the plan, or the UI parity reference changes it in the same pull request.
 
 ## Lines not crossed

@@ -233,6 +233,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.remove", query(Track, "devices")),
     ("device.rename", query(Device, "name")),
     ("device.save_default_preset", nothing(FILE)),
+    ("device.swap_to_snapshot", query(Track, "devices")),
     ("device.save_preset", nothing(FILE)),
     ("device.set_enabled", query(Device, "enabled")),
     ("device.set_enabled_all", query(Device, "chains")),

@@ -37,9 +37,9 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    RecordSessionAutomationInArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -471,6 +471,10 @@ pub struct Shell {
     capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// The control moves of the Session recording under way (WP-3.12).
+    session_automation: crate::automation_record::SessionTake,
+    /// The song frame the Session recording's take began on, once it has.
+    session_take_start: Option<Frames>,
     /// What the Session clips that played during the recording under way
     /// were (WP-3.13).
     session_watch: crate::session_capture::Watch,
@@ -732,6 +736,8 @@ impl Shell {
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
+            session_automation: crate::automation_record::SessionTake::default(),
+            session_take_start: None,
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -1327,6 +1333,13 @@ impl Shell {
         }
     }
 
+    /// Record Session automation in (Record, Warp & Launch; WP-3.12): which
+    /// tracks a Session recording writes control moves into the clips of.
+    #[must_use]
+    pub fn record_session_automation_in(&self) -> crate::settings::SessionAutomationTracks {
+        self.prefs.record_session_automation_in
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -1373,6 +1386,7 @@ impl Shell {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
             launch: self.prefs.launch,
+            record_session_automation_in: self.prefs.record_session_automation_in,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -3728,6 +3742,7 @@ impl Shell {
         // The control a drag moved is let go (automation R17).
         self.automation_take
             .release(self.arrangement.transport().position);
+        self.release_session_moves();
     }
 
     /// The effects commands have asked for since the last call.
@@ -4806,6 +4821,23 @@ impl Shell {
                 .and_then(|command| {
                     crate::automation_record::moved(self.editor.document(), &command)
                 });
+            // Spec: session-automation R1. With Automation Arm on and a
+            // Session recording running, a control move is noted for the
+            // clip it goes into.
+            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    let (track, target, value) =
+                        crate::automation_record::moved(self.editor.document(), &command)?;
+                    let before = crate::modulation::control_value(
+                        self.editor.document(),
+                        &self.devices,
+                        track,
+                        &target,
+                    )?;
+                    Some((track, target, before, value))
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
@@ -4818,6 +4850,9 @@ impl Shell {
                     self.arrangement.transport().position,
                     value,
                 );
+            }
+            if let Some((track, target, before, value)) = session_moved {
+                self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
                 // Spec: session-view R23. A launched scene's tempo and
@@ -4875,6 +4910,7 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            self.re_enable_launched_automation(command);
             if let engine_session::SessionCommand::LaunchScene(scene) = command {
                 // Spec: session-recording R10. Start Recording on Scene
                 // Launch.
@@ -6123,6 +6159,12 @@ impl Shell {
                 self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
+                let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
+                self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;

@@ -1226,6 +1226,70 @@ mod tests {
         );
     }
 
+    // Spec: session-automation R10
+    #[test]
+    fn session_automation_envelopes_save_with_the_set_and_load_back() {
+        let (mut doc, [_, audio, _]) = song();
+        let scene = doc.scenes().next().unwrap().id;
+        let clip = ClipId(bl_core::id::Id::new(900).unwrap());
+        doc.apply(&Command::CreateSlotClip {
+            track: audio,
+            scene,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Audio(AudioData::new(ContentHash([0xcd; 32]))),
+            ),
+        })
+        .unwrap();
+        let volume = AutomationTarget::Mixer {
+            param: crate::MixerParam::Volume,
+        };
+        for kind in [
+            crate::EnvelopeKind::Modulation,
+            crate::EnvelopeKind::Automation,
+        ] {
+            doc.apply(&Command::SetClipEnvelopeBreakpoint {
+                kind,
+                clip,
+                target: volume,
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+        }
+        // A hand move turns the automation envelope off: it saves so.
+        doc.apply(&Command::SetVolume {
+            track: audio,
+            volume: 0.3,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let slots = value["tracks"][0]["children"][0]["slots"].to_string();
+        assert!(
+            slots.contains(r#""kind":"automation""#) && slots.contains(r#""enabled":false"#),
+            "{slots}"
+        );
+        let loaded = load(value.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        let slot = loaded.clip(clip).unwrap();
+        assert_eq!(slot.envelopes().count(), 2, "one of each kind");
+
+        // An Arrangement clip with an automation envelope doesn't load.
+        let mut bad = serde_json::to_value(&doc).unwrap();
+        let arrangement = bad["tracks"][0]["children"][0]["clips"][0].clone();
+        let mut automation = arrangement;
+        automation["envelopes"] = json!([{
+            "target": { "type": "mixer", "param": "volume" },
+            "envelope": { "points": [{ "at": 0, "value": 0.5 }] },
+            "kind": "automation"
+        }]);
+        bad["tracks"][0]["children"][0]["clips"][0] = automation;
+        let error = load(bad).unwrap_err().to_string();
+        assert!(error.contains("isn't in a Session slot"), "{error}");
+    }
+
     // Spec: clip-envelopes R6
     #[test]
     fn clip_envelopes_save_with_the_set_and_load_back() {
@@ -1241,6 +1305,7 @@ mod tests {
         };
         for (target, at, value) in [(volume, Ticks::ZERO, 1.0), (volume, Ticks::WHOLE, 0.25)] {
             doc.apply(&Command::SetClipEnvelopeBreakpoint {
+                kind: crate::EnvelopeKind::Modulation,
                 clip,
                 target,
                 at,
@@ -1249,6 +1314,7 @@ mod tests {
             .unwrap();
         }
         doc.apply(&Command::SetClipEnvelopeBreakpoint {
+            kind: crate::EnvelopeKind::Modulation,
             clip,
             target: param,
             at: Ticks::ZERO,
@@ -1258,6 +1324,7 @@ mod tests {
         // The volume's segment is curved and the envelope is unlinked: both
         // save.
         doc.apply(&Command::SetClipEnvelopeCurve {
+            kind: crate::EnvelopeKind::Modulation,
             clip,
             target: volume,
             at: Ticks::ZERO,
@@ -1265,6 +1332,7 @@ mod tests {
         })
         .unwrap();
         doc.apply(&Command::SetClipEnvelopeLinked {
+            kind: crate::EnvelopeKind::Modulation,
             clip,
             target: volume,
             linked: false,

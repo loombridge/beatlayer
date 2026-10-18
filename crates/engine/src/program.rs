@@ -1054,7 +1054,12 @@ impl EngineProgram {
                         &mut self.pool[own.clone()],
                         &self.delay_scratch[..size],
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );
@@ -1068,7 +1073,12 @@ impl EngineProgram {
                         mine,
                         theirs,
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );
@@ -1077,7 +1087,12 @@ impl EngineProgram {
                         &mut self.pool[own.clone()],
                         &self.tap_pool[at..at + size],
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         Bus::new(&self.bus, stride, frames),
                         scratch,
                     );

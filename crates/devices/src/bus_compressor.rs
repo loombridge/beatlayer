@@ -335,7 +335,7 @@ impl NativeDevice for Bond {
 
         // 1. The reduction, frame by frame.
         for i in 0..frames {
-            if self.tick % REFRESH_FRAMES == 0 {
+            if self.tick.is_multiple_of(REFRESH_FRAMES) {
                 self.settings = Settings {
                     threshold: f64::from(threshold[i]),
                     ratio: f64::from(ratio[i]).clamp(RATIO_RANGE.0, RATIO_RANGE.1),

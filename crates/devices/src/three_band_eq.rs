@@ -267,7 +267,7 @@ impl NativeDevice for Triad {
         let (low_hz, high_hz) = (params.ramp(at(FREQ_LOW)), params.ramp(at(FREQ_HIGH)));
         let mut i = 0;
         while i < frames {
-            if self.tick % REFRESH_FRAMES == 0 {
+            if self.tick.is_multiple_of(REFRESH_FRAMES) {
                 // The upper crossover never sits below the lower one.
                 let lower_hz = f64::from(low_hz[i]);
                 let upper_hz = f64::from(high_hz[i]).max(lower_hz);

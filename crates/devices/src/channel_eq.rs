@@ -222,7 +222,7 @@ struct Chain([Biquad; 5]);
 impl Chain {
     fn set(&mut self, plan: &Plan) {
         for (section, c) in self.0.iter_mut().zip(plan.sections()) {
-            section.c = c;
+            section.set(c);
         }
     }
 
@@ -279,7 +279,7 @@ impl NativeDevice for Strip {
         let high_pass = params.value(at(HIGH_PASS)) >= 0.5;
         let mut i = 0;
         while i < frames {
-            if self.tick % REFRESH_FRAMES == 0 {
+            if self.tick.is_multiple_of(REFRESH_FRAMES) {
                 self.plan = Plan::new(
                     high_pass,
                     f64::from(low[i]),

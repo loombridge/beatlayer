@@ -260,7 +260,7 @@ impl NativeDevice for Shutter {
 
         // 1. The detector and the gate's opening, frame by frame.
         for i in 0..frames {
-            if self.tick % REFRESH_FRAMES == 0 {
+            if self.tick.is_multiple_of(REFRESH_FRAMES) {
                 let (open, closing) = (f64::from(threshold[i]), f64::from(hysteresis[i]));
                 self.settings = Settings {
                     open_level: db_to_gain(open) as f32,

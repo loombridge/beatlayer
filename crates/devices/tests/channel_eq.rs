@@ -225,6 +225,17 @@ fn output_scales_the_result_and_reaches_minus_infinity() {
     assert!(silent.iter().flatten().all(|s| *s == 0.0));
 }
 
+// Spec: channel-eq R2
+#[test]
+fn switching_the_high_pass_off_leaves_nothing_of_it_behind() {
+    let input = noise(2048);
+    let mut node = strip(&[(HIGH_PASS, 1.0)], 1024);
+    run(node.as_mut(), &input[..1024], &[]);
+    // The next block is flat from its first frame on: the output is the input.
+    let out = run(node.as_mut(), &input[1024..], &[set(0, HIGH_PASS, 0.0)]);
+    assert_eq!(out[0], &input[1024..]);
+}
+
 // Spec: channel-eq R8
 #[test]
 fn renders_are_bit_identical_at_any_block_size_and_add_no_latency() {

@@ -103,6 +103,17 @@ pub(crate) struct Biquad {
 }
 
 impl Biquad {
+    /// Uses `c` from now on. A section that passes its input as it is
+    /// (`b0` 1, the rest 0) also forgets its state, so what an earlier shape
+    /// left in it doesn't leak out once.
+    pub(crate) fn set(&mut self, c: Coeffs) {
+        if c.b0 == 1.0 && c.b1 == 0.0 && c.b2 == 0.0 && c.a1 == 0.0 && c.a2 == 0.0 {
+            self.z1 = 0.0;
+            self.z2 = 0.0;
+        }
+        self.c = c;
+    }
+
     /// Its output for `x`, advancing its state.
     #[inline]
     pub(crate) fn process(&mut self, x: f32) -> f32 {

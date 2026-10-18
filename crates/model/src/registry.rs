@@ -1806,14 +1806,18 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as \
-            the slot's Map button and a click on the parameter's control do. `target` is a mixer \
-            control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any \
-            device on any track, but not a parameter of the modulator itself. The slot's earlier \
-            mapping is replaced; one modulator doesn't map one parameter twice. A modulator in \
-            Remote Control can't map a parameter another modulator in Remote Control holds. The \
-            mapping is saved with the set, goes with its target when that is deleted, and shows \
-            in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).",
+        description: "Maps one of a modulator's slots (`slot`, 0 to 7; the Play Mod's are 0 to 4) \
+            to a parameter, as the slot's Map button and a click on the parameter's control do. \
+            `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a \
+            parameter of any device on any track, but not a parameter of the modulator itself. \
+            The slot's earlier mapping is replaced; one modulator doesn't map one parameter \
+            twice. A modulator in Remote Control can't map a parameter another modulator in \
+            Remote Control holds. A modulator driven by audio, notes or MIDI (the Level Mod, \
+            Gate Mod, Strike Mod and Play Mod) doesn't map another modulator's parameters, nor \
+            one on a track that feeds its own track, which would make the two tracks wait on each \
+            other. The mapping is saved with the set, goes with its target when that is deleted, \
+            and shows in the `mappings` field of the query tool's `device`. One undo step (Map \
+            Modulator).",
     },
     Entry {
         id: "modulator.unmap",
@@ -1822,7 +1826,8 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap \
+        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Play Mod's \
+            are 0 to 4), as its Unmap \
             button does: the parameter plays its own value again from the next frame. A slot \
             with no mapping stays as it is. One undo step (Unmap Modulator).",
     },
@@ -1833,12 +1838,13 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
-            does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
-            `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
-            place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \
-            there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit \
-            Shape).",
+        description: "Replaces the breakpoint shape of a Curve Mod or a Strike Mod, as every edit \
+            of its display does (adding, moving, bending or deleting a breakpoint, making one \
+            the sustain breakpoint, Clear and the six presets). `points` lists up to 64 \
+            breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the \
+            output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 \
+            straight) and `sustain` (true on the Strike Mod's sustain breakpoint, at most one in \
+            a shape). An empty list outputs 0. One undo step (Edit Shape).",
     },
     Entry {
         id: "device.compare_switch",

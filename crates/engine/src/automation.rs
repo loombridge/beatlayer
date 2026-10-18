@@ -20,8 +20,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::modulation::Travel;
 use bl_model::modulator::ModTarget;
 use bl_model::{
-    AutomationTarget, ClipData, DeviceId, EnvelopeKind, MidiData, MixerParam, ParamId, SceneId,
-    TrackId, curve_value,
+    AutomationTarget, ClipData, EnvelopeKind, MidiData, MixerParam, ParamId, SceneId, TrackId,
+    curve_value,
 };
 
 use crate::mixer;
@@ -698,7 +698,7 @@ pub(crate) fn lists(
     track: TrackId,
     rate: SampleRate,
     delay: impl Fn(NodeKey) -> i64,
-    rows: &BTreeMap<DeviceId, u32>,
+    rows: &modbus::ModRows,
 ) -> Vec<(NodeKey, AutomationList)> {
     let Some(track) = document.track(track) else {
         return Vec::new();
@@ -769,10 +769,10 @@ pub(crate) fn lists(
     // from any track.
     for owner in document.tracks() {
         for device in owner.devices_deep() {
-            let Some(&modulator) = rows.get(&device.id) else {
-                continue;
-            };
             for mapping in &device.mappings {
+                let Some(row) = rows.row_of(document, owner, device, mapping) else {
+                    continue;
+                };
                 let target = match mapping.target {
                     ModTarget::Mixer { track: t, param } if t == track.id() => {
                         target_node(t, &AutomationTarget::Mixer { param })
@@ -791,9 +791,7 @@ pub(crate) fn lists(
                     continue;
                 };
                 if let Some(entries) = lists.get_mut(&key) {
-                    entries
-                        .mapped
-                        .push((param, modbus::row(modulator, mapping.slot)));
+                    entries.mapped.push((param, row + mapping.slot as u32 * 2));
                 }
             }
         }

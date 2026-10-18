@@ -11,7 +11,7 @@ use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
 use crate::display::DisplayReader;
-use crate::modbus::{Bus, Control};
+use crate::modbus::{Bus, Control, ROWS};
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
@@ -486,6 +486,10 @@ pub struct Block<'a> {
     pub(crate) session: &'a [SessionPlayback],
     /// What the modulators wrote for the frames of this block (WP-5.10).
     pub(crate) modulation: Bus<'a>,
+    /// Where a modulator driven by audio, notes or MIDI writes its rows
+    /// while its track runs (WP-5.11): [`ROWS`] rows, `stride` apart. `None`
+    /// for any other node.
+    pub(crate) rows: Option<&'a mut [f32]>,
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -537,6 +541,7 @@ impl<'a> Block<'a> {
             notes_out: None,
             session: &[],
             modulation: Bus::EMPTY,
+            rows: None,
         }
     }
 
@@ -564,6 +569,27 @@ impl<'a> Block<'a> {
     #[must_use]
     pub fn with_modulation(self, modulation: Bus<'a>) -> Self {
         Self { modulation, ..self }
+    }
+
+    /// The same block with rows for a modulator driven by audio, notes or
+    /// MIDI to write ([`ROWS`] of them, `stride` apart). For tests of nodes
+    /// outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `rows` is too short.
+    #[must_use]
+    pub fn with_rows(self, rows: &'a mut [f32]) -> Self {
+        assert!(
+            rows.len() >= ROWS * self.stride,
+            "{ROWS} rows of {} don't fit {} values",
+            self.stride,
+            rows.len()
+        );
+        Self {
+            rows: Some(rows),
+            ..self
+        }
     }
 
     /// The same block with the Session slots playing on the tracks
@@ -623,6 +649,17 @@ impl<'a> Block<'a> {
     /// parameters.
     pub fn modulation(&self) -> Bus<'a> {
         self.modulation
+    }
+
+    /// Row `index` of the rows a modulator driven by audio, notes or MIDI
+    /// writes (WP-5.11), over the block's frames; empty for a node that
+    /// writes none.
+    pub fn row_mut(&mut self, index: usize) -> &mut [f32] {
+        let (stride, frames) = (self.stride, self.frames);
+        match self.rows.as_deref_mut() {
+            Some(rows) if index < ROWS => &mut rows[index * stride..index * stride + frames],
+            _ => &mut [],
+        }
     }
 
     /// The Session slots playing on the tracks, each with the song frame

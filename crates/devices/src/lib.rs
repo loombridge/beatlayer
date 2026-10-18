@@ -50,10 +50,12 @@ pub mod eq;
 pub mod filter_delay;
 mod framework;
 pub mod gate;
+pub mod gate_mod;
 pub mod grain_delay;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
+pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
@@ -63,6 +65,7 @@ pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
 pub mod overdrive;
+pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -70,7 +73,9 @@ pub mod sampler;
 pub mod saturator;
 mod sections;
 pub mod shifter;
+mod signal_mod;
 pub mod stack;
+pub mod strike_mod;
 pub mod testing;
 pub mod three_band_eq;
 pub mod touch;
@@ -143,6 +148,14 @@ pub fn display(
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
+        bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
+        bl_model::modulator::STRIKE_MOD => {
+            Some(strike_mod::display(device, description, values, data))
+        }
+        bl_model::modulator::GATE_MOD => Some(gate_mod::display(device, description, values, data)),
+        bl_model::modulator::LEVEL_MOD => {
+            Some(level_mod::display(device, description, values, data))
+        }
         MULTIBAND_DYNAMICS => Some(multiband_dynamics::display(
             device,
             description,
@@ -176,6 +189,10 @@ pub fn register(registry: &mut Registry) {
     drum_sampler::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
+    level_mod::register(registry);
+    gate_mod::register(registry);
+    strike_mod::register(registry);
+    play_mod::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);

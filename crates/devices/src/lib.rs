@@ -30,6 +30,7 @@
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod auto_filter;
 pub mod compressor;
 pub mod crusher;
 pub mod degrade;
@@ -56,6 +57,7 @@ pub mod touch;
 pub mod utility;
 pub mod wax;
 
+pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use degrade::{DEGRADE, degrade_type};
@@ -97,6 +99,7 @@ pub fn display(
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
@@ -126,6 +129,7 @@ pub fn register(registry: &mut Registry) {
     degrade::register(registry);
     crusher::register(registry);
     wax::register(registry);
+    auto_filter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

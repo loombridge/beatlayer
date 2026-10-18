@@ -3677,7 +3677,7 @@ impl Shell {
                                     start,
                                     length: ticks(pass.song_start + Frames(pass.frames as i64))
                                         .saturating_sub(start),
-                                    data,
+                                    data: data.clone(),
                                 }],
                             },
                         })?;
@@ -4642,6 +4642,87 @@ impl Shell {
         }
     }
 
+    /// Spec: warping R7, R11. A warp marker edit on several clips needs
+    /// files as long as each other's, and a marker can't leave its file; the
+    /// document doesn't hold the media, so the check is made here, when the
+    /// media store knows the files' lengths.
+    fn check_warp_files(&self, id: &str, args: &Value) -> Result<(), ShellError> {
+        use bl_model::Command;
+        let refuse = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let Ok(command) = model::command_from_args(id, args.clone()) else {
+            return Ok(());
+        };
+        let document = self.editor.document();
+        // Each clip's file length in seconds, where the store knows it.
+        let length = |clip: &bl_model::ClipId| {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(*clip).map(|c| &c.data)
+            else {
+                return None;
+            };
+            let info = self
+                .media
+                .info(bl_media::ContentHash::from_bytes(audio.media.0))
+                .ok()?;
+            Some(info.frames? as f64 / f64::from(info.sample_rate))
+        };
+        let (clips, places) =
+            match &command {
+                Command::InsertWarpMarker { clips, .. }
+                | Command::ShiftWarpMarker { clips, .. } => (clips, true),
+                Command::MoveWarpMarkers { clips, .. }
+                | Command::DeleteWarpMarkers { clips, .. } => (clips, false),
+                _ => return Ok(()),
+            };
+        let lengths: Vec<Option<f64>> = clips.iter().map(length).collect();
+        let known: Vec<f64> = lengths.iter().flatten().copied().collect();
+        if known.len() == clips.len()
+            && known
+                .windows(2)
+                .any(|pair| (pair[0] - pair[1]).abs() > 1e-9)
+        {
+            return Err(refuse(
+                "the clips' files aren't all as long as each other's".to_owned(),
+            ));
+        }
+        if !places {
+            return Ok(());
+        }
+        for (&clip, length) in clips.iter().zip(lengths) {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(clip).map(|c| &c.data)
+            else {
+                continue;
+            };
+            let at = match &command {
+                // A shift moves a marker from where it is.
+                Command::ShiftWarpMarker { marker, by, .. } => {
+                    audio.warp_markers.get(*marker).map(|m| m.time + by)
+                }
+                Command::InsertWarpMarker {
+                    time: Some(time), ..
+                } => Some(*time),
+                // A marker put on a beat goes at the time the map places it.
+                Command::InsertWarpMarker {
+                    beat: Some(beat), ..
+                } => audio
+                    .warp_map()
+                    .ok()
+                    .map(|map| map.beat_to_time(beat.get() as f64)),
+                _ => None,
+            };
+            if let (Some(at), Some(length)) = (at, length)
+                && at > length + 1e-9
+            {
+                return Err(refuse(format!(
+                    "the marker would leave the file, which is {length} seconds long"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
@@ -4705,6 +4786,7 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
+            self.check_warp_files(id, &args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.

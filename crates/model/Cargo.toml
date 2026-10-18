@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 bl-commands.workspace = true
 bl-core = { workspace = true, features = ["serde", "schemars"] }
+# The warp map's arithmetic (WP-4.1).
+bl-stretch.workspace = true
 # Parameter descriptors, re-exported from `param` (the plug-in kit).
 lspk-params.workspace = true
 imbl = { version = "7.0.2", features = ["serde"] }

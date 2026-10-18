@@ -456,7 +456,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
 | 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
-| 4.2 | todo |  |  |
+| 4.2 | done | 18 October 2026 | [#178](https://github.com/loombridge/beatlayer/pull/178); warped clips play through a table from song frames to file positions under the tempo map, sent as node data, with Re-Pitch on a warp-mode interface, the HiQ and RAM switches, loops only on warped clips, and four commands for the mode, its settings and the switches; [the spec](specs/warp-modes.md) |
 | 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
 | 4.4 | todo |  |  |
 | 4.5 | todo |  |  |
@@ -491,7 +491,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.11 | todo |  |  |
 | 5.12 | done | 17 October 2026 | [#121](https://github.com/loombridge/beatlayer/pull/121); every native device holds A and B states, switched with P or the Edit and device menus' Compare items as one undo step that glides and overrides its envelopes, copied either way, and saved with the set; racks and plug-ins offer none; [the spec](specs/device-compare.md) |
 | 5.13 | done | 18 October 2026 | [#126](https://github.com/loombridge/beatlayer/pull/126); Mosaic, the multisampler, plays ordered layers chosen by key, velocity and the Sample Selector, with zone fades, Round Robin, loops, three interpolation kernels and its volume envelope, edited in the zone editor and Sample tab as one undo step each and sent to its node as data; [the spec](specs/multisampler.md) |
-| 5.14 | todo |  |  |
+| 5.14 | done | 18 October 2026 | [#175](https://github.com/loombridge/beatlayer/pull/175); Mosaic gains its Pitch/Osc, Filter/Global, Modulation and MIDI tabs, run per note with 21 routable destinations, and imports SFZ instruments by drop, the browser and `device.import_sfz`. |
 | 5.15 | done | 18 October 2026 | [#174](https://github.com/loombridge/beatlayer/pull/174); Snapshot and the multisampler draw their sample with its flags, loop and slices, select by Shift-drag and audition by a click, keep a non-destructive edit list (Trim, Cut, Reverse, fades, Normalize) rendered off the audio thread, write Crop and Reverse as processed copies, and convert into each other; [the spec](specs/multisampler.md) |
 | 5.15b | todo |  |  |
 | 5.16 | todo |  |  |

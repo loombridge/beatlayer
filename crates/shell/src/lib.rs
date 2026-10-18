@@ -70,6 +70,7 @@ pub mod auto_warp;
 mod automation_record;
 pub mod browser;
 mod chord_learn;
+pub mod clip_defaults;
 pub mod clip_view;
 pub mod devices;
 pub mod export;

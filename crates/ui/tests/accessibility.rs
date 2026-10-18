@@ -1458,6 +1458,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let sample_editor =
         LaterView("the Sample Editor and the Audio Utilities panel's warp controls (WP-4.10)");
+    let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
@@ -2059,6 +2060,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.set_warp", Exception(sample_editor)),
+        ("clip.set_warp_mode", Exception(sample_editor)),
+        ("clip.set_warp_settings", Exception(sample_editor)),
+        ("clip.set_ram_mode", Exception(sample_editor)),
+        ("clip.set_high_quality", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
         ("clip.insert_warp_markers", Exception(sample_editor)),
         ("clip.set_1_1_1_here", Exception(sample_editor)),
@@ -2070,6 +2075,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.reset_transients", Exception(sample_editor)),
         ("clip.move_transient", Exception(sample_editor)),
         ("clip.transients", Exception(sample_editor)),
+        ("clip.save_default", Exception(clip_title_bar)),
+        ("clip.defaults", Exception(clip_title_bar)),
         ("clip.move_warp_markers", Exception(sample_editor)),
         ("clip.shift_warp_marker", Exception(sample_editor)),
         ("clip.delete_warp_markers", Exception(sample_editor)),
@@ -2387,6 +2394,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Hot-Swap Sample (`device.hot_swap_layer`), then Enter in the browser \
                  (`browser.load_selected`) on the file",
+            )),
+        ),
+        (
+            "device.import_sfz",
+            Exception(Equivalent(
+                "`browser.load_selected`, which Enter runs on a selected SFZ instrument in the \
+                 browser and loads as a multisampler (multisampler R47); this form names the \
+                 file, the track or the device",
             )),
         ),
         (

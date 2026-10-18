@@ -209,13 +209,7 @@ pub fn add_files(
             }
             let track = current.expect("a track is chosen or made above");
             // Spec: warping R33. The warp settings come from the file.
-            let new = new_clip(
-                file.media.hash,
-                file.seconds,
-                editor.document(),
-                at,
-                warping,
-            );
+            let new = new_clip(&file.media, file.seconds, editor.document(), at, warping);
             let length = new.length;
             let id = editor.new_id();
             // Spec: audio-clips R7. With Create Fades on Clip Edges on, a

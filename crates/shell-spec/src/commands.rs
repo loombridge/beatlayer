@@ -1149,8 +1149,7 @@ fn specs() -> Vec<CommandSpec> {
                 "Chooses Default Warp Mode on the Settings window's Record, Warp & Launch \
                  page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or \
                  `complex_pro`) a new warped clip takes. It's `beats` in a new install, as \
-                 Live's is. Clips already in the set keep their modes, and warp modes aren't \
-                 built into clips yet, so for now it only keeps the choice. The setting is \
+                 Live's is. Clips already in the set keep their modes. The setting is \
                  kept for the next start, and isn't part of the set or an undo step.",
             )
             .permission(Permission::Edit)

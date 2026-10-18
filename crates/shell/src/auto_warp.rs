@@ -7,11 +7,13 @@ use bl_analysis::cache::{Analysis, AnalysisCache};
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::ContentHash as MediaHash;
 use bl_model::{
-    AudioData, ContentHash, Document, EVEN_LOOP_BARS, FileBeats, WarpMarker, loop_bpm, nearest_bars,
+    AudioData, ContentHash, Document, EVEN_LOOP_BARS, FileBeats, WarpMarker, WarpMode, loop_bpm,
+    nearest_bars,
 };
-use bl_shell_spec::settings::{LoopWarpShortSamples, WarpPrefs};
+use bl_shell_spec::settings::{DefaultWarpMode, LoopWarpShortSamples, WarpPrefs};
 
-use crate::browser::arrange::length_at;
+use crate::browser::arrange::{MediaFile, length_at};
+use crate::clip_defaults;
 
 /// A sample of this many seconds or more is a long one (R31): Beatlayer's
 /// own threshold.
@@ -42,22 +44,52 @@ pub struct NewClip {
     pub length: Ticks,
 }
 
+/// The warp mode Default Warp Mode names.
+#[must_use]
+pub fn warp_mode(setting: DefaultWarpMode) -> WarpMode {
+    match setting {
+        DefaultWarpMode::Beats => WarpMode::Beats,
+        DefaultWarpMode::Tones => WarpMode::Tones,
+        DefaultWarpMode::Texture => WarpMode::Texture,
+        DefaultWarpMode::RePitch => WarpMode::RePitch,
+        DefaultWarpMode::Complex => WarpMode::Complex,
+        DefaultWarpMode::ComplexPro => WarpMode::ComplexPro,
+    }
+}
+
+/// `audio` as a clip added at `at`: a warped one lasts from its Start to its
+/// End marker, any other as long as the file plays at the set's tempo (R33).
+fn sized(audio: AudioData, seconds: f64, doc: &Document, at: Ticks) -> NewClip {
+    let length = match audio.warp.then(|| audio.warp_map().ok()).flatten() {
+        Some(map) => {
+            let end = audio.end.unwrap_or_else(|| map.time_to_beat(seconds));
+            Ticks(((end - audio.start).round() as i64).max(1))
+        }
+        None => length_at(doc, at, seconds),
+    };
+    NewClip { audio, length }
+}
+
 /// The clip a file of `seconds` becomes when it is added at `at` (R33): the
-/// warp settings its preferences ask for, waiting for the file's analysis
-/// where they need it (R36), or a plain unwarped clip that plays as long as
-/// the file does at the set's tempo.
+/// settings saved for the file (R42) if it has any, else the warp settings
+/// its preferences ask for, waiting for the file's analysis where they need
+/// it (R36), or a plain unwarped clip that plays as long as the file does at
+/// the set's tempo.
 #[must_use]
 pub fn new_clip(
-    media: ContentHash,
+    file: &MediaFile,
     seconds: f64,
     doc: &Document,
     at: Ticks,
     warping: Warping<'_>,
 ) -> NewClip {
-    let plain = || NewClip {
-        audio: AudioData::new(media),
-        length: length_at(doc, at, seconds),
-    };
+    let media = file.hash;
+    if let Some(audio) = clip_defaults::load(&file.path, media)
+        .and_then(|defaults| AudioData::new(media).with_defaults(&defaults).ok())
+    {
+        return sized(audio, seconds, doc, at);
+    }
+    let plain = || sized(AudioData::new(media), seconds, doc, at);
     let short = seconds < SHORT_SAMPLE_SECONDS;
     let wanted = if short {
         warping.prefs.loop_warp_short_samples != LoopWarpShortSamples::UnwarpedOneShot
@@ -94,14 +126,11 @@ pub fn new_clip(
     let Some(audio) = warped else {
         return plain();
     };
-    let Ok(map) = audio.warp_map() else {
-        return plain();
+    let audio = AudioData {
+        warp_mode: warp_mode(warping.prefs.default_warp_mode),
+        ..audio
     };
-    let end = audio.end.unwrap_or_else(|| map.time_to_beat(seconds));
-    NewClip {
-        length: Ticks(((end - audio.start).round() as i64).max(1)),
-        audio,
-    }
+    sized(audio, seconds, doc, at)
 }
 
 /// A short sample's data under `setting` (R32, R34): warped as a loop of
@@ -146,7 +175,13 @@ fn warp_short(
 /// seconds in the file; they become ticks. A tempo ramp counts as a straight
 /// segment between its ends.
 #[must_use]
-pub fn warp_recorded(audio: AudioData, tempo: &TempoMap, start: Ticks, end: Ticks) -> AudioData {
+pub fn warp_recorded(
+    audio: AudioData,
+    tempo: &TempoMap,
+    start: Ticks,
+    end: Ticks,
+    mode: WarpMode,
+) -> AudioData {
     let from = tempo.ticks_to_seconds(start);
     let mut markers = vec![WarpMarker {
         time: audio.start,
@@ -163,5 +198,10 @@ pub fn warp_recorded(audio: AudioData, tempo: &TempoMap, start: Ticks, end: Tick
             }),
     );
     let bpm = tempo.bpm_at(end.saturating_sub(Ticks(1)).max(start)).get();
-    audio.warped_by(markers, bpm).unwrap_or(audio)
+    audio
+        .warped_by(markers, bpm)
+        .map_or(audio, |warped| AudioData {
+            warp_mode: mode,
+            ..warped
+        })
 }

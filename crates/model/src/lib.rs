@@ -87,9 +87,10 @@ mod scene;
 mod shared;
 mod track;
 mod warp;
+mod warp_settings;
 
 pub use auto_warp::{
-    EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm, nearest_bars,
+    ClipDefaults, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm, nearest_bars,
 };
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -138,3 +139,7 @@ pub use track::{
     TrackKind,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
+pub use warp_settings::{
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
+    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+};

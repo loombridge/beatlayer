@@ -3521,6 +3521,7 @@ impl Shell {
         let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
         let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         // shortcut: a take that went round the loop copies no Session
         // clips; upgrade when Live's behaviour there is observed.
@@ -3573,7 +3574,7 @@ impl Shell {
                         let audio = AudioData::new(*hash);
                         // Spec: warping R37.
                         let audio = if warp_recorded {
-                            auto_warp::warp_recorded(audio, &tempo, start, end)
+                            auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
                         } else {
                             audio
                         };
@@ -3675,6 +3676,7 @@ impl Shell {
         let tempo = self.editor.document().settings().tempo.clone();
         let edge_fades = self.create_fades_on_clip_edges();
         let warp_recorded = self.warp_recorded_audio();
+        let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
         let (lead_in, passes) = crate::recording::passes(take, frames);
         let seconds = |frames: u64| frames as f64 / rate.as_f64();
@@ -3695,7 +3697,7 @@ impl Shell {
             let audio = if warp_recorded {
                 let start = ticks(pass.song_start);
                 let end = ticks(pass.song_start + Frames(pass.frames as i64));
-                auto_warp::warp_recorded(audio, &tempo, start, end)
+                auto_warp::warp_recorded(audio, &tempo, start, end, warp_mode)
             } else {
                 audio
             };
@@ -5183,6 +5185,28 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_sfz()
+        {
+            // Spec: multisampler R47. A selected SFZ instrument loads as a
+            // multisampler onto the selected track if it is a MIDI track,
+            // otherwise onto a new one.
+            Self::args::<NoArgs>(id, args)?;
+            let doc = self.editor.document();
+            let track = self
+                .arrangement
+                .selected_tracks()
+                .first()
+                .copied()
+                .filter(|track| {
+                    doc.track(*track)
+                        .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi)
+                });
+            return self.run_multisampler(
+                multisampler_ids::IMPORT_SFZ,
+                json!({ "path": path.to_string_lossy(), "track": track }),
+            );
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some((device, layer, path)) = self.hot_swapped_layer_file()

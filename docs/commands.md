@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-432 commands in 35 areas.
+439 commands in 35 areas.
 
 ## Permission classes
 
@@ -138,6 +138,7 @@ Each command has:
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
+| [`clip.defaults`](#clipdefaults) | Clip Defaults | `read` |  |  |
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
@@ -154,6 +155,7 @@ Each command has:
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
+| [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
@@ -163,6 +165,7 @@ Each command has:
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | Set Clip Follow Actions | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
+| [`clip.set_high_quality`](#clipset_high_quality) | Set Clip High Quality | `edit` |  |  |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
 | [`clip.set_legato`](#clipset_legato) | Set Clip Legato | `edit` |  |  |
@@ -172,10 +175,13 @@ Each command has:
 | [`clip.set_midi_loop`](#clipset_midi_loop) | Set MIDI Clip Loop | `edit` |  |  |
 | [`clip.set_midi_region`](#clipset_midi_region) | Set MIDI Clip Start and End | `edit` |  |  |
 | [`clip.set_mute`](#clipset_mute) | Activate/Deactivate Clip | `edit` | `0` | `0` |
+| [`clip.set_ram_mode`](#clipset_ram_mode) | Set Clip RAM Mode | `edit` |  |  |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
 | [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
+| [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
+| [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
@@ -206,6 +212,7 @@ Each command has:
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
+| [`device.import_sfz`](#deviceimport_sfz) | Import SFZ | `external` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | Insert Device in Chain | `edit` |  |  |
 | [`device.insert_layers`](#deviceinsert_layers) | Add Samples | `edit` |  |  |
@@ -2393,6 +2400,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.defaults`
+
+**Clip Defaults**. Permission: `read`. Contexts: `clip-view`.
+
+Reads the defaults saved for an audio clip's file by `clip.save_default`: its `file`, the `<sample file name>.beatlayer-clip` beside the sample, and the `defaults` in it, or `null` when none are saved or the file does not hold settings for this content. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.delete`
 
 **Delete Clip**. Permission: `destructive`. Contexts: `arrangement`.
@@ -2683,6 +2706,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.save_default`
+
+**Save Default Clip**. Permission: `external`. Contexts: `clip-view`.
+
+Saves an audio clip's Warp switch, warp markers and tempo, warp mode and mode controls (which hold its Transpose and Detune), and gain as its file's defaults, as the Save button in the clip's title bar does: into a small file of Beatlayer's own, `<sample file name>.beatlayer-clip`, beside the sample, so the defaults travel with it, replacing any saved before. A clip made from the file afterwards (dropped from the browser, loaded with Enter or imported) starts with them and is not auto-warped; clips already in the set don't change. Fails with the reason, and writes nothing, if the folder can't be written or the clip's file isn't known. Changes nothing in the set and is no undo step; writes a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.scale_tempo`
 
 **Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
@@ -2855,6 +2894,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_high_quality`
+
+**Set Clip High Quality**. Permission: `edit`. Contexts: `clip-view`.
+
+Switches an audio clip's high-quality interpolation (`data.audio.high_quality`, on for a new clip). On, the clip is resampled by a band-limited interpolator wherever it is read at a rate other than 1, as Re-Pitch does at any speed but 1, at more CPU and with less distortion; off, by a cheaper one. Where no resampling happens it changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `high_quality` | boolean | yes | Whether the clip is resampled by the band-limited interpolator. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_launch_mode`
 
 **Set Clip Launch Mode**. Permission: `edit`. Contexts: `clip-view`.
@@ -2946,7 +3002,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Clip Loop On/Off**. Permission: `edit`. Contexts: `clip-view`.
 
-Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) for as long as it lasts in the arrangement; off, it plays from its Start marker to its End marker once. The Start marker must be before the brace's end to switch it on.
+Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) for as long as it lasts in the arrangement; off, it plays from its Start marker to its End marker once. The Start marker must be before the brace's end to switch it on. An audio clip can only loop while Warp is on (`clip.set_warp`): switching the loop on for an unwarped audio clip is refused.
 
 Default keys: none.
 
@@ -3016,6 +3072,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_ram_mode`
+
+**Set Clip RAM Mode**. Permission: `edit`. Contexts: `clip-view`.
+
+Switches an audio clip's RAM mode (`data.audio.ram`, off for a new clip). On, the clip's whole file is held in memory instead of streamed from disk, so it never underruns; the audio it plays is the same. Switching it while the clip plays leaves no gap.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `ram` | boolean | yes | Whether the clip's whole file is held in memory. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_region`
 
 **Set Clip Start and End**. Permission: `edit`. Contexts: `clip-view`.
@@ -3074,7 +3147,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Clip Warp On/Off**. Permission: `edit`. Contexts: `clip-view`.
 
-Switches an audio clip's Warp on or off. Off, the clip plays at its file's own speed whatever the set's tempo, and its Start and End markers and loop brace are seconds into the file. On, it follows the set's tempo through its warp map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the last marker), and its markers and brace are ticks of its contents. Switching on a clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's tempo there, so it goes on playing at the speed it did; switching off keeps the map. Either way the markers and brace convert, so each keeps its place in the audio, and the clip keeps its place and length in the arrangement. Until warped playback arrives (Phase 4), a warped clip still plays at its file's own speed.
+Switches an audio clip's Warp on or off. Off, the clip plays at its file's own speed whatever the set's tempo, and its Start and End markers and loop brace are seconds into the file. On, it follows the set's tempo through its warp map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the last marker), and its markers and brace are ticks of its contents. Switching on a clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's tempo there, so it goes on playing at the speed it did; switching off keeps the map. Either way the markers and brace convert, so each keeps its place in the audio, and the clip keeps its place and length in the arrangement. A warped clip plays through its warp map at the set's tempo, in its warp mode (`clip.set_warp_mode`); only a warped clip can loop, so switching Warp off also switches the clip's loop off in the same undo step.
 
 Default keys: none.
 
@@ -3084,6 +3157,43 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `warp` | boolean | yes | Whether the clip follows the set's tempo through its warp map. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_warp_mode`
+
+**Set Warp Mode**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets how a warped audio clip's audio is fitted to the speed its warp map sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` (`data.audio.warp_mode`; a new clip is `beats`). `re_pitch` plays the file faster or slower, so its pitch moves with the speed. An unwarped clip keeps its mode for when Warp goes back on, and every mode's controls stay with the clip. Until the other modes are built, they play as `re_pitch` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `mode` | [`WarpMode`](#warpmode) | yes | The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_warp_settings`
+
+**Set Warp Settings**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets controls of an audio clip's warp modes, named by mode, any of them in one undo step (`data.audio.warp_settings`; a control at its default isn't listed there). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 %, default 100), `envelope` (8 to 512, default 128). Give at least one control; a value out of range refuses the whole command.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `beats` | [`BeatsUpdate`](#beatsupdate) or null | no | Beats' controls to change. |
+| `complex_pro` | [`ComplexProUpdate`](#complexproupdate) or null | no | Complex Pro's controls to change. |
+| `texture` | [`TextureUpdate`](#textureupdate) or null | no | Texture's controls to change. |
+| `tones` | [`TonesUpdate`](#tonesupdate) or null | no | Tones' controls to change. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3641,6 +3751,24 @@ Arguments:
 | `on` | boolean or null | no | Start (true) or end (false) hot-swapping; starts if left out. |
 
 Result: [`MultisamplerState`](#multisamplerstate).
+
+#### `device.import_sfz`
+
+**Import SFZ**. Permission: `external`. Contexts: `device-view`.
+
+Imports an SFZ multisample instrument, the open text format, as a multisampler: each region becomes a layer (its sample, key and velocity zones with their crossfades as fades, Root Key, tuning, Volume, Pan, start and end points, loop and loop mode), and the device-wide settings most regions agree on (the volume, filter, filter and pitch envelopes, Vel > Vol, Pitch Bend Range, reverse, the fade law) set the new device's controls. Sequences (`seq_length`) turn Round Robin on in Forward mode, random windows (`lorand`) in Random mode. With `device`, a multisampler, only the layers are added, at the end of its list; otherwise a multisampler is made on `track`, or on a new MIDI track below the last. The samples join the set's media where they lie. Regions whose sample is missing or isn't audio, or whose `trigger` isn't `attack`, are left out and named in `left_out`; opcodes the import doesn't read are listed in `unread`. A file with no region left changes nothing. One undo step. It reads files outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The `.sfz` file. |
+| `device` | [`DeviceId`](#deviceid) or null | no | A multisampler to add the regions to as layers, at the end of its list. Left out, the import makes a multisampler: on `track`, or on a new MIDI track below the last track. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track to put a new multisampler on, after its other devices. Ignored with `device`. |
+
+Result: [`SfzImported`](#sfzimported).
 
 #### `device.insert`
 
@@ -4495,7 +4623,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Change Sample Settings**. Permission: `edit`. Contexts: `device-view`.
 
-Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
+Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
 
 Default keys: none.
 
@@ -6945,7 +7073,7 @@ Result: nothing (`null`).
 
 **Default Warp Mode**. Permission: `edit`. Contexts: `settings`.
 
-Chooses Default Warp Mode on the Settings window's Record, Warp & Launch page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro`) a new warped clip takes. It's `beats` in a new install, as Live's is. Clips already in the set keep their modes, and warp modes aren't built into clips yet, so for now it only keeps the choice. The setting is kept for the next start, and isn't part of the set or an undo step.
+Chooses Default Warp Mode on the Settings window's Record, Warp & Launch page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro`) a new warped clip takes. It's `beats` in a new install, as Live's is. Clips already in the set keep their modes. The setting is kept for the next start, and isn't part of the set or an undo step.
 
 Default keys: none.
 
@@ -8128,6 +8256,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
+| [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
@@ -8137,6 +8266,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`clip.set_follow_actions`](#clipset_follow_actions) | the query tool's `clip` | `launch.follow` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
+| [`clip.set_high_quality`](#clipset_high_quality) | the query tool's `clip` | `data.audio.high_quality` |
 | [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
 | [`clip.set_legato`](#clipset_legato) | the query tool's `clip` | `launch.legato` |
@@ -8146,10 +8276,13 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_midi_loop`](#clipset_midi_loop) | the query tool's `clip` | `data.midi.loop_start` |
 | [`clip.set_midi_region`](#clipset_midi_region) | the query tool's `clip` | `data.midi.start` |
 | [`clip.set_mute`](#clipset_mute) | the query tool's `clip` | `mute` |
+| [`clip.set_ram_mode`](#clipset_ram_mode) | the query tool's `clip` | `data.audio.ram` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.set_warp`](#clipset_warp) | the query tool's `clip` | `data.audio.warp` |
+| [`clip.set_warp_mode`](#clipset_warp_mode) | the query tool's `clip` | `data.audio.warp_mode` |
+| [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -8170,6 +8303,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
 | [`device.edit_sample`](#deviceedit_sample) | the query tool's `device` | `sample_edits` |
 | [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
+| [`device.import_sfz`](#deviceimport_sfz) | the query tool's `device` | `layers` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
 | [`device.insert_layers`](#deviceinsert_layers) | the query tool's `device` | `layers` |
@@ -9049,15 +9183,19 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `fade_in` | number, at least 0 | no | The fade-in's length in seconds, from the clip's start in the Arrangement: 0 (no fade) unless given. |
 | `fade_out` | number, at least 0 | no | The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given. |
 | `gain` | number, at least 0 | no | The clip's gain, as a linear gain: 1 (0 dB) unless given, 0.5 about −6 dB, and 0 silence (−∞ dB). Finite and 0 or more. |
+| `high_quality` | boolean | no | The HiQ switch (R12): on unless given. On, the clip is resampled by a band-limited interpolator wherever it is read at another rate than 1. |
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
 | `loop_start` | number, at least 0 | no | Where the loop brace starts in the file, in seconds. 0 or more; 0 unless given. |
 | `looping` | boolean | no | The Loop switch: whether the clip repeats its loop brace. Off unless given. |
+| `ram` | boolean | no | The RAM switch (R11): off unless given. On, the clip's whole file is held in memory instead of streamed. |
 | `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
 | `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
 | `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
+| `warp_mode` | [`WarpMode`](#warpmode) | no | The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on. |
+| `warp_settings` | [`WarpSettings`](#warpsettings) | no | Every mode's controls (R2): each at the table's default unless given. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9091,6 +9229,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "minimum": 0.0,
       "type": "number"
     },
+    "high_quality": {
+      "description": "The HiQ switch (R12): on unless given. On, the clip is resampled by a band-limited interpolator wherever it is read at another rate than 1.",
+      "type": "boolean"
+    },
     "loop_end": {
       "description": "Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it.",
       "format": "double",
@@ -9112,6 +9254,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
     "media": {
       "$ref": "#/$defs/ContentHash",
       "description": "The media file the clip plays, by content hash."
+    },
+    "ram": {
+      "description": "The RAM switch (R11): off unless given. On, the clip's whole file is held in memory instead of streamed.",
+      "type": "boolean"
     },
     "signature": {
       "anyOf": [
@@ -9154,6 +9300,14 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
         "$ref": "#/$defs/WarpMarker"
       },
       "type": "array"
+    },
+    "warp_mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on."
+    },
+    "warp_settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Every mode's controls (R2): each at the table's default unless given."
     }
   },
   "required": [
@@ -9824,6 +9978,102 @@ One octave band.
     "high_hz",
     "level_db"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BeatsSettings`
+
+Beats' controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `preserve` | [`Preserve`](#preserve) | no | What it preserves: transients unless given. |
+| `transient_envelope` | integer from 0 to 100 | no | How far each segment fades, 0 to 100: 100 (no fade) unless given. |
+| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) | no | What it does when a segment runs out: Loop Forward unless given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Beats' controls.",
+  "properties": {
+    "preserve": {
+      "$ref": "#/$defs/Preserve",
+      "description": "What it preserves: transients unless given."
+    },
+    "transient_envelope": {
+      "description": "How far each segment fades, 0 to 100: 100 (no fade) unless given.",
+      "format": "uint32",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "transient_loop_mode": {
+      "$ref": "#/$defs/TransientLoopMode",
+      "description": "What it does when a segment runs out: Loop Forward unless given."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `BeatsUpdate`
+
+Changes to Beats' controls: only the ones given change.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `preserve` | [`Preserve`](#preserve) or null | no | What it preserves. |
+| `transient_envelope` | integer or null | no | How far each segment fades, 0 to 100. |
+| `transient_loop_mode` | [`TransientLoopMode`](#transientloopmode) or null | no | What it does when a segment runs out. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Changes to Beats' controls: only the ones given change.",
+  "properties": {
+    "preserve": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Preserve"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "What it preserves."
+    },
+    "transient_envelope": {
+      "default": null,
+      "description": "How far each segment fades, 0 to 100.",
+      "format": "uint32",
+      "maximum": 100,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "transient_loop_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransientLoopMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "What it does when a segment runs out."
+    }
+  },
   "type": "object"
 }
 ```
@@ -10833,6 +11083,72 @@ One of:
 
 </details>
 
+### `ClipDefaults`
+
+An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `warp` | boolean | yes | The Warp switch. |
+| `warp_markers` | array of [`WarpMarker`](#warpmarker) | yes | The warp markers. |
+| `tempo` | number or null | yes | The clip's tempo in BPM; given whenever there are markers. |
+| `warp_mode` | [`WarpMode`](#warpmode) | yes | The warp mode. |
+| `warp_settings` | [`WarpSettings`](#warpsettings) | yes | Every mode's controls. |
+| `gain` | number | yes | The gain, as a linear gain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.",
+  "properties": {
+    "gain": {
+      "description": "The gain, as a linear gain.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The clip's tempo in BPM; given whenever there are markers.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "warp": {
+      "description": "The Warp switch.",
+      "type": "boolean"
+    },
+    "warp_markers": {
+      "description": "The warp markers.",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
+    },
+    "warp_mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode."
+    },
+    "warp_settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Every mode's controls."
+    }
+  },
+  "required": [
+    "warp",
+    "warp_markers",
+    "tempo",
+    "warp_mode",
+    "warp_settings",
+    "gain"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipEnvelope`
 
 An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).
@@ -11215,6 +11531,86 @@ What `arrangement.copy` put on the clipboard.
     "tracks",
     "length"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ComplexProSettings`
+
+Complex Pro's controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | integer from 8 to 512 | no | The detail of the spectral envelope, 8 to 512: 128 unless given. |
+| `formants` | number from 0 to 100 | no | How far the formants stay put when the pitch moves, 0 to 100 percent: 100 unless given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Complex Pro's controls.",
+  "properties": {
+    "envelope": {
+      "description": "The detail of the spectral envelope, 8 to 512: 128 unless given.",
+      "format": "uint32",
+      "maximum": 512,
+      "minimum": 8,
+      "type": "integer"
+    },
+    "formants": {
+      "description": "How far the formants stay put when the pitch moves, 0 to 100 percent: 100 unless given.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "type": "number"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ComplexProUpdate`
+
+Changes to Complex Pro's controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `envelope` | integer or null | no | The detail of the spectral envelope, 8 to 512. |
+| `formants` | number or null | no | How far the formants stay put, 0 to 100 percent. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Changes to Complex Pro's controls.",
+  "properties": {
+    "envelope": {
+      "default": null,
+      "description": "The detail of the spectral envelope, 8 to 512.",
+      "format": "uint32",
+      "maximum": 512,
+      "minimum": 8,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "formants": {
+      "default": null,
+      "description": "How far the formants stay put, 0 to 100 percent.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -14597,6 +14993,7 @@ One of:
 
 - `"folder"`: A folder.
 - `"audio"`: An audio file Beatlayer can open.
+- `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
@@ -14616,6 +15013,11 @@ One of:
     {
       "const": "audio",
       "description": "An audio file Beatlayer can open.",
+      "type": "string"
+    },
+    {
+      "const": "sfz",
+      "description": "An SFZ multisample instrument, which imports as a multisampler (WP-5.14).",
       "type": "string"
     },
     {
@@ -15257,6 +15659,7 @@ One sample of a multisample (R2).
 | `edits` | array of [`SampleEdit`](#sampleedit) | no | The sample's edits, applied in order to the media (WP-5.15, R55). The markers, [`length`](Self::length) and the sample the engine plays are the edited sample's; the source file is never written. |
 | `link` | boolean | no | Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off. |
 | `loop_detune` | number | no | How the voice is retuned inside a loop, in cents (R19). |
+| `one_shot` | boolean | no | Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`. |
 | `pan` | number | no | Its place in the stereo field, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) | no | What the note's end does inside a sustain loop (R18). |
 | `sustain` | [`SustainMode`](#sustainmode) | no | The sustain loop's kind (R17). |
@@ -15340,6 +15743,10 @@ One sample of a multisample (R2).
     "name": {
       "description": "Its name: the file's name until renamed.",
       "type": "string"
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`.",
+      "type": "boolean"
     },
     "pan": {
       "description": "Its place in the stereo field, −50 to 50.",
@@ -15494,6 +15901,7 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
 | `loop_detune` | number or null | no | The loop's Detune, −50 to 50 cents. |
 | `loop_end` | integer or null | no | Loop End, in frames. |
 | `loop_start` | integer or null | no | Loop Start, in frames. |
+| `one_shot` | boolean or null | no | Whether the layer's voices play on to Sample End whatever the note does. |
 | `pan` | number or null | no | Pan, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) or null | no | Release Mode. |
 | `release_loop` | integer or null | no | The Release Loop point, in frames. |
@@ -15564,6 +15972,13 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
       "minimum": 0,
       "type": [
         "integer",
+        "null"
+      ]
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does.",
+      "type": [
+        "boolean",
         "null"
       ]
     },
@@ -18716,6 +19131,67 @@ One of:
 
 </details>
 
+### `Preserve`
+
+What Beats keeps (R2): its transients, or the lines of a grid in the clip's own beats.
+
+One of:
+
+- `"transients"`: A segment at each transient; the default.
+- `"1_bar"`: A segment at each bar.
+- `"half"`: At each half note.
+- `"quarter"`: At each quarter note.
+- `"eighth"`: At each eighth note.
+- `"sixteenth"`: At each sixteenth note.
+- `"thirty_second"`: At each thirty-second note.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Beats keeps (R2): its transients, or the lines of a grid in the clip's own beats.",
+  "oneOf": [
+    {
+      "const": "transients",
+      "description": "A segment at each transient; the default.",
+      "type": "string"
+    },
+    {
+      "const": "1_bar",
+      "description": "A segment at each bar.",
+      "type": "string"
+    },
+    {
+      "const": "half",
+      "description": "At each half note.",
+      "type": "string"
+    },
+    {
+      "const": "quarter",
+      "description": "At each quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "eighth",
+      "description": "At each eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "sixteenth",
+      "description": "At each sixteenth note.",
+      "type": "string"
+    },
+    {
+      "const": "thirty_second",
+      "description": "At each thirty-second note.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PresetResult`
 
 What the preset commands return.
@@ -20170,6 +20646,53 @@ One of:
 
 </details>
 
+### `SavedDefaults`
+
+What `clip.save_default` and `clip.defaults` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The defaults file beside the clip's sample, where the defaults are or would be kept. |
+| `defaults` | [`ClipDefaults`](#clipdefaults) or null | yes | The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.save_default` and `clip.defaults` return.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content."
+    },
+    "file": {
+      "description": "The defaults file beside the clip's sample, where the defaults are or would be kept.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "defaults"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ScannedItem`
 
 A plug-in the scanner found.
@@ -20889,6 +21412,154 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "plug_ins",
     "agents",
     "assistant"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzCount`
+
+An opcode or header the import left unread or settled device-wide, with how many regions use it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The opcode, or the header in angle brackets. |
+| `regions` | integer, at least 0 | yes | How many regions use it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An opcode or header the import left unread or settled device-wide, with how many regions use it.",
+  "properties": {
+    "name": {
+      "description": "The opcode, or the header in angle brackets.",
+      "type": "string"
+    },
+    "regions": {
+      "description": "How many regions use it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "regions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzImported`
+
+What `device.import_sfz` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The multisampler. |
+| `track` | [`TrackId`](#trackid) | yes | Its track. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The new layers, in list order: now the selected layers. |
+| `unread` | array of [`SfzCount`](#sfzcount) | yes | Opcodes and headers left unread. |
+| `settled` | array of [`SfzCount`](#sfzcount) | yes | Opcodes most regions agree on, which set the device's own controls. |
+| `left_out` | array of [`SfzLeftOut`](#sfzleftout) | yes | Regions left out, each with why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.import_sfz` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The multisampler."
+    },
+    "layers": {
+      "description": "The new layers, in list order: now the selected layers.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    },
+    "left_out": {
+      "description": "Regions left out, each with why.",
+      "items": {
+        "$ref": "#/$defs/SfzLeftOut"
+      },
+      "type": "array"
+    },
+    "settled": {
+      "description": "Opcodes most regions agree on, which set the device's own controls.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "Its track."
+    },
+    "unread": {
+      "description": "Opcodes and headers left unread.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "track",
+    "layers",
+    "unread",
+    "settled",
+    "left_out"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzLeftOut`
+
+A region the import left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `region` | integer, at least 0 | yes | Its place among the file's regions, from 1. |
+| `sample` | string | yes | Its sample as the file names it. |
+| `reason` | string | yes | Why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A region the import left out.",
+  "properties": {
+    "reason": {
+      "description": "Why.",
+      "type": "string"
+    },
+    "region": {
+      "description": "Its place among the file's regions, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sample": {
+      "description": "Its sample as the file names it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "region",
+    "sample",
+    "reason"
   ],
   "type": "object"
 }
@@ -21633,6 +22304,86 @@ What `audio.set_test_tone` returns: the test tone's state afterwards.
 
 </details>
 
+### `TextureSettings`
+
+Texture's controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `flux` | number from 0 to 100 | no | The randomness, 0 to 100 percent (Live's Fluctuation): 25 unless given. |
+| `grain_size` | number from 10 to 500 | no | The grains' length in milliseconds, 10 to 500: 65 unless given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Texture's controls.",
+  "properties": {
+    "flux": {
+      "description": "The randomness, 0 to 100 percent (Live's Fluctuation): 25 unless given.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "grain_size": {
+      "description": "The grains' length in milliseconds, 10 to 500: 65 unless given.",
+      "format": "double",
+      "maximum": 500.0,
+      "minimum": 10.0,
+      "type": "number"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `TextureUpdate`
+
+Changes to Texture's controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `flux` | number or null | no | The randomness, 0 to 100 percent. |
+| `grain_size` | number or null | no | The grains' length in milliseconds, 10 to 500. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Changes to Texture's controls.",
+  "properties": {
+    "flux": {
+      "default": null,
+      "description": "The randomness, 0 to 100 percent.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "grain_size": {
+      "default": null,
+      "description": "The grains' length in milliseconds, 10 to 500.",
+      "format": "double",
+      "maximum": 500.0,
+      "minimum": 10.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ThemeChoice`
 
 Beatlayer's two themes.
@@ -21845,6 +22596,66 @@ The test tone's level and frequency, as the Audio page's Tone Volume and Tone Fr
     "volume_db",
     "frequency_hz"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TonesSettings`
+
+Tones' controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grain_size` | number from 10 to 100 | no | The grains' average length in milliseconds, 10 to 100: 30 unless given. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Tones' controls.",
+  "properties": {
+    "grain_size": {
+      "description": "The grains' average length in milliseconds, 10 to 100: 30 unless given.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 10.0,
+      "type": "number"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `TonesUpdate`
+
+Changes to Tones' controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `grain_size` | number or null | no | The grains' average length in milliseconds, 10 to 100. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Changes to Tones' controls.",
+  "properties": {
+    "grain_size": {
+      "default": null,
+      "description": "The grains' average length in milliseconds, 10 to 100.",
+      "format": "double",
+      "maximum": 100.0,
+      "minimum": 10.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -22076,6 +22887,43 @@ A clip's edits to its file's detected transients, as times in the file in second
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `TransientLoopMode`
+
+How Beats fills the time a segment's own audio doesn't (R2).
+
+One of:
+
+- `"loop_off"`: Silence until the next segment.
+- `"loop_forward"`: Back to the segment's middle, forwards again; the default.
+- `"loop_back_and_forth"`: Backwards to the middle, then forwards.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How Beats fills the time a segment's own audio doesn't (R2).",
+  "oneOf": [
+    {
+      "const": "loop_off",
+      "description": "Silence until the next segment.",
+      "type": "string"
+    },
+    {
+      "const": "loop_forward",
+      "description": "Back to the segment's middle, forwards again; the default.",
+      "type": "string"
+    },
+    {
+      "const": "loop_back_and_forth",
+      "description": "Backwards to the middle, then forwards.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -22629,6 +23477,61 @@ A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (7
 
 </details>
 
+### `WarpMode`
+
+How a warped clip's audio is fitted to the speed its warp map sets: the six warp modes, in the order the Audio panel offers them (R1).
+
+One of:
+
+- `"beats"`: Segments cut at transients or on a grid, for rhythmic material. The default of a new clip.
+- `"tones"`: Grains that keep the pitch of pitched material.
+- `"texture"`: Overlapping grains with some randomness, for material without a clear pitch.
+- `"re_pitch"`: Plays the file faster or slower, so pitch follows speed.
+- `"complex"`: Frequency-domain stretching, for whole mixes.
+- `"complex_pro"`: Complex, with finer settings and Formants.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a warped clip's audio is fitted to the speed its warp map sets: the six warp modes, in the order the Audio panel offers them (R1).",
+  "oneOf": [
+    {
+      "const": "beats",
+      "description": "Segments cut at transients or on a grid, for rhythmic material. The default of a new clip.",
+      "type": "string"
+    },
+    {
+      "const": "tones",
+      "description": "Grains that keep the pitch of pitched material.",
+      "type": "string"
+    },
+    {
+      "const": "texture",
+      "description": "Overlapping grains with some randomness, for material without a clear pitch.",
+      "type": "string"
+    },
+    {
+      "const": "re_pitch",
+      "description": "Plays the file faster or slower, so pitch follows speed.",
+      "type": "string"
+    },
+    {
+      "const": "complex",
+      "description": "Frequency-domain stretching, for whole mixes.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro",
+      "description": "Complex, with finer settings and Formants.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `WarpPrefs`
 
 The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the defaults observed in Live 12.4.6. They are preferences, kept between starts and not saved with a set.
@@ -22666,6 +23569,46 @@ The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the def
     "auto_warp_long_samples",
     "default_warp_mode"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `WarpSettings`
+
+Every mode's controls (R2). Re-Pitch and Complex have none.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `beats` | [`BeatsSettings`](#beatssettings) | no | Beats' controls. |
+| `complex_pro` | [`ComplexProSettings`](#complexprosettings) | no | Complex Pro's controls. |
+| `texture` | [`TextureSettings`](#texturesettings) | no | Texture's controls. |
+| `tones` | [`TonesSettings`](#tonessettings) | no | Tones' controls. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Every mode's controls (R2). Re-Pitch and Complex have none.",
+  "properties": {
+    "beats": {
+      "$ref": "#/$defs/BeatsSettings",
+      "description": "Beats' controls."
+    },
+    "complex_pro": {
+      "$ref": "#/$defs/ComplexProSettings",
+      "description": "Complex Pro's controls."
+    },
+    "texture": {
+      "$ref": "#/$defs/TextureSettings",
+      "description": "Texture's controls."
+    },
+    "tones": {
+      "$ref": "#/$defs/TonesSettings",
+      "description": "Tones' controls."
+    }
+  },
   "type": "object"
 }
 ```

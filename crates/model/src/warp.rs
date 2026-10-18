@@ -154,8 +154,9 @@ impl AudioData {
     }
 
     /// The clip's Start and End markers and loop brace in seconds in the
-    /// file: what the engine plays until warped playback (WP-4.2) follows the
-    /// map. An unwarped clip's are its own.
+    /// file: what the engine falls back on for a warped clip whose map is
+    /// damaged, which the commands never leave. An unwarped clip's are its
+    /// own.
     #[must_use]
     pub fn in_seconds(&self) -> Cow<'_, Self> {
         let Some(map) = self.warp.then(|| self.warp_map().ok()).flatten() else {
@@ -233,6 +234,8 @@ impl AudioData {
         } else {
             let map = self.warp_map()?;
             next = self.converted(|beat| map.beat_to_time(beat).max(0.0), false);
+            // Spec: warping R14. Only a warped clip loops.
+            next.looping = false;
         }
         next.warp = on;
         Ok(next)

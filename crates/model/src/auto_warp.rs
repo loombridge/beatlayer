@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::clip::AudioData;
 use crate::error::ModelError;
 use crate::warp::{MarkerAt, WarpMarker};
+use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The bar counts a short sample warped as a loop may be (the warping spec,
 /// R34).
@@ -40,6 +41,29 @@ pub struct FileBeats {
     pub bpm: Option<f64>,
     /// The times in seconds of its beats, in increasing order.
     pub beats: Vec<f64>,
+}
+
+/// What Save Default Clip keeps of an audio clip (the warping spec, R42): the
+/// settings a new clip of the same file starts with.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp \
+                   mode and the mode controls (which hold its Transpose and Detune), and gain. \
+                   Times in the markers are as in `data.audio.warp_markers`."
+)]
+pub struct ClipDefaults {
+    /// The Warp switch.
+    pub warp: bool,
+    /// The warp markers.
+    pub warp_markers: Vec<WarpMarker>,
+    /// The clip's tempo in BPM; given whenever there are markers.
+    pub tempo: Option<f64>,
+    /// The warp mode.
+    pub warp_mode: WarpMode,
+    /// Every mode's controls.
+    pub warp_settings: WarpSettings,
+    /// The gain, as a linear gain.
+    pub gain: f64,
 }
 
 /// Where in a warped clip a command acts: give one of the three.
@@ -146,6 +170,46 @@ fn beats_near(file: &FileBeats, hint: f64, nearest: usize) -> (Vec<f64>, Option<
 }
 
 impl AudioData {
+    /// The settings Save Default Clip keeps (R42).
+    #[must_use]
+    pub fn defaults(&self) -> ClipDefaults {
+        ClipDefaults {
+            warp: self.warp,
+            warp_markers: self.warp_markers.clone(),
+            tempo: self.tempo,
+            warp_mode: self.warp_mode,
+            warp_settings: self.warp_settings,
+            gain: self.gain,
+        }
+    }
+
+    /// The clip with `defaults` in place of its own settings: what a new clip
+    /// of a file with saved defaults is (R33). Its Start and End markers and
+    /// loop brace stay at the file's ends.
+    ///
+    /// # Errors
+    ///
+    /// If the markers and tempo don't make a map, or the gain isn't finite
+    /// and 0 or more.
+    pub fn with_defaults(self, defaults: &ClipDefaults) -> Result<Self, ModelError> {
+        if !defaults.gain.is_finite() || defaults.gain < 0.0 {
+            return Err(ModelError::InvalidInput("a gain is finite and 0 or more"));
+        }
+        let next = Self {
+            warp: defaults.warp,
+            warp_markers: defaults.warp_markers.clone(),
+            tempo: defaults.tempo,
+            warp_mode: defaults.warp_mode,
+            warp_settings: defaults.warp_settings,
+            gain: defaults.gain,
+            ..self
+        };
+        if next.warp || !next.warp_markers.is_empty() {
+            next.warp_map()?;
+        }
+        Ok(next)
+    }
+
     /// The clip warped as a loop of `bars` bars of 4/4 over the part of its
     /// file from `from` to `to` seconds (R34, R40): a marker at each end,
     /// on 1.1.1 and on the last bar's end, the loop brace and the Start and

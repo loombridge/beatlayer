@@ -815,7 +815,7 @@ impl SessionView {
         ctx.editor.transact("Insert Clip", |editor| {
             for ((media, name, seconds), (track, scene)) in prepared.iter().zip(&targets) {
                 let new = crate::auto_warp::new_clip(
-                    media.hash,
+                    media,
                     *seconds,
                     editor.document(),
                     Ticks::ZERO,

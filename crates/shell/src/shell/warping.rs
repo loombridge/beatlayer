@@ -10,7 +10,10 @@ use bl_analysis::cache::{Analysis, AnalysisCache, AnalysisOptions, AnalysisStatu
 use bl_core::time::Ticks;
 use bl_media::{ContentHash, MediaError};
 use bl_model::{AudioData, ClipData, ClipId, Command, FileBeats, TRANSIENT_MATCH};
-use bl_shell_spec::warping::{ClipTransient, ClipTransients, ClipTransientsArgs};
+use bl_shell_spec::warping::{
+    self as spec, ClipDefaultsArgs, ClipTransient, ClipTransients, ClipTransientsArgs,
+    SavedDefaults,
+};
 use serde_json::{Value, json};
 
 use super::*;
@@ -131,8 +134,40 @@ impl Shell {
         ))
     }
 
-    /// Runs `clip.transients` (R24).
+    /// Runs `clip.save_default` and `clip.defaults` (R42).
+    fn run_defaults(&self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let ClipDefaultsArgs { clip } = Self::args(id, args)?;
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let Some(ClipData::Audio(audio)) = self.editor.document().clip(clip).map(|c| &c.data)
+        else {
+            return Err(failed("the clip isn't an audio clip".to_owned()));
+        };
+        let Some(entry) = self.media.entry(ContentHash::from_bytes(audio.media.0)) else {
+            return Err(failed(
+                "the media store doesn't have the clip's file".to_owned(),
+            ));
+        };
+        let file = if id == spec::SAVE_DEFAULT {
+            crate::clip_defaults::save(&entry.path, audio.media, audio.defaults())
+                .map_err(failed)?
+        } else {
+            crate::clip_defaults::path_for(&entry.path)
+        };
+        Ok(to_value(&SavedDefaults {
+            clip,
+            file: file.display().to_string(),
+            defaults: crate::clip_defaults::load(&entry.path, audio.media),
+        }))
+    }
+
+    /// Runs `clip.transients` (R24), `clip.save_default` or `clip.defaults`.
     pub(super) fn run_warping(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id != spec::TRANSIENTS {
+            return self.run_defaults(id, args);
+        }
         let ClipTransientsArgs { clip } = Self::args(id, args)?;
         let (audio, shown) = self.shown_transients(id, clip)?;
         let map = audio.warp.then(|| audio.warp_map().ok()).flatten();

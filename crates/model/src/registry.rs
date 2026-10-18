@@ -2036,6 +2036,20 @@ const ENTRIES: &[Entry] = &[
             the bass compressor's source to the kick's track and switch External on.",
     },
     Entry {
+        id: "device.set_midi_sidechain_source",
+        action: Action::Apply("set_midi_sidechain_source"),
+        label: "Set MIDI Sidechain Source",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI \
+            source chooser in its sidechain parameters does: `track` is a MIDI track (the \
+            device's own track too), or left out for No Input, a new device's. The device \
+            hears the notes and channel messages that track's clips and input play, before \
+            its own devices change them; the track still plays as before. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
+    },
+    Entry {
         id: "device.set_sidechain_enabled",
         action: Action::Apply("set_sidechain_enabled"),
         label: "External Sidechain On/Off",

@@ -72,6 +72,7 @@ pub mod reverb;
 pub mod sampler;
 pub mod saturator;
 mod sections;
+pub mod shifter;
 mod signal_mod;
 pub mod stack;
 pub mod strike_mod;
@@ -112,6 +113,7 @@ pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
+pub use shifter::{SHIFTER, shifter_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
@@ -206,6 +208,7 @@ pub fn register(registry: &mut Registry) {
     tube::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
+    shifter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

@@ -431,3 +431,125 @@ fn routing_and_sidechains_pass_under_rtsan() {
         state.cpu_load_max * 100.0
     );
 }
+
+/// MIDI sidechains under RealtimeSanitizer (WP-5.27): a MIDI track playing a
+/// clip's notes reaches the probe on an audio track, and the source is
+/// switched between MIDI tracks, cleared, and set again, and its track
+/// deleted, while the engine plays and swaps programs.
+#[test]
+fn midi_sidechains_pass_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_engine::testing::HEAR;
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, testing::registry(&probe), collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let keys = [
+        track(&mut editor, TrackKind::Midi, None),
+        track(&mut editor, TrackKind::Midi, None),
+        track(&mut editor, TrackKind::Midi, None),
+    ];
+    for (n, &keys) in keys.iter().enumerate() {
+        let notes: Vec<Note> = (0..16)
+            .map(|i| {
+                Note::new(
+                    48 + (n as u8 * 5 + i as u8 * 3) % 40,
+                    Ticks(TICKS_PER_QUARTER / 4 * i),
+                    Ticks(TICKS_PER_QUARTER / 4),
+                    100,
+                )
+            })
+            .collect();
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track: keys,
+                clip: Clip::new(
+                    id,
+                    Ticks::ZERO,
+                    Ticks(TICKS_PER_QUARTER * 4),
+                    ClipData::Midi(MidiData::new(notes)),
+                ),
+            })
+            .unwrap();
+    }
+    let audio = track(&mut editor, TrackKind::Audio, None);
+    tone(&mut editor, audio, 220.0);
+    let hear = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track: audio,
+            index: 1,
+            device: Device::new(
+                hear,
+                "Test MIDI Sidechain",
+                DeviceKind::Native {
+                    device_type: HEAR.to_owned(),
+                },
+            )
+            .with_midi_sidechain(),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let mut programs = 1u64;
+    for round in 0..2_000u64 {
+        let command = match round {
+            20 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[0]),
+            }),
+            200 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[1]),
+            }),
+            400 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: None,
+            }),
+            600 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[2]),
+            }),
+            900 => Some(Command::DeleteTrack { track: keys[2] }),
+            1_000 => Some(Command::SetMidiSidechainSource {
+                device: hear,
+                track: Some(keys[0]),
+            }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            let update = compiler.sync(editor.document());
+            programs += u64::from(update.program.is_some());
+            sender.send_update(update);
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert_eq!(state.counters.migration_mismatches, 0);
+    assert_eq!(state.swaps, programs);
+    assert!(programs >= 7, "{programs} programs");
+    eprintln!(
+        "2,000 blocks of MIDI sidechains under RealtimeSanitizer: {} swaps, \
+         peak engine load {:.1}%",
+        state.swaps,
+        state.cpu_load_max * 100.0
+    );
+}

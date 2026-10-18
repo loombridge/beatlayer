@@ -1191,6 +1191,34 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The Test MIDI Sidechain on audio track 3, the selected track, its
+/// sidechain section shown, no device selected (WP-5.27).
+fn a_midi_sidechained_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::hear_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.show_sidechain",
+            json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A Wave Mod and a test utility on the selected audio track (WP-5.10),
 /// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
@@ -2295,6 +2323,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 a_sidechained_device,
                 device_view,
                 "Sidechain Source",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "device.set_midi_sidechain_source",
+            main(
+                a_midi_sidechained_device,
+                device_view,
+                "MIDI Sidechain Source",
                 Key::ArrowUp,
             ),
         ),

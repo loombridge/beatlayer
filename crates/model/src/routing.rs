@@ -53,6 +53,9 @@ impl Document {
             if let Some(sidechain) = &device.sidechain {
                 check_sidechain_input(self, track, sidechain.input.clone())?;
             }
+            if let Some(source) = device.midi_sidechain.as_ref().and_then(|s| s.source) {
+                check_midi_sidechain_source(self, track, source)?;
+            }
         }
         Ok(())
     }
@@ -128,7 +131,9 @@ impl Document {
             .tracks
             .iter()
             .filter(|(_, t)| {
-                names_any(&t.routing, gone) || t.devices_deep().any(|d| listens_to(d, gone))
+                names_any(&t.routing, gone)
+                    || t.devices_deep()
+                        .any(|d| listens_to(d, gone) || hears(d, gone))
             })
             .map(|(&id, _)| id)
             .collect();
@@ -136,12 +141,17 @@ impl Document {
             if let Some(track) = self.tracks.get_mut(&id) {
                 let track = crate::shared::Shared::make_mut(track);
                 for device in track.devices.iter_mut() {
-                    if device.walk().any(|d| listens_to(d, gone)) {
+                    if device.walk().any(|d| listens_to(d, gone) || hears(d, gone)) {
                         crate::shared::Shared::make_mut(device).walk_mut(&mut |device| {
                             if listens_to(device, gone)
                                 && let Some(sidechain) = &mut device.sidechain
                             {
                                 sidechain.input = Input::None;
+                            }
+                            if hears(device, gone)
+                                && let Some(sidechain) = &mut device.midi_sidechain
+                            {
+                                sidechain.source = None;
                             }
                         });
                     }
@@ -244,6 +254,16 @@ fn listens_to(device: &crate::Device, gone: &BTreeSet<TrackId>) -> bool {
         .sidechain
         .as_ref()
         .is_some_and(|s| matches!(&s.input, Input::Track { track, .. } if gone.contains(track)))
+}
+
+/// Whether a device's MIDI sidechain takes its source from a track in
+/// `gone`.
+fn hears(device: &crate::Device, gone: &BTreeSet<TrackId>) -> bool {
+    device
+        .midi_sidechain
+        .as_ref()
+        .and_then(|s| s.source)
+        .is_some_and(|track| gone.contains(&track))
 }
 
 /// Whether an input taps a chain in `gone`.
@@ -416,6 +436,23 @@ fn check_sidechain_input(doc: &Document, track: &Track, input: Input) -> Result<
             }
         }
         _ => Err(wrong_kind(track, "a device's sidechain to take a track")),
+    }
+}
+
+/// A MIDI sidechain's source: a MIDI track, the device's own included.
+fn check_midi_sidechain_source(
+    doc: &Document,
+    track: &Track,
+    source: TrackId,
+) -> Result<(), ModelError> {
+    let from = doc.track(source).ok_or(ModelError::NoSuchTrack(source))?;
+    if from.kind == TrackKind::Midi {
+        Ok(())
+    } else {
+        Err(ModelError::CannotRoute {
+            track: track.id,
+            to: source,
+        })
     }
 }
 
@@ -888,6 +925,73 @@ mod tests {
             None,
             "Ext. Out goes nowhere in the set"
         );
+    }
+
+    // Spec: routing R32, R33
+    #[test]
+    fn a_midi_sidechain_takes_a_midi_track_and_forgets_a_deleted_one() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let m = add(&mut editor, TrackKind::Midi, None);
+        let n = add(&mut editor, TrackKind::Midi, None);
+        let id = editor.new_id();
+        let kind = crate::DeviceKind::Native {
+            device_type: "test.key".to_owned(),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track: a,
+                index: 0,
+                device: crate::Device::new(id, "Key", kind).with_midi_sidechain(),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            saved["tracks"][0]["devices"][0]["midi_sidechain"],
+            serde_json::json!({}),
+            "a new device's MIDI sidechain has no source and saves none"
+        );
+        let set = |editor: &mut Editor, track| {
+            editor.apply(Command::SetMidiSidechainSource { device: id, track })
+        };
+        assert!(
+            set(&mut editor, Some(a)).is_err(),
+            "an audio track isn't a source"
+        );
+        set(&mut editor, Some(m)).unwrap();
+        set(&mut editor, Some(n)).unwrap();
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
+        let before = editor.document().clone();
+        editor.apply(Command::DeleteTrack { track: n }).unwrap();
+        let source = |editor: &Editor| editor.document().device(id).unwrap().midi_sidechain.clone();
+        assert_eq!(source(&editor).unwrap().source, None);
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &before);
+        assert_eq!(source(&editor).unwrap().source, Some(n));
+        let plain = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track: m,
+                index: 0,
+                device: crate::Device::new(
+                    plain,
+                    "Plain",
+                    crate::DeviceKind::Native {
+                        device_type: "test.plain".to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        assert!(matches!(
+            editor.apply(Command::SetMidiSidechainSource {
+                device: plain,
+                track: None
+            }),
+            Err(crate::EditError::Command(ModelError::NoMidiSidechain(_)))
+        ));
+        set(&mut editor, None).unwrap();
     }
 
     // Spec: routing R9 (IMP-01)

@@ -23,14 +23,17 @@
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
 //! adds them to the engine, with the three delays of WP-5.25
-//! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments are the polysynth
-//! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
-//! eight-slot drum sampler ([`kitbag`], WP-5.17). The
+//! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments
+//! are the polysynth
+//! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16), the
+//! multisampler ([`multisampler`], WP-5.13) and the eight-slot drum sampler
+//! ([`kitbag`], WP-5.17). The
 //! rest of the core effects ship with WP-2.18. [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod auto_filter;
 pub mod compressor;
 pub mod delay;
 pub mod dice;
@@ -47,6 +50,7 @@ pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod multisampler;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -57,6 +61,7 @@ pub mod touch;
 pub mod utility;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
@@ -71,6 +76,7 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
@@ -96,6 +102,7 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
@@ -116,6 +123,7 @@ pub fn register(registry: &mut Registry) {
     utility::register(registry);
     eq::register(registry);
     sampler::register(registry);
+    multisampler::register(registry);
     drum_sampler::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
@@ -125,6 +133,7 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    auto_filter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

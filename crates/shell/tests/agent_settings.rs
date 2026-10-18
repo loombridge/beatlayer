@@ -1,31 +1,50 @@
 //! The agent server's settings (WP-1.15): switched on and off, agents
 //! allowed and forgotten, autonomous mode, and the token, each through its
-//! registered command and kept with the preferences. And the editing hook
+//! registered command and kept with the preferences, the tokens in the
+//! keychain and never in the preferences' file. And the editing hook
 //! the agent API uses for batches, dry runs, and checkpoints.
 
+use std::sync::Arc;
+
+use bl_assistant::keychain::{Keychain, KeychainError, MemoryKeychain};
 use bl_model::{TrackId, registry as model};
-use bl_shell::agent::{AgentSettings, DEFAULT_PORT};
+use bl_shell::agent::{AgentSettings, DEFAULT_PORT, KEYCHAIN_ACCOUNT};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Shell, ShellError};
 use serde_json::json;
 
-fn shell_saving_to(dir: &std::path::Path) -> Shell {
+/// A shell keeping its preferences in `dir` and its agent tokens in
+/// `keys`, as the app keeps them in the OS keychain.
+fn shell_saving_to(dir: &std::path::Path, keys: &Arc<MemoryKeychain>) -> Shell {
     let prefs = Preferences::load(dir).unwrap();
-    Shell::new(
+    let mut shell = Shell::new(
         prefs.clone(),
         Some(dir.to_owned()),
         AudioHost::null(prefs.audio),
         Box::new(ProjectFiles::new()),
-    )
+    );
+    shell.use_agent_keychain(Arc::clone(keys) as Arc<dyn Keychain>);
+    shell
+}
+
+/// The preferences' file as written.
+fn file(dir: &std::path::Path) -> String {
+    std::fs::read_to_string(dir.join(bl_shell::settings::PREFERENCES_FILE)).unwrap()
+}
+
+/// The tokens the keychain holds, as its entry's text.
+fn stored(keys: &MemoryKeychain) -> String {
+    keys.read(KEYCHAIN_ACCOUNT).unwrap().unwrap_or_default()
 }
 
 #[test]
 fn the_server_starts_off_and_switching_it_on_makes_a_token_that_is_kept() {
     let dir = std::env::temp_dir().join(format!("bl-shell-agent-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let mut shell = shell_saving_to(&dir);
+    let keys = Arc::new(MemoryKeychain::new());
+    let mut shell = shell_saving_to(&dir, &keys);
     assert_eq!(shell.agent_settings(), &AgentSettings::default());
     assert!(!shell.agent_settings().server);
 
@@ -60,8 +79,13 @@ fn the_server_starts_off_and_switching_it_on_makes_a_token_that_is_kept() {
     let new = shell.agent_settings().token.clone();
     assert_ne!(new, token);
 
+    // The keychain has it; the preferences' file doesn't.
+    assert!(stored(&keys).contains(new.expose()));
+    assert!(!file(&dir).contains(new.expose()));
+    assert!(!file(&dir).contains("token"), "{}", file(&dir));
+
     // The next start reads them back.
-    let again = shell_saving_to(&dir);
+    let again = shell_saving_to(&dir, &keys);
     assert!(again.agent_settings().server);
     assert_eq!(again.agent_settings().port, 40_000);
     assert_eq!(again.agent_settings().token, new);
@@ -162,7 +186,8 @@ fn each_allowed_agent_gets_a_token_of_its_own_that_can_be_replaced() {
     // Spec: agent-permissions R7, R9.
     let dir = std::env::temp_dir().join(format!("bl-shell-agent-tokens-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let mut shell = shell_saving_to(&dir);
+    let keys = Arc::new(MemoryKeychain::new());
+    let mut shell = shell_saving_to(&dir, &keys);
     shell
         .run("agent.set_server", json!({ "on": true }))
         .unwrap();
@@ -214,9 +239,20 @@ fn each_allowed_agent_gets_a_token_of_its_own_that_can_be_replaced() {
         .unwrap();
     assert_eq!(shell.agent_settings().clients[0].token, tokens[0]);
 
-    // The next start reads them back.
-    let again = shell_saving_to(&dir);
+    // The next start reads them back, from the keychain alone.
+    for token in [&tokens[0], &new] {
+        assert!(stored(&keys).contains(token.as_str()));
+        assert!(!file(&dir).contains(token.as_str()));
+    }
+    let again = shell_saving_to(&dir, &keys);
     assert_eq!(again.agent_settings(), shell.agent_settings());
+
+    // Forgetting an agent forgets its token.
+    let mut shell = again;
+    shell
+        .run("agent.forget_client", json!({ "client": "claude-code" }))
+        .unwrap();
+    assert!(!stored(&keys).contains(tokens[0].as_str()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -231,11 +267,12 @@ fn agents_allowed_before_agents_had_tokens_get_one_and_keep_it() {
               { "name": "claude-code", "autonomous": true } ] } }"#,
     )
     .unwrap();
-    let shell = shell_saving_to(&dir);
+    let keys = Arc::new(MemoryKeychain::new());
+    let shell = shell_saving_to(&dir, &keys);
     let token = shell.agent_settings().clients[0].token.clone();
     assert_eq!(token.expose().len(), 64);
     assert!(shell.agent_settings().is_autonomous("claude-code"));
-    let again = shell_saving_to(&dir);
+    let again = shell_saving_to(&dir, &keys);
     assert_eq!(again.agent_settings().clients[0].token, token);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -412,4 +449,101 @@ fn clip_set_data_is_destructive_only_when_it_leaves_a_midi_clip_fewer_notes() {
         &json!({ "clip": 999_999, "data": notes(0) }),
     );
     assert_eq!(call.classes(), [Permission::Edit]);
+}
+
+#[test]
+fn tokens_in_an_older_preferences_file_move_to_the_keychain() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-agent-move-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let server = "a".repeat(64);
+    let client = "b".repeat(64);
+    std::fs::write(
+        dir.join(bl_shell::settings::PREFERENCES_FILE),
+        format!(
+            r#"{{ "agent": {{ "server": true, "port": 40001, "token": "{server}", "clients": [
+              {{ "name": "claude-code", "autonomous": true, "token": "{client}" }} ] }} }}"#
+        ),
+    )
+    .unwrap();
+    let keys = Arc::new(MemoryKeychain::new());
+    let shell = shell_saving_to(&dir, &keys);
+    // Nothing changes for the person: the same tokens, the same agents.
+    assert_eq!(shell.agent_settings().token, server);
+    assert_eq!(shell.agent_settings().clients[0].token, client);
+    assert!(shell.agent_settings().is_autonomous("claude-code"));
+    // They're in the keychain now, and gone from the file, which keeps the
+    // rest of its settings.
+    assert!(stored(&keys).contains(&server) && stored(&keys).contains(&client));
+    let text = file(&dir);
+    assert!(!text.contains(&server) && !text.contains(&client), "{text}");
+    assert!(
+        text.contains("40001") && text.contains("claude-code"),
+        "{text}"
+    );
+
+    // The next start reads them from the keychain.
+    let again = shell_saving_to(&dir, &keys);
+    assert_eq!(again.agent_settings(), shell.agent_settings());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A keychain that can't be reached, as on a Linux desktop without a
+/// running Secret Service.
+struct NoKeychain;
+
+impl Keychain for NoKeychain {
+    fn read(&self, _: &str) -> Result<Option<String>, KeychainError> {
+        Err(KeychainError::Unavailable("no D-Bus session".to_owned()))
+    }
+
+    fn write(&self, _: &str, _: &str) -> Result<(), KeychainError> {
+        Err(KeychainError::Unavailable("no D-Bus session".to_owned()))
+    }
+
+    fn delete(&self, _: &str) -> Result<(), KeychainError> {
+        Err(KeychainError::Unavailable("no D-Bus session".to_owned()))
+    }
+}
+
+#[test]
+fn without_a_keychain_the_tokens_last_the_session_and_never_reach_the_file() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-agent-nokeys-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut shell = Shell::new(
+        Preferences::default(),
+        Some(dir.clone()),
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    shell.use_agent_keychain(Arc::new(NoKeychain));
+    assert!(
+        shell
+            .message()
+            .is_some_and(|m| m.text.contains("no D-Bus session"))
+    );
+    shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+    shell
+        .run("agent.approve_client", json!({ "client": "goose" }))
+        .unwrap();
+    let token = shell.agent_settings().token.clone();
+    assert_eq!(
+        token.expose().len(),
+        64,
+        "the server still runs this session"
+    );
+    assert!(
+        shell
+            .message()
+            .is_some_and(|m| m.text.contains("until Beatlayer quits"))
+    );
+    let text = file(&dir);
+    assert!(
+        !text.contains(token.expose()) && !text.contains("token"),
+        "{text}"
+    );
+    assert!(text.contains("goose"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

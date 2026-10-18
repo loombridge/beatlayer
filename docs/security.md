@@ -57,7 +57,7 @@ Text that comes from a file, a model, or an agent stays untrusted after it cross
 | Audio files | symphonia's decoders. The RF64 reader refuses zero channels, rate, or block alignment. Peak files fuzzed by hand (`peak_file`). | No limit on the length or channel count a header declares, before decoding starts. |
 | MIDI files | midly. | The whole file is read into memory with no size cap. |
 | SFZ instruments | Caps on regions, nesting, and sizes. Fuzzed by hand (`sfz`). | |
-| Agent API over HTTP | Off until the person turns it on. Listens on `127.0.0.1` only. Refuses a `Host` other than `127.0.0.1`, `localhost`, or `[::1]`, and any `Origin`, so a web page can't reach it through DNS rebinding. A bearer token on every request, compared in constant time: each allowed agent has its own, and a client with only the server's token is asked about every time. 32 connections, 16 KiB of headers, 8 MiB bodies, 60 s idle timeout. | Tokens are kept in plain text in `preferences.json`. No rate limit. |
+| Agent API over HTTP | Off until the person turns it on. Listens on `127.0.0.1` only. Refuses a `Host` other than `127.0.0.1`, `localhost`, or `[::1]`, and any `Origin`, so a web page can't reach it through DNS rebinding. A bearer token on every request, compared in constant time: each allowed agent has its own, and a client with only the server's token is asked about every time. The tokens are kept in the operating system's keychain, beside the assistant's keys, never in `preferences.json`; ones an older file held move to the keychain at the next start. 32 connections, 16 KiB of headers, 8 MiB bodies, 60 s idle timeout. | No rate limit. |
 | Agent permissions | Every action is a registered command with a permission class. `read` and `edit` run; `destructive` and `external` ask the person first unless they made that agent autonomous, and `bl-cli mcp` refuses them unless started with `--autonomous`. The agent server's own commands and the assistant's settings are the person's only. Edits that overlap the person's clips count as destructive ([agent permissions](specs/agent-permissions.md)). Every `edit` can be undone. | |
 | The assistant | API keys in the operating system's keychain, never in a settings file. HTTPS through rustls with the platform's roots. Its tool calls are commands, under the same permission classes as any agent. | A provider's base URL can be changed, so a key goes where the person points it. |
 | Package downloads | Stem separation's runtime and model come from fixed URLs and are checked against SHA-256s pinned in the source before they're unpacked or loaded; the person is shown what will be downloaded, from where, and where it goes, before anything is fetched. | |
@@ -70,11 +70,10 @@ Text that comes from a file, a model, or an agent stays untrusted after it cross
 What isn't protected yet, roughly in the order it should be fixed:
 
 1. **Plug-ins share Beatlayer's process.** The plug-in sandbox (Phase 10, [the roadmap](01-roadmap.md)) moves them out, so a crash or a malicious plug-in can't take the set with it.
-2. **Agent tokens in plain text.** They belong in the keychain, beside the assistant's keys.
-3. **Unbounded audio and MIDI headers.** A declared length, channel count, or file size past a sensible limit should be refused before anything is allocated.
-4. **Fuzzing isn't in CI.** The targets exist; a scheduled run would find regressions without anyone remembering to.
-5. **Unsigned builds.** Signing and notarisation need a Developer ID and a Windows signing route ([the architecture's packaging section](02-architecture.md#packaging)).
-6. **No rate limit on the agent server.**
+2. **Unbounded audio and MIDI headers.** A declared length, channel count, or file size past a sensible limit should be refused before anything is allocated.
+3. **Fuzzing isn't in CI.** The targets exist; a scheduled run would find regressions without anyone remembering to.
+4. **Unsigned builds.** Signing and notarisation need a Developer ID and a Windows signing route ([the architecture's packaging section](02-architecture.md#packaging)).
+5. **No rate limit on the agent server.**
 
 ## Rules for new code
 

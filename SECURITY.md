@@ -45,7 +45,7 @@ Beatlayer is an alpha. Only the latest release gets security fixes; there are no
 These are known and not yet fixed. They're written here so nobody has to discover them.
 
 - **Plug-ins run in Beatlayer's process.** Scanning happens in a separate process with a timeout and a blocklist, but a loaded plug-in can read and write anything Beatlayer can, and its crash takes Beatlayer down. A plug-in sandbox is planned for 1.0.
-- **Agent tokens are stored in plain text** in `preferences.json` in Beatlayer's settings folder. Anything that can read that file can act as an allowed agent. The agent server is off until the person turns it on, listens on `127.0.0.1` only, refuses other `Host` and any `Origin` header, and caps connections and request sizes, but it doesn't limit request rates.
+- **The agent server doesn't limit request rates.** It's off until the person turns it on, listens on `127.0.0.1` only, refuses other `Host` and any `Origin` header, and caps connections and request sizes. Its tokens are kept in the operating system's keychain, not in a settings file.
 - **Audio and MIDI headers aren't bounded** beyond what the decoders do themselves: a file that declares a huge length or channel count is not refused up front. Sets are capped at 512 MiB of JSON and presets at 16 MiB.
 - **The builds are unsigned** (ad-hoc signed on macOS). Every release lists each file's SHA-256 in `SHA256SUMS.txt` and carries a build provenance attestation; the [release notes](RELEASE-NOTES.md#checking-a-download) say how to check them.
 - **Fuzzing runs by hand,** not in CI (`fuzz/`).

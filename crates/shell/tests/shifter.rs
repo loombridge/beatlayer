@@ -1,4 +1,4 @@
-//! Veer, the native Shifter, in the shell (WP-5.27; the
+//! Shifter, the native Shifter, in the shell (WP-5.27; the
 //! pitch-and-frequency-shifter spec, R13 and R14, and the routing spec,
 //! R34): its MIDI source chooser lists the MIDI tracks as Live's choosers
 //! list tracks, choosing is one undo step, and a set with the device saves
@@ -52,7 +52,7 @@ fn shell_in(scratch: &Scratch) -> Shell {
     )
 }
 
-/// Adds Veer to `track`, as `device.add` does with its type's flags.
+/// Adds Shifter to `track`, as `device.add` does with its type's flags.
 fn add_veer(shell: &mut Shell, track: TrackId) -> DeviceId {
     shell
         .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
@@ -64,7 +64,7 @@ fn add_veer(shell: &mut Shell, track: TrackId) -> DeviceId {
                 "device.add",
                 json!({ "device": {
                     "kind": DeviceKind::Native { device_type: SHIFTER.to_owned() },
-                    "name": "Veer",
+                    "name": "Shifter",
                     "role": DeviceRole::AudioEffect,
                     "midi_sidechain": shifter_type().midi_sidechain,
                 } }),

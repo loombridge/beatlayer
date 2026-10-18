@@ -1,7 +1,7 @@
 //! What the modulators driven by audio, notes and MIDI share (WP-5.11; the
 //! modulation spec, R13, R14, R16, R20, R28): their output stage.
 //!
-//! Where the Wave Mod and the Curve Mod work their output out before any
+//! Where the LFO and the Shaper work their output out before any
 //! track runs, these hear their track's signal, so they run in it, at their
 //! place in its chain, and write the rows their targets read as they go. The
 //! output is taken every [`GRID`](crate::modulator::GRID) frames on a grid
@@ -271,7 +271,7 @@ impl Held {
 }
 
 /// What Jitter, Smooth and Offset do to a level taken at a grid point (R22,
-/// the Wave Mod's laws, R26): Jitter adds up to half its share of a draw
+/// the LFO's laws, R26): Jitter adds up to half its share of a draw
 /// either way, Smooth moves the output towards each new level by a share
 /// that falls from all of it at 0 % to 2 % at 100 %, and Offset then adds
 /// its share and clamps the output to 0 to 1. The draws come from a

@@ -1,4 +1,4 @@
-//! Veer, the native Shifter (WP-5.27; the pitch-and-frequency-shifter
+//! Shifter, the native Shifter (WP-5.27; the pitch-and-frequency-shifter
 //! spec): a pitch shifter, a frequency shifter and a ring modulator in one
 //! device, with Spread and Wide for the stereo image, a feedback delay
 //! (free in Hz or synced to the tempo) with a Tone filter in its feedback
@@ -29,7 +29,7 @@ use crate::auto_filter::DIVISIONS;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
-/// Veer's device type.
+/// Shifter's device type.
 pub const SHIFTER: &str = "beatlayer.veer";
 
 /// Mode: Pitch, Freq or Ring, one of [`MODES`].
@@ -203,7 +203,7 @@ const HELD_KEYS: usize = 16;
 /// The most notes and messages one stretch of a block takes.
 const EVENT_ROOM: usize = 4_096;
 
-/// Veer's device type.
+/// Shifter's device type.
 #[must_use]
 pub fn shifter_type() -> DeviceType {
     let divisions: Vec<&str> = DELAY_DIVISIONS.iter().map(|d| d.0).collect();
@@ -361,7 +361,7 @@ pub fn shifter_type() -> DeviceType {
         ParamDescriptor::integer(BEND_RANGE, "PB", (0, 24), 2, ParamUnit::Semitones)
             .describe("How far the full pitch bend of the MIDI source moves the pitch."),
     ];
-    DeviceType::native(SHIFTER, "Veer", DeviceRole::AudioEffect)
+    DeviceType::native(SHIFTER, "Shifter", DeviceRole::AudioEffect)
         .with_midi_sidechain()
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
@@ -421,7 +421,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds the Veer device to `registry`.
+/// Adds the Shifter device to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, shifter_type(), Shifter::new);
 }
@@ -853,7 +853,7 @@ impl Chan {
     }
 }
 
-/// Veer's audio-thread half.
+/// Shifter's audio-thread half.
 struct Shifter {
     rate: f64,
     /// The latency every mode reports, in frames.

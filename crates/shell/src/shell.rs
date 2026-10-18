@@ -335,7 +335,7 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
-    /// The chord Stack's Learn is hearing.
+    /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
@@ -1290,7 +1290,7 @@ impl Shell {
         before != self.midi.ports()
     }
 
-    /// Spec: midi-chord R15. While a Stack device's Learn is on, the keys
+    /// Spec: midi-chord R15. While a Chord device's Learn is on, the keys
     /// played set its shifts: the first key down is the root and the other
     /// keys held become Shift 1 to 6 in order, one undo step each time the
     /// chord changes. Returns whether the set changed.

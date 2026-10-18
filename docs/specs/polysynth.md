@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-Cascade is Beatlayer's polysynth: a subtractive, polyphonic instrument whose manual section is the one on Live's compact polyphonic instrument. The user plays it from MIDI notes and shapes the sound with two oscillators and a noise source, a switchable low-pass and high-pass filter with key tracking and drive, and two envelopes. Oscillator 1 offers the manual's seven waveforms and a Shape control that morphs the selected waveform; Oscillator 2 offers the manual's five and can be transposed in octaves and semitones; the noise generator adds white noise. Each source has a switch and a gain, and the three gains share the manual's −6.0 dB default.
+Drift is Beatlayer's polysynth: a subtractive, polyphonic instrument whose manual section is the one on Live's compact polyphonic instrument. The user plays it from MIDI notes and shapes the sound with two oscillators and a noise source, a switchable low-pass and high-pass filter with key tracking and drive, and two envelopes. Oscillator 1 offers the manual's seven waveforms and a Shape control that morphs the selected waveform; Oscillator 2 offers the manual's five and can be transposed in octaves and semitones; the noise generator adds white noise. Each source has a switch and a gain, and the three gains share the manual's −6.0 dB default.
 
 The filter is Beatlayer's own zero-delay-feedback pair: Type I is a 12 dB per octave state-variable low-pass whose resonance path saturates, Type II is a 24 dB per octave four-pole whose stages soft-clip their resonance, and both match their analogue prototypes. Key tracking moves the low-pass cutoff with the played note; the high-pass removes the low end. The manual's two saturation points sit before and after the filter, and the oscillator gains drive them. Envelope 1 shapes the amplitude; Envelope 2 is the second envelope and can be chosen as a modulation source.
 
@@ -27,7 +27,7 @@ This spec covers the instrument's behaviour. The framework every native device i
 
 ## Rules
 
-- **R1.** Beatlayer ships Cascade, an instrument device type of its own name and layout, described like any native device: every parameter has a descriptor and a place in the layout. (S4)
+- **R1.** Beatlayer ships Drift, an instrument device type of its own layout, described like any native device: every parameter has a descriptor and a place in the layout. (S4)
 - **R2.** Oscillator 1 offers the manual's waveforms in its order — Sine, Triangle, Shark Tooth, Saturated, Saw, Pulse, Rectangle — and Oscillator 2 its five — Sine, Triangle, Saturated, Saw, Rectangle. Each has a switch, its own gain (default −6.0 dB) and an Oct control that transposes it in whole octaves; Oscillator 2's Detune transposes it in whole semitones. Oct runs from −4 to +4 and Detune from −12 to +12 semitones. (S1)
 - **R3.** The oscillators are band-limited at every key: a saw at the top key and at a middle key folds less than −80 dB of its energy away from its harmonics. (S1)
 - **R4.** Oscillator 1's Shape, 0 to 100 % and 0 % by default, morphs its waveform. A Pulse or Rectangle narrows its duty cycle towards 20 %; the others compress their rise and stretch their fall, so a saw moves towards a triangle. The curves are Beatlayer's own; the manual says only that each waveform responds differently and that the effect is similar to pulse-width modulation. (S1)

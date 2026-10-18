@@ -83,7 +83,7 @@ fn add_sampler(shell: &mut Shell) -> DeviceId {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: SAMPLER.to_owned() },
-                        "name": "Snapshot",
+                        "name": "Simpler",
                         "role": DeviceRole::Instrument,
                     }
                 }),

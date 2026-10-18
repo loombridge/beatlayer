@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-Grit is Beatlayer's overdrive, a distortion in the manner of a guitar pedal that can be driven hard without losing its dynamics. The signal goes through a band-pass filter, then the distortion, and a Tone control after it; the band-pass decides which part of the signal reaches the distortion, and the user sets its place (Frequency) and its width (Width), which a drawn X–Y display would also move. Drive sets the amount of distortion, and even at 0% the signal is distorted. Dynamics decides how far the distortion's level follows Drive: at low settings more Drive means more compression and make-up gain, at high settings less. Dry/Wet balances the processed signal against the dry one.
+Overdrive is Beatlayer's overdrive, a distortion in the manner of a guitar pedal that can be driven hard without losing its dynamics. The signal goes through a band-pass filter, then the distortion, and a Tone control after it; the band-pass decides which part of the signal reaches the distortion, and the user sets its place (Frequency) and its width (Width), which a drawn X–Y display would also move. Drive sets the amount of distortion, and even at 0% the signal is distorted. Dynamics decides how far the distortion's level follows Drive: at low settings more Drive means more compression and make-up gain, at high settings less. Dry/Wet balances the processed signal against the dry one.
 
 This spec covers the device; the device framework is the [device framework spec](device-framework.md).
 
@@ -20,7 +20,7 @@ This spec covers the device; the device framework is the [device framework spec]
 
 ## Rules
 
-- **R1.** Beatlayer ships Grit, an audio-effect device type of its own name and layout, described like any native device: every parameter has a descriptor and a place in the layout, with no menu items and no expanded part. It has no latency. The X–Y display's two parameters, Frequency and Width, are ordinary controls in the cell Drive Curve's bottom band. (S1, S2)
+- **R1.** Beatlayer ships Overdrive, an audio-effect device type of its own layout, described like any native device: every parameter has a descriptor and a place in the layout, with no menu items and no expanded part. It has no latency. The X–Y display's two parameters, Frequency and Width, are ordinary controls in the cell Drive Curve's bottom band. (S1, S2)
 - **R2.** The band-pass is a second-order filter of 0 dB gain at its centre. Frequency, from 80 Hz to 8 kHz (default 1.2 kHz, logarithmic), is its centre, and Width, from 0.2 to 4 octaves (default 1.5), is the distance between its −3 dB points, both within 2% at a small signal; the centre is the geometric mean of the −3 dB points. (S1; the filter and ranges are Beatlayer's own)
 - **R3.** Drive, from 0 to 100% (default 50%), sets a gain before the distortion of 6 dB at 0% to 36 dB at 100%, in a straight line over the percentage, and the distortion is the `tanh` of the gain times the band-passed signal. So even Drive 0% adds harmonics to a signal of moderate level, and a harder drive adds more. (S1; the gain range and the curve are Beatlayer's own)
 - **R4.** Tone, from 0 to 100% (default 50%), is a high shelf at 1.5 kHz after the distortion, of −12 dB at 0%, nothing at 50% and +12 dB at 100%. (S1; the shelf is Beatlayer's own)
@@ -28,7 +28,7 @@ This spec covers the device; the device framework is the [device framework spec]
 - **R6.** Dry/Wet runs from 0 to 100% (default 100%); at 0% the output is the input exactly. The band-pass, the distortion and Tone are in the processed signal only. (S1)
 - **R7.** The display holds the distortion curve over inputs from −1 to 1 at the Drive now as a series named Drive Curve, and, once an engine publishes, the input's level in dB as the reading Input with a marker on the curve. The cell stays a black frame in the generic UI; `device.display` reads both headlessly. (S1)
 - **R8.** Renders are bit-identical at block sizes 1, 64, 512 and 4,096, and nothing on the audio thread allocates, locks or blocks. The filters' coefficients are updated every 16 frames counted from the device's first frame, so they don't follow the block size. (S2)
-- **R9.** An agent adds Grit with `device.insert` or `device.add`, sets and reads every parameter by ID with `device.set_param` and `device.parameters`, reads the display with `device.display`, and finds the device and its values when the saved set is opened. Every parameter is automatable (device framework R3). (S2)
+- **R9.** An agent adds Overdrive with `device.insert` or `device.add`, sets and reads every parameter by ID with `device.set_param` and `device.parameters`, reads the display with `device.display`, and finds the device and its values when the saved set is opened. Every parameter is automatable (device framework R3). (S2)
 
 ## Tests
 

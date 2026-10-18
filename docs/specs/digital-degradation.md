@@ -1,13 +1,13 @@
 # Digital degradation
 
 - **Status:** partial
-- **Work packages:** WP-5.24 (part 1; the equivalent of Erosion)
+- **Work packages:** WP-5.24 (part 1; Erosion)
 - **Parity-matrix row:** Audio effects: Erosion, to Live's current version (the 12.4 Erosion)
 - **Checked against:** Live 12.4's reference manual, section 29.17, and the 12.4 release notes
 
 ## The behaviour
 
-Degrade is Beatlayer's equivalent of Live's Erosion. It delays the signal by a few milliseconds and moves that delay with a modulation made of a sine wave and band-filtered noise, which smears the signal: from a warble when the sine leads, through sidebands around every partial, to a gritty, noisy roughness when the noise leads. The user sets the modulation's frequency (the sine's frequency, and the centre of the noise's band), how far it moves the delay, the balance between sine and noise, the width of the noise's band, and how different the two channels' modulation is. A display shows the spectrum of the input.
+Erosion is Beatlayer's version of Live's Erosion. It delays the signal by a few milliseconds and moves that delay with a modulation made of a sine wave and band-filtered noise, which smears the signal: from a warble when the sine leads, through sidebands around every partial, to a gritty, noisy roughness when the noise leads. The user sets the modulation's frequency (the sine's frequency, and the centre of the noise's band), how far it moves the delay, the balance between sine and noise, the width of the noise's band, and how different the two channels' modulation is. A display shows the spectrum of the input.
 
 This spec covers the device's behaviour. The device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and delay compensation is [its own spec](delay-compensation.md). Live's older Erosion, which sets from before 12.4 load as Erosion Legacy, is not built; set import maps it later.
 

@@ -1,4 +1,4 @@
-//! The Gate Mod (WP-5.11; the modulation spec, R25): each note starts its
+//! The Envelope MIDI (WP-5.11; the modulation spec, R25): each note starts its
 //! envelope from the level it is at, the last held key's end starts the
 //! release, Sustain on holds the level while a key is held and off releases
 //! after the decay, and the loop modes start it again as set. The notes pass
@@ -32,7 +32,7 @@ fn playing(at: usize) -> TransportInfo {
     }
 }
 
-/// A Gate Mod whose slot 1 gives its envelope itself, with an attack of
+/// An Envelope MIDI whose slot 1 gives its envelope itself, with an attack of
 /// 20 ms (960 frames), a decay of 40 ms (1,920), a sustain of 50 % and a
 /// release of 100 ms (4,800); `params` over those.
 fn gate(params: &[(ParamId, f64)]) -> Box<dyn Node> {

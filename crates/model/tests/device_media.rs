@@ -15,7 +15,7 @@ fn hash(n: u8) -> ContentHash {
 fn device() -> Device {
     Device::new(
         DeviceId(Id::new(7).expect("7 is an ID")),
-        "Kitbag",
+        "Impulse",
         DeviceKind::Native {
             device_type: "beatlayer.kitbag".to_owned(),
         },

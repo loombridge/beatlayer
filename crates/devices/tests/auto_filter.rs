@@ -1,4 +1,4 @@
-//! Sweep, the native Auto Filter (WP-5.20; the auto-filter spec): the
+//! Auto Filter, the native Auto Filter (WP-5.20; the auto-filter spec): the
 //! filter types and slopes against the spec's curves, the circuits, Drive,
 //! the LFO and envelope follower moving the cutoff, the sidechain, Clip,
 //! Hi-Quality's latency, and renders that repeat at any block size. Every
@@ -89,7 +89,7 @@ fn gain_db(params: &[(ParamId, f64)], hz: f64) -> f64 {
 fn sweep_is_described_with_a_sidechain_and_two_menu_options() {
     let device_type = auto_filter_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Sweep");
+    assert_eq!(device_type.name, "Auto Filter");
     assert!(device_type.sidechain);
     assert!(matches!(
         device_type.kind,
@@ -172,7 +172,7 @@ struct Probe {
 impl Probe {
     fn new(params: &[(ParamId, f64)], max_frames: usize, tempo: TempoMap, playing: bool) -> Self {
         let mut node = sweep(params, max_frames);
-        let reader = node.display().expect("Sweep has a display");
+        let reader = node.display().expect("Auto Filter has a display");
         let base = auto_filter_type()
             .description
             .value(&values(params), FREQ)

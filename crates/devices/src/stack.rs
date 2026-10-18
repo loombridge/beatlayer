@@ -1,4 +1,4 @@
-//! Stack, the chord MIDI effect (WP-5.30; the MIDI chord spec): adds up to six
+//! Chord, the chord MIDI effect (WP-5.30; the MIDI chord spec): adds up to six
 //! notes above or below each note that comes in, each with its own velocity
 //! and chance, and can strum them.
 //!
@@ -11,7 +11,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, seed, value};
 
-/// The Stack device type's id.
+/// The Chord device type's id.
 pub const STACK: &str = "beatlayer.stack";
 
 /// How many added notes there are.
@@ -49,7 +49,7 @@ pub const DUPLICATES: ParamId = ParamId(3 * SHIFTS + 5);
 /// Gives each added note its own ID and its source's expressions.
 pub const PER_NOTE: ParamId = ParamId(3 * SHIFTS + 6);
 
-/// Stack's device type.
+/// Chord's device type.
 #[must_use]
 pub fn stack_type() -> DeviceType {
     let mut params = Vec::new();
@@ -136,11 +136,11 @@ pub fn stack_type() -> DeviceType {
              made it.",
         ),
     ]);
-    DeviceType::native(STACK, "Stack", DeviceRole::MidiEffect)
+    DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect)
         .with_description(DeviceDescription::new(params))
 }
 
-/// Adds Stack to `registry`.
+/// Adds Chord to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, stack_type(), |device, _| Stack {
         router: Router::new(),

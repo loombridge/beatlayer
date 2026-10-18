@@ -72,7 +72,7 @@ pub(crate) const TRANSITION_SECONDS: f64 = 0.02;
 /// The LFO's highest filter movement, in octaves.
 const FILTER_MOD_OCTAVES: f64 = 2.0;
 
-/// The delay's type: Beatlayer's own name and look, Live's parameters
+/// The delay's type: Beatlayer's own look, Live's parameters
 /// (the delay spec, "What Live does").
 #[must_use]
 pub fn delay_type() -> DeviceType {
@@ -149,7 +149,7 @@ pub fn delay_type() -> DeviceType {
         ParamDescriptor::continuous(LFO_FILTER, "Filter", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much the LFO moves the filter's frequency."),
     ];
-    DeviceType::native(DELAY, "Reprise", DeviceRole::AudioEffect)
+    DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 

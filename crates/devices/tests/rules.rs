@@ -18,7 +18,7 @@ use bl_model::{
 };
 use common::{RATE, config, device, node, run, run_at, set};
 
-/// The gains of Triad, each of which acts on one band.
+/// The gains of EQ Three, each of which acts on one band.
 const BAND_GAINS: [ParamId; 3] = [
     bl_devices::three_band_eq::GAIN_LOW,
     bl_devices::three_band_eq::GAIN_MID,
@@ -63,9 +63,9 @@ fn every_gain_parameter_reaches_minus_infinity() {
             let band_gain = |p: &bl_model::ParamDescriptor| {
                 p.name.split_once(' ').map(|(_, gain)| gain.to_owned())
             };
-            let group: Vec<_> = if device_type.name == "Triad" {
+            let group: Vec<_> = if device_type.name == "EQ Three" {
                 BAND_GAINS.to_vec()
-            } else if device_type.name == "Triband" && band_gain(param).is_some() {
+            } else if device_type.name == "Multiband Dynamics" && band_gain(param).is_some() {
                 let same = |p: &&bl_model::ParamDescriptor| {
                     p.is_gain() && band_gain(p) == band_gain(param)
                 };

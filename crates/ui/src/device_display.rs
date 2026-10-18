@@ -127,7 +127,7 @@ pub fn draw(
 }
 
 /// What a modulator's display shows beside its curves (WP-5.11; the
-/// modulation spec, R24 to R26): the Level Mod's Direct and S.C. meters in
+/// modulation spec, R24 to R26): the Envelope Follower's Direct and S.C. meters in
 /// dB from -60 to 0, a bar for a modulator's level, and the LED that flashes
 /// on each start, in the cell's top-right corner.
 fn modulator_readings(

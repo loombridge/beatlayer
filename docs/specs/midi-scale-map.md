@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Remap sends each note of an octave to a note of your choosing. A grid has a column for each note that can come in, counted from Base, and a row for each note that can go out; a column sends its note to its row, in every octave, and a column with no row sends its note nowhere, so it plays nothing. Transpose then moves every note that comes out. Fold keeps a mapped note within half an octave of the note that came in. Lowest and Range limit which notes are remapped; the rest pass through.
+Scale sends each note of an octave to a note of your choosing. A grid has a column for each note that can come in, counted from Base, and a row for each note that can go out; a column sends its note to its row, in every octave, and a column with no row sends its note nowhere, so it plays nothing. Transpose then moves every note that comes out. Fold keeps a mapped note within half an octave of the note that came in. Lowest and Range limit which notes are remapped; the rest pass through.
 
-Beatlayer's own name for the device is Remap; its look is the device framework's generic controls, with each column of the grid a parameter. Named scales, and Use Current Scale, which takes the base and scale from the clip, arrive with Phase 6's scales: the switch is carried and does nothing, and there is no chooser of scale names yet. Only the User grid exists. This spec covers the device only.
+The device takes Live's name, Scale; its look is the device framework's generic controls, with each column of the grid a parameter. Named scales, and Use Current Scale, which takes the base and scale from the clip, arrive with Phase 6's scales: the switch is carried and does nothing, and there is no chooser of scale names yet. Only the User grid exists. This spec covers the device only.
 
 ## Sources
 
@@ -29,8 +29,8 @@ Beatlayer's own name for the device is Remap; its look is the device framework's
 - **R5.** Transpose, from −36 to +36 semitones, moves every note after it is mapped; a note moved off the keyboard is dropped. (S1)
 - **R6.** With Fold on, a mapped note more than six semitones above or below the note that came in is moved by an octave towards it, before Transpose. (S1)
 - **R7.** Only notes from Lowest up Range keys are remapped; others pass through unchanged. (S1)
-- **R8.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Remap/`. (S3)
-- **R9.** Every parameter is automatable and has a description, and nothing Remap does on the audio thread allocates, locks, or blocks. (S3, S4)
+- **R8.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Scale/`. (S3)
+- **R9.** Every parameter is automatable and has a description, and nothing Scale does on the audio thread allocates, locks, or blocks. (S3, S4)
 
 ## Tests
 
@@ -48,7 +48,7 @@ Beatlayer's own name for the device is Remap; its look is the device framework's
 
 ## Defaults, ranges and details
 
-- A new Remap starts at Base C, Transpose 0, Fold off, Lowest 0, Range 127 and Use Current Scale off, with the identity grid.
+- A new Scale starts at Base C, Transpose 0, Fold off, Lowest 0, Range 127 and Use Current Scale off, with the identity grid.
 - The grid has twelve columns, one for each note of an octave, and thirteen rows, 0 to 12 semitones above Base (row 12 is the base an octave up). The manual draws thirteen columns; the thirteenth repeats the first an octave up and no note can come in on it, so it is not a parameter.
 - Each column is a whole number from −1 to 12 (`Map 1` to `Map 12`); an agent reads and sets them like any parameter.
 - The manual's chooser of scale names (and Base's tie to it) is not built: a chooser of one entry can't be automated, so it waits for Phase 6's scale list.

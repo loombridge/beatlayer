@@ -30,6 +30,7 @@
 //! device list with the `kit-examples` feature, off by default.
 
 pub mod auto_filter;
+pub mod beat_repeat;
 pub mod compressor;
 pub mod delay;
 pub mod dice;
@@ -54,6 +55,7 @@ pub mod touch;
 pub mod utility;
 
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
+pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
@@ -119,6 +121,7 @@ pub fn register(registry: &mut Registry) {
     stack::register(registry);
     hold::register(registry);
     auto_filter::register(registry);
+    beat_repeat::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

@@ -1,0 +1,65 @@
+# Stutter, the equivalent of Beat Repeat
+
+- **Status:** partial (every rule below has a passing test; the manual states few ranges, so most of them are Beatlayer's own, as the rules say)
+- **Work packages:** WP-5.26. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); its seeded random source is WP-5.42's (device framework R29)
+- **Parity-matrix row:** Audio effects: Beat Repeat, to Live's current version
+- **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.5 "Beat Repeat", read on 18 October 2026. The manual gives the controls and a few examples but almost no ranges, defaults or curves: those are Beatlayer's own, and each rule that rests on S4 alone says so
+
+## The behaviour
+
+Stutter is Beatlayer's Beat Repeat. At points on the song's beat grid it captures a slice of its input and repeats the slice for a while, so a loop stutters in time with the song. Interval sets how often a capture can start, Offset moves those points later, Chance decides whether a point starts one, and Gate sets the total length of the repeats. Grid sets the size of a slice, No Triplets keeps it binary, and Variation lets it fluctuate around its setting, at the moments its mode names. The Repeat button captures and repeats at once, ignoring Interval, Offset, Chance and Gate, until it is switched off.
+
+Pitch resamples the repeats lower, so each slice plays longer, and Pitch Decay makes each repeat lower than the one before; Decay makes each quieter. A filter, with a centre frequency and a width, can take the repeats down to a band. Three modes set how the input and the repeats leave: Mix adds the repeats to the input, Insert replaces the input with them while they play, and Gate plays only them. Volume sets the output level.
+
+This spec covers the device only; where it sits in a chain and the frame around it are [the device chains spec](device-chains.md) and [the device framework spec](device-framework.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 29, section 29.5 "Beat Repeat" | The controls and what each does: Interval, tempo-synced from 1/32 to 4 bars, sets how often Beat Repeat captures new audio and starts repeating it; Offset moves the point of the interval later (an interval of one bar with an offset of 8/16 captures once a bar, on beat three); Chance is the probability, in per cent, that a repetition happens when Interval and Offset call for one; Gate is the total length of all the repetitions in sixteenth notes, from the point of the interval and offset (4/16 spans a beat); the Repeat button bypasses Interval, Offset, Chance and Gate and captures and repeats at once until it is off; Grid sets the size of each repeated slice (large values give rhythmic loops, small ones sonic artefacts) and No Triplets keeps it binary; Variation changes the grid size at random, none at zero and more the higher it goes, in five modes: Trigger (whenever repetitions are triggered), 1/4, 1/8 and 1/16 (at regular intervals of that note value) and Auto (a new variation after each repetition); Pitch resamples the repetitions lower, so the slices get longer rather than being squeezed back, and Pitch Decay makes each slice play lower than the one before; the filter is a combined low-pass and high-pass that defines a passed range, with an on switch, a centre frequency and a width; Mix passes the original with the repetitions added, Insert mutes the original while repetitions play and passes it otherwise, Gate outputs only the repetitions; Volume is the output level and Decay makes the repetitions fade |
+| S2 | Beatlayer | [The improvements](../05-improvements.md), rules G1 and G2 | Every gain and level reaches −∞ dB; every parameter can be automated and modulated |
+| S3 | Beatlayer | [The device framework spec](device-framework.md), R2, R3, R29 and R35 | A device's parameters are sample-accurate; the random source follows the device's ID, so a render repeats run after run; a device reports the frames it delays its input by |
+| S4 | Beatlayer | Beatlayer's own | The manual gives no values for Interval between 1/32 and 4 bars, no range for Offset, Gate, Pitch, Pitch Decay, the filter, Volume or Decay, no Grid values, no defaults, no amount for Variation, and does not say what plays while a slice is being captured; each rule that rests on S4 alone gives Beatlayer's own and says so |
+| S5 | Beatlayer | [The architecture](../02-architecture.md), "Offline rendering" and "Real-time rules" | A render repeats run after run and is the same at any block size; nothing on the audio thread allocates, locks or blocks |
+
+## Rules
+
+- **R1.** Beatlayer ships Stutter, an audio-effect device type of its own name and layout with seventeen parameters, each with a descriptor and a place in the layout: Interval, Offset, Chance, Gate, Repeat, Grid, No Triplets, Variation, Variation Mode, Pitch, Pitch Decay, Filter, Freq, Width, Mode, Volume and Decay. It has no display, no menu options and no latency. A new device has Interval 1 Bar, Offset 0, Chance 100 %, Gate 4 sixteenths, Repeat off, Grid 1/16, No Triplets off, Variation 0 %, Variation Mode Trigger, Pitch 0, Pitch Decay 0 %, Filter off at 1,000 Hz and 4 octaves wide, Mode Mix, Volume 0 dB and Decay 0 %. (S1, S4)
+- **R2.** The points where a capture can start are the ticks `k × Interval + Offset`, for k from 0, on the song's beat grid, each on the frame the song's tempo map gives its tick (so a tempo change moves the frame and not the beat). Interval is one of 1/32, 1/16, 1/8, 1/4, 1/2, 1 Bar, 2 Bars and 4 Bars, in note values of a whole note, a bar counting four quarter notes whatever the time signature; Offset is 0 to 15 sixteenth notes and wraps within the interval. Points exist only while the song plays; a point that falls inside a span (R4) starts nothing. (S1, S4)
+- **R3.** A capture starts on its point's frame: the next Grid-length stretch of the input, taken from that frame on, is the slice. A slice's length is Grid at the tempo of the point, in frames, rounded; a slice longer than eight seconds (a quarter-note grid below 7.5 BPM) is cut to eight seconds. While the slice is captured it is the input that sounds, in Mix and Insert mode, and Gate mode is silent (R10); the repeats begin on the frame the capture ends, so a capture that starts on beat three at 120 and 90 BPM, and across a tempo change, starts on that beat's frame. (S1, S4)
+- **R4.** A span runs from its point for Gate sixteenth notes (1 to 32, the end placed through the tempo map), and holds the capture and then repeats of the slice, one after another, the slice playing from its start each time; the span's end cuts the repeat it falls in. A span of the interval ends when the song stops or the playhead jumps. (S1, S4)
+- **R5.** At every point Stutter draws a number from the device's seeded source (device framework R29) and starts a capture if the number, scaled to 0 to 100, is below Chance, so Chance 0 % never starts one and Chance 100 % always does. Over 1,000 points at 50 % the captures number 500 with a standard deviation of 15.8; they stay within four standard deviations, 437 to 563, and are the same run after run. (S1, S3, S4)
+- **R6.** Grid is one of 1/4, 1/6, 1/8, 1/12, 1/16, 1/24 and 1/32 of a whole note, a quarter note, a triplet of quarter notes, and so on; the second, fourth and sixth are triplets. With No Triplets on a triplet Grid plays as the binary grid next below it (1/6 as 1/8, 1/12 as 1/16, 1/24 as 1/32). (S1, S4)
+- **R7.** Pitch is 0 to 36 semitones, Pitch Decay 0 to 100 %. Repeat k (counting the first as 0) plays the slice resampled down by `Pitch + k × Pitch Decay × 2 / 100` semitones (at most 60), with linear interpolation, so at Pitch 12 a slice plays at half speed and takes twice as long, and at Pitch 0 every repeat is the captured samples bit for bit. A repeat ends when it has played the slice, and the next begins where it left off. (S1, S4)
+- **R8.** Decay is 0 to 100 %: repeat k is quieter than the first by `k × Decay × 6 / 100` dB. Volume is a gain, up to +6 dB, reaching −∞ dB (rule G1), on the device's whole output, the input in Mix and Insert mode included. (S1, S2, S4)
+- **R9.** Variation is 0 to 100 %. At 0 % the slice is Grid. Above it, each time its mode says, Stutter draws from the seeded source and moves the Grid entry by the draw times Variation times three entries, rounded and kept within the list. The modes: Trigger draws once at the capture and sizes the capture and every repeat by it; 1/4, 1/8 and 1/16 draw at each beat division of that note value while a span runs, and Auto draws as each repeat begins, the new size applying from the next repeat; the capture itself is the Grid, unvaried, in these modes. A repeat longer than the captured slice wraps to the slice's start. (S1, S3, S4)
+- **R10.** Mode is Mix, Insert or Gate. In Mix the output is the input plus the repeats. In Insert it is the input outside a span and during the capture, and only the repeats from the end of the capture to the span's end. In Gate it is only the repeats, and silent outside them. (S1)
+- **R11.** While Repeat is on, Stutter ignores Interval, Offset, Chance and Gate: it starts a capture on the frame the button went on, with the song playing or stopped, repeats until the frame it went off, and ends the repeat there. A stopped song's clock carries on from its position for the Variation modes that follow the beat grid. (S1, S4)
+- **R12.** With Filter on, the repeats (not the input) pass through a second-order Butterworth high-pass and low-pass in series, at Freq × 2^(−Width/2) and Freq × 2^(Width/2) (Freq 20 Hz to 20 kHz, Width 0.1 to 8 octaves; the low edge kept to at least 20 Hz and the high to below 0.45 of the sample rate). Its state clears when a span starts. (S1, S4)
+- **R13.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run, with Chance and Variation, a tempo change and parameter changes mid-stream. Every block runs without allocating, locking or blocking: the capture buffers (eight seconds a channel), the filters and the random source are made with the device. (S3, S5)
+- **R14.** Every parameter can be inserted, set by ID and read back through the agent API (`device.insert`, `device.set_param`, `device.parameters`), is automatable and modulatable (rule G2), and the gain (Volume) reaches −∞ dB (rule G1). A set with the device saves and reopens with every parameter. (S2, S3)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/devices/tests/beat_repeat.rs`, `stutter_is_described_with_every_parameter_in_its_layout_and_no_latency` | unit |
+| R2, R3 | `crates/devices/tests/beat_repeat.rs`, `a_capture_starts_on_beat_three_at_two_tempos_and_across_a_tempo_change` | real-time trap |
+| R4 | `crates/devices/tests/beat_repeat.rs`, `the_captured_slice_repeats_for_gates_length`, `a_span_ends_when_the_song_stops` | real-time trap |
+| R5 | `crates/devices/tests/beat_repeat.rs`, `chance_zero_never_repeats_and_fifty_per_cent_stays_within_the_binomial_bounds` | real-time trap |
+| R6 | `crates/devices/tests/beat_repeat.rs`, `no_triplets_keeps_the_grid_binary` | real-time trap |
+| R7 | `crates/devices/tests/beat_repeat.rs`, `pitch_an_octave_down_plays_each_slice_at_half_speed`, `pitch_decay_plays_each_repeat_lower_than_the_one_before` | real-time trap |
+| R8 | `crates/devices/tests/beat_repeat.rs`, `decay_lowers_each_repeat_by_its_step`; `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity` | real-time trap |
+| R9 | `crates/devices/tests/beat_repeat.rs`, `variation_zero_keeps_the_grid_and_each_mode_varies_it_at_its_moments` | real-time trap |
+| R10 | `crates/devices/tests/beat_repeat.rs`, `insert_mutes_the_input_while_repeating_gate_never_passes_it_and_mix_passes_both` | real-time trap |
+| R11 | `crates/devices/tests/beat_repeat.rs`, `the_repeat_button_captures_and_repeats_at_once_until_it_is_off` | real-time trap |
+| R12 | `crates/devices/tests/beat_repeat.rs`, `the_filter_passes_its_band_and_cuts_what_lies_outside_it` | real-time trap |
+| R13 | `crates/devices/tests/beat_repeat.rs`, `renders_are_bit_identical_at_block_sizes_1_64_512_and_4096_and_run_after_run`; `crates/cli/tests/golden.rs`, `every_fixture_nulls_against_its_reference` (the `beat-repeat` fixture); `rtsan/tests/devices.rs`, `stutter_passes_under_rtsan` | real-time trap, golden render, RTSan |
+| R14 | `crates/cli/tests/agent.rs`, `an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id`; `crates/shell/tests/beat_repeat.rs`, `a_set_with_stutter_reopens_with_every_parameter`; `crates/devices/tests/rules.rs` over the shipped types | MCP script, unit, real-time trap |
+
+## Not built yet
+
+- A display: Live's device has none the manual describes, so the layout holds controls only.
+- Intervals in bars that follow the song's time signature: a bar counts four quarter notes here.
+- Choosing which Grid, Interval and Gate values Live offers: the lists above are Beatlayer's own until Live is observed.

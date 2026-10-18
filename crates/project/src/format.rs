@@ -6,7 +6,7 @@
 //!      "format": "beatlayer-set",
 //!      "schema": 1,              the schema version
 //!      "revision": 7,            the number of saves so far
-//!      "saved_by": "Beatlayer 0.1.0",
+//!      "saved_by": "Beatlayer 0.2.0",
 //!      "ids": 412,               the next object ID to hand out
 //!      "media": [ { "hash": "…", "path": "Samples/Imported/Kick.wav", "size": 88244 } ],
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },

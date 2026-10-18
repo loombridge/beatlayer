@@ -1,6 +1,6 @@
 # 01. Roadmap
 
-Beatlayer is an open-source digital audio workstation, written in Rust, that runs natively on macOS (Apple Silicon), Windows, and Linux, with the workflow of Ableton Live 12: Session and Arrangement views, warping, racks, and a full set of instruments and effects. The roadmap runs in 11 phases. The first usable release, alpha 0.1, comes at milestone M2, when you can make a whole song. Version 1.0 comes when [the parity matrix](04-parity-matrix.md) is covered and the app is hardened for daily use.
+Beatlayer is an open-source digital audio workstation, written in Rust, that runs natively on macOS (Apple Silicon), Windows, and Linux, with the workflow of Ableton Live 12: Session and Arrangement views, warping, racks, and a full set of instruments and effects. The roadmap runs in 11 phases. The first usable release, alpha 0.2, comes at milestone M3, when you can make a whole song and perform it. Version 1.0 comes when [the parity matrix](04-parity-matrix.md) is covered and the app is hardened for daily use.
 
 ## Principles
 
@@ -21,8 +21,8 @@ Beatlayer is an open-source digital audio workstation, written in Rust, that run
 |---|---|---|---|
 | M0 Foundations | none | Nothing yet as a user. Developers get a workspace that builds, tests, and packages on all three platforms. | A tone plays on every platform; the UI framework is chosen. |
 | M1 Playback core | internal | Import audio, arrange it, mix it, and export it. Connect an AI agent through MCP and have it do the same. | Arrange eight stems, export, and reopen identically, once by hand and once by an agent. |
-| M2 Make a track | **alpha 0.1** | Make a song: MIDI, piano roll, native sampler and synth, CLAP, VST3, and AU plug-ins, recording, automation, sends, and sidechain. Ask the built-in assistant, on any cloud or local model, to build or change a track. | A three-minute song made from scratch, and a 16-bar track built by the assistant on a local model. |
-| M3 Session view | 0.2 | Perform: launch clips and scenes with quantisation, follow actions, and record a performance into the arrangement. | A live set performed and captured. |
+| M2 Make a track | in alpha 0.2 | Make a song: MIDI, piano roll, native sampler and synth, CLAP, VST3, and AU plug-ins, recording, automation, sends, and sidechain. Ask the built-in assistant, on any cloud or local model, to build or change a track. | A three-minute song made from scratch, and a 16-bar track built by the assistant on a local model. |
+| M3 Session view | **alpha 0.2** | Perform: launch clips and scenes with quantisation, follow actions, and record a performance into the arrangement. | A live set performed and captured. |
 | M4 Warping | 0.3 | Work with loops and recordings at any tempo, slice to MIDI, freeze, and bounce. | A remix of unwarped stems at a new tempo. |
 | M5 Racks and core devices | 0.4 | Build racks with macros, program drum racks, modulate anything, and use every core effect and MIDI effect. | A drum rack beat through a multi-chain effect rack. |
 | M6 Editing depth | **beta 0.5** | Use MIDI transformations and generators, scales, tunings, MPE, comping, grooves, and linked-track editing. Bring projects in from Bitwig, Studio One, and Cubase through DAWproject. | A comped vocal and a generated, scale-aware chord part. |

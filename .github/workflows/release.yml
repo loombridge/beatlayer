@@ -4,7 +4,7 @@
 # a person to review and publish by hand. It never publishes on its own.
 #
 # Each package is attached twice: once named for the release
-# (beatlayer-v0.1.0-aarch64-apple-darwin.dmg) and once under a name that never
+# (beatlayer-v0.2.0-aarch64-apple-darwin.dmg) and once under a name that never
 # changes (beatlayer-macos-arm64.dmg), so that
 # https://github.com/loombridge/beatlayer/releases/latest/download/<name>
 # always gives the newest published release. The README links to those. Before anything builds, the tag must be `v` followed by

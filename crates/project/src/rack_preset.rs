@@ -8,7 +8,7 @@
 //! of it:
 //!
 //! ```json
-//! {"format":"beatlayer-preset","schema":2,"saved_by":"Beatlayer 0.1.0",
+//! {"format":"beatlayer-preset","schema":2,"saved_by":"Beatlayer 0.2.0",
 //!  "rack":{"id":7,"name":"Audio Effect Rack","kind":{"rack":{"kind":"audio_effect"}},
 //!          "chains":[{"id":8,"name":"Wide","devices":[ ... ]}], ...},
 //!  "samples":[{"hash":"9f...","name":"Kick.wav","data":"UklGR..."}]}

@@ -45,9 +45,9 @@ use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
 };
 use bl_engine::{
-    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
-    Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand, SlotStatus,
-    TakeBounds, TransportCommand,
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams, Pool,
+    PoolConfig, Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand,
+    SlotStatus, TakeBounds, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
 use bl_model::{Channel, Document, LaunchSettings, TrackId};
@@ -1087,7 +1087,7 @@ impl AudioHost {
             .open_stream(&request, callback)
             .map_err(|e| e.to_string())?;
         // The engine is made for the rate the device runs at.
-        let engine = self.start_engine(stream.info(), handoff)?;
+        let engine = self.start_engine(stream.info(), stream.workgroup(), handoff)?;
         if let Err(error) = stream.start() {
             // The processor goes with the stream, before the engine.
             drop(stream);
@@ -1112,6 +1112,7 @@ impl AudioHost {
     fn start_engine(
         &mut self,
         info: &StreamInfo,
+        workgroup: Option<bl_audio_io::Workgroup>,
         mut handoff: Producer<Processor>,
     ) -> Result<Engine, String> {
         let rate = SampleRate::new(info.sample_rate)
@@ -1148,6 +1149,24 @@ impl AudioHost {
         if let Some(midi) = &self.midi {
             // The processor has no queue yet, so nothing comes back to drop.
             processor.set_midi_input(midi.attach(MIDI_QUEUE_MESSAGES));
+        }
+        // The multicore scheduler (WP-5.37): workers beside the audio
+        // thread, joined to the stream's workgroup, started with the stream
+        // and stopped with it. A pool that can't start leaves the audio
+        // thread to run the song alone.
+        let frames = info.buffer_size.unwrap_or(info.max_block_frames);
+        let period = Duration::from_secs_f64(f64::from(frames) / f64::from(info.sample_rate));
+        let promote = workgroup.is_some() || info.backend != BackendKind::Null;
+        let mut pool = PoolConfig::for_stream(period, workgroup, promote);
+        // The null device is a test's: it runs as fast as it can, and
+        // workers spinning beside it would only crowd the machine.
+        if info.backend == BackendKind::Null {
+            pool.workers = 0;
+        }
+        if let Ok(pool) = Pool::start(&config, &pool)
+            && pool.workers() > 0
+        {
+            processor.set_pool(Some(pool));
         }
         if let Some(document) = &self.document {
             engine.sync(document);

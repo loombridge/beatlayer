@@ -9,6 +9,7 @@ use crate::gc::Collector;
 use crate::message::Report;
 use crate::processor::{Output, Processor};
 use crate::registry::Registry;
+use crate::sched::{Pool, PoolConfig};
 use crate::session::SceneOverride;
 use crate::state::{EngineState, Monitor};
 
@@ -77,6 +78,28 @@ impl Offline {
             missing: Vec::new(),
             override_sent: SceneOverride::default(),
         }
+    }
+
+    /// [`new`](Self::new), running the tasks on `workers` real-time workers
+    /// beside the thread that renders (the multicore scheduler, WP-5.37):
+    /// the render is the same to the bit, only faster on a song of many
+    /// tracks. `0` runs it on the one thread. The workers don't ask for
+    /// real-time priority.
+    ///
+    /// # Errors
+    ///
+    /// If a worker thread can't start.
+    pub fn with_workers(
+        config: EngineConfig,
+        registry: Registry,
+        workers: usize,
+    ) -> std::io::Result<Self> {
+        let mut offline = Self::new(config, registry);
+        if workers > 0 {
+            let pool = Pool::start(&config, &PoolConfig::plain(workers))?;
+            offline.processor.set_pool(Some(pool));
+        }
+        Ok(offline)
     }
 
     /// The engine's settings.
@@ -185,7 +208,7 @@ impl Offline {
     /// ([`bl_rt::install_trap!`]), as test and debug builds do.
     #[must_use]
     pub fn heap_operations(&self) -> u64 {
-        self.heap_operations
+        self.heap_operations + self.processor.pool().map_or(0, Pool::heap_operations)
     }
 }
 

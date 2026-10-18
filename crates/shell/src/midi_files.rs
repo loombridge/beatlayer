@@ -123,7 +123,7 @@ pub fn import(
                     id
                 }
             };
-            let mut data = MidiData::new(chunk.notes.iter().copied());
+            let mut data = MidiData::new(chunk.notes.iter().cloned());
             // Spec: midi-clips R17. Looping on, with the brace the whole clip.
             data.end = Some(length);
             data.looping = true;
@@ -213,7 +213,7 @@ pub fn export(
     } else {
         clip.name.clone()
     };
-    let notes: Vec<bl_model::Note> = data.notes.iter().copied().collect();
+    let notes: Vec<bl_model::Note> = data.notes.iter().cloned().collect();
     midi::write(path, &name, &notes, tempo, signature)
         .map_err(|e| MidiFileError::Failed(format!("{}: {e}", args.path)))?;
     Ok(MidiExportResult {

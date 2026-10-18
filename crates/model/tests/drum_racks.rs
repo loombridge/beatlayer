@@ -443,6 +443,18 @@ fn a_return_chain_sends_to_a_return_track_or_the_rack() {
         ),
         ModelError::NotADrumChain(_)
     ));
+    // A return chain added with an output that isn't a return track is
+    // refused too.
+    let mut stray = Chain::new_return(kit.editor.new_id(), "Stray");
+    stray.audio_to = Some(audio);
+    rejected(
+        &mut kit.editor,
+        Command::AddChain {
+            rack: kit.rack,
+            index: 2,
+            chain: stray,
+        },
+    );
     // Deleting the return track sends the chain home; undo restores both.
     kit.editor
         .apply(Command::DeleteTrack { track: ret })

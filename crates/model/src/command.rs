@@ -4088,6 +4088,9 @@ impl Document {
         }
         // Only a drum rack's chains keep their notes, sends and outputs.
         chain.fit_to(self.device_ref(rack)?);
+        if let Some(track) = chain.audio_to {
+            check_kind(self.track_ref(track)?, |k| k == TrackKind::Return, RETURN)?;
+        }
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, chain.clone());

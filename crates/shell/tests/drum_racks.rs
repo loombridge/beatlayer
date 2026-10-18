@@ -882,3 +882,65 @@ fn a_pad_selects_its_chains_and_the_view_moves_by_group_or_row() {
     assert_eq!(selected.selected_chains, [a]);
     assert_eq!(selected.pads.unwrap().selected, Some(37));
 }
+
+// Spec: drum-racks R23. The notes of a chain on All Notes keep their pitch,
+// and a Session clip's notes leave it for a clip in the same slot.
+#[test]
+fn extracting_takes_session_clips_notes_and_keeps_all_notes_pitches() {
+    let scratch = Scratch::new("extract-session");
+    let mut drums = kit();
+    let a = drop_on(
+        &mut drums,
+        36,
+        json!({ "samples": [scratch.wav("A.wav", 1_000)] }),
+    )
+    .chains[0];
+    drums
+        .shell
+        .invoke(
+            "chain.set_receive",
+            json!({ "chain": a, "receive": "all_notes" }),
+        )
+        .unwrap();
+    let scene = drums.shell.editor().document().scenes().next().unwrap().id;
+    let clip: bl_model::ClipId = drums.shell.new_id();
+    let beat = bl_core::time::Ticks(bl_core::time::TICKS_PER_QUARTER);
+    drums
+        .shell
+        .run(
+            "clip.create_in_slot",
+            json!({
+                "track": drums.track,
+                "scene": scene,
+                "clip": bl_model::Clip::new(
+                    clip,
+                    bl_core::time::Ticks::ZERO,
+                    beat * 4,
+                    bl_model::ClipData::Midi(bl_model::MidiData::new([
+                        bl_model::Note::new(41, bl_core::time::Ticks::ZERO, beat, 100),
+                        bl_model::Note::new(50, beat, beat, 100),
+                    ])),
+                ),
+            }),
+        )
+        .unwrap();
+    let extracted: Extracted = serde_json::from_value(
+        drums
+            .shell
+            .invoke("chain.extract", json!({ "chain": a }))
+            .unwrap(),
+    )
+    .unwrap();
+    let doc = drums.shell.editor().document();
+    let moved = doc.slot(extracted.track, scene).expect("the same slot");
+    let bl_model::ClipData::Midi(data) = &moved.data else {
+        panic!("a MIDI clip");
+    };
+    let mut keys: Vec<u8> = data.notes.iter().map(|n| n.key).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, [41, 50], "All Notes passes the pitches as they came");
+    let bl_model::ClipData::Midi(left) = &doc.slot(drums.track, scene).unwrap().data else {
+        panic!("a MIDI clip");
+    };
+    assert!(left.notes.is_empty(), "the source clip lost them");
+}

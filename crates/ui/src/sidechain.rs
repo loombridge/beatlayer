@@ -91,11 +91,11 @@ pub fn strip_buttons(frame: Rect) -> [Rect; 2] {
     [toggle, listen]
 }
 
-fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
+pub(crate) fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
-fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
+pub(crate) fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
     if response.has_focus() && crate::focus::outlined(ui.ctx()) {
         ui.painter().rect_stroke(
             rect.expand(1.5),
@@ -107,7 +107,7 @@ fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {
 }
 
 /// What a click, or Enter with the focus on it, does to a button.
-fn pressed(ui: &Ui, response: &egui::Response) -> bool {
+pub(crate) fn pressed(ui: &Ui, response: &egui::Response) -> bool {
     response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
 }
 
@@ -399,7 +399,7 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 
-fn describe(ui: &Ui, id: Id, role: Role, label: &str, value: &str) {
+pub(crate) fn describe(ui: &Ui, id: Id, role: Role, label: &str, value: &str) {
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(role);
         node.set_label(label.to_owned());
@@ -565,7 +565,7 @@ fn number_box(ui: &mut Ui, theme: &Theme, b: NumberBox, rect: Rect, events: &mut
 
 /// A chooser: a dark box with the choice and a ▼, whose list a click opens
 /// (observed); choosing an entry runs its command.
-fn draw_chooser(
+pub(crate) fn draw_chooser(
     ui: &mut Ui,
     theme: &Theme,
     id: Id,

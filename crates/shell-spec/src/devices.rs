@@ -288,6 +288,21 @@ pub fn body_width(frame: &DeviceFrame) -> f32 {
     })
 }
 
+/// The width at 100%, in points, of an external device's section: its three
+/// choosers and Hardware Latency (Beatlayer's own; to observe).
+pub const EXTERNAL_SECTION_WIDTH: f32 = 92.0;
+
+/// The width at 100% of an external device's section: 0 for any other
+/// device.
+#[must_use]
+pub fn external_width(frame: &DeviceFrame) -> f32 {
+    if frame.external.is_some() {
+        EXTERNAL_SECTION_WIDTH
+    } else {
+        0.0
+    }
+}
+
 /// The width at 100% of what sits left of a device's body: its sidechain
 /// strip and, while shown, its sidechain section (WP-2.19b, and a MIDI
 /// sidechain's, WP-5.27); 0 without a sidechain input.
@@ -300,7 +315,7 @@ pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
         .or_else(|| frame.midi_sidechain.as_ref().map(|s| s.shown));
     shown.map_or(0.0, |shown| {
         SIDECHAIN_STRIP_WIDTH + if shown { SIDECHAIN_SECTION_WIDTH } else { 0.0 }
-    })
+    }) + external_width(frame)
 }
 
 /// How wide a device's frame is at 100%: a title bar wide when folded or
@@ -525,6 +540,9 @@ pub struct DeviceFrame {
     pub panel: Option<DevicePanel>,
     /// Its sidechain section, if it has a sidechain input (WP-2.19b).
     pub sidechain: Option<SidechainSection>,
+    /// Its routing to hardware, if it is an external device (WP-5.34).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<ExternalSection>,
     /// Its MIDI sidechain section, if it has a MIDI sidechain input
     /// (WP-5.27).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -676,6 +694,21 @@ pub struct SidechainSection {
     pub gain: f64,
     /// Sidechain Listen.
     pub listen: bool,
+}
+
+/// An external device's routing section, drawn at the left of its body
+/// (WP-5.34; the external devices spec, R9): the choosers and Hardware
+/// Latency, whose choices the shell lists.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExternalSection {
+    /// MIDI To: the output port's name, or none for No Output.
+    pub port: Option<String>,
+    /// The MIDI channel, 1 to 16.
+    pub channel: u8,
+    /// What Audio From shows: a channel `3` or a pair `3/4`.
+    pub audio_from: String,
+    /// Hardware Latency, in the unit its switch is on.
+    pub hardware_latency: bl_model::HardwareLatency,
 }
 
 /// A device's MIDI sidechain section, in the same left strip as a

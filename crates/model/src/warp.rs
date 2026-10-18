@@ -427,6 +427,11 @@ impl AudioData {
                 "the range must end after it starts",
             ));
         }
+        if transients.iter().any(|t| !t.is_finite()) {
+            return Err(ModelError::InvalidInput(
+                "a transient's time must be a number",
+            ));
+        }
         let map = self.warp_map()?;
         let within = (from.get() as f64)..=(to.get() as f64);
         let inside: Vec<MarkerAt> = transients

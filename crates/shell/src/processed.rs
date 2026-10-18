@@ -40,7 +40,7 @@ pub enum Kind {
     Freeze,
     /// A bounced track's render.
     Bounce,
-    /// A clip's separated stems (WP-9.1).
+    /// A clip's separated stems (IMP-11).
     Stems,
 }
 

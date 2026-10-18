@@ -1,4 +1,4 @@
-//! The Demucs network run through ONNX Runtime (WP-9.1).
+//! The Demucs network run through ONNX Runtime (IMP-11).
 //!
 //! ONNX Runtime isn't linked into Beatlayer: the `ort` crate loads its
 //! shared library at run time, from the folder the stem separation

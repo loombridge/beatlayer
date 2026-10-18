@@ -144,7 +144,7 @@ pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: &Value) -> Result<
 /// (its body holds the API's message), certificates verify through the
 /// platform's store, and rustls' crypto provider is ring. One shared agent
 /// pools the providers' connections; the stem separation packages' download
-/// (WP-9.1) uses it too.
+/// (IMP-11) uses it too.
 pub fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {

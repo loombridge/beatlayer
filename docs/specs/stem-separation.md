@@ -1,7 +1,7 @@
 # Stem separation
 
 - **Status:** partial
-- **Work packages:** WP-9.1 (IMP-11)
+- **Work packages:** IMP-11, built ahead of Phase 9 in [#202](https://github.com/loombridge/beatlayer/pull/202)
 - **Parity-matrix row:** Audio clips and warping: Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems)
 - **Checked against:** the Live 12 reference manual (online edition), chapter 22, read 18 October 2026, and Live 12 on macOS observed on 18 October 2026
 

@@ -1,4 +1,4 @@
-//! Separate Stems to New Audio Tracks (WP-9.1) through the shell, headless.
+//! Separate Stems to New Audio Tracks (IMP-11) through the shell, headless.
 //! The behaviour is in the stem separation spec.
 //!
 //! The separation itself needs the packages a person downloads on first

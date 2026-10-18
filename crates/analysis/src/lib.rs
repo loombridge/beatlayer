@@ -15,7 +15,7 @@
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
 //!
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
-//! Demucs network (WP-9.1).
+//! Demucs network (IMP-11).
 //!
 //! [`cache`] keeps what is found in each audio file, by the file's content
 //! hash (WP-4.3).

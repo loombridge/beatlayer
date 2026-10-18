@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 # Measures the agent API's previews (WP-1.16), and separates stems through
-# ONNX Runtime (WP-9.1).
+# ONNX Runtime (IMP-11).
 bl-analysis = { workspace = true, features = ["stems"] }
 # The built-in assistant (WP-2.23): the API keys in the OS keychain, and the
 # agent loop the panel runs (parts 1-2), whose tool calls the shell hosts.
@@ -44,7 +44,7 @@ bl-shell-spec.workspace = true
 # source. The version egui's hashing already brings in, so nothing new enters
 # the build.
 getrandom = "0.3.4"
-# Stem separation's packages (WP-9.1): each download's SHA-256 (the version
+# Stem separation's packages (IMP-11): each download's SHA-256 (the version
 # already in the build), and ONNX Runtime's library out of its release
 # archive, a gzipped tar or, on Windows, a zip.
 sha2 = "0.11"

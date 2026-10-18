@@ -1,4 +1,4 @@
-//! Stem separation's background work (WP-9.1): the packages it downloads on
+//! Stem separation's background work (IMP-11): the packages it downloads on
 //! first use, and the separation itself, each on a thread of its own. The
 //! shell starts them and lands their results (`Shell::run` for `stems.*`);
 //! the behaviour is in the stem separation spec.

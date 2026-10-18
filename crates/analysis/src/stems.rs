@@ -1,4 +1,4 @@
-//! Stem separation (WP-9.1, IMP-11): splits a stereo mix into drums, bass,
+//! Stem separation (IMP-11): splits a stereo mix into drums, bass,
 //! others, and vocals with a Demucs network, as the stem separation spec
 //! describes.
 //!

@@ -1,4 +1,4 @@
-//! Separate Stems to New Audio Tracks through the shell (WP-9.1): the
+//! Separate Stems to New Audio Tracks through the shell (IMP-11): the
 //! `stems.*` commands, the dialog's state, and the edit that lands once the
 //! stems are written. The work itself is in [`crate::stems`]; the behaviour
 //! is in the stem separation spec.

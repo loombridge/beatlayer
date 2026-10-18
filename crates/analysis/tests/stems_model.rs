@@ -1,4 +1,4 @@
-//! The real Demucs network (WP-9.1), where its packages are installed:
+//! The real Demucs network (IMP-11), where its packages are installed:
 //! `BL_STEMS_RUNTIME` names ONNX Runtime's shared library and
 //! `BL_STEMS_MODEL` the model. Without them the test passes untested, so
 //! CI, which has neither, skips it.

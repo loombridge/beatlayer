@@ -1,5 +1,5 @@
 //! Separate Stems to New Audio Tracks from an audio clip's menu, and its
-//! dialog (WP-9.1; the stem separation spec, R1 to R7).
+//! dialog (IMP-11; the stem separation spec, R1 to R7).
 
 mod common;
 

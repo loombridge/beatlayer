@@ -83,7 +83,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Consolidate | M4 | Built in WP-4.13 |
 | Slice to New MIDI Track (transients, warp markers, beat divisions, slicing presets) | M4 | Built in WP-4.16 |
 | Convert Drums, Melody, or Harmony to New MIDI Track | M9 | On-device ML, with measured accuracy targets (IMP-06) |
-| Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems) | M9 | On-device ML on the GPU, with a speed target (IMP-11). Arrangement clips, both modes and merging built in WP-9.1, on the CPU; files, Session clips, time selections and the GPU later in Phase 9 |
+| Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems) | M9 | On-device ML on the GPU, with a speed target (IMP-11). Arrangement clips, both modes and merging built ahead of Phase 9 in [#202](https://github.com/loombridge/beatlayer/pull/202), on the CPU; files, Session clips, time selections and the GPU later in Phase 9 |
 | Freeze Track | M4 | Built in WP-4.14 |
 | Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio | M4 | Mono sources bounce to mono files (IMP-10). Built in WP-4.15 |
 | REX files | Out | The REX SDK is proprietary; in scope only if its terms allow use in a GPL-3.0 application |

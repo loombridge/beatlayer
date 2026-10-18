@@ -11,9 +11,9 @@
 //! still holds its content, so a changed file is new media and never shows
 //! the old file's analysis.
 //!
-//! The analysis holds the file's transients for now; WP-4.9 adds its tempo
-//! and beats, and raises [`FORMAT_VERSION`] so older files are made again.
-//! Beatlayer never reads or writes Live's `.asd` files.
+//! The analysis holds the file's transients, its tempo and its beats (WP-4.9
+//! added the last two and raised [`FORMAT_VERSION`], so older files are made
+//! again). Beatlayer never reads or writes Live's `.asd` files.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -26,6 +26,7 @@ use bl_media::peaks::default_cache_dir;
 use bl_media::{ContentHash, MediaError, MediaStatus, MediaStore, SampleData, write_atomically};
 
 use crate::onsets;
+use crate::tempo::{self, Tempo};
 
 /// The file name extension of analysis files, without the dot.
 pub const FILE_EXTENSION: &str = "blanalysis";
@@ -33,12 +34,14 @@ pub const FILE_EXTENSION: &str = "blanalysis";
 /// The analysis file format version this build reads and writes. It goes up
 /// whenever the layout or the way an analysis is made changes, so stale
 /// files are made again rather than misread.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 const MAGIC: [u8; 8] = *b"BLANLYS\0";
 /// Magic, version, a reserved word, the source hash, the checksum, the count.
 const HEADER: usize = 8 + 4 + 4 + 32 + 32 + 8;
 const CHECKSUM: std::ops::Range<usize> = 48..80;
+/// The tempo's four words.
+const TEMPO: usize = 32;
 
 /// How many threads the constructors of [`AnalysisOptions`] give analysis.
 pub const ANALYSIS_THREADS: usize = 2;
@@ -49,6 +52,12 @@ pub struct Analysis {
     /// The file's transients as times in seconds from its start, in order
     /// (the warping spec R22).
     pub transients: Vec<f64>,
+    /// The file's tempo, if it has a rhythm to measure (the warping spec
+    /// R30).
+    pub tempo: Option<Tempo>,
+    /// The times in seconds of the file's beats, in order, from its first
+    /// beat to its end: empty without a tempo (R30).
+    pub beats: Vec<f64>,
 }
 
 impl Analysis {
@@ -72,17 +81,28 @@ impl Analysis {
             .map(|i| data.channels().map(|c| f64::from(c[i])).sum::<f64>() * scale)
             .collect();
         let function = onsets::onset_function(&mono, rate);
+        let transients = onsets::detect(&mono, &function);
+        let tempo = tempo::estimate(&function, &transients);
+        let seconds = data.frames() as f64 / f64::from(rate);
+        let beats = tempo
+            .as_ref()
+            .map_or_else(Vec::new, |tempo| tempo::beats(tempo, &transients, seconds));
         Ok(Self {
-            transients: onsets::detect(&mono, &function),
+            transients,
+            tempo,
+            beats,
         })
     }
 
-    /// The analysis as an analysis file: a header, then the transients as
-    /// little-endian `f64`s. `source` is the content hash of the media it
-    /// was made from.
+    /// The analysis as an analysis file: a header, the transients as
+    /// little-endian `f64`s, the tempo (its BPM, confidence, fitted count
+    /// and first beat, the BPM 0 for none), the beats' count and the beats.
+    /// `source` is the content hash of the media it was made from.
     #[must_use]
     pub fn to_file_bytes(&self, source: ContentHash) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(HEADER + 8 * self.transients.len());
+        let mut bytes = Vec::with_capacity(
+            HEADER + 8 * self.transients.len() + TEMPO + 8 + 8 * self.beats.len(),
+        );
         bytes.extend_from_slice(&MAGIC);
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend_from_slice(&[0; 4]);
@@ -90,6 +110,25 @@ impl Analysis {
         bytes.extend_from_slice(&[0; 32]);
         bytes.extend_from_slice(&(self.transients.len() as u64).to_le_bytes());
         for time in &self.transients {
+            bytes.extend_from_slice(&time.to_le_bytes());
+        }
+        let tempo = self.tempo.unwrap_or(Tempo {
+            bpm: 0.0,
+            confidence: 0.0,
+            fitted: 0,
+            first_beat: None,
+        });
+        // A first beat of NaN stands for none.
+        for word in [
+            tempo.bpm,
+            tempo.confidence,
+            tempo.fitted as f64,
+            tempo.first_beat.unwrap_or(f64::NAN),
+        ] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(&(self.beats.len() as u64).to_le_bytes());
+        for time in &self.beats {
             bytes.extend_from_slice(&time.to_le_bytes());
         }
         let sum = ContentHash::of_bytes(&bytes);
@@ -121,24 +160,60 @@ fn parse(bytes: &[u8], source: ContentHash) -> Result<Analysis, String> {
         return Err("made from other media".into());
     }
     let count = u64::from_le_bytes(bytes[80..88].try_into().expect("eight bytes"));
-    if u64::try_from(bytes.len() - HEADER).ok() != count.checked_mul(8) {
-        return Err("the length doesn't match the count".into());
+    let transients_end = usize::try_from(count)
+        .ok()
+        .and_then(|count| count.checked_mul(8))
+        .and_then(|len| len.checked_add(HEADER))
+        .filter(|end| {
+            end.checked_add(TEMPO + 8)
+                .is_some_and(|min| min <= bytes.len())
+        })
+        .ok_or("the length doesn't match the count")?;
+    let beats_at = transients_end + TEMPO;
+    let beat_count = u64::from_le_bytes(bytes[beats_at..beats_at + 8].try_into().expect("eight"));
+    if u64::try_from(bytes.len() - beats_at - 8).ok() != beat_count.checked_mul(8) {
+        return Err("the length doesn't match the counts".into());
     }
     let mut zeroed = bytes.to_vec();
     zeroed[CHECKSUM].fill(0);
     if bytes[CHECKSUM] != *ContentHash::of_bytes(&zeroed).as_bytes() {
         return Err("the checksum doesn't match".into());
     }
-    let (times, _) = bytes[HEADER..].as_chunks::<8>();
-    let transients: Vec<f64> = times.iter().map(|t| f64::from_le_bytes(*t)).collect();
+    let times = |range: &[u8]| -> Vec<f64> {
+        let (words, _) = range.as_chunks::<8>();
+        words.iter().map(|t| f64::from_le_bytes(*t)).collect()
+    };
+    let transients = times(&bytes[HEADER..transients_end]);
+    let beats = times(&bytes[beats_at + 8..]);
     // Times that are finite, not negative, and in order: a file that
     // passes its checksum but not this was written by a faulty build.
-    if !transients.iter().all(|t| t.is_finite() && *t >= 0.0)
-        || transients.windows(2).any(|pair| pair[0] >= pair[1])
-    {
+    let in_order = |times: &[f64]| {
+        times.iter().all(|t| t.is_finite() && *t >= 0.0)
+            && times.windows(2).all(|pair| pair[0] < pair[1])
+    };
+    if !in_order(&transients) {
         return Err("the transients aren't in order".into());
     }
-    Ok(Analysis { transients })
+    if !in_order(&beats) {
+        return Err("the beats aren't in order".into());
+    }
+    let [bpm, confidence, fitted, first] = times(&bytes[transients_end..beats_at])[..] else {
+        unreachable!("the tempo is four words");
+    };
+    if !(bpm.is_finite() && confidence.is_finite() && fitted.is_finite()) {
+        return Err("the tempo isn't a number".into());
+    }
+    let tempo = (bpm > 0.0).then_some(Tempo {
+        bpm,
+        confidence,
+        fitted: fitted as usize,
+        first_beat: first.is_finite().then_some(first),
+    });
+    Ok(Analysis {
+        transients,
+        tempo,
+        beats,
+    })
 }
 
 /// How an [`AnalysisCache`] is set up.
@@ -492,12 +567,19 @@ mod tests {
         let source = ContentHash::of_bytes(b"a");
         let analysis = Analysis {
             transients: vec![0.0, 0.25, 1.5],
+            tempo: Some(Tempo {
+                bpm: 97.5,
+                confidence: 0.75,
+                fitted: 6,
+                first_beat: Some(0.25),
+            }),
+            beats: vec![0.25, 0.875, 1.5],
         };
         let bytes = analysis.to_file_bytes(source);
         assert_eq!(Analysis::from_file_bytes(&bytes, source).unwrap(), analysis);
         assert!(Analysis::from_file_bytes(&bytes, ContentHash::of_bytes(b"b")).is_err());
         assert!(Analysis::from_file_bytes(&bytes[..bytes.len() - 1], source).is_err());
-        for at in [0, 8, 20, 50, 85, bytes.len() - 1] {
+        for at in [0, 8, 20, 50, 85, 100, bytes.len() - 1] {
             let mut damaged = bytes.clone();
             damaged[at] ^= 1;
             assert!(

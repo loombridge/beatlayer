@@ -1310,6 +1310,72 @@ const ENTRIES: &[Entry] = &[
             leave 1 to 1,000 BPM.",
     },
     Entry {
+        id: "clip.set_1_1_1_here",
+        action: Action::Apply("set_one_one_one_here"),
+        label: "Set 1.1.1 Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Makes a point of a warped audio clip's file its 1.1.1, the downbeat of its \
+            first bar: at the selected warp marker (`marker`, its place in the map, the first \
+            being 0) or at the Sample Editor's insert marker (`beat`, ticks from the clip's \
+            current 1.1.1, or `time`, seconds in the file); give one of the three. A warp \
+            marker is made there if there was none. Every marker, the End marker and the loop \
+            brace then move by the same ticks, so no segment changes tempo and each keeps its \
+            place in the audio, and the Start marker goes to 1.1.1. Refused for a clip that \
+            isn't warped, or if the End marker or the loop brace would end up before 1.1.1. \
+            One undo step.",
+    },
+    Entry {
+        id: "clip.warp_from_here",
+        action: Action::Apply("warp_from_here"),
+        label: "Warp From Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip from a point on: at the selected warp marker \
+            (`marker`) or at a new one at the insert marker (`beat` or `time`, as for \
+            `clip.set_1_1_1_here`). The markers before it stay and those after it are replaced. \
+            `method` is `auto`, a marker on the first beat of every bar after the point from \
+            the tempo found there; `start_at`, the same starting from the tempo `bpm`, the set's \
+            tempo at the point unless given, which settles whether a beat is counted at double \
+            or half the speed; `straight`, which deletes the markers after the point and sets \
+            the clip's tempo to the tempo found after it; or `bpm`, which deletes them and sets \
+            the clip's tempo to `bpm`, the set's tempo at the point unless given. The file's \
+            tempo and beats come from its analysis (`analysis` gives them), so every method but \
+            `bpm` is refused while it is not ready. Refused for a clip that isn't warped. One \
+            undo step.",
+    },
+    Entry {
+        id: "clip.warp_as_loop",
+        action: Action::Apply("warp_as_loop"),
+        label: "Warp as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip's whole file as a loop of 1, 2, 4, 8, 16 or 32 \
+            bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: \
+            a warp marker at the start of the file on 1.1.1 and one at its end on the last \
+            bar's end, the Start and End markers and the loop brace on the whole file, the loop \
+            on, and that tempo as the clip's. The clip keeps its place and length in the \
+            arrangement. Refused for a clip that isn't warped, or while the file's analysis is \
+            not ready. One undo step.",
+    },
+    Entry {
+        id: "clip.warp_selection_as_loop",
+        action: Action::Apply("warp_selection_as_loop"),
+        label: "Warp Selection as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps the part of a warped audio clip's file from `from` to `to` \
+            (seconds in the file) as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number \
+            whose tempo is nearest the set's tempo at the clip's start: a warp marker at each \
+            end of the part, the Start and End markers and the loop brace on it, the loop on. \
+            The clip keeps its place and length in the arrangement. Refused for a clip that \
+            isn't warped. One undo step.",
+    },
+    Entry {
         id: "clip.set_warp_mode",
         action: Action::Apply("set_clip_warp_mode"),
         label: "Set Warp Mode",

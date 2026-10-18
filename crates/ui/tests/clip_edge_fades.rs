@@ -30,13 +30,19 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     assert_eq!(switch.role, Role::Button);
     assert!(!switch.disabled);
     // Live's rows in Live's order, every other one pending but the Launch
-    // section's (WP-3.4) and Record Session automation in (WP-3.12):
-    // Record's seven, then Warp/Fades' three before the switch, then Launch
-    // and Tap Tempo.
+    // section's (WP-3.4), Record Session automation in (WP-3.12) and the
+    // Warp/Fades rows before the switch (WP-4.9): Record's seven, then
+    // Warp/Fades' three before the switch, then Launch and Tap Tempo.
     let live = |label: &str| {
         label == "Create Fades on Clip Edges"
             || label == "Record Session automation in"
             || label.contains("Launch")
+            || [
+                "Loop/Warp Short Samples",
+                "Auto-Warp Long Samples",
+                "Default Warp Mode",
+            ]
+            .contains(&label)
     };
     let top = |label: &str| {
         let node = Harness::node(&nodes, label);

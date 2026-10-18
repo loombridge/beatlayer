@@ -266,6 +266,115 @@ impl Default for LaunchPrefs {
     }
 }
 
+/// Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018):
+/// what a new clip of a short sample gets (the warping spec, R29 and R32).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoopWarpShortSamples {
+    /// Warp and the loop off.
+    UnwarpedOneShot,
+    /// Warped, the loop off.
+    WarpedOneShot,
+    /// Warped, the loop on over the whole file.
+    WarpedLoop,
+    /// A loop when its analysis finds a steady beat that fits whole bars, a
+    /// one-shot otherwise. What a new install has.
+    #[default]
+    Auto,
+}
+
+impl LoopWarpShortSamples {
+    /// Every choice, in the order Live lists them.
+    pub const ALL: [Self; 4] = [
+        Self::UnwarpedOneShot,
+        Self::WarpedOneShot,
+        Self::WarpedLoop,
+        Self::Auto,
+    ];
+
+    /// The choice's name in the Settings window.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UnwarpedOneShot => "Unwarped One Shot",
+            Self::WarpedOneShot => "Warped One Shot",
+            Self::WarpedLoop => "Warped Loop",
+            Self::Auto => "Auto",
+        }
+    }
+}
+
+/// Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the
+/// warp mode a new warped clip takes (the warping spec, R29 and R33).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultWarpMode {
+    /// Beats. What a new install has.
+    #[default]
+    Beats,
+    /// Tones.
+    Tones,
+    /// Texture.
+    Texture,
+    /// Re-Pitch.
+    RePitch,
+    /// Complex.
+    Complex,
+    /// Complex Pro.
+    ComplexPro,
+}
+
+impl DefaultWarpMode {
+    /// Every choice, in the order Live lists them.
+    pub const ALL: [Self; 6] = [
+        Self::Beats,
+        Self::Tones,
+        Self::Texture,
+        Self::RePitch,
+        Self::Complex,
+        Self::ComplexPro,
+    ];
+
+    /// The choice's name in the Settings window.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Beats => "Beats",
+            Self::Tones => "Tones",
+            Self::Texture => "Texture",
+            Self::RePitch => "Re-Pitch",
+            Self::Complex => "Complex",
+            Self::ComplexPro => "Complex Pro",
+        }
+    }
+}
+
+/// The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with
+/// the defaults observed in Live 12.4.6. They are preferences, kept between
+/// starts and not saved with a set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct WarpPrefs {
+    /// Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples`
+    /// sets it.
+    pub loop_warp_short_samples: LoopWarpShortSamples,
+    /// Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets
+    /// it.
+    pub auto_warp_long_samples: bool,
+    /// Default Warp Mode, as `settings.set_default_warp_mode` sets it.
+    pub default_warp_mode: DefaultWarpMode,
+}
+
+impl Default for WarpPrefs {
+    fn default() -> Self {
+        Self {
+            loop_warp_short_samples: LoopWarpShortSamples::Auto,
+            auto_warp_long_samples: true,
+            default_warp_mode: DefaultWarpMode::Beats,
+        }
+    }
+}
+
 /// Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12):
 /// which tracks a Session recording writes control moves into the clips of.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -322,6 +431,9 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,
+    /// Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long
+    /// Samples and Default Warp Mode.
+    pub warp: WarpPrefs,
     /// Record, Warp & Launch: the Launch section, as the
     /// `settings.set_default_launch_*`, `settings.set_select_on_launch`,
     /// `settings.set_select_next_scene_on_launch` and

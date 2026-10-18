@@ -60,10 +60,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "autotools"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef941527c41b0fc0dd48511a8154cd5fc7e29200a0ff8b7203c5d777dbc795cf"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "beatlayer-fuzz"
 version = "0.0.0"
 dependencies = [
  "bl-core",
+ "bl-interop",
  "bl-media",
  "bl-project",
  "libfuzzer-sys",
@@ -77,14 +87,15 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "bl-commands"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-commands",
+ "serde_json",
 ]
 
 [[package]]
 name = "bl-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libm",
  "schemars",
@@ -93,20 +104,31 @@ dependencies = [
 
 [[package]]
 name = "bl-dsp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-params",
 ]
 
 [[package]]
+name = "bl-interop"
+version = "0.1.0"
+dependencies = [
+ "bl-core",
+ "bl-model",
+ "bl-project",
+ "midly",
+]
+
+[[package]]
 name = "bl-media"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-dsp",
  "bl-rt",
  "blake3",
  "flacenc",
  "hound",
+ "mp3lame-encoder",
  "rayon",
  "rtrb",
  "rubato",
@@ -115,10 +137,11 @@ dependencies = [
 
 [[package]]
 name = "bl-model"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
+ "bl-stretch",
  "imbl",
  "lspk-params",
  "schemars",
@@ -128,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "bl-project"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -141,9 +164,16 @@ dependencies = [
 
 [[package]]
 name = "bl-rt"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-rt",
+]
+
+[[package]]
+name = "bl-stretch"
+version = "0.1.0"
+dependencies = [
+ "bl-dsp",
 ]
 
 [[package]]
@@ -445,7 +475,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lspk-commands"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=dcb30164a76fadf3b51de4db305546e71b0611e4#dcb30164a76fadf3b51de4db305546e71b0611e4"
+source = "git+https://github.com/loombridge/plugin-kit?rev=fbf23cd99a14cbfff7f5246f1cd3af526380073b#fbf23cd99a14cbfff7f5246f1cd3af526380073b"
 dependencies = [
  "schemars",
  "serde",
@@ -455,7 +485,7 @@ dependencies = [
 [[package]]
 name = "lspk-params"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=dcb30164a76fadf3b51de4db305546e71b0611e4#dcb30164a76fadf3b51de4db305546e71b0611e4"
+source = "git+https://github.com/loombridge/plugin-kit?rev=fbf23cd99a14cbfff7f5246f1cd3af526380073b#fbf23cd99a14cbfff7f5246f1cd3af526380073b"
 dependencies = [
  "schemars",
  "serde",
@@ -464,7 +494,7 @@ dependencies = [
 [[package]]
 name = "lspk-rt"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=dcb30164a76fadf3b51de4db305546e71b0611e4#dcb30164a76fadf3b51de4db305546e71b0611e4"
+source = "git+https://github.com/loombridge/plugin-kit?rev=fbf23cd99a14cbfff7f5246f1cd3af526380073b#fbf23cd99a14cbfff7f5246f1cd3af526380073b"
 dependencies = [
  "libc",
  "rtrb",
@@ -486,6 +516,35 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "midly"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "207d755f4cb882d20c4da58d707ca9130a0c9bc5061f657a4f299b8e36362b7a"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "mp3lame-encoder"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60cb9bdd89806317373e36ff745f264b7ed7ffc5bc5aab02dc7d1b837c16a8d4"
+dependencies = [
+ "mp3lame-sys",
+]
+
+[[package]]
+name = "mp3lame-sys"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e3b1772db47828840702e5a2e05694527f731abadf9b931355d54035f019d8"
+dependencies = [
+ "autotools",
+ "cc",
+ "libc",
+]
 
 [[package]]
 name = "num-complex"

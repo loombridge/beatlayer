@@ -150,6 +150,7 @@ fn sample_drop(
     ui: &Ui,
     state: &DeviceViewState,
     placed: &[(DeviceId, Rect)],
+    rect: Rect,
     events: &mut Vec<UiEvent>,
 ) {
     let (dropped, pointer) = ui.input(|i| {
@@ -164,6 +165,37 @@ fn sample_drop(
     let (Some(path), Some(pointer)) = (dropped.into_iter().next(), pointer) else {
         return;
     };
+    // Spec: multisampler R47. An SFZ instrument dropped on a multisampler
+    // adds its regions as layers; anywhere else in a MIDI track's Device
+    // View it makes a multisampler on the track.
+    if crate::browser::is_sfz(&path) {
+        if !rect.contains(pointer) {
+            return;
+        }
+        let over = placed
+            .iter()
+            .find(|(_, frame)| frame.contains(pointer))
+            .filter(|(device, _)| {
+                state
+                    .devices
+                    .iter()
+                    .any(|frame| frame.id == *device && frame.multisampler.is_some())
+            });
+        match (over, state.track, state.track_kind) {
+            (Some((device, _)), _, _) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "device": device }),
+            ),
+            (None, Some(track), Some(bl_model::TrackKind::Midi)) => invoke(
+                events,
+                bl_shell::multisampler_commands::IMPORT_SFZ,
+                json!({ "path": path, "track": track }),
+            ),
+            _ => {}
+        }
+        return;
+    }
     let Some((device, _)) = placed.iter().find(|(_, rect)| rect.contains(pointer)) else {
         return;
     };
@@ -326,7 +358,19 @@ impl DeviceViewUi {
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
-        sample_drop(ui, &state, &placed, events);
+        sample_drop(ui, &state, &placed, rect, events);
+    }
+
+    /// Where the zone editor is, if the selected multisampler has it open:
+    /// above the Device View in `detail` (R1).
+    #[must_use]
+    pub fn zone_editor_rect(shell: &Shell, detail: Rect) -> Option<Rect> {
+        shell.device_view_state().devices.iter().find_map(|d| {
+            d.multisampler
+                .as_ref()
+                .filter(|m| d.selected && m.view.zone_editor)
+                .map(|m| crate::multisampler::zone_editor_rect(detail, m.view.size))
+        })
     }
 
     /// Draws the zone editor of the selected multisampler whose editor is
@@ -557,6 +601,8 @@ impl DeviceViewUi {
                 }
                 if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
+                    crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
             },
         );
@@ -1409,6 +1455,7 @@ fn browser_drop(
                         "name": device.name,
                         "role": device.role,
                         "sidechain": device.sidechain,
+                        "midi_sidechain": device.midi_sidechain,
                     },
                 }),
             ),

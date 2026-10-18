@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-433 commands in 35 areas.
+435 commands in 35 areas.
 
 ## Permission classes
 
@@ -209,6 +209,7 @@ Each command has:
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` | `Q`; `Q` | `Q`; `Q` |
 | [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
+| [`device.import_sfz`](#deviceimport_sfz) | Import SFZ | `external` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | Insert Device in Chain | `edit` |  |  |
 | [`device.insert_layers`](#deviceinsert_layers) | Add Samples | `edit` |  |  |
@@ -239,6 +240,7 @@ Each command has:
 | [`device.set_layer_options`](#deviceset_layer_options) | Change Sample Options | `edit` |  |  |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | Replace Sample | `external` |  |  |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | Set MIDI Sidechain Source | `edit` |  |  |
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
@@ -3699,6 +3701,24 @@ Arguments:
 
 Result: [`MultisamplerState`](#multisamplerstate).
 
+#### `device.import_sfz`
+
+**Import SFZ**. Permission: `external`. Contexts: `device-view`.
+
+Imports an SFZ multisample instrument, the open text format, as a multisampler: each region becomes a layer (its sample, key and velocity zones with their crossfades as fades, Root Key, tuning, Volume, Pan, start and end points, loop and loop mode), and the device-wide settings most regions agree on (the volume, filter, filter and pitch envelopes, Vel > Vol, Pitch Bend Range, reverse, the fade law) set the new device's controls. Sequences (`seq_length`) turn Round Robin on in Forward mode, random windows (`lorand`) in Random mode. With `device`, a multisampler, only the layers are added, at the end of its list; otherwise a multisampler is made on `track`, or on a new MIDI track below the last. The samples join the set's media where they lie. Regions whose sample is missing or isn't audio, or whose `trigger` isn't `attack`, are left out and named in `left_out`; opcodes the import doesn't read are listed in `unread`. A file with no region left changes nothing. One undo step. It reads files outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The `.sfz` file. |
+| `device` | [`DeviceId`](#deviceid) or null | no | A multisampler to add the regions to as layers, at the end of its list. Left out, the import makes a multisampler: on `track`, or on a new MIDI track below the last track. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track to put a new multisampler on, after its other devices. Ignored with `device`. |
+
+Result: [`SfzImported`](#sfzimported).
+
 #### `device.insert`
 
 **Insert Device**. Permission: `edit`. Contexts: `device-view`, `browser`.
@@ -4247,6 +4267,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_midi_sidechain_source`
+
+**Set MIDI Sidechain Source**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track whose notes and channel messages the device hears (its own track too), or `None` for No Input. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_multisampler_view`
 
 **Set Multisampler View**. Permission: `read`. Contexts: `device-view`.
@@ -4466,7 +4503,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Show Sidechain**. Permission: `read`. Contexts: `device-view`.
 
-Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`.
+Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI sidechain's, `device.set_midi_sidechain_source`.
 
 Default keys: none.
 
@@ -4571,7 +4608,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Change Sample Settings**. Permission: `edit`. Contexts: `device-view`.
 
-Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
+Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
 
 Default keys: none.
 
@@ -8200,6 +8237,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
 | [`device.edit_sample`](#deviceedit_sample) | the query tool's `device` | `sample_edits` |
 | [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
+| [`device.import_sfz`](#deviceimport_sfz) | the query tool's `device` | `layers` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
 | [`device.insert_layers`](#deviceinsert_layers) | the query tool's `device` | `layers` |
@@ -8223,6 +8261,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_layer_options`](#deviceset_layer_options) | the query tool's `device` | `layers` |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -11810,6 +11849,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
+| `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -11876,6 +11916,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         ]
       },
       "type": "array"
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechain"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -12180,6 +12231,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
@@ -12237,6 +12289,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechainSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27)."
     },
     "modulator": {
       "anyOf": [
@@ -14759,6 +14822,7 @@ One of:
 
 - `"folder"`: A folder.
 - `"audio"`: An audio file Beatlayer can open.
+- `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
@@ -14778,6 +14842,11 @@ One of:
     {
       "const": "audio",
       "description": "An audio file Beatlayer can open.",
+      "type": "string"
+    },
+    {
+      "const": "sfz",
+      "description": "An SFZ multisample instrument, which imports as a multisampler (WP-5.14).",
       "type": "string"
     },
     {
@@ -15419,6 +15488,7 @@ One sample of a multisample (R2).
 | `edits` | array of [`SampleEdit`](#sampleedit) | no | The sample's edits, applied in order to the media (WP-5.15, R55). The markers, [`length`](Self::length) and the sample the engine plays are the edited sample's; the source file is never written. |
 | `link` | boolean | no | Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off. |
 | `loop_detune` | number | no | How the voice is retuned inside a loop, in cents (R19). |
+| `one_shot` | boolean | no | Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`. |
 | `pan` | number | no | Its place in the stereo field, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) | no | What the note's end does inside a sustain loop (R18). |
 | `sustain` | [`SustainMode`](#sustainmode) | no | The sustain loop's kind (R17). |
@@ -15502,6 +15572,10 @@ One sample of a multisample (R2).
     "name": {
       "description": "Its name: the file's name until renamed.",
       "type": "string"
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does (R50's `one_shot`). No control in the Sample tab sets it: an SFZ import does, and `device.update_layers`.",
+      "type": "boolean"
     },
     "pan": {
       "description": "Its place in the stereo field, −50 to 50.",
@@ -15656,6 +15730,7 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
 | `loop_detune` | number or null | no | The loop's Detune, −50 to 50 cents. |
 | `loop_end` | integer or null | no | Loop End, in frames. |
 | `loop_start` | integer or null | no | Loop Start, in frames. |
+| `one_shot` | boolean or null | no | Whether the layer's voices play on to Sample End whatever the note does. |
 | `pan` | number or null | no | Pan, −50 to 50. |
 | `release` | [`ReleaseMode`](#releasemode) or null | no | Release Mode. |
 | `release_loop` | integer or null | no | The Release Loop point, in frames. |
@@ -15726,6 +15801,13 @@ Settings of a layer to change, each left as it was when `None` (`device.update_l
       "minimum": 0,
       "type": [
         "integer",
+        "null"
+      ]
+    },
+    "one_shot": {
+      "description": "Whether the layer's voices play on to Sample End whatever the note does.",
+      "type": [
+        "boolean",
         "null"
       ]
     },
@@ -16852,6 +16934,72 @@ What `midi.ports` returns.
 
 </details>
 
+### `MidiSidechain`
+
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MidiSidechainSection`
+
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
+| `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "properties": {
+    "shown": {
+      "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
+      "type": "boolean"
+    },
+    "source": {
+      "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shown",
+    "source"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MixerOf`
 
 Which view's mixer: the Session View's or the Arrangement View's.
@@ -17473,6 +17621,7 @@ The device `device.add` adds.
 |---|---|---|---|
 | `kind` | [`DeviceKind`](#devicekind) | yes | What it is: a native device's type ID or a plug-in's format and ID. |
 | `name` | string | yes | Its own name, such as the browser lists it. |
+| `midi_sidechain` | boolean | no | Whether it has a MIDI sidechain input, as its type declares (WP-5.27). |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain. |
 | `sidechain` | boolean | no | Whether it has a sidechain input, as its type declares (WP-2.19b). |
 
@@ -17486,6 +17635,10 @@ The device `device.add` adds.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is: a native device's type ID or a plug-in's format and ID."
+    },
+    "midi_sidechain": {
+      "description": "Whether it has a MIDI sidechain input, as its type declares (WP-5.27).",
+      "type": "boolean"
     },
     "name": {
       "description": "Its own name, such as the browser lists it.",
@@ -21063,6 +21216,154 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "plug_ins",
     "agents",
     "assistant"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzCount`
+
+An opcode or header the import left unread or settled device-wide, with how many regions use it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The opcode, or the header in angle brackets. |
+| `regions` | integer, at least 0 | yes | How many regions use it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An opcode or header the import left unread or settled device-wide, with how many regions use it.",
+  "properties": {
+    "name": {
+      "description": "The opcode, or the header in angle brackets.",
+      "type": "string"
+    },
+    "regions": {
+      "description": "How many regions use it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "regions"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzImported`
+
+What `device.import_sfz` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The multisampler. |
+| `track` | [`TrackId`](#trackid) | yes | Its track. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The new layers, in list order: now the selected layers. |
+| `unread` | array of [`SfzCount`](#sfzcount) | yes | Opcodes and headers left unread. |
+| `settled` | array of [`SfzCount`](#sfzcount) | yes | Opcodes most regions agree on, which set the device's own controls. |
+| `left_out` | array of [`SfzLeftOut`](#sfzleftout) | yes | Regions left out, each with why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.import_sfz` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The multisampler."
+    },
+    "layers": {
+      "description": "The new layers, in list order: now the selected layers.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    },
+    "left_out": {
+      "description": "Regions left out, each with why.",
+      "items": {
+        "$ref": "#/$defs/SfzLeftOut"
+      },
+      "type": "array"
+    },
+    "settled": {
+      "description": "Opcodes most regions agree on, which set the device's own controls.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "Its track."
+    },
+    "unread": {
+      "description": "Opcodes and headers left unread.",
+      "items": {
+        "$ref": "#/$defs/SfzCount"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "track",
+    "layers",
+    "unread",
+    "settled",
+    "left_out"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SfzLeftOut`
+
+A region the import left out.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `region` | integer, at least 0 | yes | Its place among the file's regions, from 1. |
+| `sample` | string | yes | Its sample as the file names it. |
+| `reason` | string | yes | Why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A region the import left out.",
+  "properties": {
+    "reason": {
+      "description": "Why.",
+      "type": "string"
+    },
+    "region": {
+      "description": "Its place among the file's regions, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sample": {
+      "description": "Its sample as the file names it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "region",
+    "sample",
+    "reason"
   ],
   "type": "object"
 }

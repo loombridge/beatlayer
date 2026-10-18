@@ -1957,7 +1957,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
+        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms`, `loop_detune` and `one_shot` (the layer's voices play on to Sample End whatever the note does, as an SFZ `one_shot` region's do). Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
     },
     Entry {
         id: "device.set_layer_media",
@@ -2028,6 +2028,20 @@ const ENTRIES: &[Entry] = &[
             plays as before; the device only listens to it. The detector hears it only while \
             External is on (`device.set_sidechain_enabled`). To make a kick duck a bass, set \
             the bass compressor's source to the kick's track and switch External on.",
+    },
+    Entry {
+        id: "device.set_midi_sidechain_source",
+        action: Action::Apply("set_midi_sidechain_source"),
+        label: "Set MIDI Sidechain Source",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI \
+            source chooser in its sidechain parameters does: `track` is a MIDI track (the \
+            device's own track too), or left out for No Input, a new device's. The device \
+            hears the notes and channel messages that track's clips and input play, before \
+            its own devices change them; the track still plays as before. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
     },
     Entry {
         id: "device.set_sidechain_enabled",

@@ -277,6 +277,7 @@ impl DeviceView {
             name: ready.device.title().to_owned(),
             role: ready.device.role,
             sidechain: ready.device.sidechain.is_some(),
+            midi_sidechain: ready.device.midi_sidechain.is_some(),
         };
         let add = AddDeviceArgs {
             device: new,

@@ -223,7 +223,8 @@ pub struct BrowserDevice {
     /// Where it goes in a chain.
     pub role: bl_model::DeviceRole,
     /// Whether it has a sidechain input.
-    pub sidechain: bool,
+    pub sidechain: bool,    /// Whether it has a MIDI sidechain input.
+    pub midi_sidechain: bool,
 }
 
 /// The devices a label lists: under Modulators, Beatlayer's modulator
@@ -246,6 +247,7 @@ fn label_devices(label: &Label) -> Vec<BrowserDevice> {
             kind: DeviceKind::Rack { kind },
             role: kind.role(),
             sidechain: false,
+            midi_sidechain: false,
         })
         .into_iter()
         .collect();
@@ -268,6 +270,7 @@ fn label_devices(label: &Label) -> Vec<BrowserDevice> {
                     t.role
                 },
                 sidechain: t.sidechain,
+                midi_sidechain: t.midi_sidechain,
             }),
             _ => None,
         }
@@ -1014,6 +1017,22 @@ impl BrowserView {
         self.selected_audio().is_empty()
     }
 
+    /// The SFZ instrument selected, if one file is and it is that.
+    #[must_use]
+    pub fn selected_sfz(&self) -> Option<PathBuf> {
+        match self.selected.as_slice() {
+            [one]
+                if one
+                    .file_name()
+                    .and_then(|n| file_kind(&n.to_string_lossy()))
+                    == Some(ItemKind::Sfz) =>
+            {
+                Some(one.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// The selected audio files, in the content pane's order.
     fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -1033,7 +1052,9 @@ impl BrowserView {
     pub fn can_run(&self, id: &str, args: &Value) -> bool {
         match id {
             ids::LOAD_SELECTED => {
-                !self.selected_audio().is_empty() || self.selected_device().is_some()
+                !self.selected_audio().is_empty()
+                    || self.selected_device().is_some()
+                    || self.selected_sfz().is_some()
             }
             ids::PREVIEW => args.get("path").is_some() || self.selected_audio().len() == 1,
             ids::REMOVE_FOLDER => args

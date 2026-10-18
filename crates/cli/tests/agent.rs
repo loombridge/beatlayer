@@ -2423,6 +2423,100 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
+// agent inserts Veer by its type with its MIDI sidechain, sets its
+// parameters by ID, points its MIDI source at a MIDI track and reads both
+// back; the source goes when that track does.
+#[test]
+fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_track() {
+    use bl_devices::shifter::{COARSE, MODE, PITCH_SOURCE, SHIFT, SHIFTER};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("veer-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Veer", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": SHIFTER } },
+                                    "name": "Veer", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Veer", "commands": [
+            set(MODE, 1.0),
+            set(SHIFT, 123.0),
+            set(COARSE, -7.0),
+            set(PITCH_SOURCE, 1.0),
+            { "command": "device.set_midi_sidechain_source",
+              "args": { "device": device, "track": keys } },
+        ] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 34, "every parameter is listed");
+    let value = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))["value"]
+            .clone()
+    };
+    assert_eq!(
+        [MODE, SHIFT, COARSE, PITCH_SOURCE].map(value),
+        [json!(1.0), json!(123.0), json!(-7.0), json!(1.0)]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+
+    // The source reads back from the device, and goes with its track.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+    // An audio track isn't a source.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                    "args": { "device": device, "track": audio } }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
+}
+
 // Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
 // reads its parameters with its two menu options, switches one by ID, and
 // swaps it to Snapshot, by command ID.
@@ -2956,6 +3050,69 @@ fn an_agent_warps_a_clip_and_reads_it_back() {
         off["start"].as_f64().unwrap() < 10.0,
         "seconds again: {off}"
     );
+}
+
+/// An agent imports an SFZ instrument by path, then reads its layers, its
+/// device settings and what the import left unread back (WP-5.14; the
+/// multisampler spec, R47 and R53).
+#[test]
+fn an_agent_imports_an_sfz_by_path() {
+    let sfz = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/sfz/Sine Bank.sfz")
+        .to_string_lossy()
+        .into_owned();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let imported = call(
+        &mut client,
+        "run",
+        json!({ "label": "Import the kit", "commands": [
+            { "command": "device.import_sfz", "args": { "path": sfz } },
+        ] }),
+    );
+    let result = &imported["results"][0]["result"];
+    assert_eq!(result["layers"].as_array().unwrap().len(), 5);
+    assert_eq!(result["left_out"][0]["sample"], "missing.wav");
+    assert_eq!(result["unread"][0]["name"], "group");
+    let device = result["device"].clone();
+    // The layers read back, in the order a round robin takes them, with the
+    // zones the file gave.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device) }),
+    );
+    let layers = &found["layers"];
+    assert_eq!(layers["count"], 5);
+    let items = layers["list"]["items"].as_array().unwrap();
+    let names: Vec<&str> = items.iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["low_soft", "low_hard", "mid_a", "mid_b", "high"]);
+    assert_eq!(items[0]["key"]["low"], 36);
+    assert_eq!(items[0]["velocity"]["high"], 63);
+    assert_eq!(items[2]["key"]["fade_high"], 3);
+    assert_eq!(items[4]["sustain"], "loop");
+    // Round Robin is on in Forward mode, and Vel > Vol is the file's 0.
+    let parameters = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.parameters", "args": { "device": device } },
+        ] }),
+    );
+    let params = parameters["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let value = |name: &str| {
+        params
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .as_f64()
+            .unwrap()
+    };
+    assert_eq!(value("Round Robin"), 1.0);
+    assert_eq!(value("Vel > Vol"), 0.0);
+    assert_eq!(value("Env Release"), 50.0);
 }
 
 /// Spec: warp-modes R1 to R3, R12; warping R14. An agent sets a clip's warp

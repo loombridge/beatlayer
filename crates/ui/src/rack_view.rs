@@ -1129,6 +1129,7 @@ impl DeviceViewUi {
                                     "name": device.name,
                                     "role": device.role,
                                     "sidechain": device.sidechain,
+                                    "midi_sidechain": device.midi_sidechain,
                                 },
                             }),
                         ),

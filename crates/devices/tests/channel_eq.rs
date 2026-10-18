@@ -1,4 +1,4 @@
-//! Strip, the native channel EQ (WP-5.21; the channel-eq spec): its
+//! Channel EQ, the native channel EQ (WP-5.21; the channel-eq spec): its
 //! sections against the cookbook curves, the high-pass's corner, the
 //! shelf's plateaus and changing shape, the mid peak's gain across its
 //! sweep, the high band's shelf and low-pass, Output, and the display.
@@ -33,7 +33,7 @@ fn strip(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     node(&registry(), &device(&device_type, params), max_frames)
 }
 
-/// The Strip's response at `hz`, in dB, with `params` set.
+/// The Channel EQ's response at `hz`, in dB, with `params` set.
 fn response_db(params: &[(ParamId, f64)], hz: f64) -> f64 {
     let ir = impulse_response(strip(params, FRAMES).as_mut(), FRAMES);
     db(response_at(&ir, hz))
@@ -280,7 +280,7 @@ fn the_display_holds_the_response_the_mid_marker_and_the_spectrum() {
             &values.params,
             data,
         )
-        .expect("Strip draws a display")
+        .expect("Channel EQ draws a display")
     };
     let from_values = shown(None);
     assert!(!from_values.live && from_values.series.len() == 1);

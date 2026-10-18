@@ -1,4 +1,4 @@
-//! Trident, the three-line filter delay (WP-5.25; the filter delay spec):
+//! Filter Delay, the three-line filter delay (WP-5.25; the filter delay spec):
 //! three delay lines, each with its band in its loop, its own time (synced
 //! or free), Pan and Volume, and one Feedback and one Dry for the device.
 
@@ -15,7 +15,7 @@ use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sections::Biquad;
 
-/// Trident's device type.
+/// Filter Delay's device type.
 pub const FILTER_DELAY: &str = "bl.device.trident";
 
 /// A line's On switch, as its offset among the line's parameters.
@@ -127,7 +127,7 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
     ]
 }
 
-/// Trident's type: Beatlayer's own name and look, Live's parameters (the
+/// Filter Delay's type: Beatlayer's own look, Live's parameters (the
 /// filter delay spec).
 #[must_use]
 pub fn filter_delay_type() -> DeviceType {
@@ -140,7 +140,7 @@ pub fn filter_delay_type() -> DeviceType {
         ParamDescriptor::gain(DRY, "Dry", 0.0, 0.0)
             .describe("The level of the unprocessed signal."),
     );
-    DeviceType::native(FILTER_DELAY, "Trident", DeviceRole::AudioEffect)
+    DeviceType::native(FILTER_DELAY, "Filter Delay", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -179,7 +179,7 @@ fn layout() -> DeviceLayout {
     DeviceLayout::new(LayoutNode::Row(parts))
 }
 
-/// Adds Trident to `registry`.
+/// Adds Filter Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, filter_delay_type(), Trident::new);
 }
@@ -209,7 +209,7 @@ impl Band {
     }
 }
 
-/// Trident: three lines and their bands.
+/// Filter Delay: three lines and their bands.
 struct Trident {
     lines: [Line; LINES],
     bands: [Band; LINES],

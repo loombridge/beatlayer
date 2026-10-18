@@ -52,6 +52,7 @@ fn analysis_runs_in_the_background_and_is_kept_by_content_hash() {
     // can return them.
     let marked = Analysis {
         transients: vec![0.125],
+        ..Analysis::default()
     };
     fs::write(first.file_path(hash).unwrap(), marked.to_file_bytes(hash)).unwrap();
     let elsewhere = TempDir::new("elsewhere");
@@ -135,6 +136,7 @@ fn a_damaged_or_foreign_analysis_file_is_rebuilt() {
     *flipped.last_mut().unwrap() ^= 1;
     let other = Analysis {
         transients: vec![0.5],
+        ..Analysis::default()
     }
     .to_file_bytes(ContentHash::of_bytes(b"other media"));
     for damaged in [

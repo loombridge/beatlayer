@@ -1,4 +1,4 @@
-//! Strike in the Device View (WP-5.18), headless: a sample dropped on it
+//! Drum Sampler in the Device View (WP-5.18), headless: a sample dropped on it
 //! loads, and its context menu ends with its own items, which run the
 //! commands an agent runs.
 //!
@@ -160,7 +160,7 @@ fn the_menu_ends_with_strikes_own_items_and_they_run_their_commands() {
     // The two switches, in the manual's order: bend on in a new device.
     let bend = place(&nodes, "Enable Per-Note Pitch Bend");
     let follows = place(&nodes, "Envelope Follows Pitch");
-    let swap = place(&nodes, "Swap to Snapshot");
+    let swap = place(&nodes, "Swap to Simpler");
     let pad = place(&nodes, "Save as Default Pad");
     // Listed top to bottom in that order, all after the general items.
     let top = |at: usize| nodes[at].bounds.unwrap().y0;
@@ -178,15 +178,15 @@ fn the_menu_ends_with_strikes_own_items_and_they_run_their_commands() {
     assert_eq!(param(&h, device, PER_NOTE_BEND), None, "still the default");
     assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
 
-    // The swap replaces it with Snapshot, in one undo step.
+    // The swap replaces it with Simpler, in one undo step.
     let nodes = open_menu(&mut h, device);
     let steps = h.shell.editor().undo_history().count();
-    click(&mut h, &nodes[place(&nodes, "Swap to Snapshot")]);
+    click(&mut h, &nodes[place(&nodes, "Swap to Simpler")]);
     assert!(h.shell.editor().document().device(device).is_none());
     assert_eq!(h.shell.editor().undo_history().count(), steps + 1);
     assert_eq!(
         h.shell.editor().undo_history().next().unwrap(),
-        "Swap to Snapshot"
+        "Swap to Simpler"
     );
     let snapshot = h
         .shell
@@ -195,6 +195,6 @@ fn the_menu_ends_with_strikes_own_items_and_they_run_their_commands() {
         .tracks()
         .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
         .find(|d| matches!(&d.kind, DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER))
-        .expect("Snapshot took its place");
+        .expect("Simpler took its place");
     assert_eq!(snapshot.params.get(&bl_devices::sampler::MODE), Some(&1.0));
 }

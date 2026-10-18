@@ -1,4 +1,4 @@
-//! The Wave Mod (WP-5.10; the modulation spec, R21 and R22): nine waveforms
+//! The LFO (WP-5.10; the modulation spec, R21 and R22): nine waveforms
 //! that keep to 0 to 1 and repeat at the rate, Shape and Steps that go
 //! inactive where they should, a cycle locked to the song position, Hold and
 //! R, and random parts that start again with the transport. Every block runs
@@ -30,7 +30,7 @@ fn playing(position: i64) -> TransportInfo {
     }
 }
 
-/// A Wave Mod whose slot 1 gives its output itself: unipolar at full amount
+/// A LFO whose slot 1 gives its output itself: unipolar at full amount
 /// and depth. `params` set over those.
 fn wave(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     let mut all = vec![(modulator::amount(0), 100.0), (POLARITY, 1.0)];

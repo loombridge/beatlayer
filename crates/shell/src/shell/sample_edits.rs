@@ -1,6 +1,6 @@
 //! Sample editing in the sampler devices (WP-5.15, IMP-28; the multisampler
-//! spec, R54 to R63): the edit list kept with Snapshot's sample and with each
-//! multisampler layer, Crop and Reverse as processed copies, Snapshot's
+//! spec, R54 to R63): the edit list kept with Simpler's sample and with each
+//! multisampler layer, Crop and Reverse as processed copies, Simpler's
 //! Normalize Volumes, the conversions between the two devices, and
 //! auditioning from a point.
 //!
@@ -23,7 +23,7 @@ use bl_shell_spec::multisampler::{
 use super::*;
 use crate::processed::{Kind, Request};
 
-/// The sample a command acts on: Snapshot's, or one layer's of a
+/// The sample a command acts on: Simpler's, or one layer's of a
 /// multisampler.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Target {
@@ -38,7 +38,7 @@ struct Sample {
 }
 
 impl Shell {
-    /// Whether `device` is Snapshot.
+    /// Whether `device` is Simpler.
     pub(super) fn is_snapshot(device: &bl_model::Device) -> bool {
         matches!(
             &device.kind,
@@ -48,7 +48,7 @@ impl Shell {
 
     /// The sample `device` (or the selected device) and `layer` name: a
     /// multisampler's layer (its first selected if none is named), or
-    /// Snapshot's own sample.
+    /// Simpler's own sample.
     pub(super) fn sample_target(
         &self,
         id: &str,
@@ -87,7 +87,7 @@ impl Shell {
             })
         } else if Self::is_snapshot(found) {
             if layer.is_some() {
-                return Err(self.failed(id, "Snapshot has one sample and no layers"));
+                return Err(self.failed(id, "Simpler has one sample and no layers"));
             }
             Ok(Target {
                 device,
@@ -216,7 +216,7 @@ impl Shell {
             };
             // The selection must fit the sample as the earlier edits left
             // it; a layer's model checks that against its length, and
-            // Snapshot's is checked against the sample here.
+            // Simpler's is checked against the sample here.
             if layer.is_none() {
                 let length = self
                     .edited_audio(sample.media, &sample.edits)
@@ -246,7 +246,7 @@ impl Shell {
         }))
     }
 
-    /// Snapshot's region as frames of its edited sample: Start and Length
+    /// Simpler's region as frames of its edited sample: Start and Length
     /// are shares of it (the sampler spec, R3).
     fn snapshot_region(&self, device: DeviceId, frames: u64) -> (u64, u64) {
         let (start, length) = self.snapshot_shares(device);
@@ -255,7 +255,7 @@ impl Shell {
         (first, end)
     }
 
-    /// Snapshot's Start and Length as shares of the sample, 0 to 1.
+    /// Simpler's Start and Length as shares of the sample, 0 to 1.
     fn snapshot_shares(&self, device: DeviceId) -> (f64, f64) {
         let description = sampler::sampler_type().description;
         self.editor
@@ -377,7 +377,7 @@ impl Shell {
                         })
                         .map(drop),
                     None => {
-                        // Loading the copy clears Snapshot's edits; a crop
+                        // Loading the copy clears Simpler's edits; a crop
                         // makes the region the whole of the copy.
                         editor.apply(Command::SetDeviceSample {
                             device,
@@ -420,7 +420,7 @@ impl Shell {
         }))
     }
 
-    /// Snapshot's Normalize Volumes (R60): its Gain, so the region's largest
+    /// Simpler's Normalize Volumes (R60): its Gain, so the region's largest
     /// sample magnitude reaches 0 dBFS.
     pub(super) fn normalize_snapshot(
         &mut self,
@@ -429,7 +429,7 @@ impl Shell {
         what: Normalize,
     ) -> Result<Value, ShellError> {
         if what == Normalize::Pan {
-            return Err(self.failed(id, "Snapshot has no Normalize Pan"));
+            return Err(self.failed(id, "Simpler has no Normalize Pan"));
         }
         let target = Target {
             device,
@@ -464,7 +464,7 @@ impl Shell {
         }))
     }
 
-    /// `device.convert` (R62): Snapshot and the multisampler into each
+    /// `device.convert` (R62): Simpler and the multisampler into each
     /// other, in the old one's place.
     fn convert(&mut self, id: &str, args: &ConvertArgs) -> Result<Value, ShellError> {
         let device = args
@@ -493,7 +493,7 @@ impl Shell {
         let (new, layer) = match args.to {
             ConvertTo::Multisampler => {
                 if !Self::is_snapshot(&old) {
-                    return Err(self.failed(id, format!("{device} isn't Snapshot")));
+                    return Err(self.failed(id, format!("{device} isn't Simpler")));
                 }
                 self.snapshot_to_multisampler(id, &old, new_id, &mut dropped)?
             }
@@ -542,7 +542,7 @@ impl Shell {
         }))
     }
 
-    /// Snapshot as a multisampler's device and its one layer: the whole
+    /// Simpler as a multisampler's device and its one layer: the whole
     /// zones, the region as Sample Start and Sample End, the loop as a
     /// sustain loop (R62).
     fn snapshot_to_multisampler(
@@ -636,7 +636,7 @@ impl Shell {
         Ok((new, Some(layer)))
     }
 
-    /// A multisampler as Snapshot in Classic mode playing its first layer
+    /// A multisampler as Simpler in Classic mode playing its first layer
     /// (R62).
     fn multisampler_to_snapshot(
         &self,
@@ -684,7 +684,7 @@ impl Shell {
             sampler::LENGTH,
             (layer.end - layer.start) as f64 / length * 100.0,
         );
-        // Snapshot plays C3 at the sample's own pitch; the layer's root key
+        // Simpler plays C3 at the sample's own pitch; the layer's root key
         // is where the multisampler does.
         set(
             sampler::TRANSPOSE,
@@ -719,7 +719,7 @@ impl Shell {
         if layer.release != bl_model::ReleaseMode::Off {
             dropped.push("the layer's release mode".to_owned());
         }
-        // Snapshot's loop always ends at the region's end, plays forwards
+        // Simpler's loop always ends at the region's end, plays forwards
         // and has no detune of its own.
         if layer.sustain != SustainMode::Off && layer.loop_end != layer.end {
             dropped.push("the layer's Loop End".to_owned());

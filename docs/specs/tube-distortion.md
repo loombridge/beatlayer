@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-Valve is Beatlayer's tube distortion. The user chooses one of three tube models, A, B or C, sets how much signal reaches the tube (Drive), how far the signal sits into the tube's curve (Bias), and where the distortion falls in the spectrum (Tone), and can let the input's level move the Bias (Envelope, with Attack and Release). Model A is clean until the signal reaches a threshold and then adds bright harmonics; C always distorts; B is between. Output sets the level after the tube. Hi-Quality, an item of the Show Options menu, runs the tube at a higher rate so its harmonics don't alias.
+Dynamic Tube is Beatlayer's tube distortion. The user chooses one of three tube models, A, B or C, sets how much signal reaches the tube (Drive), how far the signal sits into the tube's curve (Bias), and where the distortion falls in the spectrum (Tone), and can let the input's level move the Bias (Envelope, with Attack and Release). Model A is clean until the signal reaches a threshold and then adds bright harmonics; C always distorts; B is between. Output sets the level after the tube. Hi-Quality, an item of the Show Options menu, runs the tube at a higher rate so its harmonics don't alias.
 
 The signal goes through Tone's shelf, the Drive gain, the tube, Tone's inverse shelf and Output. The tube works the curve at an operating point set by the model, the Bias and the envelope. This spec covers the device; the device framework is the [device framework spec](device-framework.md).
 
@@ -21,7 +21,7 @@ The signal goes through Tone's shelf, the Drive gain, the tube, Tone's inverse s
 
 ## Rules
 
-- **R1.** Beatlayer ships Valve, an audio-effect device type of its own name and layout, described like any native device: every parameter has a descriptor and a place in the layout (Hi-Quality in the Show Options menu instead). It has no latency while Hi-Quality is off. The display cell is named Tube Curve. (S1, S2, S3)
+- **R1.** Beatlayer ships Dynamic Tube, an audio-effect device type of its own layout, described like any native device: every parameter has a descriptor and a place in the layout (Hi-Quality in the Show Options menu instead). It has no latency while Hi-Quality is off. The display cell is named Tube Curve. (S1, S2, S3)
 - **R2.** The tube is a curve `g` that is linear up to a knee `k` and above it eases to 1: `g(v) = v` for `|v| ≤ k`, and `sign(v) · (k + (1 − k) · tanh((|v| − k) / (1 − k)))` above. Its output for the signal `x` (after Tone's shelf and the Drive gain) is `g(x + o) − g(o)`, where `o` is the operating point: the model's offset plus the Bias as a fraction (0 to 1), plus the envelope (R5), limited to between 0 and 1 before the model's offset is added. **Tube A** has `k = 0.5` and offset 0: at Bias 0 and Drive 0 dB it is the identity while the signal stays under 0.5, so a sine under that has harmonic distortion below −80 dB, and above it the distortion rises (a sine of 0.9 is above −40 dB); a higher Bias brings the threshold down. (S1; the knee and offset are Beatlayer's own)
 - **R3.** **Tube C** has `k = 0` (a plain `tanh`) and offset 0.15, so it distorts at every level: a sine of 0.01 to 0.4 has harmonic distortion above −80 dB. (S1; Beatlayer's own)
 - **R4.** **Tube B** has `k = 0.2` and offset 0.05; at the same Drive and level its distortion lies between A's and C's. (S1; Beatlayer's own)
@@ -32,7 +32,7 @@ The signal goes through Tone's shelf, the Drive gain, the tube, Tone's inverse s
 - **R9.** Drive is a value in dB from 0 to 36 dB (default 6 dB), Bias runs from 0 to 100% (default 20%), and Output is a gain from −∞ to +6 dB (default 0 dB) applied after the tube and Tone's inverse. (S1; the ranges and defaults are Beatlayer's own)
 - **R10.** The display holds the tube's curve at the Model, Drive and Bias now (with no envelope) over inputs from −1 to 1 as a series named Tube Curve, and, once an engine publishes, the input's level in dB as the reading Input with a marker on the curve. The cell stays a black frame in the generic UI; `device.display` reads both headlessly. (S1)
 - **R11.** Renders are bit-identical at block sizes 1, 64, 512 and 4,096, and nothing on the audio thread allocates, locks or blocks. Tone's coefficients are updated every 16 frames counted from the device's first frame, so they don't follow the block size. (S2)
-- **R12.** An agent adds Valve with `device.insert` or `device.add`, sets and reads every parameter by ID with `device.set_param` and `device.parameters` (Hi-Quality reported as a menu option), reads the display with `device.display`, and finds the device and its values when the saved set is opened. Output reaches −∞ dB and is silent there, and every parameter is automatable (device framework R2 and R3). (S2)
+- **R12.** An agent adds Dynamic Tube with `device.insert` or `device.add`, sets and reads every parameter by ID with `device.set_param` and `device.parameters` (Hi-Quality reported as a menu option), reads the display with `device.display`, and finds the device and its values when the saved set is opened. Output reaches −∞ dB and is silent there, and every parameter is automatable (device framework R2 and R3). (S2)
 
 ## Tests
 

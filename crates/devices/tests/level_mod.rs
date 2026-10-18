@@ -1,4 +1,4 @@
-//! The Level Mod (WP-5.11; the modulation spec, R24): its output follows the
+//! The Envelope Follower (WP-5.11; the modulation spec, R24): its output follows the
 //! level of the signal it hears, or of its sidechain, through Gain, Rise and
 //! Fall, and is held back by Delay; its audio passes untouched. Every block
 //! runs as a real-time section under the allocation trap.
@@ -29,7 +29,7 @@ fn playing(at: usize) -> TransportInfo {
     }
 }
 
-/// A Level Mod whose slot 1 gives its output itself (unipolar, full amount
+/// An Envelope Follower whose slot 1 gives its output itself (unipolar, full amount
 /// and depth), with Rise and Fall at 0 so it follows at once; `params` over
 /// those.
 fn follower(params: &[(ParamId, f64)]) -> Box<dyn Node> {

@@ -1,18 +1,18 @@
-//! The framework's test effects device, Sweep and Stutter under
+//! The framework's test effects device, Auto Filter and Beat Repeat under
 //! RealtimeSanitizer (WP-5.42, WP-5.20, WP-5.21, WP-5.26). The test effects device runs the effects' shared
 //! parts (an LFO that locks to the song's tempo map and position, an
 //! envelope follower, and a seeded random source) on a track that plays,
 //! while its waveform, rate mode, output, Hold, and menu option change.
-//! Sweep runs every filter type, the oversampled path, the LFO's waves,
-//! rate modes and quantiser, and Clip while they change. Strip, Triad,
-//! Shutter and Bond run with their parameters moving. Stutter runs its
+//! Auto Filter runs every filter type, the oversampled path, the LFO's waves,
+//! rate modes and quantiser, and Clip while they change. Channel EQ, EQ Three,
+//! Gate and Glue Compressor run with their parameters moving. Beat Repeat runs its
 //! intervals, grids, Chance, Variation and its modes, output modes, filter
 //! and Repeat button while they change. RTSan stops the process at the first allocation, free, lock, or
 //! blocking call, and the allocation trap, installed as in every Beatlayer
 //! test binary, fails the test at any heap use it sees.
 //!
-//! The lo-fi effects (WP-5.24: Degrade, Crush and Wax) run after a test tone
-//! with every parameter changing the same way, as do Singe, Grit and Valve
+//! The lo-fi effects (WP-5.24: Erosion, Redux and Vinyl Distortion) run after a test tone
+//! with every parameter changing the same way, as do Saturator, Overdrive and Dynamic Tube
 //! (WP-5.23) with their curves, Hi-Quality and envelopes changing.
 
 bl_rt::install_trap!();
@@ -215,7 +215,7 @@ fn sweep_passes_under_rtsan() {
     assert_eq!(state.counters.events_unrouted, 0);
     assert!(state.counters.events_applied > 100);
     eprintln!(
-        "2,000 blocks of Sweep under RealtimeSanitizer: {} parameter changes, \
+        "2,000 blocks of Auto Filter under RealtimeSanitizer: {} parameter changes, \
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0
@@ -335,7 +335,7 @@ fn veer_passes_under_rtsan() {
     assert_eq!(state.counters.events_unrouted, 0);
     assert!(state.counters.events_applied > 100);
     eprintln!(
-        "2,000 blocks of Veer under RealtimeSanitizer: {} parameter changes, \
+        "2,000 blocks of Shifter under RealtimeSanitizer: {} parameter changes, \
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0
@@ -866,7 +866,7 @@ fn stutter_passes_under_rtsan() {
     assert_eq!(state.counters.events_unrouted, 0);
     assert!(state.counters.events_applied > 100);
     eprintln!(
-        "2,000 blocks of Stutter under RealtimeSanitizer: {} parameter changes, \
+        "2,000 blocks of Beat Repeat under RealtimeSanitizer: {} parameter changes, \
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0
@@ -914,7 +914,7 @@ fn the_saturation_devices_pass_under_rtsan() {
     );
 }
 
-/// Triband (WP-5.22) on a track that plays, with its sidechain unused, while
+/// Multiband Dynamics (WP-5.22) on a track that plays, with its sidechain unused, while
 /// its band switches, detector, knee, Time, Amount, solos and thresholds
 /// change.
 #[test]
@@ -1020,7 +1020,7 @@ fn triband_passes_under_rtsan() {
     assert_eq!(state.counters.events_unrouted, 0);
     assert!(state.counters.events_applied > 100);
     eprintln!(
-        "2,000 blocks of Triband under RealtimeSanitizer: {} parameter changes, \
+        "2,000 blocks of Multiband Dynamics under RealtimeSanitizer: {} parameter changes, \
          peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0

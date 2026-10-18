@@ -1,7 +1,7 @@
 //! Sample editing in the sampler devices (WP-5.15, IMP-28; the multisampler
 //! spec, R55 to R63): the edit list, Revert Edits, Crop and Reverse as
-//! processed copies, Snapshot's Normalize Volumes, and the conversions
-//! between Snapshot and the multisampler. Driven through `Shell::run`, as an
+//! processed copies, Simpler's Normalize Volumes, and the conversions
+//! between Simpler and the multisampler. Driven through `Shell::run`, as an
 //! agent drives it (D17), on real files and bl-project's real set files.
 
 use std::path::{Path, PathBuf};
@@ -105,9 +105,9 @@ fn add_device(shell: &mut Shell, device_type: &str, name: &str) -> DeviceId {
     added.device
 }
 
-/// A Snapshot playing `file`.
+/// A Simpler playing `file`.
 fn snapshot(shell: &mut Shell, file: &Path) -> DeviceId {
-    let device = add_device(shell, SAMPLER, "Snapshot");
+    let device = add_device(shell, SAMPLER, "Simpler");
     shell
         .run(
             "device.load_sample",
@@ -119,7 +119,7 @@ fn snapshot(shell: &mut Shell, file: &Path) -> DeviceId {
 
 /// A multisampler with one layer of `file`.
 fn multisampler(shell: &mut Shell, file: &Path) -> DeviceId {
-    let device = add_device(shell, MULTISAMPLER, "Mosaic");
+    let device = add_device(shell, MULTISAMPLER, "Sampler");
     shell
         .run(
             "device.add_layers",
@@ -293,7 +293,7 @@ fn crop_and_reverse_write_a_processed_copy_and_keep_the_original() {
     let source = shell.media_store().load(before).unwrap();
     let ramp = source.channel(0).unwrap().to_vec();
 
-    // Snapshot's Crop keeps the region (a quarter in, half the length).
+    // Simpler's Crop keeps the region (a quarter in, half the length).
     set_param(&mut shell, snap, sampler::START, 25.0);
     set_param(&mut shell, snap, sampler::LENGTH, 50.0);
     edit(&mut shell, snap, "fade_in", Some((0, 10)));
@@ -516,7 +516,7 @@ fn snapshot_and_the_multisampler_convert_both_ways() {
         .value(&new.params, bl_devices::multisampler::ENV_ATTACK)
         .unwrap();
     assert_eq!(attack, 20.0, "the envelope carries over");
-    // One undo step puts Snapshot back.
+    // One undo step puts Simpler back.
     undo(&mut shell);
     assert!(shell.editor().document().device(mosaic).is_none());
     assert_eq!(device(&shell, snap).sample_edits.len(), 1);

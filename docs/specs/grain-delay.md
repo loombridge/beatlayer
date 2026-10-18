@@ -9,7 +9,7 @@
 
 The grain delay delays its input and plays it back in short overlapping pieces, grains. The delay time is a beat division (Sync), optionally shortened or lengthened by a percentage, or a free time in milliseconds. Frequency sets how often a grain starts and so how long each lasts. Pitch transposes the grains; Random Pitch varies each grain's pitch at random; Spray starts each grain a random time later than the delay time, smearing the signal. Feedback sends the output back into the delay, and Dry/Wet balances the input against the grains. An X–Y display moves two parameters at once; any parameter can be put on either axis, and the assignment is part of the set.
 
-Beatlayer's own name for the device is Scatter. It runs on the device framework with the generic controls and one display cell for the X–Y pad, a black frame holding the two axis choosers. The manual names the controls and their effects but gives no ranges, units or defaults, nor the grain design, so those are Beatlayer's own. The device reports no latency of its own: the delay time is the effect.
+The device takes Live's name, Grain Delay. It runs on the device framework with the generic controls and one display cell for the X–Y pad, a black frame holding the two axis choosers. The manual names the controls and their effects but gives no ranges, units or defaults, nor the grain design, so those are Beatlayer's own. The device reports no latency of its own: the delay time is the effect.
 
 ## Sources
 
@@ -46,7 +46,7 @@ Beatlayer's own name for the device is Scatter. It runs on the device framework 
 
 ## Defaults, ranges and details
 
-- A new Scatter has Sync off, a time of 100 ms (4 sixteenths, 0 % when synced), Frequency 20 Hz, Pitch 0, Random Pitch 0 %, Spray 0 ms, Feedback 0 %, Dry/Wet 50 %, and the X–Y axes on Delay Time and Dry/Wet.
+- A new Grain Delay has Sync off, a time of 100 ms (4 sixteenths, 0 % when synced), Frequency 20 Hz, Pitch 0, Random Pitch 0 %, Spray 0 ms, Feedback 0 %, Dry/Wet 50 %, and the X–Y axes on Delay Time and Dry/Wet.
 - Up to eight grains sound at once; two overlap, and the rest are older grains that outlast a rise in Frequency. A ninth takes the oldest's place.
 - A grain is read by linear interpolation, so high pitches lose some brightness, as the manual's "crude pitch shifter" allows. The two channels share each grain's delay and pitch, which keeps the stereo image.
 - The delay line holds a little over 5.5 s, the longest time plus the widest spray. A time set at a slow tempo past it is held there.

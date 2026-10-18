@@ -1,4 +1,4 @@
-//! Stutter, the equivalent of Beat Repeat (WP-5.26; the beat-repeat spec):
+//! Beat Repeat (WP-5.26; the beat-repeat spec):
 //! captures land on the song's beat grid through the tempo map, the slice
 //! repeats for the gate's length, the three modes mix the input and the
 //! repeats, Chance and Variation draw from a seeded source, and a render is
@@ -51,7 +51,7 @@ fn ramp(frames: usize) -> Vec<f32> {
 /// A parameter change on frame `at` of a render.
 type Change = (usize, ParamId, f64);
 
-/// Renders `input` (the same on both channels) through Stutter with
+/// Renders `input` (the same on both channels) through Beat Repeat with
 /// `params` in blocks of `block` frames, while the song plays from frame 0
 /// (or stands still at 0), applying each of `changes` on its frame. Returns
 /// the left channel and the right.
@@ -117,7 +117,7 @@ fn beat_three() -> Vec<(ParamId, f64)> {
 fn stutter_is_described_with_every_parameter_in_its_layout_and_no_latency() {
     let device_type = beat_repeat_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Stutter");
+    assert_eq!(device_type.name, "Beat Repeat");
     assert_eq!(device_type.description.params.len(), 17);
     assert!(device_type.description.menu_options.is_empty());
     assert_eq!(device_type.description.param(VOLUME).unwrap().default, 1.0);
@@ -345,7 +345,7 @@ fn no_triplets_keeps_the_grid_binary() {
     }
 }
 
-/// The frames after `from` where a render of Stutter in Gate mode over a
+/// The frames after `from` where a render of Beat Repeat in Gate mode over a
 /// ramp falls back: where a slice starts again.
 fn falls(out: &[f32], from: usize) -> Vec<usize> {
     (from + 1..out.len())

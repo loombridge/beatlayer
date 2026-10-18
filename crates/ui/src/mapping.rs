@@ -1,4 +1,4 @@
-//! Mapping a modulator to its targets, and the Curve Mod's display (WP-5.10;
+//! Mapping a modulator to its targets, and the Shaper's display (WP-5.10;
 //! the modulation spec, R15, R19, R23).
 //!
 //! A modulator's Map button lights its slot: every parameter that can be a
@@ -125,7 +125,7 @@ pub fn unmap_button_id(device: DeviceId, slot: u8) -> Id {
     Id::new(("modulator-unmap", device, slot))
 }
 
-/// The ID of a Curve Mod's shape display.
+/// The ID of a Shaper's shape display.
 #[must_use]
 pub fn curve_id(device: DeviceId) -> Id {
     Id::new(("modulator-curve", device))
@@ -294,7 +294,7 @@ enum Drag {
     Bend { index: usize, bend: f64, y: f32 },
 }
 
-/// A Curve Mod's shape display (R23): the breakpoint envelope over one
+/// A Shaper's shape display (R23): the breakpoint envelope over one
 /// cycle, with a grid. A click adds a breakpoint, a drag moves one,
 /// Alt/Option-dragging a segment curves it, Shift-clicking a breakpoint
 /// deletes it; Clear and six presets sit along its top. `grid` is the number
@@ -417,7 +417,7 @@ pub fn curve_cell(
     };
     let (alt, shift, command) =
         ui.input(|i| (i.modifiers.alt, i.modifiers.shift, i.modifiers.command));
-    // Spec: modulation R26. Only a Strike Mod has a sustain breakpoint.
+    // Spec: modulation R26. Only a Shaper MIDI has a sustain breakpoint.
     let sustains =
         matches!(&frame.kind, DeviceKind::Native { device_type } if device_type == STRIKE_MOD);
     if response.drag_started() {

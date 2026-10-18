@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Lift is a MIDI effect that moves every note that reaches it by a number of semitones, and keeps the result inside a window of keys. A note that would land outside the window is dropped (Block), moved by octaves into it (Fold), or moved to its nearest edge (Limit). The note's velocity, release velocity, channel and timing are untouched, and its per-note expressions (bend, pressure, slide) follow it to its new key. Lift ends each note on the key it started it on, whatever changes while the note is held.
+Pitch is a MIDI effect that moves every note that reaches it by a number of semitones, and keeps the result inside a window of keys. A note that would land outside the window is dropped (Block), moved by octaves into it (Fold), or moved to its nearest edge (Limit). The note's velocity, release velocity, channel and timing are untouched, and its per-note expressions (bend, pressure, slide) follow it to its new key. Pitch ends each note on the key it started it on, whatever changes while the note is held.
 
-Beatlayer's own name for the device is Lift; its look is the device framework's generic controls. Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are two buttons that move Pitch by Step Width; the generic layout has no momentary buttons, so Beatlayer carries Step Width as a parameter and agents and people set Pitch directly. The Use Current Scale switch is carried and does nothing until Phase 6's scales: Pitch then reads in scale degrees. This spec covers the device only.
+The device takes Live's name, Pitch; its look is the device framework's generic controls. Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are two buttons that move Pitch by Step Width; the generic layout has no momentary buttons, so Beatlayer carries Step Width as a parameter and agents and people set Pitch directly. The Use Current Scale switch is carried and does nothing until Phase 6's scales: Pitch then reads in scale degrees. This spec covers the device only.
 
 ## Sources
 
@@ -22,16 +22,16 @@ Beatlayer's own name for the device is Lift; its look is the device framework's 
 
 ## Rules
 
-- **R1.** Every note that reaches Lift leaves it Pitch semitones away, on the same frame, with the same velocity, channel and note ID, and its note-off leaves on the key its note-on left on, with the note-off's own release velocity. A note moved outside 0 to 127 is outside the window (R3 to R5). (S1, S2)
+- **R1.** Every note that reaches Pitch leaves it Pitch semitones away, on the same frame, with the same velocity, channel and note ID, and its note-off leaves on the key its note-on left on, with the note-off's own release velocity. A note moved outside 0 to 127 is outside the window (R3 to R5). (S1, S2)
 - **R2.** Pitch runs from −128 to +128 semitones and moves notes down when negative. (S1)
 - **R3.** The window runs from Lowest, a key from 0 to 127, up Range keys, to at most 127. In Block mode a note that would land outside it is dropped, and so are its note-off and its expressions; the light that flashes for it is drawn once the engine publishes a device's display state. (S1)
 - **R4.** In Fold mode a note outside the window is moved by whole octaves into it; a window too narrow for any octave of the note drops it. (S1)
 - **R5.** In Limit mode a note below the window is moved to Lowest and a note above it to the window's highest key. (S1)
-- **R6.** Changing Pitch, Lowest, Range or Mode while a note is held doesn't move the note: its note-off leaves on the key its note-on left on, at any block size. A note-off for a note Lift never saw, such as one started while it was switched off, passes through as it came. (S1, S2)
-- **R7.** A per-note expression for a note Lift moved is sent on to the moved note, with its key and note ID. (S2)
-- **R8.** A note Lift dropped takes its expressions with it. (S2)
-- **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Lift/`. (S3)
-- **R10.** Every parameter is automatable and has a description, and nothing Lift does on the audio thread allocates, locks, or blocks. (S3, S4)
+- **R6.** Changing Pitch, Lowest, Range or Mode while a note is held doesn't move the note: its note-off leaves on the key its note-on left on, at any block size. A note-off for a note Pitch never saw, such as one started while it was switched off, passes through as it came. (S1, S2)
+- **R7.** A per-note expression for a note Pitch moved is sent on to the moved note, with its key and note ID. (S2)
+- **R8.** A note Pitch dropped takes its expressions with it. (S2)
+- **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Pitch/`. (S3)
+- **R10.** Every parameter is automatable and has a description, and nothing Pitch does on the audio thread allocates, locks, or blocks. (S3, S4)
 - **R11.** Use Current Scale is a switch that does nothing until Phase 6 brings scales; Step Width is a value that nothing reads until the Step Up and Step Down buttons exist. (S1)
 
 ## Tests
@@ -52,6 +52,6 @@ Beatlayer's own name for the device is Lift; its look is the device framework's 
 
 ## Defaults, ranges and details
 
-- A new Lift starts at Pitch 0, Step Width 1, Lowest 0, Range 127 (the whole keyboard), Mode Block, Use Current Scale off. The manual doesn't state the defaults; these leave notes alone.
+- A new Pitch starts at Pitch 0, Step Width 1, Lowest 0, Range 127 (the whole keyboard), Mode Block, Use Current Scale off. The manual doesn't state the defaults; these leave notes alone.
 - The window applies to the key after Pitch. Pitch and Step Width are whole numbers of semitones.
 - The blocked-note light is not drawn: it needs the engine to publish a device's display state.

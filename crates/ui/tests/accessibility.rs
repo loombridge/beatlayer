@@ -1111,6 +1111,35 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The test plug-in on audio track 3, the selected track, once it offers
+/// its editor, with no device selected (WP-2.10).
+fn a_plugin(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let loaded = h
+        .shell
+        .run(
+            "plugin.load",
+            json!({ "path": bl_test_clap::bundle(), "track": track }),
+        )
+        .unwrap();
+    let device: bl_model::DeviceId = serde_json::from_value(loaded["device"].clone()).unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !h.shell.plugin_info(device).is_some_and(|i| i.has_window) {
+        assert!(
+            std::time::Instant::now() < until,
+            "the plug-in never offered its editor"
+        );
+        h.shell.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// An audio effect rack with two chains, Pad and Lead, on audio track 3, the
 /// selected track, with no device selected (WP-5.2).
 fn a_rack(h: &mut Harness) {
@@ -1279,8 +1308,8 @@ fn a_midi_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
-/// A Wave Mod and a test utility on the selected audio track (WP-5.10),
-/// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
+/// An LFO and a test utility on the selected audio track (WP-5.10),
+/// with the LFO's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
 fn modulators_on_track(h: &mut Harness, mapped: bool, lit: bool) {
     let mut types = bl_devices::testing::device_types();
@@ -1332,7 +1361,7 @@ fn a_lit_map_button(h: &mut Harness) {
     modulators_on_track(h, false, true);
 }
 
-/// A Curve Mod on the selected audio track.
+/// A Shaper on the selected audio track.
 fn a_curve_mod(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1351,7 +1380,7 @@ fn a_curve_mod(h: &mut Harness) {
         .unwrap();
 }
 
-/// A Squeeze, whose display has views, on the selected audio track.
+/// A Compressor, whose display has views, on the selected audio track.
 fn a_squeeze(h: &mut Harness) {
     h.shell.set_device_types(bl_devices::device_types());
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1361,7 +1390,7 @@ fn a_squeeze(h: &mut Harness) {
     let types = bl_devices::device_types();
     let t = types
         .iter()
-        .find(|t| t.name == "Squeeze")
+        .find(|t| t.name == "Compressor")
         .expect("the compressor is offered");
     h.shell
         .run(
@@ -1546,6 +1575,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let sample_editor =
         LaterView("the Sample Editor and the Audio Utilities panel's warp controls (WP-4.10)");
+    let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
     // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
     // deletes breakpoints, and the keys for the breakpoints come with a
     // later package; its choosers and Linked switch are reached by Tab.
@@ -1788,6 +1818,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 nothing,
                 "Warp recorded audio",
                 Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_loop_warp_short_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Loop/Warp Short Samples",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "settings.set_auto_warp_long_samples",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Auto-Warp Long Samples",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_default_warp_mode",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Default Warp Mode",
+                Key::ArrowDown,
             ),
         ),
         (
@@ -2126,11 +2183,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_high_quality", Exception(sample_editor)),
         ("clip.insert_warp_marker", Exception(sample_editor)),
         ("clip.insert_warp_markers", Exception(sample_editor)),
+        ("clip.set_1_1_1_here", Exception(sample_editor)),
+        ("clip.warp_from_here", Exception(sample_editor)),
+        ("clip.warp_as_loop", Exception(sample_editor)),
+        ("clip.warp_selection_as_loop", Exception(sample_editor)),
         ("clip.insert_transient", Exception(sample_editor)),
         ("clip.delete_transients", Exception(sample_editor)),
         ("clip.reset_transients", Exception(sample_editor)),
         ("clip.move_transient", Exception(sample_editor)),
         ("clip.transients", Exception(sample_editor)),
+        ("clip.save_default", Exception(clip_title_bar)),
+        ("clip.defaults", Exception(clip_title_bar)),
         ("clip.move_warp_markers", Exception(sample_editor)),
         ("clip.shift_warp_marker", Exception(sample_editor)),
         ("clip.delete_warp_markers", Exception(sample_editor)),
@@ -2458,7 +2521,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
         ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
-        // maps while Map is lit (Enter on one), and the Curve Mod's preset
+        // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.
         (
             "modulator.arm_map",
@@ -2733,8 +2796,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         // Plug-ins (WP-2.6): loaded by path until the browser lists them
-        // (WP-2.9); the window's button is the plug-in device panel's
-        // (WP-2.10).
+        // (WP-2.9); the window's button is in the plug-in device's title
+        // bar (WP-2.10, L-DEV-010).
         ("plugin.info", Exception(Query)),
         (
             "plugin.load",
@@ -2749,7 +2812,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "plugin.show_window",
-            Exception(LaterView("the plug-in device panel (WP-2.10)")),
+            main(
+                a_plugin,
+                device_view,
+                "Show/Hide Plug-In Window",
+                Key::Enter,
+            ),
         ),
         (
             "plugin.set_window",

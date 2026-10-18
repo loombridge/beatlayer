@@ -931,7 +931,7 @@ fn the_multisamplers_title_bar_menu_holds_its_options() {
     assert!(
         nodes
             .iter()
-            .any(|n| n.label == "Convert to Snapshot" && !n.disabled),
+            .any(|n| n.label == "Convert to Simpler" && !n.disabled),
         "the conversion is in the menu (multisampler R62)"
     );
     let b = fade.bounds.unwrap();

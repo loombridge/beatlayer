@@ -66,7 +66,7 @@ This spec covers how modulation and automation combine on a parameter, in the en
 
 **The first two modulators (WP-5.10, Beatlayer's own)**
 
-The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's the **Curve Mod** (`beatlayer.curve_mod`). Both are audio effects listed under the Modulators label (R12). Their parameters, with the units the device panel and an agent see:
+The LFO (`beatlayer.wave_mod`) and the Shaper (`beatlayer.curve_mod`) take Live's names. Both are audio effects listed under the Modulators label (R12). Their parameters, with the units the device panel and an agent see:
 
 | Parameter | Both or one | Range and default |
 |---|---|---|
@@ -81,18 +81,18 @@ The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's
 | Offset | both | −100 % to 100 %, 0 % |
 | Phase | both | 0 % to 100 %, 0 % |
 | R | both | a switch; turning it on restarts the cycle from its Phase |
-| Wave | Wave Mod | the nine waveforms, Sine by default |
-| Shape | Wave Mod | −100 % to 100 %, 0 % |
-| Steps | Wave Mod | 0 (smooth) to 24 |
-| Hold | Wave Mod | a switch |
-| Trigger Mode | Curve Mod | Loop (default), 1-Shot or Manual |
-| T | Curve Mod | a switch; turning it on plays the shape once in 1-Shot mode |
-| Manual | Curve Mod | 0 % to 100 %, 0 % |
-| Grid, Snap | Curve Mod | the display's divisions of the cycle (1/2, 1/4 (default), 1/8, 1/16, 1/32) and whether breakpoints snap to them |
+| Wave | LFO | the nine waveforms, Sine by default |
+| Shape | LFO | −100 % to 100 %, 0 % |
+| Steps | LFO | 0 (smooth) to 24 |
+| Hold | LFO | a switch |
+| Trigger Mode | Shaper | Loop (default), 1-Shot or Manual |
+| T | Shaper | a switch; turning it on plays the shape once in 1-Shot mode |
+| Manual | Shaper | 0 % to 100 %, 0 % |
+| Grid, Snap | Shaper | the display's divisions of the cycle (1/2, 1/4 (default), 1/8, 1/16, 1/32) and whether breakpoints snap to them |
 
-*The Wave Mod's waveforms.* With `p` the position in the cycle, from 0 to 1, bent by Shape (`p` raised to the power `4^(−s)`, `s` being Shape as a share from −1 to 1, so a positive Shape brings the change forward and a negative one holds it back; the random waves aren't bent): Sine is `0.5 − 0.5·cos(2πp)`, Up is `p`, Down is `1 − p`, Triangle is `1 − |2p − 1|`, and Square is 1 for the first half of the bent cycle and 0 for the rest. The four random waves draw from the generator R21 describes, once per cycle: Random holds a new value in 0 to 1 for the cycle, Bin holds 0 or 1, Stray holds a value that wanders from the last by up to a quarter either way, reflected at 0 and 1, and Glider runs in a straight line from the last cycle's value to this one's. Steps cuts a wave into that many evenly spaced levels (inactive for Random, Bin and Square). Jitter adds up to half its share of a draw either way, Smooth moves the output towards each new value by a share that falls from all of it at 0 % to 2 % at 100 %, and Offset then adds its share and clamps the output to 0 to 1. Hold keeps the output where it is and stops the cycle; released, a free cycle carries on from there and a synced one is shifted so the output carries on, then follows the song again.
+*The LFO's waveforms.* With `p` the position in the cycle, from 0 to 1, bent by Shape (`p` raised to the power `4^(−s)`, `s` being Shape as a share from −1 to 1, so a positive Shape brings the change forward and a negative one holds it back; the random waves aren't bent): Sine is `0.5 − 0.5·cos(2πp)`, Up is `p`, Down is `1 − p`, Triangle is `1 − |2p − 1|`, and Square is 1 for the first half of the bent cycle and 0 for the rest. The four random waves draw from the generator R21 describes, once per cycle: Random holds a new value in 0 to 1 for the cycle, Bin holds 0 or 1, Stray holds a value that wanders from the last by up to a quarter either way, reflected at 0 and 1, and Glider runs in a straight line from the last cycle's value to this one's. Steps cuts a wave into that many evenly spaced levels (inactive for Random, Bin and Square). Jitter adds up to half its share of a draw either way, Smooth moves the output towards each new value by a share that falls from all of it at 0 % to 2 % at 100 %, and Offset then adds its share and clamps the output to 0 to 1. Hold keeps the output where it is and stops the cycle; released, a free cycle carries on from there and a synced one is shifted so the output carries on, then follows the song again.
 
-*The Curve Mod's shape.* A list of up to 64 breakpoints, each a place `x` in the cycle (0 to 1), an output `y` (0 to 1) and the bend of the segment that starts there, by [automation.md](automation.md) R12's law; the output holds the first breakpoint's value before it and the last one's after it, and an empty shape outputs 0. A new Curve Mod plays the triangle (0, 0; ½, 1; 1, 0). The six preset buttons draw: 1 a rise, 2 a fall, 3 the triangle, 4 a pulse (high for the first half), 5 a staircase of four steps and 6 a curved decay. The shape belongs to the device: it is saved with the set and in its presets, copies with the device, and is edited by `modulator.set_shape` and the gestures R23 lists. Loop plays the shape once each cycle at the rate; 1-Shot rests at the shape's start before its first trigger, plays through in one cycle of the rate each time T turns on, and rests at the shape's end; Manual outputs the shape at the Manual control's share of the cycle.
+*The Shaper's shape.* A list of up to 64 breakpoints, each a place `x` in the cycle (0 to 1), an output `y` (0 to 1) and the bend of the segment that starts there, by [automation.md](automation.md) R12's law; the output holds the first breakpoint's value before it and the last one's after it, and an empty shape outputs 0. A new Shaper plays the triangle (0, 0; ½, 1; 1, 0). The six preset buttons draw: 1 a rise, 2 a fall, 3 the triangle, 4 a pulse (high for the first half), 5 a staircase of four steps and 6 a curved decay. The shape belongs to the device: it is saved with the set and in its presets, copies with the device, and is edited by `modulator.set_shape` and the gestures R23 lists. Loop plays the shape once each cycle at the rate; 1-Shot rests at the shape's start before its first trigger, plays through in one cycle of the rate each time T turns on, and rests at the shape's end; Manual outputs the shape at the Manual control's share of the cycle.
 
 *Mapping in the panel.* Slot 1's mapping cell is in the body, with the slot's Amount, Min and Max under it; Show Multimap is the device's expand toggle (L-DEV-004), which adds the other seven cells. Each cell shows the target by its device or track and its parameter, a Map button that lights while its slot is armed (`modulator.arm_map`), and Unmap. While one is lit, every control that can be a target is tinted with the theme's mapping colour (its own parameters aren't), and a click, or Enter on the control with the keyboard focus, maps it and puts the button out.
 
@@ -107,17 +107,17 @@ The LFO's equivalent is the **Wave Mod** (`beatlayer.wave_mod`) and the Shaper's
 
 **The other four modulators (WP-5.11, Beatlayer's own)**
 
-The Envelope Follower's equivalent is the **Level Mod** (`beatlayer.level_mod`, an audio effect with a sidechain section), Envelope MIDI's the **Gate Mod** (`beatlayer.gate_mod`), Shaper MIDI's the **Strike Mod** (`beatlayer.strike_mod`) and Expression Control's the **Play Mod** (`beatlayer.play_mod`); the last three are MIDI effects. All four are listed under the Modulators label (R12), take Mod, Polarity and Depth and their slots' Amount, Min and Max as the first two do, and pass their audio and notes through untouched. Their parameters, with the units the device panel and an agent see:
+The **Envelope Follower** (`beatlayer.level_mod`, an audio effect with a sidechain section), **Envelope MIDI** (`beatlayer.gate_mod`), **Shaper MIDI** (`beatlayer.strike_mod`) and **Expression Control** (`beatlayer.play_mod`) take Live's names; the last three are MIDI effects. All four are listed under the Modulators label (R12), take Mod, Polarity and Depth and their slots' Amount, Min and Max as the first two do, and pass their audio and notes through untouched. Their parameters, with the units the device panel and an agent see:
 
 | Device | Parameter | Range and default |
 |---|---|---|
-| Level Mod | Gain | down to silence, up to +40 dB; 0 dB |
+| Envelope Follower | Gain | down to silence, up to +40 dB; 0 dB |
 | | Rise, Fall | 0 to 1,000 ms, 5 ms; 0 to 5,000 ms, 100 ms |
 | | Delay Mode | Time (default) or Beats |
 | | Delay | 0 to 1,000 ms, 0 ms |
 | | Delay Division | 1/32 to 8 bars, 1/16 (up to 5 seconds whatever the tempo) |
 | | Sidechain | the framework's: External, Audio From and its tap, Mix, SC Gain and Listen |
-| Gate Mod | Attack, Decay, Release | 1 ms to 10 s, logarithmic; 10 ms, 300 ms, 300 ms |
+| Envelope MIDI | Attack, Decay, Release | 1 ms to 10 s, logarithmic; 10 ms, 300 ms, 300 ms |
 | | Sustain Level | 0 % to 100 %, 60 % |
 | | Attack Slope, Decay Slope, Release Slope | −100 % to 100 %, 0 % |
 | | Sustain | a switch, on |
@@ -127,13 +127,13 @@ The Envelope Follower's equivalent is the **Level Mod** (`beatlayer.level_mod`, 
 | | Global Time | 0.10 to 10.00, logarithmic, 1.00 |
 | | Env Echo Time, Env Feedback | 10 ms to 2 s, logarithmic, 250 ms; 0 % to 100 %, 50 % |
 | | Amount | the Depth parameter, 0 % to 100 %, 100 % |
-| Strike Mod | Loop | a switch, off |
+| Shaper MIDI | Loop | a switch, off |
 | | Velocity | 0 % to 100 %, 0 % |
-| | Jitter, Smooth, Offset | as the Wave Mod's |
-| | Time Mode, Rate, ×10, Beat Rate | as the Wave Mod's |
+| | Jitter, Smooth, Offset | as the LFO's |
+| | Time Mode, Rate, ×10, Beat Rate | as the LFO's |
 | | Time, Echo | 10 ms to 2 s, 250 ms; 0 % to 100 %, 0 % |
-| | Grid, Snap | as the Curve Mod's |
-| Play Mod | Source *n* | per tab: Velocity, Modwheel, Pitchbend, Pressure, Keytrack, Expression, Random, Increment, Slide, Sustain; tabs 1 to 5 start on the first five |
+| | Grid, Snap | as the Shaper's |
+| Expression Control | Source *n* | per tab: Velocity, Modwheel, Pitchbend, Pressure, Keytrack, Expression, Random, Increment, Slide, Sustain; tabs 1 to 5 start on the first five |
 | | Random Amount *n* | 0 % to 100 %, 100 % |
 | | Increment Steps *n* | 1 to 32, 4 |
 | | Curve *n*, Curve A *n*, Curve B *n*, Curve Link *n* | Linear or S, Linear; −100 % to 100 %, 0 %; −100 % to 100 %, 0 %; a switch, off |
@@ -142,13 +142,13 @@ The Envelope Follower's equivalent is the **Level Mod** (`beatlayer.level_mod`, 
 | | Smoothing *n*, Rise *n*, Fall *n* | Linear or Logarithmic, Linear; 0 to 1,000 ms, 0 ms; 0 to 1,000 ms, 0 ms |
 | | Output Range Max | the Depth parameter, 0 % to 100 %, 100 %; the slots' Min and Max are the Output Range Min and Max of Remote Control |
 
-*The Level Mod's detector.* The peak of what the detector hears (the track's signal, or the sidechain's signal when the sidechain section is on, which is the source through SC Gain mixed with the track's own by Mix, 0 % the track's, 100 % the sidechain's), across the channels, through Gain, then a one-pole smoother with the time constant Rise while the level climbs and Fall while it falls (0 ms follows at once). The output is that level, 1 at full scale, held at 1 above it, delayed by Delay. Direct and S.C. show the peak of the track's own signal and of what the detector hears, in dB from −60, and Level the output.
+*The Envelope Follower's detector.* The peak of what the detector hears (the track's signal, or the sidechain's signal when the sidechain section is on, which is the source through SC Gain mixed with the track's own by Mix, 0 % the track's, 100 % the sidechain's), across the channels, through Gain, then a one-pole smoother with the time constant Rise while the level climbs and Fall while it falls (0 ms follows at once). The output is that level, 1 at full scale, held at 1 above it, delayed by Delay. Direct and S.C. show the peak of the track's own signal and of what the detector hears, in dB from −60, and Level the output.
 
-*The Gate Mod's envelope.* A note starts it from the level it is at: Attack runs to the peak (1, or the note's velocity with Velocity on), Decay to Sustain Level's share of the peak, and the last held key's end starts Release from the level it is at. Each segment bends by the automation law ([automation.md](automation.md) R12, as `curve_value`): a positive slope bows it below the straight line. Global Time scales every time. With Sustain off the envelope runs Attack, Decay and Release whatever the key does. Loop Mode: Free starts it on each note; Sync starts it again on every Sync Rate division while a key is held; Loop runs Attack, Decay and Release over and over while a key is held, with no Sustain, so a cycle is the three times together; Echo starts it again every Env Echo Time, each repeat's peak Env Feedback's share of the last, until it is under a 256th, whether or not the key is still held. Its display draws the envelope as its controls set it, with a held key's sustain as long as half the attack and decay together, and a reading of its level and the trigger LED.
+*The Envelope MIDI's envelope.* A note starts it from the level it is at: Attack runs to the peak (1, or the note's velocity with Velocity on), Decay to Sustain Level's share of the peak, and the last held key's end starts Release from the level it is at. Each segment bends by the automation law ([automation.md](automation.md) R12, as `curve_value`): a positive slope bows it below the straight line. Global Time scales every time. With Sustain off the envelope runs Attack, Decay and Release whatever the key does. Loop Mode: Free starts it on each note; Sync starts it again on every Sync Rate division while a key is held; Loop runs Attack, Decay and Release over and over while a key is held, with no Sustain, so a cycle is the three times together; Echo starts it again every Env Echo Time, each repeat's peak Env Feedback's share of the last, until it is under a 256th, whether or not the key is still held. Its display draws the envelope as its controls set it, with a held key's sustain as long as half the attack and decay together, and a reading of its level and the trigger LED.
 
-*The Strike Mod's shape.* Up to 64 breakpoints as the Curve Mod's, one of them possibly the sustain breakpoint; a new one plays a rise to the top by a tenth of the cycle, which is its sustain breakpoint, and a fall to the end. A note starts the shape from its start and it runs through one cycle at Rate (a length in Hz, or in beat divisions of the song's tempo at the moment); with a sustain breakpoint it holds there while a key is held and goes on to its end when the last key comes up; with Loop it starts again at its end while a key is held, passing over the sustain breakpoint. The output rests at the shape's start before the first note and at its end after each. Velocity scales the output by `1 − v + v · velocity`, with `v` its share, so 0 % leaves velocity out and 100 % makes the output the velocity. Echo starts the shape again every Time, each repeat scaled by Echo's share of the last, until it is under a 256th. Jitter, Smooth and Offset are the Wave Mod's, applied where the level is taken. The Curve Mod has no sustain breakpoint.
+*The Shaper MIDI's shape.* Up to 64 breakpoints as the Shaper's, one of them possibly the sustain breakpoint; a new one plays a rise to the top by a tenth of the cycle, which is its sustain breakpoint, and a fall to the end. A note starts the shape from its start and it runs through one cycle at Rate (a length in Hz, or in beat divisions of the song's tempo at the moment); with a sustain breakpoint it holds there while a key is held and goes on to its end when the last key comes up; with Loop it starts again at its end while a key is held, passing over the sustain breakpoint. The output rests at the shape's start before the first note and at its end after each. Velocity scales the output by `1 − v + v · velocity`, with `v` its share, so 0 % leaves velocity out and 100 % makes the output the velocity. Echo starts the shape again every Time, each repeat scaled by Echo's share of the last, until it is under a 256th. Jitter, Smooth and Offset are the LFO's, applied where the level is taken. The Shaper has no sustain breakpoint.
 
-*The Play Mod's sources.* Each is a share from 0 to 1. Velocity and Keytrack (the key's number over 127) are those of the latest note; Modwheel, Expression and Sustain are controllers 1, 11 and 64; Pitchbend runs from 0 at the wheel's bottom to 1 at its top, ½ at the centre; Pressure is the channel's pressure or the latest held note's own; Slide is the latest held note's own; Random is a draw at each note, `½ + ½ · Random Amount · draw`, from the device's generator (a draw is made for every tab at every note, so the stream doesn't depend on the choosers); Increment is the step the notes have reached, from 0 at the first to 1 at the last of Increment Steps, going round, and it starts again at the first when the transport stops. Before anything is played every source reads 0, bar Pitchbend and Random at ½; when the transport starts what the last note said is forgotten unless a key is already down. The curve is Linear (`curve_value` from 0 to 1 bent by Curve A) or S (through the middle breakpoint (X, Y), the lower segment bent by Curve B, or by minus Curve A with Link, and the upper by Curve A), and the output is `Min + curve · (Max − Min)`. Smoothing follows the output at Rise while it climbs and Fall while it falls: Linear takes that long for the whole range, Logarithmic is a one-pole smoother with that time constant; 0 ms follows at once.
+*The Expression Control's sources.* Each is a share from 0 to 1. Velocity and Keytrack (the key's number over 127) are those of the latest note; Modwheel, Expression and Sustain are controllers 1, 11 and 64; Pitchbend runs from 0 at the wheel's bottom to 1 at its top, ½ at the centre; Pressure is the channel's pressure or the latest held note's own; Slide is the latest held note's own; Random is a draw at each note, `½ + ½ · Random Amount · draw`, from the device's generator (a draw is made for every tab at every note, so the stream doesn't depend on the choosers); Increment is the step the notes have reached, from 0 at the first to 1 at the last of Increment Steps, going round, and it starts again at the first when the transport stops. Before anything is played every source reads 0, bar Pitchbend and Random at ½; when the transport starts what the last note said is forgotten unless a key is already down. The curve is Linear (`curve_value` from 0 to 1 bent by Curve A) or S (through the middle breakpoint (X, Y), the lower segment bent by Curve B, or by minus Curve A with Link, and the upper by Curve A), and the output is `Min + curve · (Max − Min)`. Smoothing follows the output at Rise while it climbs and Fall while it falls: Linear takes that long for the whole range, Logarithmic is a one-pole smoother with that time constant; 0 ms follows at once.
 
 ## Not built yet
 
@@ -158,10 +158,10 @@ The Envelope Follower's equivalent is the **Level Mod** (`beatlayer.level_mod`, 
 - A held control isn't drawn disabled (R16): it refuses hand moves and the commands that make them, and shows its played value, but its look doesn't change.
 - A slot's Min and Max are positions on the target's travel, shown as percentages; the target's own units (R16) wait for a control that reads its target's scale.
 - A modulator isn't held back by its target's node delay (R20, delay-compensation R5): the order the audio-driven ones need is built (R28), but their rows still reach a target on the frames they were worked out for, not on the frames the target's delay compensation shifts its audio to.
-- The Wave Mod's display shows the waveform as the controls set it, and the Curve Mod's the shape, not the output now; the Strike Mod's shows its shape the same way, with its level and trigger LED beside it.
-- The Level Mod's Audio From chooser offers the tracks and their taps; the chains inside racks (R24) wait for the racks spec's chain taps (R38), which reach a track's Audio From but not yet a device's sidechain source.
-- The Gate Mod's display draws its envelope, but its handles (R25) don't drag yet: the knobs set it. The Play Mod's curves are drawn in its panel (R27) but not dragged in it.
-- What each Play Mod source reads before anything is played, and which note a per-note source follows, are Beatlayer's own until they are observed ("To observe" item 13).
+- The LFO's display shows the waveform as the controls set it, and the Shaper's the shape, not the output now; the Shaper MIDI's shows its shape the same way, with its level and trigger LED beside it.
+- The Envelope Follower's Audio From chooser offers the tracks and their taps; the chains inside racks (R24) wait for the racks spec's chain taps (R38), which reach a track's Audio From but not yet a device's sidechain source.
+- The Envelope MIDI's display draws its envelope, but its handles (R25) don't drag yet: the knobs set it. The Expression Control's curves are drawn in its panel (R27) but not dragged in it.
+- What each Expression Control source reads before anything is played, and which note a per-note source follows, are Beatlayer's own until they are observed ("To observe" item 13).
 
 ## Tests
 

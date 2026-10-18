@@ -1,6 +1,6 @@
-//! Modulators' mappings and the Curve Mod's shape (WP-5.10; the modulation
+//! Modulators' mappings and the Shaper's shape (WP-5.10; the modulation
 //! spec, R12 to R19, R23): what a modulator device maps, how a mapping is
-//! kept and removed, and the breakpoint shape a Curve Mod plays.
+//! kept and removed, and the breakpoint shape a Shaper plays.
 //!
 //! A mapping is kept on the modulator, in the document. The modulator's
 //! output, its mode, polarity and each slot's amount and range are
@@ -16,30 +16,26 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{DeviceId, ParamId, TrackId};
 
-/// The Wave Mod's device type: Beatlayer's equivalent of an LFO device.
+/// The LFO's device type.
 pub const WAVE_MOD: &str = "beatlayer.wave_mod";
-/// The Curve Mod's device type: Beatlayer's equivalent of a Shaper device.
+/// The Shaper's device type.
 pub const CURVE_MOD: &str = "beatlayer.curve_mod";
-/// The Level Mod's device type: Beatlayer's equivalent of an Envelope
-/// Follower device (WP-5.11).
+/// The Envelope Follower's device type.
 pub const LEVEL_MOD: &str = "beatlayer.level_mod";
-/// The Gate Mod's device type: Beatlayer's equivalent of an Envelope MIDI
-/// device.
+/// The Envelope MIDI's device type.
 pub const GATE_MOD: &str = "beatlayer.gate_mod";
-/// The Strike Mod's device type: Beatlayer's equivalent of a Shaper MIDI
-/// device.
+/// The Shaper MIDI's device type.
 pub const STRIKE_MOD: &str = "beatlayer.strike_mod";
-/// The Play Mod's device type: Beatlayer's equivalent of an Expression
-/// Control device.
+/// The Expression Control's device type.
 pub const PLAY_MOD: &str = "beatlayer.play_mod";
 
 /// How many targets a modulator maps: the first slot is always shown, and
 /// Show Multimap shows the other seven (R17).
 pub const SLOTS: u8 = 8;
-/// How many targets the Play Mod maps: one on each of its five source tabs
+/// How many targets the Expression Control maps: one on each of its five source tabs
 /// (R17).
 pub const PLAY_SLOTS: u8 = 5;
-/// The most breakpoints a Curve Mod's shape holds.
+/// The most breakpoints a Shaper's shape holds.
 pub const MAX_POINTS: usize = 64;
 
 /// The Mod switch: Modulation (0, the default) or Remote Control (1) for
@@ -50,10 +46,10 @@ pub const POLARITY: ParamId = ParamId(65);
 /// The Depth, from 0 % (no effect) to 100 % (full), which scales every
 /// mapping's effect (R13). A parameter of every modulator.
 pub const DEPTH: ParamId = ParamId(66);
-/// The Curve Mod's Grid: the display's divisions of the cycle, a choice among
+/// The Shaper's Grid: the display's divisions of the cycle, a choice among
 /// [`GRIDS`] (R23).
 pub const GRID_DIVISIONS: ParamId = ParamId(13);
-/// The Curve Mod's Snap: breakpoints snap to the grid (R23).
+/// The Shaper's Snap: breakpoints snap to the grid (R23).
 pub const SNAP: ParamId = ParamId(14);
 /// The Grid's choices: each one's name and its divisions of the cycle.
 pub const GRIDS: [(&str, u32); 5] = [
@@ -111,8 +107,8 @@ pub fn is_signal_kind(kind: &DeviceKind) -> bool {
     )
 }
 
-/// Whether `kind` keeps a breakpoint shape: the Curve Mod and the Strike
-/// Mod (R23, R26).
+/// Whether `kind` keeps a breakpoint shape: the Shaper and the Shaper
+/// MIDI (R23, R26).
 #[must_use]
 pub fn has_shape_kind(kind: &DeviceKind) -> bool {
     matches!(kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD || device_type == STRIKE_MOD)
@@ -172,7 +168,7 @@ pub struct Mapping {
     pub target: ModTarget,
 }
 
-/// One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the
+/// One breakpoint of a Shaper's shape (R23): a place in the cycle, the
 /// output there, and the bend of the segment starting at it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShapePoint {
@@ -184,7 +180,7 @@ pub struct ShapePoint {
     /// automation spec's curve law; 0 is straight.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub bend: f64,
-    /// Whether it is the Strike Mod's sustain breakpoint (R26): at most one
+    /// Whether it is the Shaper MIDI's sustain breakpoint (R26): at most one
     /// in a shape.
     #[serde(default, skip_serializing_if = "is_false")]
     pub sustain: bool,
@@ -336,14 +332,14 @@ pub fn without_point(points: &[ShapePoint], index: usize) -> Vec<ShapePoint> {
     out
 }
 
-/// The shape a new Curve Mod plays: the triangle.
+/// The shape a new Shaper plays: the triangle.
 #[must_use]
 pub fn default_shape() -> Vec<ShapePoint> {
     shape_preset(3).unwrap_or_default()
 }
 
-/// The shape a new device of `kind` plays: the triangle, or for the Strike
-/// Mod a rise that holds at its top while the note is held and falls after
+/// The shape a new device of `kind` plays: the triangle, or for the Shaper
+/// MIDI a rise that holds at its top while the note is held and falls after
 /// (R26, Beatlayer's own).
 #[must_use]
 pub fn default_shape_of(kind: &DeviceKind) -> Vec<ShapePoint> {
@@ -572,7 +568,7 @@ impl Document {
         Ok(())
     }
 
-    /// Replaces the shape of the Curve Mod or Strike Mod `device` (R23, R26).
+    /// Replaces the shape of the Shaper or Shaper MIDI `device` (R23, R26).
     pub(crate) fn set_shape(
         &mut self,
         device: DeviceId,
@@ -581,14 +577,14 @@ impl Document {
         let current = self.device_ref(device)?;
         if !has_shape_kind(&current.kind) {
             return Err(ModelError::InvalidInput(
-                "only a Curve Mod or a Strike Mod has a shape",
+                "only a Shaper or a Shaper MIDI has a shape",
             ));
         }
         check_shape(points)?;
         let strike = matches!(&current.kind, DeviceKind::Native { device_type } if device_type == STRIKE_MOD);
         if !strike && points.iter().any(|p| p.sustain) {
             return Err(ModelError::InvalidInput(
-                "only a Strike Mod has a sustain breakpoint",
+                "only a Shaper MIDI has a sustain breakpoint",
             ));
         }
         if current.shape.as_deref() != Some(points) {
@@ -869,7 +865,7 @@ mod document_tests {
             set.editor.document().device(wave).unwrap().mappings.len(),
             8
         );
-        // The Play Mod has one on each of its five source tabs.
+        // The Expression Control has one on each of its five source tabs.
         let play = device(&mut set.editor, set.audio, PLAY_MOD);
         for slot in 0..PLAY_SLOTS {
             map(
@@ -910,7 +906,7 @@ mod document_tests {
         let refused = map(&mut set.editor, level, 0, on(set.wave, 3)).unwrap_err();
         assert!(refused.contains("another modulator"), "{refused}");
         map(&mut set.editor, level, 0, on(set.target, 1)).unwrap();
-        // The other way round it is fine: the Wave Mod runs first.
+        // The other way round it is fine: the LFO runs first.
         map(&mut set.editor, set.wave, 0, on(level, 0)).unwrap();
 
         // The track holding the target feeds the follower's: refused.
@@ -963,10 +959,10 @@ mod document_tests {
         assert!(apply(&mut set.editor, strike, two).is_err(), "only one");
         assert!(
             apply(&mut set.editor, curve, one).is_err(),
-            "a Curve Mod has none"
+            "a Shaper has none"
         );
         apply(&mut set.editor, curve, vec![p(0.0, false), p(1.0, false)]).unwrap();
-        // A new Strike Mod plays a shape with its sustain at the top.
+        // A new Shaper MIDI plays a shape with its sustain at the top.
         let default = default_shape_of(&set.editor.document().device(strike).unwrap().kind);
         assert_eq!(default.iter().filter(|p| p.sustain).count(), 1);
         assert!(check_shape(&default).is_ok());

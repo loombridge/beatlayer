@@ -1,4 +1,4 @@
-//! Brickwall, the native limiter (WP-2.18a, part 3; the limiter spec): the
+//! Limiter, the native limiter (WP-2.18a, part 3; the limiter spec): the
 //! sample peak, the true peak at 4 times the rate, the release time, Auto
 //! Release, the stereo Link, the mid/side routing, and soft clipping.
 
@@ -23,7 +23,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Brickwall of `params`, up to `max_frames` at a time.
+/// A Limiter of `params`, up to `max_frames` at a time.
 fn brickwall(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = limiter_type();
     node(&registry(), &device(&device_type, params), max_frames)
@@ -278,7 +278,7 @@ fn soft_clip_keeps_the_output_below_the_ceiling() {
 fn the_limiter_is_described_and_laid_out() {
     let device_type: DeviceType = limiter_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Brickwall");
+    assert_eq!(device_type.name, "Limiter");
     assert!(matches!(
         device_type.kind,
         bl_model::DeviceKind::Native { ref device_type } if device_type == LIMITER

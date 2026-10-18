@@ -9,7 +9,7 @@
 
 The filter delay is an audio effect with three delay lines. The first hears the left input, the third the right input, and the second both. Each line has an On switch and a filter in its loop: a high-pass and a low-pass that move together as one band, set by the band's centre frequency and its width (the two axes of an X–Y display, whose parameters are ordinary controls here). Each line's time is either a beat division (Sync), optionally shortened or lengthened by a percentage for a swing, or a free time in milliseconds. One Feedback sends every line's output back into its own input through its band. Each line has a Pan, which by default leaves it on the side it hears, and a Volume that can be raised to 6 dB; one Dry sets the unprocessed signal.
 
-Beatlayer's own name for the device is Trident. It runs on the device framework: its look is the framework's generic controls and one display cell for each line's X–Y pad, which stays a black frame, and its parameters, ranges and defaults come from the manual's section where it gives them and are Beatlayer's own where it does not. The device reports no latency. Where a delay sits in a chain and the device frame around it are [the device chains spec](device-chains.md) and [the device framework spec](device-framework.md).
+The device takes Live's name, Filter Delay. It runs on the device framework: its look is the framework's generic controls and one display cell for each line's X–Y pad, which stays a black frame, and its parameters, ranges and defaults come from the manual's section where it gives them and are Beatlayer's own where it does not. The device reports no latency. Where a delay sits in a chain and the device frame around it are [the device chains spec](device-chains.md) and [the device framework spec](device-framework.md).
 
 ## Sources
 
@@ -48,7 +48,7 @@ Beatlayer's own name for the device is Trident. It runs on the device framework:
 
 ## Defaults, ranges and details
 
-- A new Trident has all three lines on with their bands on at 1 kHz and 4 octaves, Sync on at 4, 8 and 12 sixteenths (one, two and three beats), Time % at 0 %, a free time of 100 ms, Pan at −100 %, 0 % and +100 %, Volume at 0 dB, Feedback at 50 % and Dry at 0 dB.
+- A new Filter Delay has all three lines on with their bands on at 1 kHz and 4 octaves, Sync on at 4, 8 and 12 sixteenths (one, two and three beats), Time % at 0 %, a free time of 100 ms, Pan at −100 %, 0 % and +100 %, Volume at 0 dB, Feedback at 50 % and Dry at 0 dB.
 - The device is stereo: on a track with fewer than two channels it passes the input through.
 - The line reads its time as the parameter's target and moves between times itself, in Repitch, over 20 ms (the delay spec's details), so a tempo change or a new time glides in pitch rather than clicking.
 - The X–Y pad of each line is a display cell holding its Freq and Width controls; the cell is a black frame and the two parameters are the pad's axes.

@@ -1,13 +1,13 @@
 # Vinyl distortion
 
 - **Status:** implemented
-- **Work packages:** WP-5.24 (part 3; the equivalent of Vinyl Distortion)
+- **Work packages:** WP-5.24 (part 3; Vinyl Distortion)
 - **Parity-matrix row:** Audio effects: Vinyl Distortion
 - **Checked against:** Live 12's reference manual, section 29.41
 
 ## The behaviour
 
-Wax is Beatlayer's equivalent of Live's Vinyl Distortion. It adds the distortion of a record to a signal in two parts, each working on a band of the spectrum that the user places: the tracing model, which adds even harmonics, and the pinch, which adds odd harmonics, in opposite phase between the two channels so that they widen the stereo image. A single Drive raises or lowers both, Soft and Hard choose between a gentler and a plainer distortion, and a crackle of random clicks can be added.
+Vinyl Distortion is Beatlayer's version of Live's Vinyl Distortion. It adds the distortion of a record to a signal in two parts, each working on a band of the spectrum that the user places: the tracing model, which adds even harmonics, and the pinch, which adds odd harmonics, in opposite phase between the two channels so that they widen the stereo image. A single Drive raises or lowers both, Soft and Hard choose between a gentler and a plainer distortion, and a crackle of random clicks can be added.
 
 This spec covers the device's behaviour. The device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md).
 

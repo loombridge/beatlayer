@@ -1804,7 +1804,7 @@ impl DeviceView {
         Ok(outcome)
     }
 
-    /// Replaces the Strike drum sampler `device` with Snapshot in One-Shot
+    /// Replaces the Drum Sampler `device` with Simpler in One-Shot
     /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
     /// same place, sample and on or off state, and the same Start and
     /// Length, in one undo step.
@@ -1827,7 +1827,7 @@ impl DeviceView {
             strike
                 .description
                 .value(&old.params, id)
-                .expect("Strike describes it")
+                .expect("Drum Sampler describes it")
         };
         let (enabled, media) = (old.enabled, old.media.clone());
         let (start, length) = (kept(drum_sampler::START), kept(drum_sampler::LENGTH));
@@ -1840,7 +1840,7 @@ impl DeviceView {
         snapshot.params.insert(sampler::LENGTH, length);
         // A chain holds one instrument, so the old one goes first.
         editor
-            .transact("Swap to Snapshot", |editor| {
+            .transact("Swap to Simpler", |editor| {
                 editor.apply(Command::RemoveDevice { device })?;
                 match place.chain {
                     None => editor.apply(Command::InsertDevice {

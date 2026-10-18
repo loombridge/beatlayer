@@ -178,6 +178,18 @@ impl<'a> Audio<'_, 'a> {
         })
     }
 
+    /// What an external device brings back from the audio interface over
+    /// the stretch on `channel` (WP-5.34), or `None` for any other device.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    #[must_use]
+    pub fn external(&self, channel: usize) -> Option<&'a [f32]> {
+        let range = self.range.clone();
+        self.block.external(channel).map(|data| &data[range])
+    }
+
     /// Sends a note on from the stretch, at `note.offset` frames after its
     /// first frame (clamped into it): the notes go out in order of offset,
     /// note-offs before note-ons on one frame (spec: device-framework R30).

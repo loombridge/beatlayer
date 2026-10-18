@@ -236,6 +236,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.save_preset", nothing(FILE)),
     ("device.set_enabled", query(Device, "enabled")),
     ("device.set_enabled_all", query(Device, "chains")),
+    ("device.set_external", query(Device, "external")),
     ("device.set_floating", query(Device, "floating")),
     ("device.set_param", query(Device, "params")),
     ("device.set_sample", query(Device, "media")),

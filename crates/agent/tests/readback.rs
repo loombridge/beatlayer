@@ -8,9 +8,10 @@ use bl_agent::client::{Client, InProcess};
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
-    LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, External, HardwareLatency, Input,
+    LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData,
+    MidiTo, MixerParam, Monitor, Note, Output, ParamId, SendTap, Sidechain, TakeClip, TakeLane,
+    Tap, TrackId, TrackKind,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -164,7 +165,7 @@ fn fixture() -> Project {
         },
         Command::SetMidiOutput {
             track: keys,
-            to: Some(pad),
+            to: Some(MidiTo::Track(pad)),
         },
         Command::SetMainOut {
             channel: Channel::Pair(3),
@@ -271,6 +272,12 @@ fn fixture() -> Project {
     // B active, with A's values kept (device compare R1, R10).
     device.b_active = true;
     device.other_params = Some([(ParamId(2), 0.25)].into_iter().collect());
+    device.external = Some(External {
+        port: Some("Synth".to_owned()),
+        channel: 5,
+        audio_from: Channel::Mono(3),
+        hardware_latency: HardwareLatency::Samples { value: 96 },
+    });
     device.sidechain = Some(Sidechain {
         enabled: true,
         input: Input::Track {
@@ -723,6 +730,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "show_preset_name",
                 "params",
                 "sidechain",
+                "external.port",
+                "external.channel",
+                "external.audio_from",
+                "external.hardware_latency",
                 "floating",
                 "media",
                 "b_active",

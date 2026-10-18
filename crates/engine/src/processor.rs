@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::midi::MidiInputEvent;
+use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{LaunchMode, LaunchSettings, ParamId, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
@@ -406,6 +406,21 @@ impl Processor {
         self.midi.set_queue(queue)
     }
 
+    /// Gives the processor the producing end of the queue to the MIDI output
+    /// thread (`bl-midi-io`'s `MidiPorts::attach_output`), which the messages
+    /// for tracks' MIDI To ports and external instruments leave on, each
+    /// stamped with the moment its frame is heard at the audio interface's
+    /// output (`docs/specs/external-devices.md`, R4, R5). Call it before the
+    /// processor runs on the audio thread: it returns the queue it had, if
+    /// any, to be dropped there. A processor without one, such as an offline
+    /// render's, sends nothing (R8).
+    pub fn set_midi_output(
+        &mut self,
+        queue: rtrb::Producer<MidiOutputEvent>,
+    ) -> Option<rtrb::Producer<MidiOutputEvent>> {
+        self.midi.set_out(queue)
+    }
+
     /// What a MIDI track's input received in the last block, and whether the
     /// track monitors. `None` before a program arrives, or if `track` isn't
     /// a MIDI track in it.
@@ -508,6 +523,11 @@ impl Processor {
         // Spec: device-changes R1
         self.playing = false;
         self.metronome.stop();
+        // Spec: external-devices R6. No note stays held on the hardware when
+        // the stream stops or restarts.
+        if let Some(program) = self.program.as_mut() {
+            self.midi.release(&mut program.get_mut().midi);
+        }
         // The song stopped with the stream, so the Session View is at rest
         // too: nothing plays until a person launches again.
         self.session.clear();
@@ -857,6 +877,7 @@ impl Processor {
                 self.end_recordings();
                 if self.playing {
                     self.playing = false;
+                    self.release_midi();
                 } else {
                     self.insert_marker = Ticks::ZERO;
                     self.position = Frames::ZERO;
@@ -868,6 +889,7 @@ impl Processor {
             TransportCommand::PlayStop => {
                 if self.playing {
                     self.playing = false;
+                    self.release_midi();
                     self.metronome.stop();
                     self.end_recordings();
                 } else {
@@ -913,6 +935,14 @@ impl Processor {
                     self.end_recording();
                 }
             }
+        }
+    }
+
+    /// Spec: external-devices R6. Ends the notes sent to ports, at the start
+    /// of the next block: the transport stopped.
+    fn release_midi(&mut self) {
+        if let Some(program) = self.program.as_mut() {
+            program.get_mut().midi.release_all();
         }
     }
 
@@ -1547,6 +1577,8 @@ impl Processor {
                     transport,
                     &self.session_playback,
                 );
+                // Spec: external-devices R4, R5
+                self.midi.emit(&mut program.midi, self.config.output_latency);
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
                     let from = c.min(program.channels - 1);

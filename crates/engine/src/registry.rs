@@ -56,6 +56,11 @@ pub struct DeviceType {
     /// tracks can route into it, and its node reads what its detector
     /// hears with [`Block::sidechain`](crate::Block::sidechain).
     pub sidechain: bool,
+    /// Whether its devices work with hardware outside the computer
+    /// (WP-5.34): they have an output port, a channel, the interface inputs
+    /// the sound comes back on, and a Hardware Latency
+    /// ([`bl_model::External`]).
+    pub external: bool,
 }
 
 impl DeviceType {
@@ -70,6 +75,7 @@ impl DeviceType {
             role,
             description: DeviceDescription::default(),
             sidechain: false,
+            external: false,
         }
     }
 
@@ -87,16 +93,26 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, working with external hardware.
+    #[must_use]
+    pub fn with_external(mut self) -> Self {
+        self.external = true;
+        self
+    }
+
     /// A new, switched-on device of this type with default parameters, and
-    /// a new sidechain input if the type declares one.
+    /// a new sidechain input or routing to hardware if the type declares
+    /// one.
     #[must_use]
     pub fn device(&self, id: DeviceId) -> Device {
-        let device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
+        let mut device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
         if self.sidechain {
-            device.with_sidechain()
-        } else {
-            device
+            device = device.with_sidechain();
         }
+        if self.external {
+            device = device.with_external();
+        }
+        device
     }
 }
 

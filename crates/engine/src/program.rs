@@ -7,7 +7,7 @@ use core::ops::Range;
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
-use crate::midi::{MidiRoutes, TrackMidiInput};
+use crate::midi::{MidiRoutes, OutOwner, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::modbus::{Bus, Control, ROWS};
 use crate::node::{
@@ -343,6 +343,9 @@ pub(crate) struct NodeSlot {
     /// output out before the tasks (WP-5.10), and it leaves the chain's
     /// signal as it is.
     pub(crate) modulator: bool,
+    /// For an external instrument (WP-5.34): the interface inputs its sound
+    /// comes back on, which the program maps into the block it is given.
+    pub(crate) external: Option<Channel>,
 }
 
 /// A node that moves from the program before into this one.
@@ -941,6 +944,7 @@ impl EngineProgram {
                         sample_rate: self.sample_rate,
                         tempo: &self.tempo,
                         sidechain: None,
+                        external: None,
                         notes: &[],
                         notes_out: Some(&mut self.note_buffers[0]),
                         session,
@@ -1102,8 +1106,16 @@ impl EngineProgram {
                 session,
                 delivered: 0,
             };
-            self.run_steps(&mut pass, task, task.chain, t, 0, 0);
+            let ended = self.run_steps(&mut pass, task, task.chain, t, 0, 0);
             delivered += pass.delivered;
+
+            // Spec: external-devices R3. What reached the end of the chain
+            // leaves for the port the track's MIDI To names.
+            self.midi.send(
+                OutOwner::Track(task.track),
+                self.note_buffers[ended].notes(),
+                from,
+            );
 
             // Keep the chain's output for pre-fader sends and Post FX
             // inputs.
@@ -1128,6 +1140,7 @@ impl EngineProgram {
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
                     sidechain: None,
+                    external: None,
                     notes: &[],
                     notes_out: None,
                     session,
@@ -1473,7 +1486,12 @@ impl EngineProgram {
                 continue;
             }
             pass.delivered += gather(pass.events, slot, pass.from, pass.until, pass.scratch);
-            let NodeSlot { node, .. } = &mut self.slots[slot as usize];
+            let NodeSlot {
+                node,
+                key,
+                external,
+                ..
+            } = &mut self.slots[slot as usize];
             let Some(node) = node.as_mut().and_then(Instance::as_node) else {
                 continue;
             };
@@ -1482,6 +1500,24 @@ impl EngineProgram {
                 .get_disjoint_mut([pair + note_idx, pair + 1 - note_idx])
                 .expect("the pair's buffers are two");
             out_buf.clear();
+            // Spec: external-devices R10. An external instrument sends what
+            // reaches it to its port, and hears the interface's inputs it
+            // is set to.
+            let mut returned = None;
+            if let (Some(audio_from), NodeKey::Device(device), false) = (*external, *key, bypass) {
+                self.midi
+                    .send(OutOwner::Device(device), in_buf.notes(), pass.from);
+                map_device_input(
+                    &mut self.device_scratch,
+                    &self.device_input,
+                    self.device_input_channels,
+                    audio_from,
+                    channels,
+                    stride,
+                    frames,
+                );
+                returned = Some(&self.device_scratch[..size]);
+            }
             if bypass {
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
@@ -1505,6 +1541,7 @@ impl EngineProgram {
                 sidechain: heard
                     .as_ref()
                     .map(|(at, _)| &self.sidechain_pool[at.clone()]),
+                external: returned,
                 notes: in_buf.notes(),
                 notes_out: Some(out_buf),
                 session: pass.session,
@@ -1632,6 +1669,7 @@ impl EngineProgram {
                         sample_rate: self.sample_rate,
                         tempo: &self.tempo,
                         sidechain: None,
+                        external: None,
                         notes: &[],
                         notes_out: None,
                         session: pass.session,

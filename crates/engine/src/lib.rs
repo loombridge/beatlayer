@@ -168,6 +168,17 @@ pub struct EngineConfig {
     /// The audio device's output channels, for tracks whose Audio To is
     /// Ext. Out (WP-2.13). Zero — no Ext. Out plays — until a device opens.
     pub output_channels: usize,
+    /// Frames between the engine handing the audio device a sound and it
+    /// coming out, as the device reports (zero when it reports none): MIDI
+    /// to hardware is sent this much after its frame's block starts, so it
+    /// is heard with the audio (`docs/specs/external-devices.md`, R4).
+    pub output_latency: u32,
+    /// The frames an external device's sound takes to come back through the
+    /// interface, which delay compensation holds the rest of the set back
+    /// by: the device's reported output and input latency plus Driver
+    /// Error Compensation, never less than zero (R13). A device's own
+    /// Hardware Latency adds to it.
+    pub round_trip_latency: u32,
     /// Messages the queue to the audio thread holds. More wait on the
     /// sending side ([`Sender::backlog`]).
     pub queue_capacity: usize,
@@ -209,6 +220,8 @@ impl EngineConfig {
             channels: 2,
             input_channels: 0,
             output_channels: 0,
+            output_latency: 0,
+            round_trip_latency: 0,
             queue_capacity: 4096,
             max_pending_events: 4096,
             max_scheduled: 256,

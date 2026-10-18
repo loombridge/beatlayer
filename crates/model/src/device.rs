@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{ContentHash, DeviceId, ParamId};
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
+use crate::external::External;
 use crate::track::Input;
 
 /// The most sample slots a device's media can fill.
@@ -70,6 +71,12 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// The device's routing to external hardware, if its type declares one
+    /// (WP-5.34): an external instrument's output port and channel, the
+    /// interface inputs it comes back on, and its Hardware Latency. Left out
+    /// of the saved set for a device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<External>,
     /// Whether the device floats in a window of its own rather than
     /// showing in the Device View (IMP-14, WP-2.5b), where its place in the
     /// chain shows as a strip. Only native devices float. Left out of the
@@ -310,6 +317,7 @@ impl Device {
             b_active: false,
             other_params: None,
             sidechain: None,
+            external: None,
             floating: false,
             plugin: None,
             media: Vec::new(),
@@ -398,6 +406,14 @@ impl Device {
         if self.other_params.as_ref() == Some(&self.params) {
             self.other_params = None;
         }
+    }
+
+    /// The same device with routing to external hardware, as a new external
+    /// device has.
+    #[must_use]
+    pub fn with_external(mut self) -> Self {
+        self.external = Some(External::default());
+        self
     }
 
     /// The same device with a sidechain input, as a new device has.

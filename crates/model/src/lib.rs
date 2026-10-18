@@ -68,6 +68,7 @@ pub mod device_layout;
 mod document;
 mod editor;
 mod error;
+mod external;
 pub mod fader;
 mod ids;
 mod launch;
@@ -102,6 +103,9 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub use external::{
+    External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
+};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };
@@ -114,6 +118,6 @@ pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
 pub use repr::{SavedSong, saved_schema};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
-    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };

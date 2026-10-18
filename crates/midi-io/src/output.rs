@@ -118,6 +118,9 @@ impl Output {
     /// producing end, for the next engine's processor, starting the output
     /// thread if it isn't running. What the old queue held goes with it.
     pub(crate) fn attach(self: &Arc<Self>, capacity: usize) -> Producer<MidiOutputEvent> {
+        // What the engine before queued, its stopping note-offs included,
+        // goes out first.
+        self.drain();
         let (producer, consumer) = RingBuffer::new(capacity);
         *lock(&self.queue) = Some(consumer);
         let mut thread = lock(&self.thread);

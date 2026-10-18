@@ -34,6 +34,7 @@ pub mod delay;
 pub mod dice;
 pub mod eq;
 mod framework;
+pub mod hardware;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -56,6 +57,7 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
+pub use hardware::{HARDWARE_INSTRUMENT, hardware_instrument_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -112,6 +114,7 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    hardware::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

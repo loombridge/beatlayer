@@ -473,6 +473,10 @@ pub struct Block<'a> {
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
+    /// What an external device brings back from the audio interface: the
+    /// input channels it is set to, planar with the block's channels and
+    /// stride (WP-5.34). `None` for every other device.
+    pub(crate) external: Option<&'a [f32]>,
     /// The notes the device plays in this block, in order of offset
     /// (WP-2.6). The engine sends none yet: MIDI clips and inputs reach
     /// devices with WP-2.1 and 2.2.
@@ -532,6 +536,7 @@ impl<'a> Block<'a> {
             sample_rate,
             tempo: &DEFAULT_TEMPO,
             sidechain: None,
+            external: None,
             notes: &[],
             notes_out: None,
             session: &[],
@@ -587,6 +592,26 @@ impl<'a> Block<'a> {
         );
         Self {
             sidechain: Some(sidechain),
+            ..self
+        }
+    }
+
+    /// The same block with what an external device brings back from the
+    /// interface: planar, with the block's channels and stride. For tests of
+    /// nodes outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `external` is too short.
+    #[must_use]
+    pub fn with_external(self, external: &'a [f32]) -> Self {
+        assert!(
+            self.channels == 0
+                || external.len() >= (self.channels - 1) * self.stride + self.frames,
+            "the external input is shorter than the block"
+        );
+        Self {
+            external: Some(external),
             ..self
         }
     }
@@ -697,6 +722,20 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.sidechain.map(|data| &data[start..start + self.frames])
+    }
+
+    /// What an external device brings back on one channel (WP-5.34): the
+    /// audio interface's input channels it is set to, a pair as left and
+    /// right and a single channel on both sides, silence where the interface
+    /// lacks the channel. `None` for a device that isn't an external one.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`channels`](Self::channels).
+    pub fn external(&self, index: usize) -> Option<&'a [f32]> {
+        assert!(index < self.channels, "channel {index} out of range");
+        let start = index * self.stride;
+        self.external.map(|data| &data[start..start + self.frames])
     }
 
     /// One channel's samples, writable.

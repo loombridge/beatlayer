@@ -338,6 +338,53 @@ pub enum Output {
     },
 }
 
+/// Where a MIDI track's MIDI goes: the In/Out section's MIDI To chooser and
+/// its channel (the routing spec, R4; the external devices spec, R1, R2).
+///
+/// A track is saved as its ID alone, as MIDI To has always been; a port as
+/// its name and channel.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[schemars(
+    description = "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output \
+                   port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's \
+                   name as the MIDI settings list it, and the channel to send on, 1 to 16."
+)]
+pub enum MidiTo {
+    /// Another MIDI track's Track In.
+    Track(TrackId),
+    /// A MIDI output port, by the name the MIDI system gives it, and the
+    /// channel everything is sent on. The track keeps the name while the
+    /// port is away and sends again when a port of that name returns.
+    Port {
+        /// The port's name, as the MIDI settings list it.
+        name: String,
+        /// The channel, 1 to 16.
+        channel: u8,
+    },
+}
+
+impl MidiTo {
+    /// A port with Beatlayer's first channel, 1: what choosing a port in
+    /// the chooser takes.
+    #[must_use]
+    pub fn port(name: impl Into<String>) -> Self {
+        Self::Port {
+            name: name.into(),
+            channel: 1,
+        }
+    }
+
+    /// The track it names, if it names one.
+    #[must_use]
+    pub const fn track(&self) -> Option<TrackId> {
+        match self {
+            Self::Track(track) => Some(*track),
+            Self::Port { .. } => None,
+        }
+    }
+}
+
 impl Output {
     /// Whether this is [`Output::Default`].
     #[must_use]
@@ -361,10 +408,10 @@ pub struct Routing {
     /// Audio To.
     #[serde(default, skip_serializing_if = "Output::is_default")]
     pub output: Output,
-    /// MIDI To, on a MIDI track: another MIDI track, or none (No Output,
-    /// a new MIDI track's).
+    /// MIDI To, on a MIDI track: another MIDI track, an output port with a
+    /// channel, or none (No Output, a new MIDI track's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub midi_output: Option<TrackId>,
+    pub midi_output: Option<MidiTo>,
     /// Main Out, on Main: the interface's output channels the Main mix goes
     /// to, as a stereo pair. Saved only where it differs from the first
     /// pair.

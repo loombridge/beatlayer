@@ -25,6 +25,8 @@ pub enum ModelError {
     NoSuchScene(SceneId),
     /// The device has no sidechain input to set.
     NoSidechain(DeviceId),
+    /// The device has no routing to external hardware to set.
+    NoExternal(DeviceId),
     /// The device isn't in this track's chain, so the track has no such
     /// parameter to automate (WP-2.12).
     DeviceNotInTrack {
@@ -288,6 +290,7 @@ impl fmt::Display for ModelError {
                 f.write_str("the document's object IDs leave no room for the objects it needs")
             }
             Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
+            Self::NoExternal(id) => write!(f, "{id} has no routing to external hardware"),
             Self::DeviceNotInTrack { device, track } => {
                 write!(f, "{device} isn't in {track}'s chain")
             }

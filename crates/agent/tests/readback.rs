@@ -11,8 +11,7 @@ use bl_model::{
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
     ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
-    TransientEdits,
-    WarpMarker,
+    TransientEdits, WarpMarker,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;

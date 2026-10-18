@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+mod auto_warp;
 pub mod automation;
 mod base64;
 mod changes;
@@ -89,6 +90,9 @@ mod track;
 mod warp;
 mod warp_settings;
 
+pub use auto_warp::{
+    ClipDefaults, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm, nearest_bars,
+};
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
     envelope_value,

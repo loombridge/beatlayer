@@ -1,4 +1,4 @@
-//! Kitbag, the eight-slot drum sampler (WP-5.17; the eight-slot drum sampler
+//! Impulse, the eight-slot drum sampler (WP-5.17; the eight-slot drum sampler
 //! spec): each slot's key playing its own sample at its pitch, Start,
 //! Transpose, Stretch in both modes, the filter's types, the saturator, the
 //! decay in Trigger and Gate, pan and volume with their velocity and random
@@ -171,7 +171,7 @@ fn p(slot: usize, local: u32) -> ParamId {
 #[test]
 fn the_drum_sampler_is_described_and_laid_out() {
     let device_type = kitbag_type();
-    assert_eq!(device_type.name, "Kitbag");
+    assert_eq!(device_type.name, "Impulse");
     assert_eq!(device_type.role, DeviceRole::Instrument);
     // Every parameter is described once and placed in the layout, and the
     // slots' parameters follow each other in the order the device reads
@@ -876,7 +876,7 @@ fn song(samples: &[(usize, bl_model::ContentHash)]) -> (Editor, Device) {
     let id = editor.new_id();
     let mut device = Device::new(
         id,
-        "Kitbag",
+        "Impulse",
         DeviceKind::Native {
             device_type: bl_devices::kitbag::KITBAG.to_owned(),
         },

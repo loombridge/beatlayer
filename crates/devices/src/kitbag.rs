@@ -1,4 +1,4 @@
-//! Kitbag, the eight-slot drum sampler (WP-5.17; the eight-slot drum sampler
+//! Impulse, the eight-slot drum sampler (WP-5.17; the eight-slot drum sampler
 //! spec): eight samples, each played by its own key, each with its own
 //! start, transpose, stretch, filter, saturator, decay, pan and volume, and
 //! a link that lets slot 7 and slot 8 cut each other off.
@@ -191,7 +191,7 @@ pub fn kitbag_type() -> DeviceType {
              stops an open one.",
         ),
     ]);
-    DeviceType::native(KITBAG, "Kitbag", DeviceRole::Instrument)
+    DeviceType::native(KITBAG, "Impulse", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 

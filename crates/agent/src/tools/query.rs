@@ -415,7 +415,7 @@ impl View<'_> {
             });
         }
         // Spec: modulation R18. A modulator's mappings, which
-        // `modulator.map` and `modulator.unmap` change, and a Curve Mod's
+        // `modulator.map` and `modulator.unmap` change, and a Shaper's
         // shape.
         if bl_model::modulator::is_modulator_kind(&device.kind) {
             value["mappings"] = json!(device.mappings);

@@ -1,4 +1,4 @@
-//! Triband, the native multiband dynamics (WP-5.22; the multiband-dynamics
+//! Multiband Dynamics, the native multiband dynamics (WP-5.22; the multiband-dynamics
 //! spec): the crossovers and the High and Low switches, the four kinds of
 //! processing and their static curves, the soft knee, the envelope times,
 //! Time and Amount, Peak and RMS, the band gains, activators and solos, the
@@ -25,14 +25,14 @@ use common::{RATE, device, node};
 
 const RATE_HZ: f64 = 48_000.0;
 
-/// A registry with Triband alone.
+/// A registry with Multiband Dynamics alone.
 fn registry() -> Registry {
     let mut registry = Registry::empty();
     bl_devices::multiband_dynamics::register(&mut registry);
     registry
 }
 
-/// A Triband node of `params`, up to `max_frames` at a time, and the reader
+/// A Multiband Dynamics node of `params`, up to `max_frames` at a time, and the reader
 /// of its display.
 fn rig(params: &[(ParamId, f64)], max_frames: usize) -> (Box<dyn Node>, DisplayReader) {
     let device_type: DeviceType = multiband_dynamics_type();
@@ -222,7 +222,7 @@ fn null_db(got: &[f32], want: &[f32]) -> f64 {
 fn triband_is_described_with_a_sidechain_three_bands_and_no_latency() {
     let device_type = multiband_dynamics_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Triband");
+    assert_eq!(device_type.name, "Multiband Dynamics");
     assert!(device_type.sidechain, "it has a sidechain section");
     assert_eq!(device_type.description.params.len(), 9 + 3 * 12);
     assert_eq!(device_type.description.views, VIEWS);

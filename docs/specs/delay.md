@@ -18,7 +18,7 @@ delay time changes while audio is playing, the change is handled as a
 Repitch (a glide, with a pitch change), a Fade (a crossfade between the old
 and new times), or a Jump (a cut to the new time).
 
-Beatlayer's own name for the device is Reprise; its look is the device
+The device takes Live's name, Delay; its look is the device
 framework's generic controls and one display cell, and its parameters,
 ranges, defaults and units come from the manual's Delay section. The tempo
 it syncs to is the song's tempo map ([the musical time spec](musical-time.md)).
@@ -100,4 +100,4 @@ or an observation of Live running, as the clean-room policy allows.
 - Freeze cycles the buffer at the Feedback setting. Ping Pong crosses the feedback between the channels.
 - The band-pass filters the signal entering each line, feedback included, so the repeats thin out as they decay.
 - The framework does not smooth the delay time: the device reads the time parameters' targets and moves between them itself, over 20 ms in Repitch and Fade. Other continuous parameters take the framework's smoothing as every device does.
-- The device ships as Reprise, drawn from its descriptors and one display cell.
+- The device ships as Delay, drawn from its descriptors and one display cell.

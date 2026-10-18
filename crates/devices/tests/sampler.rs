@@ -1,4 +1,4 @@
-//! Snapshot, the native sampler (WP-2.16; the sampler spec): playing a
+//! Simpler, the native sampler (WP-2.16; the sampler spec): playing a
 //! sample at the right pitch and length, the region and its loop's
 //! crossfade, the envelope's times, velocity and pan, glide and
 //! portamento, One-Shot, voice stealing, Slicing's slices, the filter's
@@ -147,7 +147,7 @@ fn db(gain: f64) -> f64 {
 #[test]
 fn the_sampler_is_described_and_laid_out() {
     let device_type = sampler_type();
-    assert_eq!(device_type.name, "Snapshot");
+    assert_eq!(device_type.name, "Simpler");
     assert_eq!(device_type.role, DeviceRole::Instrument);
     // Every parameter is described once and placed in the layout.
     device_type.description.check().unwrap();
@@ -493,7 +493,7 @@ fn the_engine_plays_the_sample_the_set_names() {
     let device_id = editor.new_id();
     let mut device = Device::new(
         device_id,
-        "Snapshot",
+        "Simpler",
         DeviceKind::Native {
             device_type: SAMPLER.to_owned(),
         },
@@ -925,7 +925,7 @@ fn the_lfo_syncs_to_the_tempo() {
     }
 }
 
-/// A set with a Snapshot on a MIDI track holding a held C3 for two beats,
+/// A set with a Simpler on a MIDI track holding a held C3 for two beats,
 /// playing `hash` with `edits`; the registry finds `media`.
 fn edited_set(
     hash: bl_model::ContentHash,
@@ -945,7 +945,7 @@ fn edited_set(
     let device_id = editor.new_id();
     let mut device = Device::new(
         device_id,
-        "Snapshot",
+        "Simpler",
         DeviceKind::Native {
             device_type: SAMPLER.to_owned(),
         },

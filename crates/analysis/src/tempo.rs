@@ -12,6 +12,9 @@
 //!    With at least four transients spanning three beats this measures a
 //!    steady tempo to a small fraction of a BPM.
 //!
+//! 3. **Beats.** The line also says where the beats fall: [`beats`] lays
+//!    its grid from the first transient on it to the end of the audio.
+//!
 //! The weighting means a tempo far from 120 BPM may read as half or double.
 
 use crate::onsets::OnsetFunction;
@@ -31,6 +34,9 @@ pub struct Tempo {
     pub confidence: f64,
     /// How many transients the refinement fitted (0 if it didn't run).
     pub fitted: usize,
+    /// The time in seconds of the first beat on the refinement's line: the
+    /// first transient that sits on the grid. `None` if it didn't run.
+    pub first_beat: Option<f64>,
 }
 
 /// The tempo the onset function `function` and the `transients` (seconds)
@@ -83,10 +89,12 @@ pub fn estimate(function: &OnsetFunction, transients: &[f64]) -> Option<Tempo> {
     };
     let mut period = (best as f64 + shift) * hop;
     let mut fitted = 0;
+    let mut first_beat = None;
     for _ in 0..2 {
-        if let Some((refined, count)) = fit(transients, period) {
-            period = refined;
-            fitted = count;
+        if let Some(line) = fit(transients, period) {
+            period = line.period;
+            fitted = line.count;
+            first_beat = Some(line.first_beat);
         } else {
             break;
         }
@@ -95,14 +103,40 @@ pub fn estimate(function: &OnsetFunction, transients: &[f64]) -> Option<Tempo> {
         bpm: 60.0 / period,
         confidence: (c / zero).clamp(0.0, 1.0),
         fitted,
+        first_beat,
     })
 }
 
+/// The beats of `tempo` in audio `seconds` long, as times in seconds: a
+/// grid of its period from its first beat, or from the first transient if
+/// the refinement found none, to the end. Empty if there is neither.
+#[must_use]
+pub fn beats(tempo: &Tempo, transients: &[f64], seconds: f64) -> Vec<f64> {
+    let Some(first) = tempo.first_beat.or_else(|| transients.first().copied()) else {
+        return Vec::new();
+    };
+    let period = 60.0 / tempo.bpm;
+    (0..)
+        .map(|n| first + f64::from(n) * period)
+        .take_while(|&t| t < seconds)
+        .collect()
+}
+
+/// A line through transients on a beat grid.
+struct Line {
+    /// Seconds a beat lasts.
+    period: f64,
+    /// How many transients it fits.
+    count: usize,
+    /// Where it puts the first of them.
+    first_beat: f64,
+}
+
 /// A line through the transients that sit on the grid `period` makes,
-/// anchored on the transient most others agree with: their period and
-/// how many there were, or `None` if fewer than four fit, they span fewer
-/// than three beats, or the line's period is more than 5% from `period`.
-fn fit(transients: &[f64], period: f64) -> Option<(f64, usize)> {
+/// anchored on the transient most others agree with, or `None` if fewer
+/// than four fit, they span fewer than three beats, or the line's period is
+/// more than 5% from `period`.
+fn fit(transients: &[f64], period: f64) -> Option<Line> {
     let tolerance = 0.1 * period;
     let on_grid = |anchor: f64| -> Vec<(f64, f64)> {
         transients
@@ -139,7 +173,12 @@ fn fit(transients: &[f64], period: f64) -> Option<(f64, usize)> {
         den += (n - mean_n) * (n - mean_n);
     }
     let slope = num / den;
-    ((slope - period).abs() <= 0.05 * period).then_some((slope, points.len()))
+    ((slope - period).abs() <= 0.05 * period).then_some(Line {
+        period: slope,
+        count: points.len(),
+        // A beat a hair before the start of the audio is at the start.
+        first_beat: (mean_t + slope * (first - mean_n)).max(0.0),
+    })
 }
 
 #[cfg(test)]

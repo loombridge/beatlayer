@@ -1,4 +1,4 @@
-//! The Strike Mod (WP-5.11; the modulation spec, R26): each note plays its
+//! The Shaper MIDI (WP-5.11; the modulation spec, R26): each note plays its
 //! shape from the start, a sustain breakpoint holds the shape while a key is
 //! held and lets it go on when the key ends, Loop starts it again past the
 //! sustain point, Velocity scales it and Echo repeats it. The notes pass
@@ -31,7 +31,7 @@ fn playing(at: usize) -> TransportInfo {
     }
 }
 
-/// A Strike Mod with the shape a new one has (a rise to the top by a tenth
+/// A Shaper MIDI with the shape a new one has (a rise to the top by a tenth
 /// of the cycle, which is its sustain breakpoint, and a fall to the end),
 /// playing a cycle in 4,800 frames, slot 1 giving its output itself;
 /// `params` over those.

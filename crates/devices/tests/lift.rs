@@ -1,4 +1,4 @@
-//! Lift, the transposing MIDI effect (WP-5.30; the transpose spec): notes
+//! Pitch, the transposing MIDI effect (WP-5.30; the transpose spec): notes
 //! land on their frames transposed, the window blocks, folds or limits,
 //! expressions follow their notes, and no note hangs when the device is
 //! switched off, deleted or moved. Every block is a real-time section under

@@ -1,4 +1,4 @@
-//! Grit, the native overdrive (WP-5.23; the overdrive spec): a band-pass
+//! Overdrive, the native overdrive (WP-5.23; the overdrive spec): a band-pass
 //! before a `tanh` distortion, a Tone control after it, and Dynamics, which
 //! levels what the distortion would otherwise make louder as Drive rises.
 //!
@@ -23,7 +23,7 @@ use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sections::Biquad;
 
-/// Grit's device type.
+/// Overdrive's device type.
 pub const OVERDRIVE: &str = "beatlayer.grit";
 
 /// Drive, per cent: the distortion's amount.
@@ -74,7 +74,7 @@ fn drive_gain(drive: f32) -> f32 {
     db_to_gain(DRIVE_FROM_DB + (DRIVE_TO_DB - DRIVE_FROM_DB) * f64::from(drive) / 100.0) as f32
 }
 
-/// The Grit device type.
+/// The Overdrive device type.
 #[must_use]
 pub fn overdrive_type() -> DeviceType {
     let params = vec![
@@ -117,16 +117,16 @@ pub fn overdrive_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(OVERDRIVE, "Grit", DeviceRole::AudioEffect)
+    DeviceType::native(OVERDRIVE, "Overdrive", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds Grit to `registry`.
+/// Adds Overdrive to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, overdrive_type(), make);
 }
 
-/// Makes a Grit for `config`'s rate. Every buffer is made here, off the
+/// Makes an Overdrive for `config`'s rate. Every buffer is made here, off the
 /// audio thread.
 #[must_use]
 pub fn make(_device: &Device, config: &NodeConfig) -> Grit {
@@ -165,7 +165,7 @@ impl BandPass {
     }
 }
 
-/// Grit's audio-thread half.
+/// Overdrive's audio-thread half.
 pub struct Grit {
     rate: f64,
     band: [BandPass; 2],

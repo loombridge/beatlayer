@@ -177,7 +177,7 @@ pub(super) const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         name: "beat-repeat",
-        about: "A drum loop of two bars through Stutter, the equivalent of Beat Repeat, in \
+        about: "A drum loop of two bars through Beat Repeat, in \
                 Insert mode: a capture of a sixteenth on beat three of each bar repeats for \
                 half a bar, each repeat quieter and lower than the last, the grid varied by \
                 the device's seeded source.",
@@ -534,7 +534,7 @@ fn drum_bar() -> Vec<f32> {
     bar
 }
 
-/// Spec: beat-repeat R1 to R10. A drum loop through Stutter in Insert mode.
+/// Spec: beat-repeat R1 to R10. A drum loop through Beat Repeat in Insert mode.
 fn beat_repeat() -> Scene {
     use bl_devices::beat_repeat::{
         BEAT_REPEAT, DECAY, GATE, GRID, INTERVAL, MODE, OFFSET, PITCH_DECAY, VARIATION,
@@ -548,7 +548,7 @@ fn beat_repeat() -> Scene {
     song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
     let mut device = Device::new(
         song.editor.new_id(),
-        "Stutter",
+        "Beat Repeat",
         DeviceKind::Native {
             device_type: BEAT_REPEAT.to_owned(),
         },

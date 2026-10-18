@@ -18,7 +18,7 @@ sets the width of the output; Density trades the tail's quality against
 the device's cost; and Reflect, Diffuse and Dry/Wet set the output's
 balance.
 
-Beatlayer's own name for the device is Rotunda. It is built on the WP-2.5
+The device takes Live's name, Reverb. It is built on the WP-2.5
 framework, so its parameters, ranges, smoothing, layout, presets and
 automation are the framework's, and only the device's own behaviour is
 here: what each control does to the sound.
@@ -138,7 +138,7 @@ allows.
 - **Stereo is a mid/side scaling of the output**, so at 0 the early
   reflections and the tail are mono together, as the manual's lowest
   setting is.
-- **The device ships as Rotunda**, Beatlayer's own name.
+- **The device ships as Reverb**, Live's name for it.
 
 ## Defaults and ranges
 

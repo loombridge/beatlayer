@@ -1,11 +1,11 @@
-//! Strip, the native three-band channel EQ (WP-5.21; the channel-eq spec):
+//! Channel EQ, the native three-band channel EQ (WP-5.21; the channel-eq spec):
 //! an 80 Hz high-pass switch, a low shelf at 100 Hz, a sweepable mid peak,
 //! and a high band that is a shelf when it boosts and a shelf with a
 //! low-pass when it cuts, then Output. Its display holds the response and
 //! the output's spectrum.
 //!
-//! The sections are Contour's (RBJ's audio-EQ cookbook) and the spectrum
-//! is Contour's analyser. The band frequencies, gains and the high band's
+//! The sections are EQ Eight's (RBJ's audio-EQ cookbook) and the spectrum
+//! is EQ Eight's analyser. The band frequencies, gains and the high band's
 //! cut behaviour are from the manual's section on Channel EQ; the shelf's
 //! gain-dependent shape, the mid band's Q, the high shelf's corner and the
 //! high-pass's order are Beatlayer's own (see `docs/specs/channel-eq.md`).
@@ -24,7 +24,7 @@ use crate::sections::{
     curve_series, response_db, spectrum_series,
 };
 
-/// Strip's device type.
+/// Channel EQ's device type.
 pub const CHANNEL_EQ: &str = "beatlayer.strip";
 
 /// HP 80: the 80 Hz high-pass switch.
@@ -80,7 +80,7 @@ pub fn low_pass_hz(gain_db: f64) -> f64 {
     LOW_PASS_TOP_HZ * (LOW_PASS_BOTTOM_HZ / LOW_PASS_TOP_HZ).powf(cut)
 }
 
-/// Strip's device type.
+/// Channel EQ's device type.
 #[must_use]
 pub fn channel_eq_type() -> DeviceType {
     let params = vec![
@@ -125,7 +125,7 @@ pub fn channel_eq_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", OUTPUT_MAX_DB, 0.0)
             .describe("The level after the bands, to offset what the EQ added."),
     ];
-    DeviceType::native(CHANNEL_EQ, "Strip", DeviceRole::AudioEffect)
+    DeviceType::native(CHANNEL_EQ, "Channel EQ", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -147,7 +147,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Strip to `registry`.
+/// Adds Channel EQ to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, channel_eq_type(), |_, config| Strip::new(config));
 }
@@ -232,7 +232,7 @@ impl Chain {
     }
 }
 
-/// Strip's audio-thread half.
+/// Channel EQ's audio-thread half.
 pub struct Strip {
     rate: f64,
     chains: [Chain; 2],
@@ -244,7 +244,7 @@ pub struct Strip {
 }
 
 impl Strip {
-    /// A Strip for `config`, every buffer made here.
+    /// A Channel EQ for `config`, every buffer made here.
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();

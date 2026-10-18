@@ -316,11 +316,11 @@ fn fixture() -> Project {
             device,
         },
     );
-    // A Curve Mod mapping that device, with a shape of its own.
+    // A Shaper mapping that device, with a shape of its own.
     let curve: bl_model::DeviceId = editor.new_id();
     let mut modulator = Device::new(
         curve,
-        "Curve Mod",
+        "Shaper",
         DeviceKind::Native {
             device_type: bl_model::modulator::CURVE_MOD.to_owned(),
         },

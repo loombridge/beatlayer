@@ -1,4 +1,4 @@
-//! Shutter, the native gate (WP-5.21; the gate spec): where a stepped tone
+//! Gate, the native gate (WP-5.21; the gate spec): where a stepped tone
 //! opens and closes it, Attack, Hold and Release, Floor, Flip, Lookahead
 //! and its latency, and a sidechain key with its EQ.
 
@@ -356,7 +356,7 @@ fn the_display_reads_the_threshold_and_return_and_the_published_gain_reduction()
             &values.params,
             data,
         )
-        .expect("Shutter has a display")
+        .expect("Gate has a display")
     };
     let from_values = shown(None);
     let texts: Vec<_> = from_values

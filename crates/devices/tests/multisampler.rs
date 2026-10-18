@@ -1,4 +1,4 @@
-//! Mosaic, the native multisampler (WP-5.13; the multisampler spec, R1 to
+//! Sampler, the native multisampler (WP-5.13; the multisampler spec, R1 to
 //! R31): which layers a note plays, zone fades, the Sample Selector, Round
 //! Robin and its resets, pitch, the markers and loops, interpolation, the
 //! volume envelope and its loop modes, voices and the steal fade, and the
@@ -209,7 +209,7 @@ fn fit(signal: &[f32], from: usize, frames: usize, hz: f64) -> (f64, f64) {
 #[test]
 fn the_multisampler_is_described_and_laid_out() {
     let device_type = multisampler_type();
-    assert_eq!(device_type.name, "Mosaic");
+    assert_eq!(device_type.name, "Sampler");
     assert_eq!(device_type.role, DeviceRole::Instrument);
     device_type.description.check().unwrap();
     assert!(
@@ -2255,7 +2255,7 @@ fn an_edited_sample_reaches_the_node_off_the_audio_thread() {
     let device_id = editor.new_id();
     let device = Device::new(
         device_id,
-        "Mosaic",
+        "Sampler",
         DeviceKind::Native {
             device_type: bl_devices::multisampler::MULTISAMPLER.to_owned(),
         },

@@ -1,4 +1,4 @@
-//! Scatter, the grain delay (WP-5.25; the grain delay spec): the delay time
+//! Grain Delay, the grain delay (WP-5.25; the grain delay spec): the delay time
 //! (synced and free), Frequency, Pitch, Random Pitch, Spray, Feedback and
 //! Dry/Wet. Every block runs as a real-time section under the allocation
 //! trap.
@@ -27,7 +27,7 @@ fn tempo() -> TempoMap {
     TempoMap::constant(Bpm::new(120.0).unwrap())
 }
 
-/// Scatter as device number `id`, fully wet, with `params`.
+/// Grain Delay as device number `id`, fully wet, with `params`.
 fn scatter(id: u64, params: &[(ParamId, f64)]) -> Box<dyn bl_engine::Node> {
     let mut device = grain_delay_type().device(DeviceId(Id::new(id).unwrap()));
     device.params.insert(DRY_WET, 100.0);

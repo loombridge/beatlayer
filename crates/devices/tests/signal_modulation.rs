@@ -1,6 +1,6 @@
 //! Modulators driven by audio, notes and MIDI in an engine (WP-5.11; the
-//! modulation spec, R28): the track holding a parameter a Level Mod maps
-//! waits for the Level Mod's, so its effect lands on the frames it is worked
+//! modulation spec, R28): the track holding a parameter an Envelope Follower maps
+//! waits for the Envelope Follower's, so its effect lands on the frames it is worked
 //! out for; a mapping that would make two tracks wait on each other is
 //! refused; and a target earlier in the modulator's own chain takes its
 //! effect one 32-frame step late, the same at any block size. Every block
@@ -176,7 +176,7 @@ fn position_of(gain: f64) -> f64 {
 /// The unit signal's track `target` (a test DC at 1 and a utility), made
 /// after the source so it comes first in display order, which is where it
 /// would run without a wait; and a muted source track holding a DC at
-/// `level`, then a Level Mod that follows it at once, mapped to the
+/// `level`, then an Envelope Follower that follows it at once, mapped to the
 /// utility's gain, unipolar at full amount. Returns the rig and the pieces.
 fn follower_rig(block: usize, level: f64) -> (Rig, TrackId, TrackId, DeviceId, DeviceId) {
     follower_rig_of(block, level, TrackKind::Midi)
@@ -423,7 +423,7 @@ fn an_earlier_target_in_the_chain_is_one_step_late_at_any_block_size() {
     );
 }
 
-/// A source track playing a held note into a Gate Mod mapped to the gain of
+/// A source track playing a held note into an Envelope MIDI mapped to the gain of
 /// a utility on the target track after it, playing.
 fn gate_rig(block: usize) -> Rig {
     let mut rig = Rig::new(block);

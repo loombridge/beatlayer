@@ -4,7 +4,7 @@
 //! select, a click to audition, Esc to clear the selection; and the context
 //! menu's edits.
 //!
-//! Snapshot's display cell and the multisampler's Sample tab draw through
+//! Simpler's display cell and the multisampler's Sample tab draw through
 //! the same [`Displays`]. Every change is a registered command
 //! (`device.set_param`, `device.set_layer`, `device.edit_sample`,
 //! `device.audition_sample`, ...), which an agent runs too. A drag on a flag
@@ -84,7 +84,7 @@ pub struct Flag<'a> {
 pub struct Shown<'a> {
     /// The sampler.
     pub device: DeviceId,
-    /// The multisampler's layer; none for Snapshot.
+    /// The multisampler's layer; none for Simpler.
     pub layer: Option<LayerId>,
     /// The sample's source, by content hash.
     pub media: ContentHash,
@@ -98,7 +98,7 @@ pub struct Shown<'a> {
     pub brace: Option<(u64, u64)>,
     /// The slices, each with its frame and whether it was made by hand.
     pub slices: &'a [(u64, bool)],
-    /// Whether this is Snapshot's display, whose menu offers Normalize
+    /// Whether this is Simpler's display, whose menu offers Normalize
     /// Volumes (R60).
     pub snapshot: bool,
     /// Whether the sample is dropped on the display to replace or add a
@@ -132,7 +132,7 @@ struct State {
     press: Option<Press>,
     dragging: Option<usize>,
     auditioning: bool,
-    /// The slices worked out for Snapshot, and what they were worked out
+    /// The slices worked out for Simpler, and what they were worked out
     /// from.
     slices: Vec<(u64, bool)>,
     slice_key: Option<(usize, Vec<u64>)>,
@@ -228,7 +228,7 @@ impl Displays {
         true
     }
 
-    /// Snapshot's display in its cell (R54): the waveform, the region's
+    /// Simpler's display in its cell (R54): the waveform, the region's
     /// flags, the loop brace in Classic mode and the slices in Slice mode.
     pub fn snapshot(
         &mut self,

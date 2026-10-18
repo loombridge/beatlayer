@@ -1,4 +1,4 @@
-//! Plumb, the alignment delay (WP-5.25; the alignment delay spec): Time,
+//! Align Delay, the alignment delay (WP-5.25; the alignment delay spec): Time,
 //! Samples and Distance modes, the temperature, Link, and no reported
 //! latency. Every block runs as a real-time section under the allocation
 //! trap.
@@ -29,7 +29,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// Plumb at `rate` with `params`, run over `input` on both channels as one
+/// Align Delay at `rate` with `params`, run over `input` on both channels as one
 /// block.
 fn render(rate: SampleRate, params: &[(ParamId, f64)], input: &[f32]) -> Vec<Vec<f32>> {
     let config = NodeConfig {
@@ -39,7 +39,7 @@ fn render(rate: SampleRate, params: &[(ParamId, f64)], input: &[f32]) -> Vec<Vec
     };
     let mut node = registry()
         .create(&device(&alignment_delay_type(), params), &config)
-        .expect("the registry makes Plumb");
+        .expect("the registry makes Align Delay");
     let mut data: Vec<f32> = input.iter().chain(input).copied().collect();
     {
         let mut block = Block::new(
@@ -195,7 +195,7 @@ fn it_reports_no_latency_and_its_track_lands_later_than_the_others_by_its_delay(
         0
     );
 
-    // Two tracks play the same tone; the second goes through Plumb.
+    // Two tracks play the same tone; the second goes through Align Delay.
     let render = |plumb: bool, only_first: bool| {
         let mut editor = Editor::new();
         let tracks = if only_first { 1 } else { 2 };

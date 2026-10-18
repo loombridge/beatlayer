@@ -1,4 +1,4 @@
-//! The Play Mod (WP-5.11; the modulation spec, R27): Beatlayer's equivalent of
+//! The Expression Control (WP-5.11; the modulation spec, R27): Beatlayer's equivalent of
 //! an Expression Control device. A MIDI effect that passes its notes and MIDI
 //! through untouched and turns what they say into control signals for the
 //! parameters it maps: five source tabs, each a source, a curve, smoothing
@@ -101,7 +101,7 @@ pub const fn param(tab: usize, field: Field) -> ParamId {
     ParamId(TAB_BASE + tab as u32 * FIELDS + field as u32)
 }
 
-/// The Play Mod's type.
+/// The Expression Control's type.
 #[must_use]
 pub fn play_mod_type() -> DeviceType {
     let mut params = Vec::new();
@@ -170,7 +170,7 @@ pub fn play_mod_type() -> DeviceType {
             "In Modulation mode, how far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(PLAY_MOD, "Play Mod", DeviceRole::MidiEffect)
+    DeviceType::native(PLAY_MOD, "Expression Control", DeviceRole::MidiEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -239,7 +239,7 @@ fn layout() -> DeviceLayout {
     .with_expanded(LayoutNode::Row((1..TABS).map(tab_layout).collect()))
 }
 
-/// Adds the Play Mod to `registry`.
+/// Adds the Expression Control to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, play_mod_type(), |device, config| {
         PlayMod::new(config.sample_rate.as_f64(), seed(device))
@@ -531,7 +531,7 @@ const FIELD_LIST: [Field; 14] = [
     Field::Fall,
 ];
 
-/// The Play Mod's display (R27): each tab's curve as its controls set it,
+/// The Expression Control's display (R27): each tab's curve as its controls set it,
 /// and each tab's output now from what its node published.
 #[must_use]
 pub fn display(

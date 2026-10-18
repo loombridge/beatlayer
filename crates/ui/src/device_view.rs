@@ -13,8 +13,7 @@
 //! A plug-in device (WP-2.10, L-DEV-010) adds the window button, a
 //! wrench named Show/Hide Plug-In Window, after the activator and before
 //! the name, lit while the plug-in's editor window is open; its panel is
-//! eight knobs mapped to the plug-in's first parameters, and the rest of
-//! its body is one large target that opens the editor (D19, IMP-03).
+//! eight knobs mapped to the plug-in's first parameters (D19, IMP-03).
 //!
 //! A floating device (WP-2.5b, IMP-14) keeps its place in the chain as a
 //! strip like a folded device's, outlined in the accent, so the signal
@@ -560,11 +559,6 @@ impl DeviceViewUi {
                             events,
                         ),
                         None => {
-                            // Spec: D19. Under the knobs, the rest of a
-                            // plug-in's body opens its editor.
-                            if frame.panel.as_ref().is_some_and(|p| p.plugin) {
-                                self.editor_target(ui, shell, frame, body, events);
-                            }
                             crate::device_panel::show(
                                 ui,
                                 theme,
@@ -865,33 +859,6 @@ impl DeviceViewUi {
                 "Shows or hides the plug-in's own panel in a floating window".to_owned(),
             );
         });
-    }
-
-    /// The rest of a plug-in device's body, under its knobs: one large
-    /// target that opens the plug-in's editor (D19, IMP-03).
-    fn editor_target(
-        &self,
-        ui: &mut Ui,
-        shell: &Shell,
-        frame: &DeviceFrame,
-        body: Rect,
-        events: &mut Vec<UiEvent>,
-    ) {
-        let has_window = shell.plugin_info(frame.id).is_some_and(|i| i.has_window);
-        if !has_window {
-            return;
-        }
-        let response = ui.interact(body, control_id(frame.id, "plugin_body"), Sense::click());
-        if response.clicked() {
-            invoke(
-                events,
-                PLUGIN_SHOW_WINDOW,
-                json!({ "device": frame.id, "shown": true }),
-            );
-        }
-        if response.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
     }
 
     /// Hot-Swap Presets, Save Preset, or Show Options: round buttons at the

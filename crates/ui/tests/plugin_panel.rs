@@ -3,9 +3,8 @@
 //! Show/Hide Plug-In Window, after the activator and before the name;
 //! clicking it opens and closes the plug-in's editor window as
 //! `plugin.show_window` does, and the button shows whether the window is
-//! open. The panel shows the plug-in's first parameters as knobs, and the
-//! rest of its body opens the editor. The plug-in is the test plug-in,
-//! built from source.
+//! open. The panel shows the plug-in's first parameters as knobs. The
+//! plug-in is the test plug-in, built from source.
 //!
 //! Spec: clap-hosting R13, R16.
 
@@ -130,9 +129,9 @@ fn clicking_the_wrench_opens_and_closes_the_plugins_window() {
     assert_eq!(button_value(&mut h), "off");
 }
 
-// Spec: clap-hosting R16; D19, IMP-03.
+// Spec: clap-hosting R5; D19, IMP-03.
 #[test]
-fn the_panel_shows_knobs_and_its_body_opens_the_editor() {
+fn the_panel_shows_the_plugins_parameters_as_knobs() {
     let (mut h, device) = harness();
     let state = h.shell.device_view_state();
     let panel = state
@@ -156,17 +155,6 @@ fn the_panel_shows_knobs_and_its_body_opens_the_editor() {
     ));
     assert!(
         !info(&mut h, device).window_open,
-        "a knob is a knob, not the editor's target"
+        "only the wrench opens the editor"
     );
-
-    // The body's bottom right, clear of the knobs, opens the editor.
-    let frame = frame_of(&mut h, device);
-    let body = pos2(frame.right() - 6.0, frame.bottom() - 6.0);
-    h.click(body);
-    assert!(
-        info(&mut h, device).window_open,
-        "the body opened the editor"
-    );
-    h.click(body);
-    assert!(info(&mut h, device).window_open, "the body only opens it");
 }

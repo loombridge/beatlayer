@@ -132,12 +132,14 @@ impl TimedOutput {
 
 impl OutputConnection for TimedOutput {
     fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError> {
-        lock(&self.inner).send(bytes)
+        // Through the timer's list, so a late message can't overtake one
+        // still waiting there (R6's note-offs after their note-ons).
+        self.send_at(bytes, Instant::now())
     }
 
     fn send_at(&mut self, bytes: &[u8], at: Instant) -> Result<(), MidiError> {
         if self.thread.is_none() {
-            return self.send(bytes);
+            return lock(&self.inner).send(bytes);
         }
         // A moment already past is queued too: the thread sends it on its
         // next turn, and every message leaves in the one order.

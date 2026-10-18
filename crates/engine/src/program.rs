@@ -1664,6 +1664,11 @@ impl EngineProgram {
                 // Spec: device-framework R32. A device switched off ends
                 // the notes it started, on this block's first frame.
                 node.release(out_buf);
+                if let (Some(_), NodeKey::Device(device)) =
+                    (turn.slot(slot).external, turn.slot(slot).key)
+                {
+                    self.midi.release(OutOwner::Device(device));
+                }
                 for &note in in_buf.notes() {
                     out_buf.push(note);
                 }

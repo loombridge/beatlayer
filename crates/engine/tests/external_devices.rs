@@ -271,3 +271,49 @@ fn the_instrument_ends_its_notes_when_its_device_goes() {
     assert_eq!(off.message.padded(), [0x81, 60, 64]);
     assert!(notes.output.pop().is_err());
 }
+
+// Spec: external-devices R6, device-framework R32
+#[test]
+fn the_instrument_ends_its_notes_when_it_is_switched_off() {
+    let mut notes = Notes::new(0);
+    notes.run();
+    notes.run();
+    notes
+        .input
+        .push(MidiInputEvent {
+            source: MidiSource::ComputerKeyboard,
+            time: notes.start + frames(150),
+            message: MidiMessage::note_on(0, 60, 100),
+        })
+        .unwrap();
+    notes.run();
+    notes.run();
+    notes.run();
+    assert_eq!(
+        notes.output.pop().unwrap().message.padded(),
+        [0x91, 60, 100]
+    );
+    let device = notes
+        .rig
+        .editor
+        .document()
+        .tracks()
+        .flat_map(|t| t.devices_deep())
+        .find(|d| d.external.is_some())
+        .unwrap()
+        .id;
+    notes.rig.apply(Command::SetDeviceEnabled {
+        device,
+        enabled: false,
+    });
+    notes.run();
+    notes.run();
+    let off = notes
+        .output
+        .pop()
+        .expect("the note ends when the device goes off");
+    assert_eq!(off.port, PortId::from_name("Hardware"));
+    assert_eq!(off.message.padded(), [0x81, 60, 64]);
+    notes.run();
+    assert!(notes.output.pop().is_err(), "it is ended once");
+}

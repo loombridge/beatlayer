@@ -402,6 +402,18 @@ impl MidiRoutes {
         }
     }
 
+    /// Ends the notes `owner` holds in the next block (R6): its device was
+    /// switched off, so nothing it is sent reaches the port.
+    pub(crate) fn release(&self, owner: OutOwner) {
+        let Some(at) = self.owners.iter().position(|&o| o == owner) else {
+            return;
+        };
+        // SAFETY: a route belongs to its owner's task, which is the one
+        // thread sending to it in this block.
+        let route = unsafe { self.outs.element(at) };
+        route.release |= route.held != 0;
+    }
+
     /// Ends every held note in the next block (R6): the transport stopped.
     pub(crate) fn release_all(&mut self) {
         for route in self.outs.iter_mut() {

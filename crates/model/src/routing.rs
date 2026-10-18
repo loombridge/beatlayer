@@ -70,6 +70,15 @@ impl Document {
             if let Some(sidechain) = &device.sidechain {
                 check_sidechain_input(self, track, sidechain.input.clone())?;
             }
+            // Spec: external-devices R9, R12
+            if let Some(external) = &device.external {
+                check_port(external.port.as_deref().unwrap_or("-"), external.channel)?;
+                if !external.hardware_latency.is_valid() {
+                    return Err(ModelError::InvalidInput(
+                        "the hardware latency is out of range",
+                    ));
+                }
+            }
         }
         Ok(())
     }

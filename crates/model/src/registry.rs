@@ -880,7 +880,7 @@ const ENTRIES: &[Entry] = &[
             (`{ \"name\": \"Synth\", \"channel\": 1 }`: the port's name as `midi.ports` lists \
             it, with its Track switch on, and the channel to send on, 1 to 16), or `null` for \
             No Output (a new MIDI track's). A track sends to a port the notes and controller, \
-            pitch bend, pressure and program change messages that reach the end of its device \
+            pitch bend and pressure messages that reach the end of its device \
             chain (a track with an instrument sends none, the instrument playing them), at \
             the moment their frame is heard at the audio interface's output; it keeps a missing \
             port's name and sends again when the port returns. Choosing a port takes channel 1.",
@@ -1904,7 +1904,8 @@ const ENTRIES: &[Entry] = &[
             (0 to 1000, kept in milliseconds when the sample rate changes) or `{ \"unit\": \
             \"samples\", \"value\": 600 }` (0 to 192000, kept in samples); to switch the unit, \
             send the converted value. Each change recompiles the song's audio, so these are \
-            settings, not parameters. Read them back in `device.list`'s `external`.",
+            settings, not parameters. Read them back in the query tool's `device` result, \
+            under `external`.",
     },
     Entry {
         id: "device.set_sidechain_enabled",

@@ -333,6 +333,7 @@ fn a_late_message_is_sent_at_once_and_counted() {
     let late = MidiMessage::note_on(0, 60, 100);
     let early = MidiMessage::note_on(0, 62, 100);
     let muted = MidiMessage::note_on(0, 64, 100);
+    let muted_off = MidiMessage::note_off(0, 64);
     let now = Instant::now();
     let due = now + Duration::from_millis(40);
     let synth = PortId::from_name("Synth");
@@ -352,6 +353,11 @@ fn a_late_message_is_sent_at_once_and_counted() {
             time: due,
             message: muted,
         },
+        MidiOutputEvent {
+            port: PortId::from_name("Muted"),
+            time: due,
+            message: muted_off,
+        },
     ] {
         producer.push(event).unwrap();
     }
@@ -359,7 +365,7 @@ fn a_late_message_is_sent_at_once_and_counted() {
     let waited = Instant::now();
     loop {
         let stats = ports.output_stats().snapshot();
-        if stats.sent == 2 && stats.unrouted == 1 {
+        if stats.sent == 3 && stats.unrouted == 1 {
             break;
         }
         assert!(
@@ -372,11 +378,12 @@ fn a_late_message_is_sent_at_once_and_counted() {
     assert_eq!((stats.late, stats.refused), (1, 0));
 
     // Both reached the port, the late one with no stamp and the other with
-    // exactly its own; the muted port got nothing.
+    // exactly its own; the muted port got only the note off (R6), so a
+    // note sent before its Track switch went off doesn't hang.
     assert_eq!(
         test.sent("Synth"),
         vec![late.bytes().to_vec(), early.bytes().to_vec()]
     );
     assert_eq!(test.sent_at("Synth"), vec![(due, early.bytes().to_vec())]);
-    assert!(test.sent("Muted").is_empty());
+    assert_eq!(test.sent("Muted"), vec![muted_off.bytes().to_vec()]);
 }

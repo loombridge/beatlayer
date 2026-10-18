@@ -84,8 +84,8 @@ impl AlsaOutput {
         Ok(output)
     }
 
-    /// Outputs `bytes` direct, or scheduled at `when` on the queue's clock.
-    fn output(&self, bytes: &[u8], when: Option<Duration>) -> Result<(), MidiError> {
+    /// Outputs `bytes` scheduled at `when` on the queue's clock.
+    fn output(&self, bytes: &[u8], when: Duration) -> Result<(), MidiError> {
         // The encoder's buffer takes a whole message, system exclusive
         // included, and a new one is cheap beside the sequencer's own work:
         // this runs on the MIDI output thread, not the audio thread.
@@ -101,16 +101,8 @@ impl AlsaOutput {
         };
         event.set_source(self.port);
         event.set_subs();
-        match when {
-            Some(when) => {
-                event.schedule_real(self.queue, false, when);
-                self.seq.event_output(&mut event).map_err(system)?;
-            }
-            None => {
-                event.set_direct();
-                self.seq.event_output_direct(&mut event).map_err(system)?;
-            }
-        }
+        event.schedule_real(self.queue, false, when);
+        self.seq.event_output(&mut event).map_err(system)?;
         // A buffer the sequencer can't take yet drains on the next call.
         let _ = self.seq.drain_output();
         Ok(())
@@ -119,15 +111,13 @@ impl AlsaOutput {
 
 impl OutputConnection for AlsaOutput {
     fn send(&mut self, bytes: &[u8]) -> Result<(), MidiError> {
-        self.output(bytes, None)
+        self.send_at(bytes, Instant::now())
     }
 
     fn send_at(&mut self, bytes: &[u8], at: Instant) -> Result<(), MidiError> {
-        let now = Instant::now();
-        let Some(ahead) = at.checked_duration_since(now) else {
-            // A moment already past goes at once.
-            return self.send(bytes);
-        };
+        // A moment already past goes on the queue at its time now, so it
+        // leaves at once but after what the queue already holds.
+        let ahead = at.saturating_duration_since(Instant::now());
         // The queue's clock has its own zero: its reading now, plus the time
         // from now to `at`, is the queue time of `at`.
         let queue_now = self
@@ -135,7 +125,7 @@ impl OutputConnection for AlsaOutput {
             .get_queue_status(self.queue)
             .map_err(system)?
             .get_real_time();
-        self.output(bytes, Some(queue_now + ahead))
+        self.output(bytes, queue_now + ahead)
     }
 }
 

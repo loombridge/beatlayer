@@ -139,7 +139,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
                     time: Instant::now(),
                     message: if sent % 7 == 6 {
                         MidiMessage::from_bytes(&[0xE0, 0, 96]).unwrap()
-                    } else if sent % 2 == 0 {
+                    } else if sent.is_multiple_of(2) {
                         MidiMessage::note_on(0, key, 100)
                     } else {
                         MidiMessage::note_off(0, key - 1)

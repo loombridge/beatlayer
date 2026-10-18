@@ -201,7 +201,12 @@ impl Shared {
 
     fn dispatch(&self, event: MidiOutputEvent) {
         let mut table = lock(&self.table);
-        let Some(slot) = table.iter_mut().find(|s| s.port == event.port && s.track) else {
+        // Spec: external-devices R6. A note off still leaves on a port whose
+        // Track switch went off, so the notes sent before it don't hang.
+        let Some(slot) = table
+            .iter_mut()
+            .find(|s| s.port == event.port && (s.track || event.message.is_note_off()))
+        else {
             self.stats.unrouted.fetch_add(1, Relaxed);
             return;
         };

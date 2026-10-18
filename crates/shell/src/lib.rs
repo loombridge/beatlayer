@@ -93,6 +93,7 @@ mod session_capture;
 pub mod session_view;
 pub mod settings;
 mod shell;
+pub mod stems;
 pub mod tracks;
 pub mod transport;
 
@@ -140,6 +141,8 @@ pub use bl_shell_spec::session_view as session_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).
+/// Stem separation's command IDs and arguments (WP-9.1).
+pub use bl_shell_spec::stems as stems_commands;
 pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.

@@ -445,7 +445,7 @@ const CREATE: &[Row] = &[
     (
         "M-CREATE-015",
         "Separate Stems to New Audio Tracks",
-        Pending(None),
+        Cmd(crate::stems::OPEN),
     ),
     SEPARATOR,
     ("M-CREATE-016", "Add Locator", Pending(None)),

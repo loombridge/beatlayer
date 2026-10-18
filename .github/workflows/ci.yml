@@ -131,7 +131,9 @@ jobs:
     name: check (${{ matrix.name }})
     needs: changes
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Windows takes about 27 minutes when every package is tested (a change
+    # to Cargo.lock), so 30 cut it off; 45, as the nightly run allows.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

@@ -1,6 +1,6 @@
 //! Processed audio files (WP-4.20): the one writer for the files an edit
 //! makes, so Reverse, Crop Sample, Consolidate, Freeze, Bounce, the sampler
-//! devices and the autosampler call it and write nothing of their own. The
+//! devices, the autosampler and stem separation call it and write nothing of their own. The
 //! behaviour it follows is in the audio clip editing spec, R1 to R6.
 //!
 //! A caller hands [`Job::start`] a [`Request`]: the kind of file, the name it
@@ -40,6 +40,8 @@ pub enum Kind {
     Freeze,
     /// A bounced track's render.
     Bounce,
+    /// A clip's separated stems (WP-9.1).
+    Stems,
 }
 
 impl Kind {
@@ -52,6 +54,7 @@ impl Kind {
             Self::Consolidate => "Consolidate",
             Self::Freeze => "Freeze",
             Self::Bounce => "Bounce",
+            Self::Stems => "Stems",
         }
     }
 }

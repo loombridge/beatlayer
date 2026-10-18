@@ -34,6 +34,7 @@ Beatlayer's own rules sit alongside Live's here, because "decodes the file" need
 - **R8.** A damaged or foreign file never crashes Beatlayer. A file cut short decodes as far as it goes (MPEG-4 excepted, which is an error); a file damaged in the middle either decodes, with only finite samples, or is an error; and a file that isn't audio is an error. Where the decoder rejects a packet the demuxer could still frame, the packet becomes silence of its length, so what follows stays in time. Symphonia 0.6 stops a FLAC file at a damaged frame rather than finding the next one, and drops a damaged MP3 frame rather than handing it to the decoder, so the rest of the file comes early. (S1)
 - **R9.** Media is identified by the BLAKE3 hash of the file's bytes. Before using a file, the media store checks it still holds that content, and reports it missing or changed if not. (S3, S4)
 - **R10.** A missing file is found again by content: Beatlayer searches the chosen folders and their subfolders, hashes only files of the recorded length, and relinks the first match, whatever its name. (S3, S4)
+- **R11.** A header that declares more than 256 channels, a sample rate above 768 kHz, or more than 2<sup>32</sup> frames is refused with an error naming the value and the limit, before anything is allocated for it. A whole decode reserves no more than 64 MiB from the length a header declares, and grows as the audio arrives. (decided 18 October 2026)
 
 ### Format tolerances (R5)
 
@@ -60,3 +61,4 @@ Signal-to-error ratio below 15 kHz, in dB, of each lossy fixture against its sou
 | R8 | `crates/media/tests/decode.rs`, `damaged_and_foreign_files_fail_cleanly`; `crates/media/tests/rf64.rs`, `a_file_shorter_than_its_header_says_keeps_what_it_has` | unit |
 | R9 | `crates/media/tests/store.rs`, `import_hashes_the_bytes_and_reads_the_header`, `notices_missing_and_changed_files` | unit |
 | R10 | `crates/media/tests/store.rs`, `relinks_a_moved_file_by_content`, `relinks_every_missing_file_in_one_pass` | unit |
+| R11 | `crates/media/tests/limits.rs`, every test; the `audio_header` fuzz target | unit, fuzz |

@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::decode::Decoder;
 use crate::error::MediaError;
+use crate::limits::MAX_PROGRESSIVE_SAMPLES;
 
 /// Frames the filling thread decodes at a time.
 const BLOCK: usize = 16_384;
@@ -45,7 +46,8 @@ impl ProgressiveSample {
     ///
     /// # Errors
     ///
-    /// If the file's header doesn't give its length, or it can't be read.
+    /// If the file's header doesn't give its length, the length is more
+    /// than [`MAX_PROGRESSIVE_SAMPLES`], or it can't be read.
     pub fn start(decoder: Decoder, head: usize) -> Result<(Arc<Self>, Fill), MediaError> {
         let info = *decoder.info();
         let frames = info
@@ -54,6 +56,12 @@ impl ProgressiveSample {
             .filter(|f| *f > 0)
             .ok_or_else(|| MediaError::Malformed("a file whose length isn't known".into()))?;
         let channels = usize::from(info.channels);
+        if frames.saturating_mul(channels) > MAX_PROGRESSIVE_SAMPLES {
+            return Err(MediaError::Unsupported(format!(
+                "{frames} frames of {channels} channels, more than the {MAX_PROGRESSIVE_SAMPLES} samples \
+                 loaded progressively"
+            )));
+        }
         let sample = Arc::new(Self {
             sample_rate: info.sample_rate,
             frames,

@@ -54,8 +54,8 @@ Text that comes from a file, a model, or an agent stays untrusted after it cross
 |---|---|---|
 | Sets | A zstd frame with its checksum around JSON (serde_json, ruzstd). At most 512 MiB of JSON. The `format` field must match, and a set from a newer schema is refused, not guessed at. Fuzzed weekly in CI (`set_file`, `set_json`). | serde_json's default recursion limit is the only depth limit. |
 | Presets | JSON, at most 16 MiB (256 MiB for rack presets). Fuzzed weekly in CI (`preset`). | |
-| Audio files | symphonia's decoders. The RF64 reader refuses zero channels, rate, or block alignment. Peak files fuzzed weekly in CI (`peak_file`). | No limit on the length or channel count a header declares, before decoding starts. |
-| MIDI files | midly. | The whole file is read into memory with no size cap. |
+| Audio files | symphonia's decoders. Before a codec is set up, a header declaring more than 256 channels, a rate above 768 kHz, or more than 2^32 frames is refused (`bl_media::limits`). The RF64 reader also refuses zero channels, rate, or block alignment, and takes the length from the file, not the header. A whole decode reserves at most 64 MiB from the header's length and grows as audio arrives; a sampler's progressive load is refused past 2^28 samples, and the file is decoded whole instead. Fuzzed weekly in CI (`audio_header`); peak files too (`peak_file`). | |
+| MIDI files | midly. A file over 64 MiB is refused from its length, before it's read. Fuzzed weekly in CI (`midi_file`). | |
 | SFZ instruments | Caps on regions, nesting, and sizes. Fuzzed weekly in CI (`sfz`). | |
 | Agent API over HTTP | Off until the person turns it on. Listens on `127.0.0.1` only. Refuses a `Host` other than `127.0.0.1`, `localhost`, or `[::1]`, and any `Origin`, so a web page can't reach it through DNS rebinding. A bearer token on every request, compared in constant time: each allowed agent has its own, and a client with only the server's token is asked about every time. 32 connections, 16 KiB of headers, 8 MiB bodies, 60 s idle timeout. | Tokens are kept in plain text in `preferences.json`. No rate limit. |
 | Agent permissions | Every action is a registered command with a permission class. `read` and `edit` run; `destructive` and `external` ask the person first unless they made that agent autonomous, and `bl-cli mcp` refuses them unless started with `--autonomous`. The agent server's own commands and the assistant's settings are the person's only. Edits that overlap the person's clips count as destructive ([agent permissions](specs/agent-permissions.md)). Every `edit` can be undone. | |
@@ -71,9 +71,8 @@ What isn't protected yet, roughly in the order it should be fixed:
 
 1. **Plug-ins share Beatlayer's process.** The plug-in sandbox (Phase 10, [the roadmap](01-roadmap.md)) moves them out, so a crash or a malicious plug-in can't take the set with it.
 2. **Agent tokens in plain text.** They belong in the keychain, beside the assistant's keys.
-3. **Unbounded audio and MIDI headers.** A declared length, channel count, or file size past a sensible limit should be refused before anything is allocated.
-4. **Unsigned builds.** Signing and notarisation need a Developer ID and a Windows signing route ([the architecture's packaging section](02-architecture.md#packaging)).
-5. **No rate limit on the agent server.**
+3. **Unsigned builds.** Signing and notarisation need a Developer ID and a Windows signing route ([the architecture's packaging section](02-architecture.md#packaging)).
+4. **No rate limit on the agent server.**
 
 ## Rules for new code
 

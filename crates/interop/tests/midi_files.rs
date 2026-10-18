@@ -329,3 +329,59 @@ fn a_clip_round_trips_through_a_written_file() {
         signature
     );
 }
+
+#[test]
+fn a_file_past_the_size_cap_is_refused_before_it_is_read() {
+    // A sparse file one byte past the cap: refused from its length alone.
+    let dir = std::env::temp_dir().join(format!("bl-interop-midi-cap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("huge.mid");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(midi::MAX_FILE_BYTES + 1).unwrap();
+    drop(file);
+    let result = midi::read(&path);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+    match result {
+        Err(midi::MidiFileError::TooLarge(bytes)) => assert_eq!(bytes, midi::MAX_FILE_BYTES + 1),
+        other => panic!("not refused for its size: {other:?}"),
+    }
+}
+
+#[test]
+fn bytes_past_the_size_cap_are_refused() {
+    let mut bytes = generate(Format::SingleTrack, &[("Cap", &[], &[])]);
+    bytes.resize(midi::MAX_FILE_BYTES as usize + 1, 0);
+    let error = midi::read_bytes(&bytes).unwrap_err();
+    assert!(matches!(error, midi::MidiFileError::TooLarge(_)), "{error}");
+    assert!(error.to_string().contains("67108865 bytes"), "{error}");
+}
+
+#[test]
+fn a_timecode_of_minus_128_frames_is_refused() {
+    // Found by the midi_file fuzz target: a header whose timing byte is
+    // 0x80, which midly negates past i8's range.
+    let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01\x80\x01".to_vec();
+    bytes.extend_from_slice(b"MTrk\0\0\0\x04\0\xff\x2f\0");
+    assert!(matches!(
+        midi::read_bytes(&bytes),
+        Err(midi::MidiFileError::OutOfRange)
+    ));
+    // The same in a second header chunk, which midly also reads.
+    let mut second = b"MThd\0\0\0\x06\0\0\0\x01\x00\x60".to_vec();
+    second.extend_from_slice(&bytes);
+    assert!(matches!(
+        midi::read_bytes(&second),
+        Err(midi::MidiFileError::OutOfRange)
+    ));
+    // The same inside an RMID file.
+    let mut rmid = b"RIFF".to_vec();
+    rmid.extend_from_slice(&(12 + bytes.len() as u32).to_le_bytes());
+    rmid.extend_from_slice(b"RMIDdata");
+    rmid.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    rmid.extend_from_slice(&bytes);
+    assert!(matches!(
+        midi::read_bytes(&rmid),
+        Err(midi::MidiFileError::OutOfRange)
+    ));
+}

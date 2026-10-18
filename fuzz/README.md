@@ -4,6 +4,8 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 
 | Target | What it feeds | Checks |
 |---|---|---|
+| `audio_header` | Bytes as read from an audio file of any format Beatlayer imports: the format probe, the header readers, and the limits on what a header may declare, then the first 4096 frames | No panic. Anything opened declares no more than `bl_media::limits` allows. |
+| `midi_file` | Bytes as read from a `.mid` or RMID file: the size cap, header and track chunks, events, tempo and time signatures | No panic. Every note has a length, a key and velocity in range, ends within its track, and comes in order. |
 | `peak_file` | Bytes as read from a `.blpeaks` file: magic, header, run table, data block, and BLAKE3 checksum | No panic. Anything the reader accepts saves again and loads back as the same peaks. |
 | `preset` | Bytes as read from a `.blpreset` file: JSON format header, schema version, device info, and parameters | No panic. Anything the decoder accepts saves again and decodes to the same preset. |
 | `sfz` | Bytes as read from an `.sfz` file: comments, `#define`, headers and opcodes (no `#include` files) | No panic. Every region it reads has zones, a detune and a pan inside the layers' ranges. |
@@ -32,6 +34,10 @@ cargo +nightly fuzz run set_json corpus/set_json ../crates/project/tests/fixture
   -dict=dictionaries/set_json.dict -max_total_time=600
 cargo +nightly fuzz run set_file corpus/set_file ../crates/project/tests/fixtures -- \
   -max_total_time=600
+cargo +nightly fuzz run audio_header corpus/audio_header -- \
+  -dict=dictionaries/audio_header.dict -max_total_time=300
+cargo +nightly fuzz run midi_file corpus/midi_file -- \
+  -dict=dictionaries/midi_file.dict -max_total_time=300
 cargo +nightly fuzz run peak_file corpus/peak_file -- \
   -max_total_time=300
 cargo +nightly fuzz run preset corpus/preset -- \

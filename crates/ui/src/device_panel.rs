@@ -21,8 +21,10 @@
 use std::f32::consts::PI;
 
 use bl_model::device_layout::{Size, Widget};
-use bl_model::{DeviceId, ParamDescriptor, ParamId, ParamKind};
+use bl_model::modulator::ModTarget;
+use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
+use bl_shell::device_commands as ids;
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
 use egui::accesskit::{Action, Role};
 use egui::{
@@ -33,6 +35,7 @@ use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
 /// Points of vertical drag that move a control from one end of its range to
 /// the other (observed in Live 12.4.6 on Dry/Wet: 0.8% of the range per
@@ -89,21 +92,28 @@ pub fn body_rect(frame: Rect, title_bar: f32) -> Rect {
 /// Each control's parameter, widget, and place in a panel.
 pub type ControlRects = Vec<(ParamId, Widget, Rect)>;
 
-/// Each display cell's name and place in a panel.
-pub type CellRects = Vec<(String, Rect)>;
+/// Each display cell's name, its place in a panel, and the sample slot it
+/// stands for if it does.
+pub type CellRects = Vec<(String, Rect, Option<u32>)>;
 
 /// Where each control and display cell sits in a body at `body`: the
-/// layout placed at the body's size ([`DeviceLayout::place`]), so docked it
-/// sits at its docked size, and a floating window (WP-2.5b) passes a larger
-/// body.
+/// layout placed at the body's size ([`DeviceLayout::place_for`]) with the
+/// panel's selected sample slot showing, so docked it sits at its docked
+/// size, and a floating window (WP-2.5b) passes a larger body.
 ///
-/// [`DeviceLayout::place`]: bl_model::DeviceLayout::place
+/// [`DeviceLayout::place_for`]: bl_model::DeviceLayout::place_for
 #[must_use]
 pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
+    place_shown(panel, false, body)
+}
+
+/// The same for a device whose expanded part shows while `expanded`
+/// (WP-5.42).
+#[must_use]
+pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
     let placed = panel
-        .description
-        .layout
-        .place(Size::new(body.width(), body.height()));
+        .layout(expanded)
+        .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
     let at = |r: bl_model::device_layout::Rect| {
         Rect::from_min_size(body.min + vec2(r.x, r.y), vec2(r.width, r.height))
     };
@@ -116,7 +126,7 @@ pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
         placed
             .cells
             .iter()
-            .map(|c| (c.name.clone(), at(c.rect)))
+            .map(|c| (c.name.clone(), at(c.rect), c.slot))
             .collect(),
     )
 }
@@ -130,18 +140,24 @@ struct Drag {
 }
 
 /// Draws a device's panel in `body`, and turns what the person does into
-/// `device.set_param` invocations.
+/// `device.set_param` invocations. `display` is what the device's display
+/// shows now, if its type draws one. `played` gives the base and the played
+/// value of a parameter while a clip modulates it.
 pub fn show(
     ui: &mut Ui,
     theme: &Theme,
     frame: &DeviceFrame,
-    panel: &DevicePanel,
+    display: Option<&DeviceDisplay>,
     body: Rect,
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
     events: &mut Vec<UiEvent>,
 ) {
+    let Some(panel) = frame.panel.as_ref() else {
+        return;
+    };
     let c = &theme.colors;
-    let (controls, cells) = place(panel, body);
-    for (index, (name, rect)) in cells.into_iter().enumerate() {
+    let (controls, cells) = place_shown(panel, frame.expanded, body);
+    for (index, (name, rect, slot)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.
         let painter = ui.painter_at(rect);
@@ -153,10 +169,56 @@ pub fn show(
             StrokeKind::Inside,
         );
         let id = cell_id(frame.id, index);
+        if let Some(slot) = slot {
+            slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: modulation R15, R23. A modulator's cells show its slots'
+        // mappings and, for the Curve Mod, its shape.
+        if let Some(modulator) = &frame.modulator {
+            let slot = name
+                .strip_prefix("Mapping ")
+                .and_then(|n| n.parse::<u8>().ok());
+            if let Some(slot) = slot {
+                crate::mapping::mapping_cell(ui, theme, frame, modulator, slot - 1, rect, events);
+            } else if let Some(points) = modulator.shape.as_ref().filter(|_| name == "Curve") {
+                let value = |param: ParamId| {
+                    panel
+                        .description
+                        .params
+                        .iter()
+                        .position(|p| p.id == param)
+                        .map_or(0.0, |i| panel.value(i))
+                };
+                let grid = bl_model::modulator::GRIDS
+                    .get(value(bl_model::modulator::GRID_DIVISIONS) as usize)
+                    .map_or(4, |&(_, n)| n);
+                let snap = value(bl_model::modulator::SNAP) >= 0.5;
+                crate::mapping::curve_cell(ui, theme, frame, points, rect, (grid, snap), events);
+            }
+        }
+        // Spec: device-framework R36. The device's own drawing fills its
+        // first cell, and a screen reader hears its readings.
+        let shown = display.filter(|d| index == 0 && has_drawing(d));
+        if let Some(display) = shown {
+            crate::device_display::draw(
+                ui,
+                theme,
+                rect,
+                id,
+                frame.enabled,
+                display,
+                &panel.description.views,
+                events,
+            );
+        }
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Image);
             node.set_label(name);
+            if let Some(display) = shown {
+                node.set_value(display.text());
+            }
         });
     }
     for (param, widget, rect) in controls {
@@ -170,6 +232,7 @@ pub fn show(
             enabled: frame.enabled,
             descriptor,
             value,
+            modulated: played(param),
             rect,
         };
         match widget {
@@ -178,7 +241,133 @@ pub fn show(
             Widget::Toggle => control.toggle(ui, theme, events),
             Widget::Chooser => control.chooser(ui, theme, events),
         }
+        // Spec: modulation R15. While a Map button is lit, every parameter
+        // but the modulator's own is a target.
+        crate::mapping::overlay(
+            ui,
+            theme,
+            rect,
+            param_control_id(frame.id, param),
+            ModTarget::Device {
+                device: frame.id,
+                param,
+            },
+            events,
+        );
     }
+}
+
+/// What a control's name above it reads: a sample slot's parameter drops the
+/// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
+/// slot's at a time.
+fn short_name(name: &str) -> &str {
+    name.strip_prefix("Slot ")
+        .and_then(|rest| rest.split_once(' '))
+        .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
+        .map_or(name, |(_, rest)| rest)
+}
+
+/// A display cell standing for a sample slot (WP-5.17): its number and key,
+/// whether it holds a sample, and a frame in the accent while its controls
+/// are the ones the panel shows. Clicking it, or Enter, selects the slot;
+/// Delete clears its sample. A sample dropped on it loads into it
+/// ([`crate::device_view`]).
+fn slot_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    panel: &DevicePanel,
+    (id, name, slot, rect): (Id, &str, u32, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let response = ui.interact(rect, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    if response.clicked() {
+        response.request_focus();
+    }
+    // While a slot's cell has the keyboard, Delete clears its sample
+    // rather than deleting the device (S-DEV-006).
+    if response.gained_focus() {
+        events.push(UiEvent::FocusValue(true));
+    }
+    if response.lost_focus() {
+        events.push(UiEvent::FocusValue(false));
+    }
+    let selected = panel.selected_slot == slot;
+    let loaded = panel
+        .loaded_slots
+        .get(slot as usize)
+        .copied()
+        .unwrap_or(false);
+    if (response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+        && !selected
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SELECT_SLOT,
+            json!({ "device": frame.id, "slot": slot }),
+        )));
+    }
+    if response.has_focus()
+        && loaded
+        && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "device.set_sample",
+            json!({ "device": frame.id, "media": null, "slot": slot }),
+        )));
+    }
+    let painter = ui.painter_at(rect);
+    if selected {
+        painter.rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(1.5, highlight(theme, frame.enabled)),
+            StrokeKind::Inside,
+        );
+    }
+    let key = panel
+        .slot_keys
+        .get(slot as usize)
+        .cloned()
+        .unwrap_or_default();
+    painter.text(
+        rect.center_top() + vec2(0.0, 4.0),
+        Align2::CENTER_TOP,
+        format!("{}", slot + 1),
+        theme.small_font(),
+        c.text.0,
+    );
+    painter.text(
+        rect.center_bottom() - vec2(0.0, 4.0),
+        Align2::CENTER_BOTTOM,
+        &key,
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    if loaded {
+        // A bar along the cell's foot: this slot holds a sample.
+        let bar = Rect::from_min_size(
+            pos2(rect.left() + 4.0, rect.bottom() - 3.0),
+            vec2(rect.width() - 8.0, 2.0),
+        );
+        painter.rect_filled(bar, 0.0, highlight(theme, frame.enabled));
+    }
+    focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(name.to_owned());
+        node.set_description(format!(
+            "plays {key}, {}{}",
+            if loaded { "holds a sample" } else { "empty" },
+            if selected { ", selected" } else { "" }
+        ));
+    });
+}
+
+/// Whether a display has anything to draw.
+fn has_drawing(display: &DeviceDisplay) -> bool {
+    !(display.series.is_empty() && display.readings.is_empty())
 }
 
 /// One control being drawn.
@@ -187,6 +376,8 @@ struct Control<'a> {
     enabled: bool,
     descriptor: &'a ParamDescriptor,
     value: f64,
+    /// Its base and what it plays while a clip modulates it.
+    modulated: Option<(f64, f64)>,
     rect: Rect,
 }
 
@@ -220,7 +411,7 @@ impl Control<'_> {
         ui.painter().text(
             top.center(),
             Align2::CENTER_CENTER,
-            &self.descriptor.name,
+            short_name(&self.descriptor.name),
             theme.small_font(),
             theme.colors.text.0,
         );
@@ -326,15 +517,23 @@ impl Control<'_> {
         }
     }
 
+    /// The value the control shows: its base while it's modulated.
+    fn shown(&self) -> f64 {
+        self.modulated.map_or(self.value, |(base, _)| base)
+    }
+
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
-        let text = d.format(self.value);
+        let text = modulated_text(
+            d.format(self.shown()),
+            self.modulated.map(|(_, played)| d.format(played)),
+        );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(role);
             node.set_label(d.name.clone());
             node.set_value(text);
-            node.set_numeric_value(self.value);
+            node.set_numeric_value(self.shown());
             node.set_min_numeric_value(d.min());
             node.set_max_numeric_value(d.max());
             node.add_action(Action::Increment);
@@ -369,9 +568,20 @@ impl Control<'_> {
                 .collect()
         };
         painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        let n = self.descriptor.normalize(self.value) as f32;
+        let n = self.descriptor.normalize(self.shown()) as f32;
         if n > 0.0 {
             painter.add(Shape::line(arc(n), Stroke::new(2.0, self.lit(theme))));
+        }
+        // Spec: modulation R7: the pointer stays at the base, and the ring
+        // shows the way to the value it plays.
+        if let Some(segment) = self
+            .modulated
+            .and_then(|(_, played)| ring_segment(n, self.descriptor.normalize(played) as f32))
+        {
+            paint_ring_segment(painter, theme, segment, |to| {
+                let a = from + sweep * to;
+                centre + vec2(a.cos(), a.sin()) * radius
+            });
         }
         let a = from + sweep * n;
         painter.line_segment(
@@ -381,7 +591,7 @@ impl Control<'_> {
         painter.text(
             value_row.center(),
             Align2::CENTER_CENTER,
-            self.descriptor.format(self.value),
+            self.descriptor.format(self.shown()),
             theme.small_font(),
             c.text.0,
         );
@@ -439,7 +649,7 @@ impl Control<'_> {
         ui.painter().text(
             button.center(),
             Align2::CENTER_CENTER,
-            &self.descriptor.name,
+            short_name(&self.descriptor.name),
             theme.small_font(),
             ink,
         );

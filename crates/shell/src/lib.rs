@@ -68,6 +68,7 @@ pub mod assistant;
 pub mod audio;
 mod automation_record;
 pub mod browser;
+mod chord_learn;
 pub mod clip_view;
 pub mod devices;
 pub mod export;
@@ -76,6 +77,7 @@ pub mod midi;
 pub mod midi_files;
 pub mod mixer_controls;
 pub mod mixer_view;
+mod modulation;
 pub mod perception;
 pub mod permission;
 pub mod placeholders;
@@ -84,6 +86,7 @@ pub mod processed;
 pub mod recording;
 pub mod routing;
 pub mod scene_fields;
+mod session_capture;
 pub mod session_view;
 pub mod settings;
 mod shell;
@@ -94,6 +97,8 @@ pub mod transport;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+/// Capture MIDI's command ID and its result types (WP-3.14).
+pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;

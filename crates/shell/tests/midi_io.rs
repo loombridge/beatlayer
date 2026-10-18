@@ -94,8 +94,8 @@ impl Rig {
 
     /// Plays a message from a port, and processes the block it arrives in
     /// and the one after, where it lands.
-    fn play(&mut self, port: &str, message: [u8; 3]) -> usize {
-        self.test.send(port, Instant::now(), &message);
+    fn play(&mut self, port: &str, message: impl AsRef<[u8]>) -> usize {
+        self.test.send(port, Instant::now(), message.as_ref());
         self.blocks_run(2)
     }
 
@@ -473,7 +473,7 @@ fn midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input() {
     rig.run("midi.ports", json!({}));
     rig.sync();
     let message = MidiMessage::note_on(4, 60, 100);
-    assert_eq!(rig.play("Keys B", message.bytes().try_into().unwrap()), 1);
+    assert_eq!(rig.play("Keys B", message.bytes()), 1);
 }
 
 /// The queue is attached to the engine the audio host starts, so a note
@@ -560,4 +560,230 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
     );
     let heard = (0..4).map(|_| peak(&mut rig)).fold(0.0_f32, f32::max);
     assert!(heard > 0.01, "the key plays Snapshot: {heard}");
+}
+
+// Spec: midi-io R12, midi-transpose R1
+#[test]
+fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
+    use bl_devices::lift::{LIFT, PITCH};
+    use bl_engine::NoteKind;
+    use bl_engine::testing::{self, Probe};
+
+    let probe = Arc::new(Probe::default());
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut rig = Rig::with_registry(registry);
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: testing::INSTRUMENT.to_owned() },
+            "name": "Test Instrument",
+            "role": DeviceRole::Instrument,
+        } }),
+    );
+    let lift = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: LIFT.to_owned() },
+            "name": "Lift",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    rig.run(
+        "device.set_param",
+        json!({ "device": lift["device"], "param": PITCH.0, "value": 7.0 }),
+    );
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": track, "monitor": "in" }),
+    );
+    rig.sync();
+    rig.blocks_run(1);
+    rig.run(
+        "midi.computer_keyboard_key",
+        json!({ "key": "A", "pressed": true }),
+    );
+    rig.blocks_run(3);
+    rig.run(
+        "midi.computer_keyboard_key",
+        json!({ "key": "A", "pressed": false }),
+    );
+    rig.blocks_run(3);
+    let heard: Vec<(NoteKind, u8)> = probe
+        .recorded_notes()
+        .iter()
+        .map(|n| (n.event.kind, n.event.key))
+        .collect();
+    // The computer keyboard's A is middle C; Lift moves it up a fifth.
+    assert_eq!(heard, [(NoteKind::On, 67), (NoteKind::Off, 67)]);
+}
+
+// Spec: midi-io R12, device-framework R39. A control change, pitch bend and
+// channel pressure from a port reach the instrument through a MIDI effect,
+// in order with the notes, and through the same effect switched off.
+#[test]
+fn a_ports_channel_messages_reach_the_instrument_through_a_midi_effect() {
+    use bl_devices::lift::{LIFT, PITCH};
+    use bl_engine::NoteKind;
+    use bl_engine::testing::{self, Probe};
+
+    let probe = Arc::new(Probe::default());
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut rig = Rig::with_registry(registry);
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let add = |rig: &mut Rig, device_type: &str, role: DeviceRole| {
+        rig.run(
+            "device.add",
+            json!({ "device": {
+                "kind": DeviceKind::Native { device_type: device_type.to_owned() },
+                "name": device_type,
+                "role": role,
+            } }),
+        )
+    };
+    add(&mut rig, testing::INSTRUMENT, DeviceRole::Instrument);
+    let lift = add(&mut rig, LIFT, DeviceRole::MidiEffect);
+    rig.run(
+        "device.set_param",
+        json!({ "device": lift["device"], "param": PITCH.0, "value": 7.0 }),
+    );
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": track, "monitor": "in" }),
+    );
+    rig.sync();
+    rig.blocks_run(1);
+    let messages: [&[u8]; 4] = [
+        &[0x90, 60, 100],
+        &[0xB0, 1, 127],
+        &[0xE0, 127, 127],
+        &[0xD0, 64],
+    ];
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    let kinds = |probe: &Probe| -> Vec<NoteKind> {
+        probe
+            .recorded_notes()
+            .iter()
+            .map(|n| n.event.kind)
+            .collect()
+    };
+    let expected = [
+        NoteKind::On,
+        NoteKind::Control {
+            controller: 1,
+            value: 1.0,
+        },
+        NoteKind::PitchBend { value: 1.0 },
+        NoteKind::ChannelPressure {
+            value: 64.0 / 127.0,
+        },
+    ];
+    // Lift moves the note, and passes the messages as they came.
+    assert_eq!(kinds(&probe), expected);
+
+    // Switched off, it ends the note it started and passes all of them.
+    rig.run(
+        "device.set_enabled",
+        json!({ "device": lift["device"], "enabled": false }),
+    );
+    rig.sync();
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    assert_eq!(kinds(&probe), [&[NoteKind::Off][..], &expected].concat());
+}
+
+// Spec: midi-chord R13
+#[test]
+fn learn_sets_stacks_shifts_from_the_chord_played() {
+    use bl_devices::stack::{LEARN, STACK, shift};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: STACK.to_owned() },
+            "name": "Stack",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device = added["device"].clone();
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    let shifts = |rig: &Rig| -> Vec<f64> {
+        let params = &rig
+            .shell
+            .editor()
+            .document()
+            .device(serde_json::from_value(device.clone()).unwrap())
+            .unwrap()
+            .params;
+        (0..6)
+            .map(|n| params.get(&shift(n)).copied().unwrap_or(-1000.0))
+            .collect()
+    };
+    let key = |rig: &mut Rig, key: &str, pressed: bool| {
+        rig.run(
+            "midi.computer_keyboard_key",
+            json!({ "key": key, "pressed": pressed }),
+        );
+        rig.shell.poll();
+    };
+
+    // Learn off: keys change nothing.
+    let before = shifts(&rig);
+    rig.shell.poll();
+    key(&mut rig, "A", true);
+    key(&mut rig, "A", false);
+    assert_eq!(shifts(&rig), before);
+
+    // Learn on: A is the root; D and G, held with it, set Shift 1 and 2.
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 1.0 }),
+    );
+    rig.shell.poll();
+    key(&mut rig, "A", true);
+    key(&mut rig, "G", true);
+    key(&mut rig, "H", true);
+    let learned = shifts(&rig);
+    assert_eq!(learned[0], 7.0, "G is a fifth above A's note");
+    assert_eq!(learned[1], 9.0, "H is a sixth above");
+    assert_eq!(&learned[2..], [0.0; 4], "the other shifts are cleared");
+    assert_ne!(before, learned);
+    // More keys held with the chord add shifts.
+    key(&mut rig, "J", true);
+    assert_eq!(shifts(&rig)[2], 11.0);
+    // A new chord starts after every key is up.
+    for k in ["A", "G", "H", "J"] {
+        key(&mut rig, k, false);
+    }
+    key(&mut rig, "G", true);
+    key(&mut rig, "A", true);
+    assert_eq!(shifts(&rig)[0], -7.0, "the first key down is the root");
+    // One undo step for the last change.
+    let steps = rig.shell.editor().undo_history().count();
+    rig.run("edit.undo", json!({}));
+    assert_eq!(rig.shell.editor().undo_history().count(), steps - 1);
+    assert_eq!(shifts(&rig)[0], 0.0, "back to the chord of the root alone");
+    // Switching Learn off stops it.
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 0.0 }),
+    );
+    rig.shell.poll();
+    let fixed = shifts(&rig);
+    key(&mut rig, "A", false);
+    key(&mut rig, "S", true);
+    key(&mut rig, "D", true);
+    assert_eq!(shifts(&rig), fixed);
 }

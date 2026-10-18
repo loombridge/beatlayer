@@ -18,6 +18,7 @@
 
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
+use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
     FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
@@ -27,6 +28,7 @@ use crate::commands::{
     VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
     VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
+use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
@@ -299,7 +301,7 @@ const EDIT: &[Row] = &[
     ),
     SEPARATOR,
     ("M-EDIT-016", "Compare: Switch to B", Key(&["S-DEV-011"])),
-    ("M-EDIT-017", "Compare: Copy A to B", Pending(None)),
+    ("M-EDIT-017", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     ("M-EDIT-018", "Cut Time", Key(&["S-ARR-015"])),
     ("M-EDIT-019", "Copy Time", Key(&["S-ARR-016"])),
@@ -402,7 +404,7 @@ const CREATE: &[Row] = &[
         "Insert Empty MIDI Clip",
         Key(&["S-SES-007", "S-ARR-037"]),
     ),
-    ("M-CREATE-009", "Capture MIDI", Pending(None)),
+    ("M-CREATE-009", "Capture MIDI", Cmd(CAPTURE_MIDI)),
     SEPARATOR,
     ("M-CREATE-010", "Create Fade", Key(&["S-ARR-008"])),
     SEPARATOR,

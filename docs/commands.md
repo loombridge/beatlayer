@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-345 commands in 31 areas.
+379 commands in 34 areas.
 
 ## Permission classes
 
@@ -116,6 +116,20 @@ Each command has:
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
+| [`chain.add`](#chainadd) | Add Chain | `edit` |  |  |
+| [`chain.copy`](#chaincopy) | Copy Chain | `read` |  |  |
+| [`chain.cut`](#chaincut) | Cut Chain | `destructive` |  |  |
+| [`chain.duplicate`](#chainduplicate) | Duplicate Chain | `edit` |  |  |
+| [`chain.move`](#chainmove) | Move Chain | `edit` |  |  |
+| [`chain.paste`](#chainpaste) | Paste Chain | `edit` |  |  |
+| [`chain.remove`](#chainremove) | Delete Chain | `destructive` |  |  |
+| [`chain.rename`](#chainrename) | Rename Chain | `edit` |  |  |
+| [`chain.set_colour`](#chainset_colour) | Set Chain Colour | `edit` |  |  |
+| [`chain.set_enabled`](#chainset_enabled) | Chain Activator | `edit` |  |  |
+| [`chain.set_gain`](#chainset_gain) | Set Chain Gain | `edit` |  |  |
+| [`chain.set_info`](#chainset_info) | Edit Chain Info Text | `edit` |  |  |
+| [`chain.set_pan`](#chainset_pan) | Set Chain Pan | `edit` |  |  |
+| [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
@@ -154,15 +168,22 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
+| [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
+| [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
+| [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
+| [`device.insert_in_chain`](#deviceinsert_in_chain) | Insert Device in Chain | `edit` |  |  |
 | [`device.load_preset`](#deviceload_preset) | Load Preset | `external` |  |  |
 | [`device.load_sample`](#deviceload_sample) | Load Sample | `external` |  |  |
 | [`device.move`](#devicemove) | Move Device | `edit` |  |  |
+| [`device.move_to_chain`](#devicemove_to_chain) | Move Device to Chain | `edit` |  |  |
 | [`device.parameters`](#deviceparameters) | Device Parameters | `read` |  |  |
 | [`device.paste`](#devicepaste) | Paste Device | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`device.remove`](#deviceremove) | Delete Device | `destructive` | `Delete` | `Delete` |
@@ -170,7 +191,10 @@ Each command has:
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
+| [`device.select_slot`](#deviceselect_slot) | Select Sample Slot | `read` |  |  |
+| [`device.set_display_view`](#deviceset_display_view) | Set Display View | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
+| [`device.set_enabled_all`](#deviceset_enabled_all) | Switch Device and Contents | `edit` | `Option+click a device activator` | `Alt+click a device activator` |
 | [`device.set_floating`](#deviceset_floating) | Float | `edit` | `Option+F` | `Ctrl+Alt+F` |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
@@ -183,7 +207,11 @@ Each command has:
 | [`device.set_state`](#deviceset_state) | Set Device State | `edit` |  |  |
 | [`device.set_window`](#deviceset_window) | Move Device Window | `read` |  |  |
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
+| [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
+| [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.windows`](#devicewindows) | Floating Device Windows | `read` |  |  |
+| [`device.wrap_in_rack`](#devicewrap_in_rack) | Wrap Devices in a Rack | `edit` |  |  |
 | [`device_view.state`](#device_viewstate) | Device View State | `read` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
@@ -197,6 +225,7 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
 | [`midi.computer_keyboard_velocity`](#midicomputer_keyboard_velocity) | Computer Keyboard Velocity | `read` |  |  |
@@ -227,6 +256,11 @@ Each command has:
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
+| [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
+| [`modulator.arm_map`](#modulatorarm_map) | Map | `read` |  |  |
+| [`modulator.map`](#modulatormap) | Map Modulator | `edit` |  |  |
+| [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
+| [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -1740,7 +1774,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
 
 Default keys:
 
@@ -1897,6 +1931,244 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`PreviewState`](#previewstate).
+
+### Area `chain`
+
+#### `chain.add`
+
+**Add Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | Where the chain goes in the rack's list, from 0 to its length. |
+| `chain` | [`Chain`](#chain) | yes | The chain, with a new ID, and new IDs for its devices. An empty `name` becomes its first device's title, or `Chain` with none. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.copy`
+
+**Copy Chain**. Permission: `read`. Contexts: `device-view`.
+
+Copies a rack's chain, with its devices, name, colour, info text and mixer, to the chain clipboard for `chain.paste`. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.cut`
+
+**Cut Chain**. Permission: `destructive`. Contexts: `device-view`.
+
+Copies a rack's chain to the chain clipboard and deletes it: one undo step (Delete Chain). Because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `chain.duplicate`
+
+**Duplicate Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Puts a copy of a rack's chain, with new IDs, straight after it: one undo step (Insert Chain).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+
+Result: [`ChainAdded`](#chainadded).
+
+#### `chain.move`
+
+**Move Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain must fit the other rack's kind, and a chain can't go into a rack it holds.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack it moves to. |
+| `index` | integer, at least 0 | yes | Where it goes in the rack's list of chains. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.paste`
+
+**Paste Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Pastes the chain clipboard's chain into a rack at `index` (the end if left out), as a new chain with new IDs and everything else copied: one undo step (Insert Chain). The chain must fit the rack's kind.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack to paste into. |
+| `index` | integer or null | no | Where it goes in the rack's list of chains; the end if left out. |
+
+Result: [`ChainAdded`](#chainadded).
+
+#### `chain.remove`
+
+**Delete Chain**. Permission: `destructive`. Contexts: `device-view`.
+
+Deletes a chain from its rack, with its devices and its automation. Undo restores it, but because it removes the person's work an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.rename`
+
+**Rename Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_colour`
+
+**Set Chain Colour**. Permission: `edit`. Contexts: `device-view`.
+
+Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `colour` | integer or null | no | The swatch, or `null` for none. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_enabled`
+
+**Chain Activator**. Permission: `edit`. Contexts: `device-view`.
+
+Switches a chain's Chain Activator: a chain that's off adds nothing to its rack's output, and its level glides down over 20 ms. Its devices keep running, and its latency still counts.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `enabled` | boolean | yes | Whether it's on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_gain`
+
+**Set Chain Gain**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a chain's Volume as linear gain with the track fader's range: 1 is 0 dB (a new chain's), 2 about +6 dB, 0 silence. The chain's level glides to the new value over 20 ms with no new program. Chains of a MIDI effect rack have no volume. Moving it by hand turns off its automation envelope.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `volume` | number | yes | The gain. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_info`
+
+**Edit Chain Info Text**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the info text of a chain, Edit Info Text in its context menu. Empty clears it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `info` | string | yes | The text. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_pan`
+
+**Set Chain Pan**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a chain's Pan from -1 (left) to 1 (right), 0 centre (a new chain's), by the track mixer's constant-power law. Chains of a MIDI effect rack have no pan.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `pan` | number | yes | The position. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_solo`
+
+**Solo Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Solos or unsolos a chain: while any chain of a rack is soloed, the rack's unsoloed chains add nothing. It leaves every other rack and every track as it is.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `solo` | boolean | yes | Whether it's soloed. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `clip`
 
@@ -2569,7 +2841,7 @@ Result: [`ClipViewState`](#clipviewstate).
 
 **Add Device**. Permission: `edit`. Contexts: `device-view`, `browser`.
 
-Adds a device as a person does from the browser: to the selected track (or `track`), after the selected device or at the end of its role's place in the chain (or at `index`), switched on, with its type's default preset if one was saved, and selects it. The chain keeps Live's order: MIDI effects, the instrument, then audio effects. An instrument or MIDI effect added while an audio, group, or return track is selected goes on a new MIDI track at the end of the track list, which becomes the selected track, as one undo step (Insert Device and Track). A chain holds one instrument until racks arrive.
+Adds a device as a person does from the browser: to the selected track (or `track`), after the selected device or at the end of its role's place in the chain (or at `index`), switched on, with its type's default preset if one was saved, and selects it. The chain keeps Live's order: MIDI effects, the instrument, then audio effects. An instrument or MIDI effect added while an audio, group, or return track is selected goes on a new MIDI track at the end of the track list, which becomes the selected track, as one undo step (Insert Device and Track). With `chain` it goes into that rack chain instead. A chain holds one instrument; a rack holds more.
 
 Default keys: none.
 
@@ -2578,10 +2850,47 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`NewDevice`](#newdevice) | yes | The device to add. |
+| `chain` | [`ChainId`](#chainid) or null | no | A rack's chain to add it to, at any depth, in place of the track's own chain (WP-5.1). |
 | `index` | integer or null | no | Where it goes in the chain; after the selected device, or at the end of its role's place in the chain, if left out. |
 | `track` | [`TrackId`](#trackid) or null | no | The track; the selected track if left out. |
 
 Result: [`DeviceAdded`](#deviceadded).
+
+#### `device.compare_copy`
+
+**Compare: Copy**. Permission: `edit`. Contexts: `device-view`.
+
+Copies every value of a native device's active state, A or B, over the other, as the Edit menu's and the device menu's Compare: Copy A to B (Copy B to A while B is active) do. What the device plays doesn't change, and no envelope is overridden. One undo step, named as the item that ran it. Racks and plug-ins have no states, so a command for one is refused. From the menus it copies the selected device's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.compare_switch`
+
+**Compare: Switch**. Permission: `edit`. Contexts: `device-view`.
+
+Makes the other of a native device's two states, A and B, the active one, as the Edit menu's and the device menu's Compare: Switch to B/A and the P key do. Every parameter whose value differs between the states moves to the newly active state's value, a continuous one gliding as any change does, and every parameter of the device that has an envelope is overridden until Re-Enable Automation. One undo step, named as the item that ran it. A change to a parameter goes to the active state only. Racks and plug-ins have no states, so a command for one is refused. `device.parameters` says which state is active and each parameter's value in the other; the query tool's `device` has both in `compare`. From the keyboard and the menus it switches the selected device.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-011 | `P` | `P` | `device-view` | Switch the device between its A and B states | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.copy`
 
@@ -2623,11 +2932,27 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.display`
+
+**Device Display**. Permission: `read`. Contexts: `device-view`.
+
+Reports what a device's display shows now, read from the display data its node publishes after each block and from its parameters: curves and spectra (an EQ's spectrum, its bands' responses and their sum per curve; a compressor's transfer curve), the markers on them (an EQ's band dots, a compressor's threshold and level), and single readings (a compressor's gain reduction and levels), each with its unit and how it reads; the view the display shows, if it has views; and whether an engine is publishing (`live`). Empty for a device whose type draws no display. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceDisplay`](#devicedisplay).
+
 #### `device.duplicate`
 
 **Duplicate Device**. Permission: `edit`. Contexts: `device-view`.
 
-Puts a copy of a device, with its settings, straight after it, and selects the copy: one undo step, named Duplicate Device. A chain holds one instrument until racks arrive, so an instrument can't be duplicated yet.
+Puts a copy of a device, with its settings, straight after it, and selects the copy: one undo step, named Duplicate Device. A chain holds one instrument, so an instrument can't be duplicated; a rack is copied whole, with new IDs for its chains and devices.
 
 Default keys:
 
@@ -2642,6 +2967,23 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
 
 Result: [`DeviceAdded`](#deviceadded).
+
+#### `device.expand`
+
+**Expand Device**. Permission: `read`. Contexts: `device-view`.
+
+Shows or hides a device's expanded part, as the toggle in its title bar does: the extra controls (a modulation section, say) some devices keep out of sight until asked; switches unless `expanded` says which. Only devices with an expanded part (`expandable` in `device_view.state`) have one. Like folding, it changes only the view: it isn't an undo step, and isn't saved with the set. The device's width in the chain follows it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `expanded` | boolean or null | no | Show (true) or hide (false) the expanded part; switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
 
 #### `device.fold`
 
@@ -2663,6 +3005,27 @@ Arguments:
 | `folded` | boolean or null | no | Fold (true) or unfold (false); switches if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.group`
+
+**Group**. Permission: `edit`. Contexts: `device-view`.
+
+Wraps the selected devices (or `devices`, all in one chain) in a new rack, as Group does: the rack takes the first device's place and holds one chain, named after the first device, that holds the devices in their order, each keeping its settings and running state; the rack is selected. The rack is the kind that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, and an instrument rack for any other mix. A selection that grouping would put out of the chain's order is refused. With `chains` (several chains of one rack) they become the chains of a new rack of the same kind, inside a new chain in the first one's place. One undo step (Group).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-001 | `Cmd+G` | `Ctrl+G` | `device-view` | Group the selected devices into a rack | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chains` | array or null | no | Several chains of one rack to group instead: they become the chains of a new rack of the same kind, in a new chain in the first one's place. |
+| `devices` | array or null | no | The devices to wrap in a new rack, all in one chain; the selected device if both lists are left out. |
+
+Result: [`Grouped`](#grouped).
 
 #### `device.hot_swap`
 
@@ -2699,6 +3062,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.insert_in_chain`
+
+**Insert Device in Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Inserts a device into a rack's chain at `index`, where 0 is first in the chain's signal flow, as `device.insert` does for a track's chain. The chain may belong to a rack at any depth. The device is described as for `device.insert`, with a new ID. A chain keeps the order for its kind of rack: an audio effect rack's chains hold only audio effects, a MIDI effect rack's only MIDI effects, and an instrument or drum rack's chains hold MIDI effects, then at most one instrument, then audio effects; an index or device that breaks it is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `index` | integer, at least 0 | yes | Where it goes in the chain, from 0 to the chain's length. |
+| `device` | [`Device`](#device) | yes | The device, with a new ID. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.load_preset`
 
 **Load Preset**. Permission: `external`. Contexts: `device-view`.
@@ -2720,7 +3101,7 @@ Result: [`PresetResult`](#presetresult).
 
 **Load Sample**. Permission: `external`. Contexts: `device-view`.
 
-Loads an audio file into a device that plays one sample (the sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample is refused.
+Loads an audio file into a device that plays samples (the sampler, or the eight-slot drum sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. `slot` says which of a device's sample slots takes it (counted from 0); left out, it is the slot selected in the panel, or the only one. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample, or a slot it doesn't have, is refused. `device.set_sample` with a null `media` clears a slot.
 
 Default keys: none.
 
@@ -2730,6 +3111,7 @@ Arguments:
 |---|---|---|---|
 | `path` | string | yes | The audio file to load into the device. |
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `slot` | integer or null | no | The sample slot to load it into, counted from 0; the slot the panel has selected for a device with several, and 0 for one with one. |
 
 Result: [`LoadSampleResult`](#loadsampleresult).
 
@@ -2747,6 +3129,24 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `track` | [`TrackId`](#trackid) | yes | The track it moves to. |
+| `index` | integer, at least 0 | yes | Where it goes in that chain. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.move_to_chain`
+
+**Move Device to Chain**. Permission: `edit`. Contexts: `device-view`.
+
+Moves a device to `index` in a rack's chain, from a track's chain or another chain, on the same track or another, keeping its settings and running state. The index counts positions after the device is taken out of its current place. The chain must stay in order for its kind of rack. A rack can't be moved into one of its own chains. To move a device out of a rack, use `device.move`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `chain` | [`ChainId`](#chainid) | yes | The chain it moves to. |
 | `index` | integer, at least 0 | yes | Where it goes in that chain. |
 
 Result: [`ChangeSet`](#changeset).
@@ -2771,7 +3171,7 @@ Result: [`DeviceParameters`](#deviceparameters).
 
 **Paste Device**. Permission: `edit`. Contexts: `device-view`.
 
-Pastes the clipboard's device, as a new device with its settings, before the selected device (or `before`), or at the end of the chain with none selected, on the selected track (or `track`), and selects it: one undo step, named Copy Device. The chain keeps Live's order, so an audio effect can't go before an instrument, and instruments and MIDI effects only go on MIDI tracks.
+Pastes the clipboard's device, as a new device with its settings, before the selected device (or `before`), or at the end of the chain with none selected, on the selected track (or `track`), and selects it: one undo step, named Copy Device. The chain keeps Live's order, so an audio effect can't go before an instrument, and instruments and MIDI effects only go on MIDI tracks. With `chain` it pastes into that rack chain, or before a device that is in one.
 
 Default keys:
 
@@ -2783,7 +3183,8 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `before` | [`DeviceId`](#deviceid) or null | no | Paste before this device; before the selected device, or at the end of the chain with none selected, if left out. |
+| `before` | [`DeviceId`](#deviceid) or null | no | Paste before this device, which may be in a rack's chain; before the selected device, or at the end of the chain with none selected, if left out. |
+| `chain` | [`ChainId`](#chainid) or null | no | A rack's chain to paste into, at any depth, in place of the track's own chain (WP-5.1). |
 | `track` | [`TrackId`](#trackid) or null | no | The track; the selected track if left out. |
 
 Result: [`DeviceAdded`](#deviceadded).
@@ -2878,6 +3279,40 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.select_slot`
+
+**Select Sample Slot**. Permission: `read`. Contexts: `device-view`.
+
+Selects one of a device's sample slots, as clicking its cell in the panel does: the panel then shows that slot's controls, and a sample loaded without naming a slot goes into it. Only a device with sample slots has any (the eight-slot drum sampler has eight, counted from 0). It changes only the view: it isn't an undo step, and isn't saved with the set. The selected slot is `selected_slot` in the device's panel (`device.state`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer, at least 0 | yes | The slot, counted from 0. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.set_display_view`
+
+**Set Display View**. Permission: `read`. Contexts: `device-view`.
+
+Chooses the view a device's display shows, as its view buttons do: a compressor's Transfer Curve, Activity, or Collapsed. Only a device whose display has views takes one, and only one of them. It changes only the view: it isn't an undo step, and `device_view.state` and `device.display` report the view chosen.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `view` | string | yes | The view, one of the device's description's `views`. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `device.set_enabled`
 
 **Activate/Deactivate Device**. Permission: `edit`. Contexts: `device-view`.
@@ -2892,6 +3327,27 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `enabled` | boolean | yes | Whether it's on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_enabled_all`
+
+**Switch Device and Contents**. Permission: `edit`. Contexts: `device-view`.
+
+Switches a device and every device inside it, at any depth, on or off with `enabled`: Option-click (Alt-click) on a rack's Device Activator. On a device that isn't a rack it is `device.set_enabled`. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-003 | `Option+click a device activator` | `Alt+click a device activator` | `device-view` | Turn every device in a rack on or off | toggles `enabled` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device, usually a rack. |
+| `enabled` | boolean | yes | Whether they're on. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2938,7 +3394,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio. A device whose type plays a sample plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. To load a file from disk as a person does, use `device.load_sample`.
+Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio, in sample slot `slot` (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum sampler eight). A device whose type plays samples plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. Null clears the slot, one undo step named Clear Sample. To load a file from disk as a person does, use `device.load_sample`.
 
 Default keys: none.
 
@@ -2948,6 +3404,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `media` | [`ContentHash`](#contenthash) or null | no | The media, by content hash, or `null` to play none. The media store is where the audio comes from; a device given media the store doesn't hold is silent. |
+| `slot` | integer from 0 to 255 | no | The sample slot to set: 0, the only one the sampler has, unless given; the eight-slot drum sampler's are 0 to 7 (WP-5.17). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3068,6 +3525,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3105,6 +3563,58 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.swap_to_snapshot`
+
+**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceAdded`](#deviceadded).
+
+#### `device.ungroup`
+
+**Ungroup**. Permission: `edit`. Contexts: `device-view`.
+
+Takes the selected rack (or `device`) apart, as Ungroup does: the devices of its one chain take the rack's place in order and the first is selected; the rack, its chain's mixer and its Macro Controls go. A rack with no chains is just removed; a rack of several chains can't be taken apart. One undo step (Ungroup).
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-002 | `Cmd+Shift+G` | `Ctrl+Shift+G` | `device-view` | Ungroup the selected rack | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`Ungrouped`](#ungrouped).
+
+#### `device.unwrap_rack`
+
+**Take a Rack Apart**. Permission: `edit`. Contexts: `device-view`.
+
+Takes a rack with one chain, or none, apart: the chain's devices take the rack's place in order, keeping their settings and running state; the rack, its chain and its mixer are gone. A rack of several chains can't be taken apart. One undo step. To ungroup the selected rack as a person does, use `device.ungroup`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The rack. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.windows`
 
 **Floating Device Windows**. Permission: `read`. Contexts: `global`.
@@ -3117,13 +3627,30 @@ Arguments: none (send `{}`).
 
 Result: [`FloatingWindows`](#floatingwindows).
 
+#### `device.wrap_in_rack`
+
+**Wrap Devices in a Rack**. Permission: `edit`. Contexts: `device-view`.
+
+Wraps devices of one chain in a new rack, which takes the first device's place: the rack holds one chain that holds the devices in their order, each keeping its settings and running state. `devices` are in one chain of a track or a rack; `rack` is a new rack device (its kind `rack` of `instrument`, `audio_effect`, `midi_effect` or `drum`, and the role of its kind) with new IDs and exactly one empty chain. The rack's kind must be one that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, an instrument rack for any other mix. A grouping that would break the chain's order is refused. One undo step. To group the selection as a person does, use `device.group`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`DeviceId`](#deviceid) | yes | The devices, all in one chain of a track or a rack. Not empty. |
+| `rack` | [`Device`](#device) | yes | The new rack, with a new ID, of a kind that can hold the devices, with exactly one chain, with a new ID and no devices. |
+
+Result: [`ChangeSet`](#changeset).
+
 ### Area `device_view`
 
 #### `device_view.state`
 
 **Device View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped; the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
+Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped, and whether it has an expanded part (`expandable`) and shows it (`expanded`); the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
 
 Default keys: none.
 
@@ -3171,7 +3698,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Export Audio**. Permission: `external`. Contexts: `global`.
 
-Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. Changes nothing in the set.
+Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. Changes nothing in the set.
 
 Default keys: none.
 
@@ -3187,6 +3714,7 @@ Arguments:
 | `include_return_and_main_effects` | boolean | no | Include return and Main effects when rendering individual tracks. Unavailable (refused) when `rendered_track` is `main`. |
 | `length` | [`Ticks`](#ticks) or null | no | How long the range is, in ticks (705,600 to the quarter note). Left out, to the end of the time selection, or without one to the end of the set's last clip. |
 | `normalize` | boolean | no | Normalize: raise or lower the whole export so its highest peak is at full scale (0 dBFS). |
+| `render_as_loop` | boolean | no | Render as Loop: the song goes on past the range's end as if Stop were pressed there, until the output has stayed below -120 dBFS for 100 ms or 60 s have passed, and that tail is added onto the file's start, wrapping round if it's longer than the range. The file is still exactly the range long. Off unless given. |
 | `rendered_track` | [`RenderedTrack`](#renderedtrack) or null | no | Which track(s) to render: `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. |
 | `replace` | boolean | no | Replace a file already at `path`. Without it, an existing file is left alone and the export refused. |
 | `start` | [`Position`](#position) or null | no | Where the range starts. Left out, the start of the Arrangement's time selection, or 1.1.1 without one. |
@@ -3338,6 +3866,18 @@ Arguments: none (send `{}`).
 Result: [`SwitchResult`](#switchresult).
 
 ### Area `midi`
+
+#### `midi.capture`
+
+**Capture MIDI**. Permission: `edit`. Contexts: `global`.
+
+Capture MIDI (Create ▸ Capture MIDI; the Control Bar's button). Brings back the notes played on the MIDI tracks that monitor their input, since the last capture or recording, as one clip on each track that was played, with their velocities and timing. A track with a clip playing while the transport runs gets the notes added to that clip: it grows to the loop pass the last note falls in and its loop moves there, keeping its length. Any other track gets a new clip in the selected scene's slot if it is empty, else the next empty slot below, else a scene added at the end; the clip's loop is the whole bars that cover its last phrase, from the first note-on to the last. With the transport stopped the first note is on 1.1.1 and the song's tempo may change to the played tempo; with it running the tempo stays. Control changes, pitch bend and pressure are not captured yet. Refused when no note was played; `transport.state` shows `capture_midi_ready`. One undo step.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`Captured`](#captured).
 
 #### `midi.computer_keyboard_key`
 
@@ -3868,6 +4408,96 @@ Arguments:
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
+
+### Area `modulation`
+
+#### `modulation.state`
+
+**Modulation State**. Permission: `read`. Contexts: `global`.
+
+Reports the parameters a track's clips and the modulators act on (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation, a modulator in Remote Control or its control sets), the value it played in the last block, the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel, the modulator slots mapping it (`modulators`), and the modulator that holds it in Remote Control (`held_by`). A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands, and `modulator.map`. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
+
+Result: [`ModulationState`](#modulationstate).
+
+### Area `modulator`
+
+#### `modulator.arm_map`
+
+**Map**. Permission: `read`. Contexts: `device-view`.
+
+Lights or puts out a modulator slot's Map button, as clicking it does. While one is lit, every parameter in the set that can be mapped is tinted, and clicking one maps it to the slot (`modulator.map`); Esc, or the button again (`armed`: false), puts it out and changes nothing. Lighting a button puts out the one that was lit. It changes only the view: it isn't an undo step, and `device_view.state` reports the lit button in `armed_map`. Only a modulator has slots.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `armed` | boolean or null | no | Arm (true) or disarm (false); switches if left out. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The modulator; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `modulator.map`
+
+**Map Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter to map: a mixer control or send of any track, or a parameter of any device but the modulator's own. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.set_shape`
+
+**Edit Shape**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The Curve Mod device. |
+| `points` | array of [`ShapePoint`](#shapepoint) | yes | The breakpoints, in order along the cycle (at most 64), each with its place and output from 0 to 1 and the bend of the segment starting there, from −1 to 1. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.unmap`
+
+**Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `note`
 
@@ -6407,6 +7037,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`automation.set_curve`](#automationset_curve) | the query tool's `track` | `automation` |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
+| [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
+| [`chain.cut`](#chaincut) | the query tool's `device` | `chains` |
+| [`chain.duplicate`](#chainduplicate) | the query tool's `device` | `chains` |
+| [`chain.move`](#chainmove) | the query tool's `device` | `chains` |
+| [`chain.paste`](#chainpaste) | the query tool's `device` | `chains` |
+| [`chain.remove`](#chainremove) | the query tool's `device` | `chains` |
+| [`chain.rename`](#chainrename) | the query tool's `device` | `chains` |
+| [`chain.set_colour`](#chainset_colour) | the query tool's `device` | `chains` |
+| [`chain.set_enabled`](#chainset_enabled) | the query tool's `device` | `chains` |
+| [`chain.set_gain`](#chainset_gain) | the query tool's `device` | `chains` |
+| [`chain.set_info`](#chainset_info) | the query tool's `device` | `chains` |
+| [`chain.set_pan`](#chainset_pan) | the query tool's `device` | `chains` |
+| [`chain.set_solo`](#chainset_solo) | the query tool's `device` | `chains` |
 | [`clip.create`](#clipcreate) | the query tool's `track` | `clips` |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | the query tool's `track` | `slots` |
 | [`clip.delete`](#clipdelete) | the query tool's `track` | `clips` |
@@ -6443,16 +7086,22 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
+| [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
+| [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
+| [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
+| [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
 | [`device.load_preset`](#deviceload_preset) | the query tool's `device` | `params` |
 | [`device.load_sample`](#deviceload_sample) | the query tool's `device` | `media` |
 | [`device.move`](#devicemove) | the query tool's `track` | `devices` |
+| [`device.move_to_chain`](#devicemove_to_chain) | the query tool's `device` | `chains` |
 | [`device.paste`](#devicepaste) | the query tool's `track` | `devices` |
 | [`device.remove`](#deviceremove) | the query tool's `track` | `devices` |
 | [`device.rename`](#devicerename) | the query tool's `device` | `name` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
+| [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
 | [`device.set_floating`](#deviceset_floating) | the query tool's `device` | `floating` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -6463,8 +7112,13 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | the query tool's `device` | `sidechain.listen` |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | the query tool's `device` | `sidechain.mix` |
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | the query tool's `track` | `devices` |
+| [`device.ungroup`](#deviceungroup) | the query tool's `track` | `devices` |
+| [`device.unwrap_rack`](#deviceunwrap_rack) | the query tool's `track` | `devices` |
+| [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | `midi.ports` | `keyboard.on` |
@@ -6480,6 +7134,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | the query tool's `song` | `settings.solo_in_place` |
 | [`mixer.set_volume`](#mixerset_volume) | the query tool's `track` | `mixer.volume` |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | the query tool's `track` | `mixer.solo` |
+| [`modulator.map`](#modulatormap) | the query tool's `device` | `mappings` |
+| [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
+| [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
@@ -6938,6 +7595,43 @@ What `perception.analyze` returns. A measure not asked for is null.
     "tempo",
     "key",
     "transients"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArmedMap`
+
+A lit Map button.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator. |
+| `slot` | integer from 0 to 255 | yes | Its slot. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A lit Map button.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator."
+    },
+    "slot": {
+      "description": "Its slot.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
   ],
   "type": "object"
 }
@@ -7796,19 +8490,20 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), or `device` with the device and its `param`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.
 
 One of:
 
 - an object with `type` = `"mixer"`, `param` ([`MixerParam`](#mixerparam)): A control of the track's mixer.
 - an object with `type` = `"send"`, `to` ([`TrackId`](#trackid)): The level of the track's send to a return track.
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
+- an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), or `device` with the device and its `param`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -7865,6 +8560,29 @@ One of:
       "required": [
         "type",
         "device",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).",
+      "properties": {
+        "chain": {
+          "$ref": "#/$defs/ChainId",
+          "description": "The chain."
+        },
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "type": {
+          "const": "chain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "chain",
         "param"
       ],
       "type": "object"
@@ -8184,6 +8902,253 @@ What `perception.capture_view` returns, beside the image.
     "bytes",
     "pixels_per_point"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Captured`
+
+What `midi.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`CapturedClip`](#capturedclip) | yes | The clips, one for each track that was played. |
+| `tempo` | number or null | yes | The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi.capture` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips, one for each track that was played.",
+      "items": {
+        "$ref": "#/$defs/CapturedClip"
+      },
+      "type": "array"
+    },
+    "tempo": {
+      "description": "The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clips",
+    "tempo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CapturedClip`
+
+One clip a capture made or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose notes it holds. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is in. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `merged` | boolean | yes | Whether the notes joined the clip that was playing, rather than making a new clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip a capture made or changed.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "merged": {
+      "description": "Whether the notes joined the clip that was playing, rather than making a new clip.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene whose slot it is in."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose notes it holds."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "clip",
+    "merged"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Chain`
+
+One chain of a rack: its own name, colour, info text and mixer, and its devices in signal order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ChainId`](#chainid) | yes | The chain's ID. |
+| `name` | string | yes | The chain's name. |
+| `colour` | integer or null | no | The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none. |
+| `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
+| `info` | string | no | The info text the user gave the chain (Edit Info Text). |
+| `mixer` | [`ChainMixer`](#chainmixer) | no | The chain's mixer. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One chain of a rack: its own name, colour, info text and mixer, and its devices in signal order.",
+  "properties": {
+    "colour": {
+      "description": "The chain's colour: an index into the palette of 5 rows of 14 swatches, from 0 to 69, or none.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "devices": {
+      "default": [],
+      "description": "The chain's devices, in signal order.",
+      "items": {
+        "$ref": "#/$defs/Device"
+      },
+      "type": "array"
+    },
+    "id": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain's ID."
+    },
+    "info": {
+      "description": "The info text the user gave the chain (Edit Info Text).",
+      "type": "string"
+    },
+    "mixer": {
+      "$ref": "#/$defs/ChainMixer",
+      "default": {},
+      "description": "The chain's mixer."
+    },
+    "name": {
+      "description": "The chain's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChainAdded`
+
+What the chain commands that add a chain return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The new chain. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack it is in. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the chain commands that add a chain return.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The new chain."
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack it is in."
+    }
+  },
+  "required": [
+    "chain",
+    "rack"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChainId`
+
+The ID of a chain: a positive integer, unique within the project and never reused.
+
+Type: integer, at least 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a chain: a positive integer, unique within the project and never reused.",
+  "format": "uint64",
+  "minimum": 1,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `ChainMixer`
+
+A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to 1 right), `enabled` (the Chain Activator) and `solo`. A MIDI effect rack's chains have no volume or pan.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | no | The Chain Activator: on in a new chain. A chain that's off adds nothing to its rack's output. |
+| `pan` | number | no | From −1 (left) to 1 (right): centre in a new chain. |
+| `solo` | boolean | no | Solo: while any chain of a rack is soloed, its unsoloed chains add nothing. |
+| `volume` | number | no | Linear gain: 1 (0 dB) in a new chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to 1 right), `enabled` (the Chain Activator) and `solo`. A MIDI effect rack's chains have no volume or pan.",
+  "properties": {
+    "enabled": {
+      "description": "The Chain Activator: on in a new chain. A chain that's off adds nothing to its rack's output.",
+      "type": "boolean"
+    },
+    "pan": {
+      "description": "From −1 (left) to 1 (right): centre in a new chain.",
+      "format": "double",
+      "type": "number"
+    },
+    "solo": {
+      "description": "Solo: while any chain of a rack is soloed, its unsoloed chains add nothing.",
+      "type": "boolean"
+    },
+    "volume": {
+      "description": "Linear gain: 1 (0 dB) in a new chain.",
+      "format": "double",
+      "type": "number"
+    }
+  },
   "type": "object"
 }
 ```
@@ -8914,6 +9879,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
 
@@ -8932,6 +9898,17 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "slots": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SlotGroup"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`])."
     },
     "width": {
       "description": "Its width.",
@@ -9041,11 +10018,16 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `kind` | [`DeviceKind`](#devicekind) | yes | What the device is. |
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
+| `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
+| `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
-| `media` | [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none. |
+| `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
+| `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
+| `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `shape` | array or null | no | The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 
@@ -9055,6 +10037,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 {
   "description": "A device in a track's chain: a native instrument or effect, or a plug-in.",
   "properties": {
+    "b_active": {
+      "description": "Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active.",
+      "type": "boolean"
+    },
+    "chains": {
+      "description": "A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged.",
+      "items": {
+        "$ref": "#/$defs/Chain"
+      },
+      "type": "array"
+    },
     "enabled": {
       "description": "Whether the device is switched on. A device that's off passes its input through unchanged.",
       "type": "boolean"
@@ -9071,20 +10064,51 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       "$ref": "#/$defs/DeviceKind",
       "description": "What the device is."
     },
+    "mappings": {
+      "description": "The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none.",
+      "items": {
+        "$ref": "#/$defs/Mapping"
+      },
+      "type": "array"
+    },
     "media": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ContentHash"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none."
+      "description": "The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContentHash"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
       "type": "string"
+    },
+    "other_params": {
+      "description": "The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/ParamId"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "own_name": {
       "description": "The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then.",
@@ -9122,6 +10146,16 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "shape": {
+      "description": "The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "show_preset_name": {
       "description": "Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on.",
@@ -9209,6 +10243,8 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9220,10 +10256,24 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       "$ref": "#/$defs/DeviceLayout",
       "description": "Where its controls and display cells sit (IMP-14)."
     },
+    "menu_options": {
+      "description": "The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
     "params": {
       "description": "Its parameters.",
       "items": {
         "$ref": "#/$defs/ParamDescriptor"
+      },
+      "type": "array"
+    },
+    "views": {
+      "description": "The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`).",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     }
@@ -9231,6 +10281,75 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
   "required": [
     "params",
     "layout"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceDisplay`
+
+A device's display now, as `device.display` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `live` | boolean | yes | Whether the device's engine has published its data: `false` while no engine runs or before its first block, when only what its parameters give is here. |
+| `series` | array of [`DisplaySeries`](#displayseries) | yes | Its curves and spectra. |
+| `markers` | array of [`DisplayMarker`](#displaymarker) | yes | Its markers. |
+| `readings` | array of [`DisplayReading`](#displayreading) | yes | Its single readings. |
+| `view` | string or null | no | The view the display is showing, for a device whose display has views. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's display now, as `device.display` reports it.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "live": {
+      "description": "Whether the device's engine has published its data: `false` while no engine runs or before its first block, when only what its parameters give is here.",
+      "type": "boolean"
+    },
+    "markers": {
+      "description": "Its markers.",
+      "items": {
+        "$ref": "#/$defs/DisplayMarker"
+      },
+      "type": "array"
+    },
+    "readings": {
+      "description": "Its single readings.",
+      "items": {
+        "$ref": "#/$defs/DisplayReading"
+      },
+      "type": "array"
+    },
+    "series": {
+      "description": "Its curves and spectra.",
+      "items": {
+        "$ref": "#/$defs/DisplaySeries"
+      },
+      "type": "array"
+    },
+    "view": {
+      "description": "The view the display is showing, for a device whose display has views.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device",
+    "live",
+    "series",
+    "markers",
+    "readings"
   ],
   "type": "object"
 }
@@ -9251,12 +10370,18 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
+| `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
+| `expanded` | boolean | yes | Whether its expanded part is shown. Never while it has none. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
+| `b_active` | boolean | yes | Whether its B state is the active one, which the title bar marks "(B)" (device compare R5). |
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
+| `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
 <details><summary>JSON Schema</summary>
@@ -9265,8 +10390,30 @@ One device as the Device View shows it.
 {
   "description": "One device as the Device View shows it.",
   "properties": {
+    "b_active": {
+      "default": false,
+      "description": "Whether its B state is the active one, which the title bar marks \"(B)\" (device compare R5).",
+      "type": "boolean"
+    },
+    "display_view": {
+      "description": "The view its display shows, if its display has views (WP-5.43): one of its description's `views`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "enabled": {
       "description": "Whether it's switched on.",
+      "type": "boolean"
+    },
+    "expandable": {
+      "default": false,
+      "description": "Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42).",
+      "type": "boolean"
+    },
+    "expanded": {
+      "default": false,
+      "description": "Whether its expanded part is shown. Never while it has none.",
       "type": "boolean"
     },
     "floating": {
@@ -9289,6 +10436,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "modulator": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModulatorFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a modulator, what it maps and which Map button is armed (WP-5.10)."
     },
     "name": {
       "description": "Its own name, such as `Auto Filter`.",
@@ -9328,6 +10486,11 @@ One device as the Device View shows it.
       ],
       "description": "Its sidechain section, if it has a sidechain input (WP-2.19b)."
     },
+    "swaps_to_snapshot": {
+      "default": false,
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "type": "boolean"
+    },
     "takes_sample": {
       "default": false,
       "description": "Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16).",
@@ -9346,9 +10509,13 @@ One device as the Device View shows it.
     "role",
     "enabled",
     "takes_sample",
+    "swaps_to_snapshot",
     "show_preset_name",
     "folded",
+    "expandable",
+    "expanded",
     "floating",
+    "b_active",
     "selected",
     "hot_swap",
     "sidechain"
@@ -9386,6 +10553,7 @@ One of:
 
 - an object with `native` (object with `device_type` (string)): A device built into Beatlayer.
 - an object with `plugin` (object with `format` ([`PluginFormat`](#pluginformat)), `plugin_id` (string)): A plug-in.
+- an object with `rack` (object with `kind` ([`RackKind`](#rackkind))): A rack (WP-5.1): a device that holds [`Device::chains`].
 
 <details><summary>JSON Schema</summary>
 
@@ -9441,6 +10609,28 @@ One of:
         "plugin"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A rack (WP-5.1): a device that holds [`Device::chains`].",
+      "properties": {
+        "rack": {
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/RackKind",
+              "description": "Which of the four kinds of rack it is."
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "rack"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -9455,6 +10645,7 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
+| `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9462,6 +10653,17 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 {
   "description": "A device's layout (IMP-14): bands of controls and display cells in rows and columns.",
   "properties": {
+    "expanded": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutNode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
+    },
     "root": {
       "$ref": "#/$defs/LayoutNode",
       "description": "The whole body."
@@ -9599,6 +10801,9 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `description` | [`DeviceDescription`](#devicedescription) | yes | Its parameters' descriptors and its layout. |
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
+| `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
+| `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
+| `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9610,10 +10815,31 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
     },
+    "loaded_slots": {
+      "description": "For a device with sample slots: whether each slot holds a sample.",
+      "items": {
+        "type": "boolean"
+      },
+      "type": "array"
+    },
     "plugin": {
       "default": false,
       "description": "Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device.",
       "type": "boolean"
+    },
+    "selected_slot": {
+      "default": 0,
+      "description": "For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slot_keys": {
+      "description": "For a device with sample slots: the key each slot plays, as Live names notes (`C3`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "values": {
       "description": "Each parameter's value now, in the description's order, in the parameter's own units.",
@@ -9627,7 +10853,8 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
   "required": [
     "description",
     "values",
-    "plugin"
+    "plugin",
+    "selected_slot"
   ],
   "type": "object"
 }
@@ -9643,6 +10870,7 @@ What `device.parameters` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of [`ParameterState`](#parameterstate) | yes | Its parameters, in the order its type lists them; empty if its type doesn't describe them. |
+| `active` | string or null | no | Which of its A and B states is active, `A` or `B` (device compare R11); left out for a device without two states. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9650,6 +10878,13 @@ What `device.parameters` returns.
 {
   "description": "What `device.parameters` returns.",
   "properties": {
+    "active": {
+      "description": "Which of its A and B states is active, `A` or `B` (device compare R11); left out for a device without two states.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "device": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device."
@@ -9708,7 +10943,7 @@ A device in use, by ID and name.
 
 ### `DeviceRole`
 
-Where a device goes in a chain. A chain holds its MIDI effects first, then its instrument, then its audio effects, as Live's does; only MIDI tracks hold MIDI effects and instruments, and a chain holds at most one instrument (racks, which hold more, arrive in milestone M5).
+Where a device goes in a chain. A chain holds its MIDI effects first, then its instrument, then its audio effects, as Live's does; only MIDI tracks hold MIDI effects and instruments, and a chain holds at most one instrument (a rack holds several, one to a chain).
 
 One of:
 
@@ -9720,7 +10955,7 @@ One of:
 
 ```json
 {
-  "description": "Where a device goes in a chain. A chain holds its MIDI effects first, then its instrument, then its audio effects, as Live's does; only MIDI tracks hold MIDI effects and instruments, and a chain holds at most one instrument (racks, which hold more, arrive in milestone M5).",
+  "description": "Where a device goes in a chain. A chain holds its MIDI effects first, then its instrument, then its audio effects, as Live's does; only MIDI tracks hold MIDI effects and instruments, and a chain holds at most one instrument (a rack holds several, one to a chain).",
   "oneOf": [
     {
       "const": "midi_effect",
@@ -9755,6 +10990,7 @@ What `device_view.state` returns.
 | `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
+| `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9762,6 +10998,17 @@ What `device_view.state` returns.
 {
   "description": "What `device_view.state` returns.",
   "properties": {
+    "armed_map": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArmedMap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10)."
+    },
     "can_paste": {
       "description": "Whether the clipboard holds a device to paste.",
       "type": "boolean"
@@ -9908,6 +11155,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
 <details><summary>JSON Schema</summary>
@@ -9935,6 +11183,15 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "slot": {
+      "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "top": {
       "anyOf": [
@@ -10012,6 +11269,194 @@ The Display & Input page's settings.
     "outline_view_in_focus",
     "use_tab_key_to_move_focus",
     "wrap_tab_navigation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplayMarker`
+
+A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `A1`. |
+| `series` | string | yes | The series whose axes it sits on. |
+| `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
+| `y` | number | yes | Its value, in the series' `unit`. |
+| `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
+  "properties": {
+    "name": {
+      "description": "What it is, such as `A1`.",
+      "type": "string"
+    },
+    "series": {
+      "description": "The series whose axes it sits on.",
+      "type": "string"
+    },
+    "text": {
+      "description": "How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`.",
+      "type": "string"
+    },
+    "x": {
+      "description": "Its place along the axis, in the series' `x_unit`.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its value, in the series' `unit`.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "series",
+    "x",
+    "y",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplayReading`
+
+A single reading, such as a gain reduction.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Gain Reduction`. |
+| `value` | number | yes | Its value now, in `unit`. |
+| `unit` | string | yes | What it's in, such as `dB`. |
+| `text` | string | yes | How it reads, such as `-4.3 dB`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A single reading, such as a gain reduction.",
+  "properties": {
+    "name": {
+      "description": "What it is, such as `Gain Reduction`.",
+      "type": "string"
+    },
+    "text": {
+      "description": "How it reads, such as `-4.3 dB`.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "What it's in, such as `dB`.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value now, in `unit`.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "unit",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplaySeries`
+
+A curve or a spectrum: values at evenly spaced places along an axis.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Spectrum`; the cell draws it by this name. |
+| `unit` | string | yes | What the values are in, such as `dB`. |
+| `x_unit` | string | yes | What the axis is in, such as `Hz`. |
+| `x_range` | array of number, at least 2 | yes | The axis's first and last place. |
+| `log_x` | boolean | yes | Whether the axis is logarithmic. |
+| `y_range` | array of number, at least 2 | yes | The values the cell shows between its bottom and its top. |
+| `detail` | boolean | yes | Whether it's a part of another series, such as one band's response within the curve's sum: drawn faint. |
+| `values` | array of number | yes | The values, from the first place to the last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A curve or a spectrum: values at evenly spaced places along an axis.",
+  "properties": {
+    "detail": {
+      "default": false,
+      "description": "Whether it's a part of another series, such as one band's response within the curve's sum: drawn faint.",
+      "type": "boolean"
+    },
+    "log_x": {
+      "description": "Whether the axis is logarithmic.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "What it is, such as `Spectrum`; the cell draws it by this name.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "What the values are in, such as `dB`.",
+      "type": "string"
+    },
+    "values": {
+      "description": "The values, from the first place to the last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "x_range": {
+      "description": "The axis's first and last place.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "x_unit": {
+      "description": "What the axis is in, such as `Hz`.",
+      "type": "string"
+    },
+    "y_range": {
+      "description": "The values the cell shows between its bottom and its top.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "unit",
+    "x_unit",
+    "x_range",
+    "log_x",
+    "y_range",
+    "detail",
+    "values"
   ],
   "type": "object"
 }
@@ -10768,6 +12213,40 @@ The editing grid, as the Arrangement View uses it now.
 
 </details>
 
+### `Grouped`
+
+What `device.group` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The new rack, now selected. |
+| `chain` | [`ChainId`](#chainid) | yes | The chain that holds the devices, or, when chains were grouped, the new chain that holds the new rack. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.group` returns.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain that holds the devices, or, when chains were grouped, the new chain that holds the new rack."
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The new rack, now selected."
+    }
+  },
+  "required": [
+    "rack",
+    "chain"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HotSwap`
 
 Hot-swapping, while it lasts.
@@ -10900,7 +12379,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -10910,13 +12389,13 @@ One of:
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
-- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `tap` ([`Tap`](#tap)): Another track's signal.
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -11008,6 +12487,17 @@ One of:
     {
       "description": "Another track's signal.",
       "properties": {
+        "chain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChainId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A chain of an instrument or audio effect rack on that track, at any depth, whose signal is taken at `tap` instead of the track's own (the racks spec, R38 to R41)."
+        },
         "tap": {
           "$ref": "#/$defs/Tap",
           "description": "Where in that track the signal is taken: Post Mixer if it's left out."
@@ -11108,6 +12598,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
+- `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 
 <details><summary>JSON Schema</summary>
 
@@ -11138,6 +12629,11 @@ One of:
     {
       "const": "plugin",
       "description": "A plug-in the scanner found (WP-2.9).",
+      "type": "string"
+    },
+    {
+      "const": "device",
+      "description": "One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.",
       "type": "string"
     }
   ]
@@ -11877,6 +13373,7 @@ What `device.load_sample` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device that took the sample. |
 | `media` | [`ContentHash`](#contenthash) | yes | The sample's media, by content hash: what the device and the set name it by. |
+| `slot` | integer from 0 to 255 | yes | The slot that took it, counted from 0. |
 | `name` | string | yes | The file's name, for messages. |
 
 <details><summary>JSON Schema</summary>
@@ -11896,11 +13393,20 @@ What `device.load_sample` returns.
     "name": {
       "description": "The file's name, for messages.",
       "type": "string"
+    },
+    "slot": {
+      "default": 0,
+      "description": "The slot that took it, counted from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
     }
   },
   "required": [
     "device",
     "media",
+    "slot",
     "name"
   ],
   "type": "object"
@@ -11983,6 +13489,86 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
     "short_term",
     "range_lu",
     "true_peak_dbtp"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Mapping`
+
+One slot's mapping: the parameter it modulates.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping: the parameter it modulates.",
+  "properties": {
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MappingRow`
+
+One slot's mapping as its panel names it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+| `label` | string | yes | The target's device and parameter, or track and control, by name, as the slot shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping as its panel names it.",
+  "properties": {
+    "label": {
+      "description": "The target's device and parameter, or track and control, by name, as the slot shows them.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target",
+    "label"
   ],
   "type": "object"
 }
@@ -12571,6 +14157,358 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModTarget`
+
+A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.
+
+One of:
+
+- an object with `type` = `"mixer"`, `track` ([`TrackId`](#trackid)), `param` ([`MixerParam`](#mixerparam)): A control of a track's mixer.
+- an object with `type` = `"send"`, `track` ([`TrackId`](#trackid)), `to` ([`TrackId`](#trackid)): The level of a track's send to a return track.
+- an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, on any track.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.",
+  "oneOf": [
+    {
+      "description": "A control of a track's mixer.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "mixer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The level of a track's send to a return track.",
+      "properties": {
+        "to": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The return track the send feeds."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The sending track."
+        },
+        "type": {
+          "const": "send",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A parameter of a device, on any track.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "param": {
+          "$ref": "#/$defs/ParamId",
+          "description": "Its parameter."
+        },
+        "type": {
+          "const": "device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ModulatedParameter`
+
+A parameter a track's clips or modulators act on.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose parameter it is. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device's parameter. |
+| `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
+| `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
+| `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+| `modulators` | array of [`ModulatorSource`](#modulatorsource) | yes | The modulator slots mapping it. |
+| `held_by` | [`DeviceId`](#deviceid) or null | no | The modulator in Remote Control that holds it, if one does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a track's clips or modulators act on.",
+  "properties": {
+    "base": {
+      "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
+      "format": "double",
+      "type": "number"
+    },
+    "held_by": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The modulator in Remote Control that holds it, if one does."
+    },
+    "modulators": {
+      "default": [],
+      "description": "The modulator slots mapping it.",
+      "items": {
+        "$ref": "#/$defs/ModulatorSource"
+      },
+      "type": "array"
+    },
+    "played": {
+      "description": "The value it played in the last block; the base while nothing modulates it now.",
+      "format": "double",
+      "type": "number"
+    },
+    "sources": {
+      "description": "The clip envelopes modulating it.",
+      "items": {
+        "$ref": "#/$defs/ModulationSource"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter: a mixer control, a send, or a device's parameter."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose parameter it is."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "base",
+    "played",
+    "sources",
+    "modulators"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationSource`
+
+One source modulating a parameter: a clip's envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose modulation envelope it is. |
+| `share` | number or null | yes | The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there. |
+| `contribution` | number | yes | What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One source modulating a parameter: a clip's envelope.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose modulation envelope it is."
+    },
+    "contribution": {
+      "description": "What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there.",
+      "format": "double",
+      "type": "number"
+    },
+    "share": {
+      "description": "The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "share",
+    "contribution"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationState`
+
+What `modulation.state` reports.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | array of [`ModulatedParameter`](#modulatedparameter) | yes | Every parameter a clip's envelope modulates, track by track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modulation.state` reports.",
+  "properties": {
+    "parameters": {
+      "description": "Every parameter a clip's envelope modulates, track by track.",
+      "items": {
+        "$ref": "#/$defs/ModulatedParameter"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorFrame`
+
+What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mappings` | array of [`MappingRow`](#mappingrow) | yes | Its mappings, by slot. |
+| `armed` | integer or null | no | The slot whose Map button is lit, while a click on a parameter maps it. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).",
+  "properties": {
+    "armed": {
+      "description": "The slot whose Map button is lit, while a click on a parameter maps it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mappings": {
+      "description": "Its mappings, by slot.",
+      "items": {
+        "$ref": "#/$defs/MappingRow"
+      },
+      "type": "array"
+    },
+    "shape": {
+      "description": "A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "mappings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorSource`
+
+One modulator slot acting on a parameter (WP-5.10).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | Its slot, from 0 to 7. |
+| `remote_control` | boolean | yes | Whether the modulator is in Remote Control, holding the parameter rather than modulating it. |
+| `contribution` | number or null | yes | What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One modulator slot acting on a parameter (WP-5.10).",
+  "properties": {
+    "contribution": {
+      "description": "What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator device."
+    },
+    "remote_control": {
+      "description": "Whether the modulator is in Remote Control, holding the parameter rather than modulating it.",
+      "type": "boolean"
+    },
+    "slot": {
+      "description": "Its slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot",
+    "remote_control",
+    "contribution"
   ],
   "type": "object"
 }
@@ -13304,7 +15242,9 @@ One of a device's parameters as `device.parameters` reports it.
 | `automatable` | boolean | yes | Whether automation and modulation can move it. Always true (rule G2); [`check`](Self::check) refuses a descriptor without it. |
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
+| `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
+| `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13333,9 +15273,22 @@ One of a device's parameters as `device.parameters` reports it.
       "$ref": "#/$defs/ParamKind",
       "description": "What kind of value it takes, and its range."
     },
+    "menu_option": {
+      "default": false,
+      "description": "Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015).",
+      "type": "boolean"
+    },
     "name": {
       "description": "Its name, as its control's label and the Status Bar show it, such as `Gain`.",
       "type": "string"
+    },
+    "other": {
+      "description": "Its value in the A and B state that isn't active (device compare R11); left out for a device without two states.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
     },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
@@ -13354,7 +15307,8 @@ One of a device's parameters as `device.parameters` reports it.
     "default",
     "automatable",
     "value",
-    "text"
+    "text",
+    "menu_option"
   ],
   "type": "object"
 }
@@ -14190,6 +16144,49 @@ One of:
     {
       "const": "note_end",
       "description": "Move the notes' ends; the starts stay put.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RackKind`
+
+The four kinds of rack. A rack has the role of what it holds ([`RackKind::role`]).
+
+One of:
+
+- `"instrument"`: Holds MIDI effects, an instrument and audio effects in each chain.
+- `"audio_effect"`: Holds audio effects only.
+- `"midi_effect"`: Holds MIDI effects only.
+- `"drum"`: An instrument rack whose chains are keyed to notes (WP-5.6).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The four kinds of rack. A rack has the role of what it holds ([`RackKind::role`]).",
+  "oneOf": [
+    {
+      "const": "instrument",
+      "description": "Holds MIDI effects, an instrument and audio effects in each chain.",
+      "type": "string"
+    },
+    {
+      "const": "audio_effect",
+      "description": "Holds audio effects only.",
+      "type": "string"
+    },
+    {
+      "const": "midi_effect",
+      "description": "Holds MIDI effects only.",
+      "type": "string"
+    },
+    {
+      "const": "drum",
+      "description": "An instrument rack whose chains are keyed to notes (WP-5.6).",
       "type": "string"
     }
   ]
@@ -15488,6 +17485,48 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 
 </details>
 
+### `ShapePoint`
+
+One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
+| `y` | number | yes | The output there, from 0 to 1. |
+| `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.",
+  "properties": {
+    "bend": {
+      "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
+      "format": "double",
+      "type": "number"
+    },
+    "x": {
+      "description": "Where in the cycle, from 0 (its start) to 1 (its end).",
+      "format": "double",
+      "type": "number"
+    },
+    "y": {
+      "description": "The output there, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "x",
+    "y"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ShortTerm`
 
 One short-term loudness reading.
@@ -15640,6 +17679,44 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SlotGroup`
+
+The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `stride` | integer, at least 0 | yes | How far apart one slot's parameter numbers are from the next's. |
+| `count` | integer, at least 0 | yes | How many slots there are. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).",
+  "properties": {
+    "count": {
+      "description": "How many slots there are.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stride": {
+      "description": "How far apart one slot's parameter numbers are from the next's.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "stride",
+    "count"
   ],
   "type": "object"
 }
@@ -16603,6 +18680,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
+| `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16620,6 +18698,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
+      "type": "boolean"
+    },
+    "capture_midi_ready": {
+      "default": false,
+      "description": "Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled.",
       "type": "boolean"
     },
     "counting_in": {
@@ -16746,7 +18829,39 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "midi_overdub",
     "automation_arm",
     "recording",
-    "last_recording"
+    "last_recording",
+    "capture_midi_ready"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Ungrouped`
+
+What `device.ungroup` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`DeviceId`](#deviceid) | yes | The devices that took the rack's place, in order; the first is now selected. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.ungroup` returns.",
+  "properties": {
+    "devices": {
+      "description": "The devices that took the rack's place, in order; the first is now selected.",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "devices"
   ],
   "type": "object"
 }

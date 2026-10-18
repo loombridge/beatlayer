@@ -196,6 +196,124 @@ fn screen_readers_read_track_names_clip_names_and_fader_values() {
     assert_eq!(fader.value(), Some("-inf dB"));
 }
 
+// Spec: modulation R7. A modulated control's value reads as its base, with
+// the value it plays, in one wording for a fader, the header's field, a
+// send, pan and a device's knob.
+#[test]
+fn a_modulated_control_reads_its_base_and_played_value() {
+    use bl_devices::testing::{self, UTILITY_GAIN};
+    use bl_model::{AutomationTarget, MixerParam};
+    use bl_shell::mixer_controls::{db_gain, send_text};
+    use bl_ui::device_panel::param_control_id;
+
+    let (mut h, tracks, _) = set();
+    let t = tracks[2];
+    let ret = h.shell.editor().document().returns().next().unwrap();
+    h.shell.set_device_types(testing::device_types());
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [t] }))
+        .unwrap();
+    let utility = testing::utility_type();
+    let added: bl_shell::device_commands::DeviceAdded = serde_json::from_value(
+        h.shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": utility.kind, "name": utility.name, "role": utility.role } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    for (id, args) in [
+        (
+            "mixer.set_volume",
+            json!({ "track": t, "volume": db_gain(-6.0) }),
+        ),
+        ("mixer.set_pan", json!({ "track": t, "pan": 0.0 })),
+        (
+            "mixer.set_send",
+            json!({ "track": t, "to": ret, "level": 0.5 }),
+        ),
+        (
+            "device.set_param",
+            json!({ "device": added.device, "param": UTILITY_GAIN, "value": db_gain(-6.0) }),
+        ),
+    ] {
+        h.shell.run(id, args).unwrap();
+    }
+    let device = |param| AutomationTarget::Device {
+        device: added.device,
+        param,
+    };
+    let mixer = |param| AutomationTarget::Mixer { param };
+    let played = [
+        (mixer(MixerParam::Volume), db_gain(-6.0), db_gain(-12.0)),
+        (mixer(MixerParam::Pan), 0.0, 0.5),
+        (AutomationTarget::Send { to: ret }, 0.5, 0.25),
+        (device(UTILITY_GAIN), db_gain(-6.0), db_gain(-18.0)),
+    ];
+    h.shell.set_modulated(
+        played
+            .iter()
+            .map(|&(target, base, played)| {
+                let (node, param) = bl_engine::target_node(t, &target);
+                bl_engine::PlayedParam {
+                    node,
+                    param,
+                    base,
+                    played,
+                }
+            })
+            .collect(),
+    );
+    let value = |nodes: &BTreeMap<accesskit::NodeId, accesskit::Node>, id: Id| {
+        nodes[&id.accesskit_id()].value().map(str::to_owned)
+    };
+    let nodes = tree(&h.settle());
+    let send = |level: f64| format!("{} dB", send_text(level));
+    // The header's volume field, pan and send, and the Device View's knob.
+    assert_eq!(
+        value(&nodes, volume_field_id(Place::Header, t)).as_deref(),
+        Some("-6.0 dB, modulated to -12.0 dB")
+    );
+    assert_eq!(
+        value(&nodes, pan_id(Place::Header, t)).as_deref(),
+        Some("C, modulated to 25R")
+    );
+    assert_eq!(
+        value(&nodes, send_id(Place::Header, t, ret)),
+        Some(format!("{}, modulated to {}", send(0.5), send(0.25)))
+    );
+    assert_eq!(
+        value(&nodes, param_control_id(added.device, UTILITY_GAIN)).as_deref(),
+        Some("-6.0 dB, modulated to -18.0 dB")
+    );
+    // The Session View's fader, pan and send say the same.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    let nodes = tree(&h.settle());
+    let strip = Place::Mixer(MixerOf::Session);
+    assert_eq!(
+        value(&nodes, fader_id(strip, t)).as_deref(),
+        Some("-6.0 dB, modulated to -12.0 dB")
+    );
+    assert_eq!(
+        value(&nodes, pan_id(strip, t)).as_deref(),
+        Some("C, modulated to 25R")
+    );
+    assert_eq!(
+        value(&nodes, send_id(strip, t, ret)),
+        Some(format!("{}, modulated to {}", send(0.5), send(0.25)))
+    );
+    // A control that plays its base reads as before.
+    h.shell.set_modulated(Vec::new());
+    let nodes = tree(&h.settle());
+    assert_eq!(
+        value(&nodes, fader_id(strip, t)).as_deref(),
+        Some("-6.0 dB")
+    );
+}
+
 // Spec: accessibility R2.
 #[test]
 fn the_screen_reader_follows_the_keyboard_focus() {
@@ -993,6 +1111,25 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The eight-slot drum sampler on the third track, the selected track, no
+/// device selected (WP-5.17).
+fn a_drum_sampler(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::kitbag_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 fn a_sidechained_device(h: &mut Harness) {
@@ -1014,6 +1151,125 @@ fn a_sidechained_device(h: &mut Harness) {
         .run(
             "device.show_sidechain",
             json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A Wave Mod and a test utility on the selected audio track (WP-5.10),
+/// with the Wave Mod's slot 1 mapped to the utility's gain when `mapped`
+/// and its Map button lit when `lit`.
+fn modulators_on_track(h: &mut Harness, mapped: bool, lit: bool) {
+    let mut types = bl_devices::testing::device_types();
+    types.extend(bl_devices::device_types());
+    h.shell.set_device_types(types);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let add = |h: &mut Harness, t: &bl_engine::DeviceType| -> serde_json::Value {
+        h.shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+            )
+            .unwrap()["device"]
+            .clone()
+    };
+    let utility = add(h, &bl_devices::testing::utility_type());
+    let wave = add(h, &bl_devices::modulator::wave_mod_type());
+    if mapped {
+        h.shell
+            .run(
+                "modulator.map",
+                json!({ "device": wave, "slot": 0,
+                        "target": { "type": "device", "device": utility, "param": 0 } }),
+            )
+            .unwrap();
+    }
+    if lit {
+        h.shell
+            .run("modulator.arm_map", json!({ "device": wave, "slot": 0 }))
+            .unwrap();
+    }
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+fn a_wave_mod(h: &mut Harness) {
+    modulators_on_track(h, false, false);
+}
+
+fn a_mapped_wave_mod(h: &mut Harness) {
+    modulators_on_track(h, true, false);
+}
+
+fn a_lit_map_button(h: &mut Harness) {
+    modulators_on_track(h, false, true);
+}
+
+/// A Curve Mod on the selected audio track.
+fn a_curve_mod(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::modulator::curve_mod_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A Squeeze, whose display has views, on the selected audio track.
+fn a_squeeze(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let types = bl_devices::device_types();
+    let t = types
+        .iter()
+        .find(|t| t.name == "Squeeze")
+        .expect("the compressor is offered");
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "sidechain": t.sidechain,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// The framework's test effects on audio track 3, the selected track, no
+/// device selected: a device with an expanded part, so it has the expand
+/// toggle (WP-5.42).
+fn an_expandable_device(h: &mut Harness) {
+    h.shell
+        .set_device_types(bl_devices::testing::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::testing::effects_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
         )
         .unwrap();
     h.shell
@@ -1423,6 +1679,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("transport.state", Exception(Query)),
         ("settings.state", Exception(Query)),
         ("view.state", Exception(Query)),
+        ("modulation.state", Exception(Query)),
         ("audio.status", Exception(Query)),
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
@@ -1709,8 +1966,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "device.save_preset",
             main(a_device, device_view, "Save Preset", Key::Enter),
         ),
+        (
+            "device.expand",
+            main(an_expandable_device, device_view, "Expand", Key::Enter),
+        ),
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
+        ("device.swap_to_snapshot", Exception(device_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(
@@ -1741,6 +2003,94 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
+        // the rack's chain list and its controls arrive with the Device
+        // View's rack (WP-5.2), until then agents reach them.
+        (
+            "device.wrap_in_rack",
+            Exception(Equivalent("Group (`device.group`, Cmd-G)")),
+        ),
+        (
+            "device.unwrap_rack",
+            Exception(Equivalent("Ungroup (`device.ungroup`, Cmd-Shift-G)")),
+        ),
+        (
+            "device.insert_in_chain",
+            Exception(Equivalent(
+                "adding a device as a person does (`device.add`)",
+            )),
+        ),
+        (
+            "device.move_to_chain",
+            Exception(Equivalent(
+                "Cmd-X on the selected device, then Cmd-V before another (`device.cut`, \
+                 `device.paste`)",
+            )),
+        ),
+        (
+            "device.set_enabled_all",
+            Exception(LaterView(
+                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.add",
+            Exception(LaterView(
+                "the rack's chain list and its drop area (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.remove",
+            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+        ),
+        (
+            "chain.move",
+            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
+        ),
+        (
+            "chain.rename",
+            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+        ),
+        (
+            "chain.set_colour",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_info",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_gain",
+            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_pan",
+            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_enabled",
+            Exception(LaterView("the chain list's activator (WP-5.2)")),
+        ),
+        (
+            "chain.set_solo",
+            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+        ),
+        (
+            "chain.copy",
+            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+        ),
+        (
+            "chain.cut",
+            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
+        ),
+        (
+            "chain.paste",
+            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
+        ),
+        (
+            "chain.duplicate",
+            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+        ),
         (
             "device.load_sample",
             Exception(Gap(
@@ -1752,6 +2102,31 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
+        // WP-5.10: a modulator's Map and Unmap buttons, the controls it
+        // maps while Map is lit (Enter on one), and the Curve Mod's preset
+        // buttons, which draw its shape.
+        (
+            "modulator.arm_map",
+            main(a_wave_mod, device_view, "Map 1", Key::Enter),
+        ),
+        (
+            "modulator.unmap",
+            main(a_mapped_wave_mod, device_view, "Unmap 1", Key::Enter),
+        ),
+        (
+            "modulator.map",
+            main(a_lit_map_button, device_view, "Gain", Key::Enter),
+        ),
+        (
+            "modulator.set_shape",
+            main(a_curve_mod, device_view, "Shape preset 1", Key::Enter),
+        ),
+        // The drum sampler's slot cells (WP-5.17): Tab to one, then Enter
+        // selects the slot.
+        (
+            "device.select_slot",
+            main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
         ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
@@ -1796,6 +2171,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
+        ("device.display", Exception(Query)),
+        // A display's view buttons (device framework R38): Enter on one.
+        (
+            "device.set_display_view",
+            main(a_squeeze, device_view, "Activity view", Key::Enter),
+        ),
         // Floating device windows (WP-2.5b): Float and Dock are
         // `device.set_floating`, on a key and in the device's menu.
         ("device.windows", Exception(Query)),

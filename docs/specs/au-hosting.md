@@ -1,7 +1,7 @@
 # Audio Unit hosting
 
 - **Status:** built (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units)
-- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and don't borrow units until WP-4.21; VST3 is WP-2.7
+- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and units (WP-4.21, built) as [offline plug-in renders](offline-plugin-renders.md) say; VST3 is WP-2.7
 - **Parity-matrix row:** Audio Units v2 and v3 (M2, macOS; built in WP-2.8)
 - **Checked against:** Apple's AudioToolbox documentation (`AudioComponent`, `AUAudioUnit`, render blocks, parameter trees, `fullState`, latency), read 15 October 2026; the architecture's "Plug-in hosting" and "Real-time rules"; the CLAP hosting spec, whose rules this mirrors where the formats allow; Live 12.4.6 on macOS, 12 October 2026 (Plug-In Sources lists Use Audio Units v2 and Use Audio Units v3, both Off by default); Apple's built-in units on this machine (macOS 27, Apple silicon)
 
@@ -11,7 +11,7 @@ An Audio Unit runs as a device in a track's chain, as any device does: in signal
 
 The unit processes the track's audio block by block: the main thread activates it for the engine's rate, channels, and block size, and its node runs it on the audio thread, with each parameter change and each note on its own frame. Its automatable parameters are the device's parameters: the generic UI, `device.parameters`, and automation see them as they see a native device's. Its own state is saved with the set and comes back when the set is opened again; it reports its latency, which delay compensation (WP-2.11) will use.
 
-A unit's own editor window opens and closes through `plugin.show_window` (R13), and the changes it makes come back into the set as one undo step per gesture (R6), as a CLAP editor's do. Offline renders (export, agents' previews) don't use units yet (WP-4.21 makes them): they render with a registry of their own in which no factory makes AU nodes, so an AU device passes its input through there, as a CLAP device did before WP-2.6b. Audio Units are macOS only: on Windows and Linux the commands say so, and an AU device in a set opened elsewhere is unhosted and passes its input through.
+A unit's own editor window opens and closes through `plugin.show_window` (R13), and the changes it makes come back into the set as one undo step per gesture (R6), as a CLAP editor's do. Offline renders (export, agents' previews) borrow the units the engine plays (WP-4.21), as they borrow CLAP plug-ins: the unit comes back from the engine's node, is activated for the render's rate and block size, and goes back with the state it had. Audio Units are macOS only: on Windows and Linux the commands say so, and an AU device in a set opened elsewhere is unhosted and passes its input through.
 
 ## Sources
 
@@ -42,6 +42,7 @@ A unit's own editor window opens and closes through `plugin.show_window` (R13), 
 - **R15.** Every unit is held a moment past its last use before its last reference is released. Apple's `AUAudioUnitV2Bridge` rebuilds its parameter tree from an asynchronous CoreAudio event (`AUEventListener`), and a unit released while that event is in flight is deallocated mid-rebuild: a SIGSEGV inside AudioToolbox's `-[AUAudioUnitV2Bridge _createParameterTree]_block_invoke`, recorded on 15 October 2026 while the tests activated and let go of Apple's units in a loop (twice in 175 lifecycles without the grace). A short grace — a quarter of a second, on a thread of the host's own — lets the event finish against a live unit. (S2)
 - **R16.** `plugin.load_au`, and `plugin.info` and `plugin.show_window` for an AU device, are the registered commands agents run: `plugin.load_au` is External, like `plugin.load`; `plugin.info` is a read. (S1, S5)
 - **R17.** Nothing the node does on the audio thread allocates, locks, or blocks: its buffers are made with the node, and the unit is set and given notes at segment boundaries on that thread, as a host's automation and MIDI are; the unit's own code is its own. A node that fails a call is silent and reports it. (S1, S2)
+- **R18.** A control change, pitch bend or channel pressure reaches a unit through its MIDI block as the message's raw bytes (two for channel pressure), scheduled with the notes at its frame ([device framework](device-framework.md) R39). (S6)
 
 ## Tests
 
@@ -65,4 +66,5 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R14 | `crates/shell/tests/plugins_au.rs`, `loading_an_audio_unit_says_they_are_macos_only` | unit |
 | R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
 | R17 | every block in `crates/plugin-host/tests/` runs as a real-time section under the allocation trap | real-time trap |
+| R18 | `crates/plugin-host/tests/au.rs`, `a_control_change_reaches_the_unit_with_its_notes` | unit, real-time trap |
 | — | The scanner lists the units: `crates/plugin-host/tests/scan.rs`, `a_scan_finds_apples_built_in_audio_units`; `crates/shell/tests/plugin_scanning.rs`, `scanning_finds_audio_units_and_they_join_the_browser` (plugin-scanning R1, R7) | unit |

@@ -821,3 +821,63 @@ fn doc_before_group(initial_tracks: &[TrackId], shell: &Shell) -> bl_model::Docu
     assert_eq!(doc.track_order(), initial_tracks);
     doc
 }
+
+#[test]
+fn delete_and_rename_from_a_key_or_menu_act_on_the_selected_tracks() {
+    // Spec: track-context-menu R4, R5, R8.
+    let mut shell = Shell::headless();
+    let order = shell.editor().document().track_order();
+    let (t3, t4, main) = (order[2], order[3], order[6]);
+    let headers = [Context::TrackHeaders, Context::Global];
+    assert!(!shell.can_invoke_in("track.delete", &json!({}), &headers));
+    assert!(!shell.can_invoke_in("track.rename", &json!({}), &headers));
+
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [t3, t4], "title_bars": true }),
+        )
+        .unwrap();
+    assert!(shell.can_invoke("track.delete", &json!({})));
+    // The Session View doesn't have the title bars' keys, but its title
+    // bars' menu does.
+    shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    assert!(!shell.can_invoke("track.delete", &json!({})));
+    assert!(shell.can_invoke_in("track.delete", &json!({}), &shell.track_menu_contexts()));
+    shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+
+    // Rename asks the title bar for the name of the first selected track.
+    shell.take_effects();
+    shell.invoke("track.rename", json!({})).unwrap();
+    assert!(matches!(shell.take_effects()[..], [Effect::RenameTrack(t)] if t == t3));
+    shell
+        .invoke("track.rename", json!({ "track": t3, "name": "Bass" }))
+        .unwrap();
+    assert_eq!(shell.editor().document().track(t3).unwrap().name(), "Bass");
+
+    // Delete takes every selected track in one undo step.
+    shell.invoke("track.delete", json!({})).unwrap();
+    let doc = shell.editor().document();
+    assert!(doc.track(t3).is_none() && doc.track(t4).is_none());
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Delete Track(s)")
+    );
+    shell.run("edit.undo", json!({})).unwrap();
+    assert!(shell.editor().document().track(t3).is_some());
+    assert!(shell.editor().document().track(t4).is_some());
+
+    // Main can be neither deleted nor renamed.
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [main], "title_bars": true }),
+        )
+        .unwrap();
+    assert!(!shell.can_invoke("track.delete", &json!({})));
+    assert!(!shell.can_invoke("track.rename", &json!({})));
+}

@@ -20,7 +20,7 @@
 
 use std::f32::consts::FRAC_PI_2;
 
-use bl_model::{DeviceId, DeviceRole, TrackId};
+use bl_model::{AutomationTarget, DeviceId, DeviceRole, TrackId};
 use bl_shell::context_menus;
 use bl_shell::device_commands::{
     self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
@@ -93,7 +93,7 @@ pub fn window_frame_id(device: DeviceId) -> Id {
 /// Where a floating device's Dock button sits in its window at `rect`.
 #[must_use]
 pub fn dock_rect(rect: Rect) -> Rect {
-    window_layout(rect)
+    window_layout(rect, false)
         .1
         .dock
         .expect("a window has a Dock button")
@@ -164,11 +164,27 @@ fn sample_drop(
     if !takes {
         return;
     }
-    invoke(
-        events,
-        ids::LOAD_SAMPLE,
-        json!({ "device": device, "path": path }),
-    );
+    // Dropped on a sample slot's cell, it loads into that slot; anywhere
+    // else on the device, into the selected one (WP-5.17).
+    let slot = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device)
+        .and_then(|frame| {
+            let panel = frame.panel.as_ref()?;
+            let rect = placed.iter().find(|(id, _)| id == device)?.1;
+            let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+            body.min.x += ids::sidechain_width(frame);
+            let (_, cells) = crate::device_panel::place_shown(panel, frame.expanded, body);
+            cells
+                .into_iter()
+                .find_map(|(_, cell, slot)| slot.filter(|_| cell.contains(pointer)))
+        });
+    let mut args = json!({ "device": device, "path": path });
+    if let Some(slot) = slot {
+        args["slot"] = json!(slot);
+    }
+    invoke(events, ids::LOAD_SAMPLE, args);
 }
 
 impl DeviceViewUi {
@@ -322,7 +338,7 @@ impl DeviceViewUi {
         let _ = ui.interact(rect, id, Sense::hover());
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Group);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_description(format!(
                 "{}, {}{}",
                 frame.role.label(),
@@ -350,9 +366,9 @@ impl DeviceViewUi {
         let (bar, controls) = if strip {
             folded_layout(rect)
         } else if window {
-            window_layout(rect)
+            window_layout(rect, frame.expandable)
         } else {
-            unfolded_layout(rect)
+            unfolded_layout(rect, frame.expandable)
         };
         painter.rect_filled(bar, theme.sizes.corner, bar_colour);
         if frame.floating && !window {
@@ -370,11 +386,27 @@ impl DeviceViewUi {
             |ui| {
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
-                if let Some(panel) = frame.panel.as_ref().filter(|_| !strip) {
+                if frame.panel.is_some() && !strip {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
-                    crate::device_panel::show(ui, theme, frame, panel, body, events);
+                    let display = shell.device_display(frame.id);
+                    let track = shell.editor().document().device_track(frame.id);
+                    let played = |param| {
+                        let device = frame.id;
+                        track.and_then(|track| {
+                            shell.played(track, &AutomationTarget::Device { device, param })
+                        })
+                    };
+                    crate::device_panel::show(
+                        ui,
+                        theme,
+                        frame,
+                        display.as_ref(),
+                        body,
+                        &played,
+                        events,
+                    );
                 }
                 self.title(
                     ui,
@@ -386,11 +418,14 @@ impl DeviceViewUi {
                     events,
                 );
                 self.activator(ui, theme, frame, controls.activator, events);
+                if let Some(expand) = controls.expand {
+                    self.round_button(ui, theme, frame, "expand", expand, events);
+                }
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
                 let options =
                     self.round_button(ui, theme, frame, "options", controls.options, events);
-                egui::Popup::menu(&options).show(|ui| self.menu(ui, shell, events));
+                egui::Popup::menu(&options).show(|ui| self.menu(ui, shell, frame, events));
                 if let Some(dock) = controls.dock {
                     self.round_button(ui, theme, frame, "dock", dock, events);
                 }
@@ -450,7 +485,7 @@ impl DeviceViewUi {
         let painter = ui.painter_at(rect);
         if strip {
             // The name reads upwards on a folded device (observed).
-            let galley = painter.layout_no_wrap(frame.title.clone(), theme.small_font(), colour);
+            let galley = painter.layout_no_wrap(frame.title_text(), theme.small_font(), colour);
             let at = pos2(
                 rect.center().x - galley.size().y / 2.0,
                 rect.top() + galley.size().x.min(rect.height()),
@@ -460,7 +495,7 @@ impl DeviceViewUi {
             painter.text(
                 pos2(rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
-                &frame.title,
+                frame.title_text(),
                 theme.small_font(),
                 colour,
             );
@@ -479,7 +514,7 @@ impl DeviceViewUi {
         {
             invoke(events, ids::SELECT, select());
         }
-        response.context_menu(|ui| self.menu(ui, shell, events));
+        response.context_menu(|ui| self.menu(ui, shell, frame, events));
         if response.drag_started() && !window {
             DragAndDrop::set_payload(ui.ctx(), DeviceDrag { device: frame.id });
             if !frame.selected {
@@ -488,11 +523,11 @@ impl DeviceViewUi {
         }
         focus_ring(ui, theme, rect, &response);
         response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, frame.selected, &frame.title)
+            WidgetInfo::selected(WidgetType::Button, true, frame.selected, frame.title_text())
         });
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Button);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_selected(frame.selected);
             node.set_description(
                 if window {
@@ -574,6 +609,7 @@ impl DeviceViewUi {
             response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
         let (name, on) = match which {
             "hot_swap" => ("Hot-Swap Presets", frame.hot_swap),
+            "expand" => ("Expand", frame.expanded),
             "save" => ("Save Preset", false),
             "dock" => ("Dock", false),
             _ => ("Show Options", false),
@@ -581,6 +617,8 @@ impl DeviceViewUi {
         if pressed {
             match which {
                 "hot_swap" => invoke(events, ids::HOT_SWAP, json!({ "device": frame.id })),
+                // Spec: device-chains R34. It behaves as Fold does.
+                "expand" => invoke(events, ids::EXPAND, json!({ "device": frame.id })),
                 "save" => invoke(events, ids::SAVE_PRESET, json!({ "device": frame.id })),
                 // Spec: device-chains R27. One undo step, Dock Device.
                 "dock" => invoke(
@@ -623,6 +661,20 @@ impl DeviceViewUi {
                     Stroke::NONE,
                 ));
             }
+            "expand" => {
+                // A triangle: pointing right while the part is hidden, down
+                // while it shows.
+                let (a, b, c) = if on {
+                    (vec2(-0.5, -0.3), vec2(0.5, -0.3), vec2(0.0, 0.5))
+                } else {
+                    (vec2(-0.3, -0.5), vec2(-0.3, 0.5), vec2(0.5, 0.0))
+                };
+                painter.add(Shape::convex_polygon(
+                    vec![centre + a * r, centre + b * r, centre + c * r],
+                    ink,
+                    Stroke::NONE,
+                ));
+            }
             "save" => {
                 // A disk.
                 painter.rect_stroke(
@@ -654,8 +706,11 @@ impl DeviceViewUi {
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Button);
             node.set_label(name.to_owned());
-            if which == "hot_swap" {
+            if which == "hot_swap" || which == "expand" {
                 node.set_value(if on { "on" } else { "off" }.to_owned());
+            }
+            if which == "expand" {
+                node.set_description("Shows or hides the device's expanded part".to_owned());
             }
             if which == "dock" {
                 node.set_description("Docks the device back in its chain".to_owned());
@@ -667,7 +722,7 @@ impl DeviceViewUi {
     /// The device's context menu (C-DEVICE): each item runs what its
     /// shortcut runs in the Device View, or names the package that builds
     /// it.
-    fn menu(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    fn menu(&self, ui: &mut Ui, shell: &Shell, frame: &DeviceFrame, events: &mut Vec<UiEvent>) {
         for item in shown(&self.menu) {
             if item.is_separator() {
                 ui.separator();
@@ -685,6 +740,50 @@ impl DeviceViewUi {
                 None => response,
             };
             crate::menus::take_focus_first(ui, &response);
+        }
+        // The device's own items follow Save as Default Preset
+        // (C-DEVICE-015): each switch ticked while it's on, and choosing it
+        // turns it over, one undo step like any parameter change.
+        let options = frame.menu_options();
+        if !options.is_empty() {
+            ui.separator();
+        }
+        for option in options {
+            let text = if option.on {
+                format!("✔ {}", option.name)
+            } else {
+                option.name.to_owned()
+            };
+            let response = ui.button(text);
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                let value = if option.on { 0.0 } else { 1.0 };
+                invoke(
+                    events,
+                    "device.set_param",
+                    json!({ "device": frame.id, "param": option.param, "value": value }),
+                );
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+        }
+        // Strike's own items after its switches (31.4.5): the swap to
+        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // (T145) bring.
+        if frame.swaps_to_snapshot {
+            let response = ui.button("Swap to Snapshot");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+            let text = "Not built yet: arrives with the Drum Rack's pads (T145).";
+            let pad = ui.add_enabled(false, egui::Button::new("Save as Default Pad"));
+            ui.ctx().accesskit_node_builder(pad.id, |node| {
+                node.set_description(text.to_owned());
+            });
+            pad.on_disabled_hover_text(text);
         }
     }
 
@@ -794,6 +893,9 @@ fn move_index(
 /// Where a title bar's controls sit.
 struct Controls {
     activator: Rect,
+    /// The expand toggle, right of the activator, on a device that has an
+    /// expanded part (L-DEV-004).
+    expand: Option<Rect>,
     title: Rect,
     hot_swap: Rect,
     save: Rect,
@@ -805,9 +907,10 @@ struct Controls {
 /// The size of a title bar's round buttons.
 const BUTTON: f32 = 11.0;
 
-/// An unfolded frame's title bar along its top: the activator, the name,
-/// then Hot-Swap Presets, Save Preset, and Show Options at the right.
-fn unfolded_layout(rect: Rect) -> (Rect, Controls) {
+/// An unfolded frame's title bar along its top: the activator, the expand
+/// toggle where the device has an expanded part, the name, then Hot-Swap
+/// Presets, Save Preset, and Show Options at the right.
+fn unfolded_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     let y = bar.center().y;
     let button = |x: f32| Rect::from_center_size(pos2(x, y), vec2(BUTTON, BUTTON));
@@ -816,14 +919,16 @@ fn unfolded_layout(rect: Rect) -> (Rect, Controls) {
     let save = button(options.center().x - step);
     let hot_swap = button(save.center().x - step);
     let activator = button(bar.left() + 2.0 + BUTTON / 2.0);
+    let expand = expandable.then(|| button(activator.right() + 3.0 + BUTTON / 2.0));
     let title = Rect::from_min_max(
-        pos2(activator.right() + 4.0, bar.top()),
+        pos2(expand.unwrap_or(activator).right() + 4.0, bar.top()),
         pos2(hot_swap.left() - 4.0, bar.bottom()),
     );
     (
         bar,
         Controls {
             activator,
+            expand,
             title,
             hot_swap,
             save,
@@ -835,11 +940,11 @@ fn unfolded_layout(rect: Rect) -> (Rect, Controls) {
 
 /// A floating window's frame: the unfolded title bar along its top, with
 /// the Dock button at its right end, after Show Options.
-fn window_layout(rect: Rect) -> (Rect, Controls) {
+fn window_layout(rect: Rect, expandable: bool) -> (Rect, Controls) {
     let step = BUTTON + 3.0;
     let mut narrower = rect;
     narrower.max.x -= step;
-    let (_, mut controls) = unfolded_layout(narrower);
+    let (_, mut controls) = unfolded_layout(narrower, expandable);
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
     controls.dock = Some(Rect::from_center_size(
         pos2(bar.right() - 2.0 - BUTTON / 2.0, bar.center().y),
@@ -866,6 +971,7 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
         rect,
         Controls {
             activator,
+            expand: None,
             title,
             hot_swap,
             save,
@@ -945,7 +1051,7 @@ pub fn activator_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.activator
     } else {
-        unfolded_layout(frame).1.activator
+        unfolded_layout(frame, false).1.activator
     }
 }
 
@@ -955,7 +1061,7 @@ pub fn title_rect(frame: Rect, folded: bool) -> Rect {
     if folded {
         folded_layout(frame).1.title
     } else {
-        unfolded_layout(frame).1.title
+        unfolded_layout(frame, false).1.title
     }
 }
 
@@ -966,7 +1072,7 @@ pub fn button_rects(frame: Rect, folded: bool) -> [Rect; 3] {
     let controls = if folded {
         folded_layout(frame).1
     } else {
-        unfolded_layout(frame).1
+        unfolded_layout(frame, false).1
     };
     [controls.hot_swap, controls.save, controls.options]
 }

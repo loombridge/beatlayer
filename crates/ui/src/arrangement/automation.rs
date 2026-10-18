@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::widgets::{self, Choice};
+use crate::widgets::{self, Choice, Leds, NO_LEDS};
 
 /// How close to a breakpoint, in points, a click deletes it or a press drags
 /// it.
@@ -263,12 +263,24 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
     match target {
         AutomationTarget::Mixer {
             param: MixerParam::Volume,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Volume,
+            ..
         } => LaneScale::Volume,
         AutomationTarget::Mixer {
             param: MixerParam::Pan,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Pan,
+            ..
         } => LaneScale::Pan,
         AutomationTarget::Mixer {
             param: MixerParam::Mute,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Mute,
+            ..
         } => LaneScale::Switch,
         AutomationTarget::Send { .. } => LaneScale::Send,
         AutomationTarget::Device { device, param } => {
@@ -300,7 +312,10 @@ pub enum AutomationDevice {
 /// The device a target belongs to, as the device chooser sees it.
 pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
     match target {
-        AutomationTarget::Mixer { .. } | AutomationTarget::Send { .. } => AutomationDevice::Mixer,
+        AutomationTarget::Mixer { .. }
+        | AutomationTarget::Send { .. }
+        // The Device View's chain list picks chain controls (WP-5.2).
+        | AutomationTarget::Chain { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
     }
 }
@@ -320,16 +335,19 @@ pub fn device_choices(doc: &Document, track: TrackId) -> Vec<Choice<AutomationDe
     let mut choices = vec![Choice {
         label: "Track Mixer".to_owned(),
         value: AutomationDevice::Mixer,
+        leds: NO_LEDS,
     }];
     if let Some(track) = doc.track(track) {
         choices.extend(track.devices().map(|device| Choice {
             label: device_title(device),
             value: AutomationDevice::Device(device.id),
+            leds: NO_LEDS,
         }));
     }
     choices.push(Choice {
         label: "None".to_owned(),
         value: AutomationDevice::None,
+        leds: NO_LEDS,
     });
     choices
 }
@@ -352,6 +370,7 @@ pub fn control_choices(
                 choices.push(Choice {
                     label: label.to_owned(),
                     value: AutomationTarget::Mixer { param },
+                    leds: NO_LEDS,
                 });
             }
             for return_track in doc.returns() {
@@ -366,6 +385,7 @@ pub fn control_choices(
                 choices.push(Choice {
                     label,
                     value: AutomationTarget::Send { to: return_track },
+                    leds: NO_LEDS,
                 });
             }
         }
@@ -385,6 +405,7 @@ pub fn control_choices(
                                 device: device_id,
                                 param: param.id,
                             },
+                            leds: NO_LEDS,
                         }),
                 );
             }
@@ -417,6 +438,63 @@ pub(crate) fn default_target(
 /// selection.
 pub(crate) fn belongs_to(target: AutomationTarget, device: AutomationDevice) -> bool {
     device_of(target) == device
+}
+
+/// What the parameters `has` picks have on `track`: an LED in the automation
+/// colour while any has an envelope (grey while every such envelope is
+/// overridden), and one in the modulation colour while any is modulated by
+/// a clip's envelope.
+// Spec: modulation R8
+fn leds(
+    doc: &Document,
+    track: TrackId,
+    theme: &Theme,
+    has: impl Fn(&AutomationTarget) -> bool,
+) -> Leds {
+    let Some(track) = doc.track(track) else {
+        return NO_LEDS;
+    };
+    let c = &theme.colors;
+    let mut envelopes = track.automation().filter(|(target, _)| has(target));
+    let automation = envelopes.next().map(|first| {
+        if first.1.enabled || envelopes.any(|(_, automation)| automation.enabled) {
+            c.automation.0
+        } else {
+            c.inactive.0
+        }
+    });
+    let modulation = track
+        .clips()
+        .chain(track.slots().map(|(_, clip)| clip))
+        .any(|clip| clip.envelopes().any(|envelope| has(&envelope.target)))
+        .then_some(c.modulation.0);
+    [automation, modulation]
+}
+
+/// Marks the device chooser's choices with their LEDs.
+pub(crate) fn mark_devices(
+    choices: &mut [Choice<AutomationDevice>],
+    doc: &Document,
+    track: TrackId,
+    theme: &Theme,
+) {
+    for choice in choices {
+        choice.leds = leds(doc, track, theme, |target| {
+            device_of(*target) == choice.value
+        });
+    }
+}
+
+/// Marks the control chooser's choices with their LEDs.
+pub(crate) fn mark_controls(
+    choices: &mut [Choice<AutomationTarget>],
+    doc: &Document,
+    track: TrackId,
+    theme: &Theme,
+) {
+    for choice in choices {
+        choice.leds = leds(doc, track, theme, |target| *target == choice.value);
+    }
 }
 
 /// A drag on an automation lane.
@@ -722,7 +800,8 @@ pub(super) fn paint_envelope(painter: &Painter, lane: &Lane<'_>, theme: &Theme) 
     if points.len() >= 2 {
         painter.add(egui::Shape::line(
             points,
-            Stroke::new(1.5, theme.colors.accent.0),
+            // Spec: modulation R9: the base, in the automation colour.
+            Stroke::new(1.5, theme.colors.automation.0),
         ));
     }
     for point in envelope.points() {
@@ -760,7 +839,8 @@ pub(super) fn lane_header(
     );
 
     let current_device = target.map_or(AutomationDevice::None, device_of);
-    let devices = device_choices(doc, track);
+    let mut devices = device_choices(doc, track);
+    mark_devices(&mut devices, doc, track, theme);
     // The choosers are Tab-reachable: the Accessibility spec, R4.
     let device_salt = format!("arrangement-automation-device-{}", track.0);
     let control_salt = format!("arrangement-automation-control-{}", track.0);
@@ -789,7 +869,8 @@ pub(super) fn lane_header(
         );
     }
 
-    let controls = control_choices(shell, doc, current_device);
+    let mut controls = control_choices(shell, doc, current_device);
+    mark_controls(&mut controls, doc, track, theme);
     let current_control = target.filter(|target| belongs_to(*target, current_device));
     if let Some(chosen) = widgets::chooser(
         &mut header,
@@ -821,6 +902,16 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
             || "Send".to_owned(),
             |track| format!("Send {}", track.name()),
         ),
+        AutomationTarget::Chain { chain, param } => {
+            let name = doc
+                .chain(chain)
+                .map_or("Chain", |chain| chain.name.as_str());
+            match param {
+                MixerParam::Volume => format!("{name} Volume"),
+                MixerParam::Pan => format!("{name} Pan"),
+                MixerParam::Mute => format!("{name} Activator"),
+            }
+        }
         AutomationTarget::Device { device, param } => doc
             .device(device)
             .and_then(|device| {

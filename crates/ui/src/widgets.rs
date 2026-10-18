@@ -3,8 +3,8 @@
 
 use egui::accesskit::{self, Role};
 use egui::{
-    Align2, Color32, Id, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
-    WidgetType, pos2, vec2,
+    Align2, Color32, Id, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::layout::{Element, Kind, Placement};
@@ -27,6 +27,9 @@ pub struct Look {
     /// Whether a value is being typed into the element, which it draws as
     /// an entry.
     pub entry: bool,
+    /// Whether a live element can't be used now: it is drawn quieter and
+    /// assistive technology reads it as disabled.
+    pub disabled: bool,
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
@@ -93,7 +96,7 @@ fn paint(
         };
         painter.rect_filled(rect, corner, face);
     }
-    let ink = if !live {
+    let ink = if !live || look.disabled {
         c.pending.0
     } else if look.on {
         c.accent_text.0
@@ -370,8 +373,19 @@ fn describe(ui: &Ui, placement: &Placement, look: &Look, response: &Response) {
             node.remove_action(accesskit::Action::Click);
             node.remove_action(accesskit::Action::Focus);
         }
+        if look.disabled {
+            node.set_disabled();
+        }
     });
 }
+
+/// The LEDs a choice carries, in a fixed order: the automation colour's
+/// place, then the modulation colour's (modulation R8). `None` leaves a
+/// place empty.
+pub type Leds = [Option<Color32>; 2];
+
+/// A choice with no LED.
+pub const NO_LEDS: Leds = [None; 2];
 
 /// One option of a [`chooser`].
 #[derive(Clone, Debug, PartialEq)]
@@ -380,6 +394,57 @@ pub struct Choice<T> {
     pub label: String,
     /// What choosing it means.
     pub value: T,
+    /// What it's marked with.
+    pub leds: Leds,
+}
+
+/// Draws `leds` with their right edge at `right`, on the line at `y`.
+fn paint_leds(painter: &Painter, leds: Leds, right: f32, y: f32) {
+    for (place, led) in leds.into_iter().enumerate() {
+        if let Some(colour) = led {
+            let x = right - 4.0 - 8.0 * (leds.len() - 1 - place) as f32;
+            painter.circle_filled(pos2(x, y), 3.0, colour);
+        }
+    }
+}
+
+/// The segment of a knob's ring a modulated control shows, from the
+/// position of its base to the position it plays (both from 0 to 1), or
+/// `None` while it plays its base.
+// Spec: modulation R7
+#[must_use]
+pub fn ring_segment(base: f32, played: f32) -> Option<(f32, f32)> {
+    ((played - base).abs() > 1e-3).then_some((base, played))
+}
+
+/// Draws a [`ring_segment`] over a knob's ring in the theme's modulation
+/// colour; `point` gives the ring's point at a position from 0 to 1.
+// Spec: modulation R7
+pub fn paint_ring_segment(
+    painter: &Painter,
+    theme: &Theme,
+    (from, to): (f32, f32),
+    point: impl Fn(f32) -> Pos2,
+) {
+    let steps = 16;
+    let points = (0..=steps)
+        .map(|i| point(from + (to - from) * i as f32 / steps as f32))
+        .collect();
+    painter.add(Shape::line(
+        points,
+        Stroke::new(2.0, theme.colors.modulation.0),
+    ));
+}
+
+/// What assistive technology reads of a control: its base's text, and while
+/// it's modulated the text of the value it plays after it.
+// Spec: modulation R7
+#[must_use]
+pub fn modulated_text(base: String, played: Option<String>) -> String {
+    played.map_or_else(
+        || base.clone(),
+        |played| format!("{base}, modulated to {played}"),
+    )
 }
 
 /// A chooser (a drop-down) in the Settings window: a box showing the
@@ -409,6 +474,7 @@ pub fn chooser<T: Clone + PartialEq>(
     let response = ui.interact(rect, id, sense);
     let index = current.and_then(|value| choices.iter().position(|c| c.value == *value));
     let text = index.map_or("", |i| choices[i].label.as_str()).to_owned();
+    let leds = index.map_or(NO_LEDS, |i| choices[i].leds);
     let mut chosen = None;
 
     if response.has_focus() {
@@ -454,7 +520,16 @@ pub fn chooser<T: Clone + PartialEq>(
     );
     let ink = if enabled { c.text.0 } else { c.pending.0 };
     // The text stops short of the arrow; a long choice is cut off there.
-    let text_area = Rect::from_min_max(rect.min, pos2(rect.right() - 16.0, rect.bottom()));
+    let lit = leds.iter().any(Option::is_some);
+    let text_area = Rect::from_min_max(
+        rect.min,
+        pos2(
+            rect.right() - 16.0 - if lit { 18.0 } else { 0.0 },
+            rect.bottom(),
+        ),
+    );
+    // Spec: modulation R8: the chosen parameter's LEDs, left of the arrow.
+    paint_leds(&painter, leds, rect.right() - 14.0, rect.center().y);
     ui.painter_at(text_area).text(
         pos2(rect.left() + 6.0, rect.center().y),
         Align2::LEFT_CENTER,
@@ -489,7 +564,14 @@ pub fn chooser<T: Clone + PartialEq>(
     egui::Popup::menu(&response).width(rect.width()).show(|ui| {
         for choice in choices {
             let selected = current == Some(&choice.value);
-            if ui.selectable_label(selected, &choice.label).clicked() {
+            let item = ui.selectable_label(selected, &choice.label);
+            paint_leds(
+                ui.painter(),
+                choice.leds,
+                item.rect.right() - 2.0,
+                item.rect.center().y,
+            );
+            if item.clicked() {
                 chosen = Some(choice.value.clone());
             }
         }

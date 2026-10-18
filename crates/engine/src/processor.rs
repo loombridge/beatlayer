@@ -10,6 +10,7 @@ use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
 
 use crate::EngineConfig;
+use crate::capture::CapturedMidi;
 use crate::gc::{Owned, Program};
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand,
@@ -21,8 +22,8 @@ use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
 use crate::session::{
-    Playhead, SceneOverride, SessionCommand, SessionLauncher, SessionPlayback, SlotState,
-    SlotStatus,
+    Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
+    SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
@@ -293,6 +294,9 @@ pub struct Processor {
     log: Writer,
     /// MIDI input from the MIDI threads (WP-2.2).
     midi: MidiIn,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    captured: Producer<CapturedMidi>,
 }
 
 impl Processor {
@@ -301,6 +305,7 @@ impl Processor {
         queue: Consumer<Message>,
         reports: Producer<Report>,
         state: triple_buffer::Input<EngineState>,
+        captured: Producer<CapturedMidi>,
     ) -> Self {
         Self {
             queue,
@@ -342,6 +347,7 @@ impl Processor {
             cpu_load_max: 0.0,
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
+            captured,
             config,
         }
     }
@@ -469,6 +475,7 @@ impl Processor {
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
             self.capture(done, length);
+            self.log_captured(done, length);
             self.render(done, length);
             done += length;
         }
@@ -1033,13 +1040,13 @@ impl Processor {
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
             SessionCommand::BackToArrangement => {
-                self.session.back_to_arrangement(None);
+                self.session.back_to_arrangement(None, self.position);
                 // Spec: session-view R23. Returning every track also gives
                 // the set's own tempo and signature back.
                 self.clear_scene_override();
             }
             SessionCommand::TrackBackToArrangement(track) => {
-                self.session.back_to_arrangement(Some(track));
+                self.session.back_to_arrangement(Some(track), self.position);
             }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
             SessionCommand::Record => self.record_session(),
@@ -1298,6 +1305,45 @@ impl Processor {
             while let Some(scene) = self.session.take_due_scene(self.position) {
                 self.apply_scene(scene);
             }
+        }
+        self.flush_launches();
+    }
+
+    /// Hands the starts and ends the launcher logged to the Arrangement
+    /// take's ring, or drops them when no such take runs (WP-3.13).
+    fn flush_launches(&mut self) {
+        if self.take.is_some()
+            && self.session_take.is_none()
+            && let Some(log) = self
+                .plan
+                .as_mut()
+                .and_then(|plan| plan.get_mut().launches.as_mut())
+        {
+            for event in self.session.log.drain(..) {
+                log.push(event);
+            }
+        }
+        self.session.log.clear();
+    }
+
+    /// A take that begins with Session clips playing logs a start for each,
+    /// at the take's first frame (WP-3.13).
+    fn log_playing_clips(&mut self) {
+        let at = self.position;
+        let Some(log) = self
+            .plan
+            .as_mut()
+            .and_then(|plan| plan.get_mut().launches.as_mut())
+        else {
+            return;
+        };
+        for (track, scene, launched) in self.session.started() {
+            log.push(SessionEvent {
+                track,
+                scene,
+                at,
+                launched: Some(launched),
+            });
         }
     }
 
@@ -1621,6 +1667,7 @@ impl Processor {
                 next: self.position,
                 wrap: None,
             });
+            self.log_playing_clips();
         }
         let written = self.take.map_or(0, |take| take.written);
         let skip = (delay.max(0) as u64)
@@ -1640,6 +1687,36 @@ impl Processor {
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
             take.next = self.position + Frames(frames as i64);
+        }
+    }
+
+    /// Copies the notes the monitoring MIDI tracks received in the frames
+    /// `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// stamped with the engine clock and, while the song plays, the song
+    /// frame (WP-3.14).
+    fn log_captured(&mut self, offset: usize, frames: usize) {
+        let Some(program) = self.program.as_ref() else {
+            return;
+        };
+        let song = (self.playing && !self.metronome.is_counting_in()).then_some(self.position);
+        for (track, events) in program.get().midi.monitored_inputs() {
+            for event in events {
+                let at = event.offset as usize;
+                let note = event.message.is_note_on() || event.message.is_note_off();
+                if !note || at < offset || at >= offset + frames {
+                    continue;
+                }
+                let into = (at - offset) as i64;
+                let logged = CapturedMidi {
+                    track,
+                    clock: self.clock + at as u64,
+                    song: song.map(|position| position + Frames(into)),
+                    message: event.message,
+                };
+                if self.captured.push(logged).is_err() {
+                    self.midi.counters.capture_dropped += 1;
+                }
+            }
         }
     }
 
@@ -1781,6 +1858,10 @@ impl Processor {
             .extend(self.session.overridden().iter().copied().take(room));
         state.meters.clear();
         state.meters_truncated = false;
+        state.modulated.clear();
+        if let Some(program) = &self.program {
+            program.get().modulated(&mut state.modulated);
+        }
         if let Some(program) = &self.program {
             let program = program.get();
             for &task in &program.order {

@@ -43,6 +43,12 @@ display = "#14171b"
 display_line = "#f2f4f7"
 value_fill = "#1f6feb"
 inactive = "#9aa3ad"
+# Automation and modulation (WP-5.9): an envelope's line and the LED of a
+# parameter that has one, and a parameter's modulation: the segment of its
+# ring, the mark under its fader, a clip's modulation envelope.
+automation = "#c46a1f"
+modulation = "#7a4fc4"
+mapping = "#12857a"
 track_palette = [
   "#d4584b", "#dd8446", "#d6af3c", "#93b642", "#47a95a", "#35a68b", "#3699c2",
   "#4676cc", "#6a5fc9", "#9156c4", "#c056a3", "#c85c77", "#88939e", "#ad8e6c",

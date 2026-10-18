@@ -393,6 +393,8 @@ pub struct AudioHost {
     engines: u64,
     /// Reports from engines that have closed, not yet taken.
     held_reports: Vec<Report>,
+    /// Captured notes from closed engines, not yet read (WP-3.14).
+    held_captured: Vec<bl_engine::CapturedMidi>,
     /// The CLAP host whose factory makes each engine's CLAP nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
@@ -477,6 +479,7 @@ impl AudioHost {
             streams: None,
             engines: 0,
             held_reports: Vec::new(),
+            held_captured: Vec::new(),
             plugins: None,
             au: None,
             vst3: None,
@@ -599,6 +602,7 @@ impl AudioHost {
         self.memory.playing = false;
         if let Some(engine) = self.engine.as_mut() {
             self.held_reports.extend(engine.reports());
+            self.held_captured.extend(engine.captured());
         }
         // The processor goes with the stream's callback; then the engine's
         // threads stop, and its drop thread frees the last program.
@@ -712,6 +716,16 @@ impl AudioHost {
         }
     }
 
+    /// The parameters under modulation as the engine last published them
+    /// (WP-5.9): what the knobs' rings and the faders' marks draw from.
+    /// Empty while the song doesn't play, and while no engine runs.
+    pub fn modulated_into(&mut self, out: &mut Vec<bl_engine::PlayedParam>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().modulated);
+        }
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which
@@ -749,6 +763,16 @@ impl AudioHost {
     pub fn cancel(&mut self, id: u64) -> Result<(), String> {
         self.running_engine()?.cancel(id);
         Ok(())
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call, for
+    /// Capture MIDI (WP-3.14), the closed engines' first.
+    pub fn take_captured(&mut self) -> Vec<bl_engine::CapturedMidi> {
+        let mut notes = std::mem::take(&mut self.held_captured);
+        if let Some(engine) = self.engine.as_mut() {
+            notes.extend(engine.captured());
+        }
+        notes
     }
 
     /// The engine's reports since the last call, the closed engines' first:
@@ -852,6 +876,19 @@ impl AudioHost {
             if state.program.is_some() {
                 out.extend_from_slice(&state.meters);
             }
+        }
+    }
+
+    /// Copies the display data the engine's devices last published into
+    /// `out`, reusing its capacity (the device framework spec, R35). Empty
+    /// while no engine runs.
+    pub fn displays_into(
+        &self,
+        out: &mut std::collections::BTreeMap<bl_model::DeviceId, bl_engine::DisplayData>,
+    ) {
+        match self.engine.as_ref() {
+            Some(engine) => engine.displays().read_all(out),
+            None => out.clear(),
         }
     }
 

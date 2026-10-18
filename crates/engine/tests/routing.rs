@@ -20,8 +20,9 @@ mod common;
 
 use bl_commands::Registry as Commands;
 use bl_engine::routing::Graph;
-use bl_model::{Editor, TrackId, TrackKind, registry};
-use common::{Rig, dc, track};
+use bl_engine::testing::{GAIN, GAIN_PARAM};
+use bl_model::{ChainId, Command, Editor, RackKind, TrackId, TrackKind, registry};
+use common::{Rig, dc, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
 
 /// Runs a document command by ID, as an agent does, checking its arguments
@@ -320,4 +321,169 @@ fn solo_hears_the_tracks_routed_into_a_soloed_track() {
     );
     rig.sync();
     assert_eq!(settled(&mut rig), 0.5);
+}
+
+/// A source track of 1.0 into Main with an audio effect rack after it: a
+/// chain of a gain of 0.5 at chain volume 0.5 (Post FX 0.5, Post Mixer
+/// 0.25), and an empty chain at volume 0 that adds nothing. A tapping track
+/// of no devices that monitors its input, into Main too.
+fn tapped() -> (Rig, TrackId, TrackId, Vec<ChainId>) {
+    let mut rig = Rig::new(256);
+    let ed = &mut rig.editor;
+    // The tapper is made last, so it comes first in display order.
+    let source = track(ed, TrackKind::Audio, None);
+    let tapper = track(ed, TrackKind::Audio, None);
+    dc(ed, source, 1.0);
+    let (_, chains) = rack(ed, source, RackKind::AudioEffect, 2);
+    effect_in(ed, chains[0], GAIN, &[(GAIN_PARAM, 0.5)]);
+    ed.apply(Command::SetChainVolume {
+        chain: chains[0],
+        volume: 0.5,
+    })
+    .unwrap();
+    ed.apply(Command::SetChainVolume {
+        chain: chains[1],
+        volume: 0.0,
+    })
+    .unwrap();
+    monitor(ed, tapper, "in");
+    (rig, source, tapper, chains)
+}
+
+fn tap_chain(rig: &mut Rig, tapper: TrackId, source: TrackId, chain: ChainId, tap: &str) {
+    run(
+        &mut rig.editor,
+        "routing.set_input",
+        json!({ "track": tapper, "input":
+                { "type": "track", "track": source, "tap": tap, "chain": chain } }),
+    );
+    rig.sync();
+}
+
+// Spec: racks R38, R40. Each tap carries its chain's signal at its point,
+// at any block size, and taking one leaves the rack's output as it was.
+#[test]
+fn chain_taps_carry_the_signal_at_their_point() {
+    for size in [1, 64, 256] {
+        let (mut rig, source, tapper, chains) = tapped();
+        rig.sync();
+        let alone = settled_at(&mut rig, size);
+        assert_eq!(alone, 0.25, "the rack's sum, with nothing tapping it");
+        for (tap, heard) in [("pre_fx", 1.0), ("post_fx", 0.5), ("post_mixer", 0.25)] {
+            tap_chain(&mut rig, tapper, source, chains[0], tap);
+            assert_eq!(
+                settled_at(&mut rig, size),
+                alone + heard,
+                "{tap}, block size {size}"
+            );
+            let meter = rig.monitor.state().meter(source).unwrap();
+            assert_eq!(
+                meter,
+                [alone, alone],
+                "{tap}: the rack's output is unchanged"
+            );
+        }
+        // The other chain, at volume 0: Post FX is its devices' output, Post
+        // Mixer is silent.
+        tap_chain(&mut rig, tapper, source, chains[1], "post_fx");
+        assert_eq!(settled_at(&mut rig, size), alone + 1.0, "an empty chain");
+        tap_chain(&mut rig, tapper, source, chains[1], "post_mixer");
+        assert_eq!(settled_at(&mut rig, size), alone, "after a mixer at −∞ dB");
+    }
+}
+
+fn settled_at(rig: &mut Rig, size: usize) -> f32 {
+    rig.render(SETTLE, size);
+    let last = rig.last();
+    assert!(last.iter().all(|&s| s == last[0]), "a steady level");
+    last[0]
+}
+
+// Spec: racks R38. A rack inside a chain offers its chains too, and a
+// switched-off rack carries nothing to a route that taps its chains.
+#[test]
+fn a_nested_racks_chain_is_tapped_and_a_rack_that_is_off_is_silent() {
+    let (mut rig, source, tapper, chains) = tapped();
+    let (nested, inner) = rack_in(&mut rig.editor, chains[0], RackKind::AudioEffect, 1);
+    effect_in(&mut rig.editor, inner[0], GAIN, &[(GAIN_PARAM, 0.5)]);
+    // The outer chain's gain leaves 0.5 at the inner rack, and its gain
+    // 0.25 after; the rack's sum is that at the outer chain's volume.
+    let alone = 0.125;
+    tap_chain(&mut rig, tapper, source, inner[0], "post_fx");
+    assert_eq!(
+        settled_at(&mut rig, 64),
+        alone + 0.25,
+        "after the inner gain"
+    );
+    tap_chain(&mut rig, tapper, source, inner[0], "pre_fx");
+    assert_eq!(
+        settled_at(&mut rig, 64),
+        alone + 0.5,
+        "at the inner rack's input"
+    );
+
+    rig.apply(Command::SetDeviceEnabled {
+        device: nested,
+        enabled: false,
+    });
+    assert_eq!(
+        settled_at(&mut rig, 64),
+        0.25,
+        "the inner rack passes its input on, and its chains tap silence"
+    );
+}
+
+// Spec: racks R40. Solo silences a track's Post Mixer tap with its output,
+// but never a chain's taps, which come before the track's mixer.
+#[test]
+fn solo_never_silences_a_chain_tap() {
+    let (mut rig, source, tapper, chains) = tapped();
+    for (tap, heard) in [("pre_fx", 1.0), ("post_fx", 0.5), ("post_mixer", 0.25)] {
+        tap_chain(&mut rig, tapper, source, chains[0], tap);
+        run(
+            &mut rig.editor,
+            "mixer.solo_exclusive",
+            json!({ "track": tapper }),
+        );
+        rig.sync();
+        assert_eq!(
+            settled(&mut rig),
+            heard,
+            "{tap}: the source is quiet, the tap isn't"
+        );
+    }
+    // Contrast: the source's own Post Mixer is silenced with it.
+    run(
+        &mut rig.editor,
+        "routing.set_input",
+        json!({ "track": tapper, "input": { "type": "track", "track": source } }),
+    );
+    rig.sync();
+    assert_eq!(settled(&mut rig), 0.0);
+}
+
+// Spec: racks R40, routing R14. The tapped track runs first, whatever the
+// display order, and a chain tap that closes a loop carries nothing.
+#[test]
+fn a_chain_tap_runs_after_the_tapped_track_and_a_loop_is_silent() {
+    let (mut rig, source, tapper, chains) = tapped();
+    tap_chain(&mut rig, tapper, source, chains[0], "post_fx");
+    // The tapper comes first in display order: were it to run first, it
+    // would hear the source's last block, and the first has none.
+    rig.render(64, 64);
+    assert_eq!(
+        rig.last()[0],
+        0.25 + 0.5,
+        "the tap is heard in the same block"
+    );
+    // The source takes the tapper's output: the tap would close a loop.
+    monitor(&mut rig.editor, source, "in");
+    run(
+        &mut rig.editor,
+        "routing.set_input",
+        json!({ "track": source, "input": { "type": "track", "track": tapper } }),
+    );
+    rig.sync();
+    let graph = Graph::of(rig.editor.document());
+    assert_eq!(graph.broken.len(), 1, "one of the two routes is broken");
 }

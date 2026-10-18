@@ -12,6 +12,8 @@
 //! - [`vst3`]: VST3 hosting, part 1 (WP-2.7): a plug-in bundle or module
 //!   loaded by path runs as a device, its component and controller
 //!   connected, with sample-accurate parameter changes and notes.
+//! - [`Hosts`] and [`Loans`]: one offline-render loan (WP-2.6b, WP-4.21)
+//!   across the three formats.
 //! - [`scan`]: the plug-in scanner (WP-2.9): finds the plug-ins on this
 //!   machine in a child process with a timeout, blocklists the ones that
 //!   fail, and caches what it found by path and modification time.
@@ -21,7 +23,11 @@
 
 pub mod au;
 pub mod clap;
+mod drive;
+mod lend;
 pub mod scan;
 pub mod vst3;
 #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 pub mod window;
+
+pub use lend::{Hosts, Loans};

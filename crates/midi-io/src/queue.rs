@@ -1,9 +1,9 @@
 //! The queue from the MIDI threads to the audio thread.
 
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use bl_core::midi::MidiInputEvent;
+use bl_core::midi::{MidiInputEvent, MidiMessage};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 /// Makes the queue that carries MIDI input to the engine: the sending end,
@@ -30,6 +30,7 @@ pub fn input_queue(capacity: usize) -> (InputSender, Consumer<MidiInputEvent>) {
     let sender = InputSender {
         producer: Arc::new(Mutex::new(producer)),
         stats: Arc::new(MidiStats::default()),
+        tap: Arc::new(Tap::default()),
     };
     (sender, consumer)
 }
@@ -44,12 +45,43 @@ pub fn input_queue(capacity: usize) -> (InputSender, Consumer<MidiInputEvent>) {
 pub struct InputSender {
     producer: Arc<Mutex<Producer<MidiInputEvent>>>,
     stats: Arc<MidiStats>,
+    tap: Arc<Tap>,
+}
+
+/// How many note messages the tap holds between two reads.
+const TAP_ROOM: usize = 256;
+
+/// A copy of the note messages for the main thread, made while someone asks
+/// for it: Chord's Learn listens to what is played (the chord spec).
+struct Tap {
+    on: AtomicBool,
+    notes: Mutex<Vec<MidiMessage>>,
+}
+
+impl Default for Tap {
+    fn default() -> Self {
+        Self {
+            on: AtomicBool::new(false),
+            notes: Mutex::new(Vec::with_capacity(TAP_ROOM)),
+        }
+    }
 }
 
 impl InputSender {
     /// Queues a message for the engine. Returns `false`, counting it as
     /// dropped, if the queue is full.
     pub fn send(&self, event: MidiInputEvent) -> bool {
+        if self.tap.on.load(Relaxed) && (event.message.is_note_on() || event.message.is_note_off())
+        {
+            let mut notes = self
+                .tap
+                .notes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if notes.len() < TAP_ROOM {
+                notes.push(event.message);
+            }
+        }
         let pushed = self
             .producer
             .lock()
@@ -62,6 +94,32 @@ impl InputSender {
             self.stats.dropped.fetch_add(1, Relaxed);
         }
         pushed
+    }
+
+    /// Starts or stops copying note messages for the main thread to read
+    /// with [`take_notes`](Self::take_notes). Stopping forgets what was
+    /// copied.
+    pub fn set_tap(&self, on: bool) {
+        self.tap.on.store(on, Relaxed);
+        if !on {
+            self.tap
+                .notes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+        }
+    }
+
+    /// Moves the note messages copied since the last call into `into`, in
+    /// the order they came.
+    pub fn take_notes(&self, into: &mut Vec<MidiMessage>) {
+        into.append(
+            &mut self
+                .tap
+                .notes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
     }
 
     /// Starts a fresh queue of `capacity` messages and returns its consuming

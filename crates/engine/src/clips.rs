@@ -97,6 +97,18 @@ pub trait MediaLibrary: Send + Sync {
     }
 }
 
+/// A decoded sample for one of a device's sample slots: what the compiler
+/// sends a node that plays media, once per filled slot (WP-2.16, WP-5.17).
+/// The sampler has the one slot, 0.
+#[derive(Clone)]
+pub struct SlotSample {
+    /// The slot, as the device's [`media`](bl_model::Device::media) list
+    /// numbers them.
+    pub slot: usize,
+    /// The audio, at the engine's rate.
+    pub sample: Arc<SampleData>,
+}
+
 /// A source in memory over `data`, which is at the engine's rate.
 fn in_memory(data: Arc<SampleData>) -> OpenedSource {
     OpenedSource {

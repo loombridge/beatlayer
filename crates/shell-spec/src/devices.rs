@@ -5,7 +5,7 @@
 //! The document's own device commands (`device.insert`, `device.remove`,
 //! `device.move`, `device.rename`, `device.set_enabled`,
 //! `device.set_show_preset_name`, `device.set_state`, `device.set_param`,
-//! `device.set_floating`)
+//! `device.set_floating`, `device.compare_switch`, `device.compare_copy`)
 //! are `bl-model`'s. Those here run on the shell, which knows the selection,
 //! the clipboard, the User Library, and the browser. A command whose
 //! `device` is left out acts on the device selected in the Device View, as
@@ -16,8 +16,8 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ContentHash, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, Tap,
-    TrackId, TrackKind, WindowFrame,
+    ChainId, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout,
+    DeviceRole, ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ pub const ADD: &str = "device.add";
 pub const SELECT: &str = "device.select";
 /// `device.fold`: fold or unfold a device.
 pub const FOLD: &str = "device.fold";
+/// `device.expand`: show or hide a device's expanded part (WP-5.42).
+pub const EXPAND: &str = "device.expand";
 /// `device.cut`: cut a device to the clipboard.
 pub const CUT: &str = "device.cut";
 /// `device.copy`: copy a device to the clipboard.
@@ -48,6 +50,13 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.swap_to_snapshot`: replace a Strike drum sampler with the Snapshot
+/// sampler, keeping its sample's start and length (one-shot drum sampler
+/// R22).
+pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
+/// `device.select_slot`: select a sample slot of a device that has them
+/// (WP-5.17).
+pub const SELECT_SLOT: &str = "device.select_slot";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -55,6 +64,28 @@ pub const PARAMETERS: &str = "device.parameters";
 /// `device.show_sidechain`: show or hide a device's sidechain section
 /// (WP-2.19b).
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
+/// `device.display`: what a device's display shows now (WP-5.43).
+pub const DISPLAY: &str = "device.display";
+/// `device.set_display_view`: choose the view a device's display shows
+/// (WP-5.43).
+pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
+
+/// `modulator.arm_map`: arm or disarm a modulator slot's Map button
+/// (WP-5.10).
+pub const ARM_MAP: &str = "modulator.arm_map";
+/// `device.group`: wrap the selected devices, or chains, in a new rack
+/// (WP-5.1).
+pub const GROUP: &str = "device.group";
+/// `device.ungroup`: take the selected rack apart (WP-5.1).
+pub const UNGROUP: &str = "device.ungroup";
+/// `chain.copy`: copy a chain to the chain clipboard (WP-5.1).
+pub const CHAIN_COPY: &str = "chain.copy";
+/// `chain.cut`: cut a chain to the chain clipboard.
+pub const CHAIN_CUT: &str = "chain.cut";
+/// `chain.paste`: paste the clipboard's chain into a rack.
+pub const CHAIN_PASTE: &str = "chain.paste";
+/// `chain.duplicate`: duplicate a chain straight after itself.
+pub const CHAIN_DUPLICATE: &str = "chain.duplicate";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -64,6 +95,13 @@ pub const SET_WINDOW: &str = "device.set_window";
 /// device (`bl-model`'s).
 pub const SET_FLOATING: &str = "device.set_floating";
 
+/// `device.compare_switch`: make a native device's other A/B state active
+/// (`bl-model`'s).
+pub const COMPARE_SWITCH: &str = "device.compare_switch";
+/// `device.compare_copy`: copy a native device's active A/B state over the
+/// other (`bl-model`'s).
+pub const COMPARE_COPY: &str = "device.compare_copy";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -71,6 +109,7 @@ pub const IDS: &[&str] = &[
     ADD,
     SELECT,
     FOLD,
+    EXPAND,
     CUT,
     COPY,
     PASTE,
@@ -79,11 +118,22 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     LOAD_SAMPLE,
+    SWAP_TO_SNAPSHOT,
+    SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
+    DISPLAY,
+    SET_DISPLAY_VIEW,
+    ARM_MAP,
     WINDOWS,
     SET_WINDOW,
+    GROUP,
+    UNGROUP,
+    CHAIN_COPY,
+    CHAIN_CUT,
+    CHAIN_PASTE,
+    CHAIN_DUPLICATE,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -94,6 +144,8 @@ pub const ON_SELECTED: &[&str] = &[
     "device.set_enabled",
     "device.set_show_preset_name",
     SET_FLOATING,
+    COMPARE_SWITCH,
+    COMPARE_COPY,
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -129,7 +181,7 @@ pub const SIDECHAIN_SECTION_WIDTH: f32 = 80.0;
 #[must_use]
 pub fn body_width(frame: &DeviceFrame) -> f32 {
     frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
-        panel.description.layout.docked_size().width
+        panel.layout(frame.expanded).docked_size().width
     })
 }
 
@@ -172,7 +224,7 @@ pub fn docked_width(frame: &DeviceFrame) -> f32 {
 #[must_use]
 pub fn body_height(frame: &DeviceFrame) -> f32 {
     frame.panel.as_ref().map_or(BODY_HEIGHT, |panel| {
-        panel.description.layout.docked_size().height
+        panel.layout(frame.expanded).docked_size().height
     })
 }
 
@@ -192,7 +244,7 @@ pub fn window_grows(frame: &DeviceFrame) -> (bool, bool) {
     frame
         .panel
         .as_ref()
-        .map_or((false, false), |panel| panel.description.layout.grows())
+        .map_or((false, false), |panel| panel.layout(frame.expanded).grows())
 }
 
 /// What the generic UI needs to draw a device (WP-2.5): its type's
@@ -209,9 +261,27 @@ pub struct DevicePanel {
     /// target that opens the plug-in's editor. False for a native device.
     #[serde(default)]
     pub plugin: bool,
+    /// For a device with sample slots (WP-5.17): the slot whose controls
+    /// the panel shows, a view setting that isn't saved with the set.
+    #[serde(default)]
+    pub selected_slot: u32,
+    /// For a device with sample slots: whether each slot holds a sample.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded_slots: Vec<bool>,
+    /// For a device with sample slots: the key each slot plays, as Live
+    /// names notes (`C3`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slot_keys: Vec<String>,
 }
 
 impl DevicePanel {
+    /// The layout as drawn: with the expanded part while `expanded`
+    /// ([`DeviceLayout::shown`]).
+    #[must_use]
+    pub fn layout(&self, expanded: bool) -> DeviceLayout {
+        self.description.layout.shown(expanded)
+    }
+
     /// The value of the parameter at `index` in the description.
     #[must_use]
     pub fn value(&self, index: usize) -> f64 {
@@ -221,6 +291,29 @@ impl DevicePanel {
                 .get(index)
                 .map_or(0.0, |p| p.default)
         })
+    }
+}
+
+impl DeviceFrame {
+    /// The device's own items in its Show Options menu, in the order its
+    /// type lists them: they follow Save as Default Preset (C-DEVICE-015).
+    #[must_use]
+    pub fn menu_options(&self) -> Vec<MenuOption<'_>> {
+        let Some(panel) = &self.panel else {
+            return Vec::new();
+        };
+        let params = &panel.description.params;
+        panel
+            .description
+            .menu_options
+            .iter()
+            .filter_map(|id| params.iter().position(|p| p.id == *id))
+            .map(|index| MenuOption {
+                param: params[index].id,
+                name: &params[index].name,
+                on: panel.value(index) >= 0.5,
+            })
+            .collect()
     }
 }
 
@@ -235,6 +328,14 @@ pub struct ParameterState {
     pub value: f64,
     /// How the value reads, as its control shows it, such as `-6.0 dB`.
     pub text: String,
+    /// Whether it's one of the device's own items in its Show Options menu
+    /// rather than a control in its body (C-DEVICE-015).
+    #[serde(default)]
+    pub menu_option: bool,
+    /// Its value in the A and B state that isn't active (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other: Option<f64>,
 }
 
 /// What `device.parameters` returns.
@@ -242,9 +343,25 @@ pub struct ParameterState {
 pub struct DeviceParameters {
     /// The device.
     pub device: DeviceId,
+    /// Which of its A and B states is active, `A` or `B` (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
     /// Its parameters, in the order its type lists them; empty if its type
     /// doesn't describe them.
     pub params: Vec<ParameterState>,
+}
+
+/// One of a device's own items in its Show Options menu: a switch its type
+/// marks as a menu option (C-DEVICE-015).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuOption<'a> {
+    /// The parameter choosing the item turns over (`device.set_param`).
+    pub param: ParamId,
+    /// The item's label: the parameter's name.
+    pub name: &'a str,
+    /// Whether it's ticked: the switch is on.
+    pub on: bool,
 }
 
 /// One device as the Device View shows it.
@@ -267,14 +384,30 @@ pub struct DeviceFrame {
     /// into it (`device.load_sample`, WP-2.16).
     #[serde(default)]
     pub takes_sample: bool,
+    /// Whether its type is the drum sampler, whose context menu offers the
+    /// swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`,
+    /// one-shot drum sampler R23).
+    #[serde(default)]
+    pub swaps_to_snapshot: bool,
     /// Whether its title shows its preset's or given name.
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
     pub folded: bool,
+    /// Whether it has an expanded part, which its title bar's expand
+    /// toggle shows and hides (L-DEV-004; WP-5.42).
+    #[serde(default)]
+    pub expandable: bool,
+    /// Whether its expanded part is shown. Never while it has none.
+    #[serde(default)]
+    pub expanded: bool,
     /// Whether it floats in a window of its own, its place in the chain a
     /// strip (WP-2.5b).
     #[serde(default)]
     pub floating: bool,
+    /// Whether its B state is the active one, which the title bar marks
+    /// "(B)" (device compare R5).
+    #[serde(default)]
+    pub b_active: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
@@ -285,6 +418,55 @@ pub struct DeviceFrame {
     pub panel: Option<DevicePanel>,
     /// Its sidechain section, if it has a sidechain input (WP-2.19b).
     pub sidechain: Option<SidechainSection>,
+    /// The view its display shows, if its display has views (WP-5.43): one
+    /// of its description's `views`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_view: Option<String>,
+    /// For a modulator, what it maps and which Map button is armed
+    /// (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulator: Option<ModulatorFrame>,
+}
+
+/// What a modulator's panel shows beside its parameters (WP-5.10; the
+/// modulation spec, R15, R19, R23).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulatorFrame {
+    /// Its mappings, by slot.
+    pub mappings: Vec<MappingRow>,
+    /// The slot whose Map button is lit, while a click on a parameter maps
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<u8>,
+    /// A Curve Mod's breakpoint shape (the default one until it is edited);
+    /// left out for a modulator that has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
+}
+
+/// One slot's mapping as its panel names it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MappingRow {
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// The parameter it maps.
+    pub target: bl_model::modulator::ModTarget,
+    /// The target's device and parameter, or track and control, by name,
+    /// as the slot shows them.
+    pub label: String,
+}
+
+impl DeviceFrame {
+    /// What its title bar reads, with "(B)" after the name while the B
+    /// state is active (device compare R5).
+    #[must_use]
+    pub fn title_text(&self) -> String {
+        if self.b_active {
+            format!("{} (B)", self.title)
+        } else {
+            self.title.clone()
+        }
+    }
 }
 
 /// A device's sidechain section, as its left strip and the section show it
@@ -378,6 +560,19 @@ pub struct DeviceViewState {
     pub hot_swap: Option<HotSwap>,
     /// Whether the clipboard holds a device to paste.
     pub can_paste: bool,
+    /// The Map button that is lit, on any track: a click on any parameter's
+    /// control maps it to the slot (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed_map: Option<ArmedMap>,
+}
+
+/// A lit Map button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ArmedMap {
+    /// The modulator.
+    pub device: DeviceId,
+    /// Its slot.
+    pub slot: u8,
 }
 
 /// Hot-swapping, while it lasts.
@@ -406,6 +601,18 @@ pub struct DeviceArgs {
 pub struct SelectDeviceArgs {
     /// The device, or `null` to select none.
     pub device: Option<DeviceId>,
+}
+
+/// Arguments of `device.expand`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExpandDeviceArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Show (true) or hide (false) the expanded part; switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
 }
 
 /// Arguments of `device.fold`.
@@ -453,6 +660,10 @@ pub struct AddDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// A rack's chain to add it to, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
     /// Where it goes in the chain; after the selected device, or at the end
     /// of its role's place in the chain, if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -480,10 +691,76 @@ pub struct PasteDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
-    /// Paste before this device; before the selected device, or at the end
-    /// of the chain with none selected, if left out.
+    /// A rack's chain to paste into, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// Paste before this device, which may be in a rack's chain; before the
+    /// selected device, or at the end of the chain with none selected, if
+    /// left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<DeviceId>,
+}
+
+/// Arguments of `device.group`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupArgs {
+    /// The devices to wrap in a new rack, all in one chain; the selected
+    /// device if both lists are left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<DeviceId>>,
+    /// Several chains of one rack to group instead: they become the chains
+    /// of a new rack of the same kind, in a new chain in the first one's
+    /// place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chains: Option<Vec<ChainId>>,
+}
+
+/// What `device.group` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Grouped {
+    /// The new rack, now selected.
+    pub rack: DeviceId,
+    /// The chain that holds the devices, or, when chains were grouped, the
+    /// new chain that holds the new rack.
+    pub chain: ChainId,
+}
+
+/// What `device.ungroup` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Ungrouped {
+    /// The devices that took the rack's place, in order; the first is now
+    /// selected.
+    pub devices: Vec<DeviceId>,
+}
+
+/// Arguments of `chain.copy`, `chain.cut` and `chain.duplicate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChainArgs {
+    /// The chain.
+    pub chain: ChainId,
+}
+
+/// Arguments of `chain.paste`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteChainArgs {
+    /// The rack to paste into.
+    pub rack: DeviceId,
+    /// Where it goes in the rack's list of chains; the end if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// What the chain commands that add a chain return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainAdded {
+    /// The new chain.
+    pub chain: ChainId,
+    /// The rack it is in.
+    pub rack: DeviceId,
 }
 
 /// Arguments of `device.save_preset`.
@@ -531,6 +808,22 @@ pub struct LoadSampleArgs {
     pub device: Option<DeviceId>,
     /// The audio file to load into the device.
     pub path: String,
+    /// The sample slot to load it into, counted from 0; the slot the
+    /// panel has selected for a device with several, and 0 for one with
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+}
+
+/// Arguments of `device.select_slot`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectSlotArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, counted from 0.
+    pub slot: u32,
 }
 
 /// What `device.load_sample` returns.
@@ -541,6 +834,9 @@ pub struct LoadSampleResult {
     /// The sample's media, by content hash: what the device and the set
     /// name it by.
     pub media: ContentHash,
+    /// The slot that took it, counted from 0.
+    #[serde(default)]
+    pub slot: u8,
     /// The file's name, for messages.
     pub name: String,
 }
@@ -569,6 +865,31 @@ pub struct ShowSidechainArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of `modulator.arm_map`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArmMapArgs {
+    /// The modulator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// Arm (true) or disarm (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<bool>,
+}
+
+/// Arguments of `device.set_display_view`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetDisplayViewArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The view, one of the device's description's `views`.
+    pub view: String,
+}
+
 /// Adds the Device View's commands to a registry.
 ///
 /// # Errors
@@ -588,7 +909,8 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Reports what the Device View shows: the selected track and its devices in \
                  signal order, each with its title, its own name, its kind and role, whether \
-                 it's on, folded, selected, or being hot-swapped; the selected device; \
+                 it's on, folded, selected, or being hot-swapped, and whether it has an expanded \
+                 part (`expandable`) and shows it (`expanded`); the selected device; \
                  hot-swapping; and whether there's a device to paste. A native device also \
                  lists its parameters' descriptors, its layout, and its values (`panel`); \
                  `device.parameters` reports any device's. Changes nothing.",
@@ -606,7 +928,8 @@ fn specs() -> Vec<CommandSpec> {
                  instrument, then audio effects. An instrument or MIDI effect added while an \
                  audio, group, or return track is selected goes on a new MIDI track at the end \
                  of the track list, which becomes the selected track, as one undo step (Insert \
-                 Device and Track). A chain holds one instrument until racks arrive.",
+                 Device and Track). With `chain` it goes into that rack chain instead. A chain \
+                 holds one instrument; a rack holds more.",
             )
             .permission(Permission::Edit)
             .contexts([DeviceView, Browser])
@@ -633,6 +956,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .binding("S-DEV-014")
             .args::<FoldDeviceArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(EXPAND, "Expand Device")
+            .description(
+                "Shows or hides a device's expanded part, as the toggle in its title bar does: \
+                 the extra controls (a modulation section, say) some devices keep out of sight \
+                 until asked; switches unless `expanded` says which. Only devices with an \
+                 expanded part (`expandable` in `device_view.state`) have one. Like folding, it \
+                 changes only the view: it isn't an undo step, and isn't saved with the set. \
+                 The device's width in the chain follows it.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ExpandDeviceArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(CUT, "Cut Device")
             .description(
@@ -661,7 +997,8 @@ fn specs() -> Vec<CommandSpec> {
                  selected device (or `before`), or at the end of the chain with none selected, \
                  on the selected track (or `track`), and selects it: one undo step, named Copy \
                  Device. The chain keeps Live's order, so an audio effect can't go before an \
-                 instrument, and instruments and MIDI effects only go on MIDI tracks.",
+                 instrument, and instruments and MIDI effects only go on MIDI tracks. With \
+                 `chain` it pastes into that rack chain, or before a device that is in one.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -671,8 +1008,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DUPLICATE, "Duplicate Device")
             .description(
                 "Puts a copy of a device, with its settings, straight after it, and selects the \
-                 copy: one undo step, named Duplicate Device. A chain holds one instrument until \
-                 racks arrive, so an instrument can't be duplicated yet.",
+                 copy: one undo step, named Duplicate Device. A chain holds one instrument, so \
+                 an instrument can't be duplicated; a rack is copied whole, with new IDs for \
+                 its chains and devices.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -718,16 +1056,45 @@ fn specs() -> Vec<CommandSpec> {
             .result::<PresetResult>(),
         CommandSpec::new(LOAD_SAMPLE, "Load Sample")
             .description(
-                "Loads an audio file into a device that plays one sample (the sampler), as \
-                 dropping the file on the device does: the file goes into the set's media \
-                 store, named by its content hash, and the device keeps that reference, so the \
-                 set reopens playing it. One undo step, named Load Sample. Reads a file outside \
-                 the project. A device whose type doesn't play a sample is refused.",
+                "Loads an audio file into a device that plays samples (the sampler, or the \
+                 eight-slot drum sampler), as dropping the file on the device does: the file \
+                 goes into the set's media store, named by its content hash, and the device \
+                 keeps that reference, so the set reopens playing it. `slot` says which of a \
+                 device's sample slots takes it (counted from 0); left out, it is the slot \
+                 selected in the panel, or the only one. One undo step, named Load Sample. \
+                 Reads a file outside the project. A device whose type doesn't play a sample, \
+                 or a slot it doesn't have, is refused. `device.set_sample` with a null `media` \
+                 clears a slot.",
             )
             .permission(Permission::External)
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Snapshot")
+            .description(
+                "Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as \
+                 Strike's context menu does: the new device takes the old one's place, sample, \
+                 and on or off state, and keeps its sample's Start and Length; every other \
+                 setting is Snapshot's default. One undo step, named Swap to Snapshot, and the \
+                 new device is selected. A device that isn't a Strike drum sampler is refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceAdded>(),
+        CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
+            .description(
+                "Selects one of a device's sample slots, as clicking its cell in the panel \
+                 does: the panel then shows that slot's controls, and a sample loaded without \
+                 naming a slot goes into it. Only a device with sample slots has any (the \
+                 eight-slot drum sampler has eight, counted from 0). It changes only the \
+                 view: it isn't an undo step, and isn't saved with the set. The selected slot \
+                 is `selected_slot` in the device's panel (`device.state`).",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SelectSlotArgs>()
+            .result::<DeviceViewState>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \
@@ -767,6 +1134,115 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(GROUP, "Group")
+            .description(
+                "Wraps the selected devices (or `devices`, all in one chain) in a new rack, as \
+                 Group does: the rack takes the first device's place and holds one chain, named \
+                 after the first device, that holds the devices in their order, each keeping \
+                 its settings and running state; the rack is selected. The rack is the kind that \
+                 can hold them: an audio effect rack for audio effects alone, a MIDI effect \
+                 rack for MIDI effects alone, and an instrument rack for any other mix. A \
+                 selection that grouping would put out of the chain's order is refused. With \
+                 `chains` (several chains of one rack) they become the chains of a new rack of \
+                 the same kind, inside a new chain in the first one's place. One undo step \
+                 (Group).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-001")
+            .args::<GroupArgs>()
+            .result::<Grouped>(),
+        CommandSpec::new(UNGROUP, "Ungroup")
+            .description(
+                "Takes the selected rack (or `device`) apart, as Ungroup does: the devices of \
+                 its one chain take the rack's place in order and the first is selected; the \
+                 rack, its chain's mixer and its Macro Controls go. A rack with no chains is \
+                 just removed; a rack of several chains can't be taken apart. One undo step \
+                 (Ungroup).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-002")
+            .args::<DeviceArgs>()
+            .result::<Ungrouped>(),
+        CommandSpec::new(CHAIN_COPY, "Copy Chain")
+            .description(
+                "Copies a rack's chain, with its devices, name, colour, info text and mixer, \
+                 to the chain clipboard for `chain.paste`. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_CUT, "Cut Chain")
+            .description(
+                "Copies a rack's chain to the chain clipboard and deletes it: one undo step \
+                 (Delete Chain). Because it removes the person's work an agent asks first.",
+            )
+            .permission(Permission::Destructive)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_PASTE, "Paste Chain")
+            .description(
+                "Pastes the chain clipboard's chain into a rack at `index` (the end if left \
+                 out), as a new chain with new IDs and everything else copied: one undo step \
+                 (Insert Chain). The chain must fit the rack's kind.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PasteChainArgs>()
+            .result::<ChainAdded>(),
+        CommandSpec::new(CHAIN_DUPLICATE, "Duplicate Chain")
+            .description(
+                "Puts a copy of a rack's chain, with new IDs, straight after it: one undo step \
+                 (Insert Chain).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<ChainAdded>(),
+        CommandSpec::new(DISPLAY, "Device Display")
+            .description(
+                "Reports what a device's display shows now, read from the display data its \
+                 node publishes after each block and from its parameters: curves and spectra \
+                 (an EQ's spectrum, its bands' responses and their sum per curve; a \
+                 compressor's transfer curve), the markers on them (an EQ's band dots, a \
+                 compressor's threshold and level), and single readings (a compressor's gain \
+                 reduction and levels), each with its unit and how it reads; the view the \
+                 display shows, if it has views; and whether an engine is publishing (`live`). \
+                 Empty for a device whose type draws no display. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceDisplay>(),
+        CommandSpec::new(SET_DISPLAY_VIEW, "Set Display View")
+            .description(
+                "Chooses the view a device's display shows, as its view buttons do: a \
+                 compressor's Transfer Curve, Activity, or Collapsed. Only a device whose \
+                 display has views takes one, and only one of them. It changes only the view: \
+                 it isn't an undo step, and `device_view.state` and `device.display` report the \
+                 view chosen.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetDisplayViewArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(ARM_MAP, "Map")
+            .description(
+                "Lights or puts out a modulator slot's Map button, as clicking it does. While \
+                 one is lit, every parameter in the set that can be mapped is tinted, and \
+                 clicking one maps it to the slot (`modulator.map`); Esc, or the button again \
+                 (`armed`: false), puts it out and changes nothing. Lighting a button puts out \
+                 the one that was lit. It changes only the view: it isn't an undo step, and \
+                 `device_view.state` reports the lit button in `armed_map`. Only a modulator \
+                 has slots.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ArmMapArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(WINDOWS, "Floating Device Windows")
             .description(

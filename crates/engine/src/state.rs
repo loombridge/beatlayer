@@ -1,12 +1,14 @@
 //! What the engine tells the UI: playhead, meters, CPU load, and reports.
 
 use bl_core::time::{Frames, SampleRate, Ticks};
-use bl_model::TrackId;
+use bl_model::{ParamId, TrackId};
 use rtrb::Consumer;
 
+use crate::capture::CapturedMidi;
 use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
+use crate::node::NodeKey;
 use crate::recording::TakeBounds;
 use crate::session::{SceneOverride, SlotStatus};
 
@@ -24,6 +26,21 @@ pub struct TrackMeter {
     pub peak: [f32; 2],
     /// The RMS level of the first two channels.
     pub rms: [f32; 2],
+}
+
+/// A parameter under modulation, as the last block played it (the modulation
+/// spec, R7 and R11): the value it had before modulation and the value it
+/// played, in the parameter's own units, at the block's last frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayedParam {
+    /// The node whose parameter it is.
+    pub node: NodeKey,
+    /// The parameter.
+    pub param: ParamId,
+    /// Its base: its envelope's value, or its control's.
+    pub base: f64,
+    /// The value it played.
+    pub played: f64,
 }
 
 /// Counters the audio thread keeps, since the engine started.
@@ -124,6 +141,9 @@ pub struct EngineState {
     /// Whether some tracks have no meter because there are more than
     /// [`EngineConfig::max_tracks`](crate::EngineConfig::max_tracks).
     pub meters_truncated: bool,
+    /// The parameters under modulation while the song plays, as the last
+    /// block played them (WP-5.9); the rest play their base.
+    pub modulated: Vec<PlayedParam>,
     /// The audio thread's counters.
     pub counters: EngineCounters,
 }
@@ -131,7 +151,12 @@ pub struct EngineState {
 impl EngineState {
     /// A state before the first block at `sample_rate`, with room for
     /// `tracks` meters and `slots` Session slots.
-    pub(crate) fn with_capacity(tracks: usize, slots: usize, sample_rate: SampleRate) -> Self {
+    pub(crate) fn with_capacity(
+        tracks: usize,
+        slots: usize,
+        modulated: usize,
+        sample_rate: SampleRate,
+    ) -> Self {
         Self {
             sample_rate,
             clock: 0,
@@ -154,8 +179,18 @@ impl EngineState {
             session_over: Vec::with_capacity(tracks),
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
+            modulated: Vec::with_capacity(modulated),
             counters: EngineCounters::default(),
         }
+    }
+
+    /// The base and played value of `param` of `node` while it's under
+    /// modulation, `None` when it plays its base.
+    #[must_use]
+    pub fn played(&self, node: NodeKey, param: ParamId) -> Option<&PlayedParam> {
+        self.modulated
+            .iter()
+            .find(|entry| entry.node == node && entry.param == param)
     }
 
     /// One track's peak meter, left and right.
@@ -185,6 +220,8 @@ impl Clone for EngineState {
         meters.extend_from_slice(&self.meters);
         let mut session = Vec::with_capacity(self.session.capacity());
         session.extend_from_slice(&self.session);
+        let mut modulated = Vec::with_capacity(self.modulated.capacity());
+        modulated.extend_from_slice(&self.modulated);
         let mut session_over = Vec::with_capacity(self.session_over.capacity());
         session_over.extend_from_slice(&self.session_over);
         Self {
@@ -209,6 +246,7 @@ impl Clone for EngineState {
             session_over,
             meters,
             meters_truncated: self.meters_truncated,
+            modulated,
             counters: self.counters,
         }
     }
@@ -219,12 +257,23 @@ impl Clone for EngineState {
 pub struct Monitor {
     pub(crate) state: triple_buffer::Output<EngineState>,
     pub(crate) reports: Consumer<Report>,
+    pub(crate) captured: Consumer<CapturedMidi>,
 }
 
 impl Monitor {
     /// The latest state the audio thread published.
     pub fn state(&mut self) -> &EngineState {
         self.state.read()
+    }
+
+    /// The notes monitoring MIDI tracks received since the last call,
+    /// oldest first, for Capture MIDI (WP-3.14).
+    pub fn captured(&mut self) -> Vec<CapturedMidi> {
+        let mut notes = Vec::with_capacity(self.captured.slots());
+        while let Ok(note) = self.captured.pop() {
+            notes.push(note);
+        }
+        notes
     }
 
     /// Reports since the last call, oldest first.

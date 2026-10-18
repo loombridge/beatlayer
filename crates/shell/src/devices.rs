@@ -16,17 +16,21 @@ use std::path::{Path, PathBuf};
 use bl_engine::DeviceType;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
-    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
-    DeviceWindows, Document, Editor, ParamId, TrackId, TrackKind,
+    Chain, ChainId, Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout,
+    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, ParamId, RackKind, TrackId,
+    TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
-    self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DevicePanel,
-    DeviceParameters, DeviceViewState, FloatingWindow, FloatingWindows, FoldDeviceArgs, HotSwap,
-    HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    self as ids, AddDeviceArgs, ChainAdded, ChainArgs, DeviceAdded, DeviceArgs, DeviceFrame,
+    DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow,
+    FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, LoadPresetArgs,
+    ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
+    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    Ungrouped,
 };
+use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -40,10 +44,24 @@ use crate::arrangement::ArrangementView;
 pub struct DeviceView {
     selected: Option<DeviceId>,
     folded: BTreeSet<DeviceId>,
+    /// Devices whose expanded part is shown (WP-5.42).
+    expanded: BTreeSet<DeviceId>,
     clipboard: Option<Device>,
+    /// The chain cut or copied from a rack (WP-5.1).
+    chain_clipboard: Option<Chain>,
     hot_swap: Option<DeviceId>,
+    /// The sample slot each device with slots shows the controls of
+    /// (WP-5.17); a device without an entry shows slot 0.
+    slots: std::collections::BTreeMap<DeviceId, u32>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
+    /// The lit Map button, if one is (WP-5.10).
+    armed: Option<(DeviceId, u8)>,
+    /// The view each device's display shows, where it has chosen one
+    /// (WP-5.43).
+    display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The display data the engine's nodes last published (WP-5.43).
+    displays: std::collections::BTreeMap<DeviceId, bl_engine::DisplayData>,
     types: Vec<DeviceType>,
     /// Where floating devices' windows sit (WP-2.5b). A frame outlives
     /// its device's docking and deletion, so undoing either puts the
@@ -99,6 +117,18 @@ pub struct Context<'a> {
     pub windows_shown: bool,
 }
 
+/// The display of a device whose type draws none.
+fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
+    bl_model::DeviceDisplay {
+        device,
+        live: false,
+        view: None,
+        series: Vec::new(),
+        markers: Vec::new(),
+        readings: Vec::new(),
+    }
+}
+
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, DeviceError> {
     let args = if args.is_null() { json!({}) } else { args };
     serde_json::from_value(args).map_err(|e| DeviceError::InvalidArgs(e.to_string()))
@@ -132,10 +162,17 @@ pub fn default_index(
         return 0;
     };
     let roles: Vec<DeviceRole> = track.devices().map(|d| d.role).collect();
+    index_among(&roles, role, after.and_then(|d| track.device_position(d)))
+}
+
+/// Where a device with `role` goes among a chain's devices, whose roles are
+/// `roles`: straight after the one at `after` if that keeps the chain in
+/// order, or else at the end of its role's place.
+fn index_among(roles: &[DeviceRole], role: DeviceRole, after: Option<usize>) -> usize {
     let fits = |index: usize| {
         roles[..index].iter().all(|r| *r <= role) && roles[index..].iter().all(|r| *r >= role)
     };
-    if let Some(index) = after.and_then(|d| track.device_position(d)).map(|i| i + 1)
+    if let Some(index) = after.map(|i| i + 1)
         && fits(index)
     {
         return index;
@@ -214,7 +251,36 @@ impl DeviceView {
                 .collect(),
             description: description.clone(),
             plugin: false,
+            selected_slot: self.slot_of(device),
+            loaded_slots: device.media.iter().map(Option::is_some).collect(),
+            // shortcut: every device with slots plays them on the keys the
+            // eight-slot drum sampler does; a device with another mapping
+            // names its keys in its own description.
+            slot_keys: bl_devices::kitbag::KEYS
+                .iter()
+                .take(description.layout.slot_count() as usize)
+                .map(|&key| bl_midi_io::note_name(key))
+                .collect(),
         })
+    }
+
+    /// How many sample slots devices of `kind` have: 0 for a type with
+    /// none.
+    #[must_use]
+    pub fn slot_count(&self, kind: &DeviceKind) -> u32 {
+        self.description(kind).map_or(0, |d| d.layout.slot_count())
+    }
+
+    /// The sample slot `device`'s panel shows the controls of: the one
+    /// selected, kept inside the slots its layout has.
+    #[must_use]
+    pub fn slot_of(&self, device: &Device) -> u32 {
+        let count = self.slot_count(&device.kind);
+        self.slots
+            .get(&device.id)
+            .copied()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1))
     }
 
     /// A plug-in device's panel (WP-2.10, D19): the plug-in's first
@@ -250,8 +316,13 @@ impl DeviceView {
             description: DeviceDescription {
                 params: selected,
                 layout,
+                views: Vec::new(),
+                menu_options: Vec::new(),
             },
             plugin: true,
+            selected_slot: 0,
+            loaded_slots: Vec::new(),
+            slot_keys: Vec::new(),
         }
     }
 
@@ -269,6 +340,12 @@ impl DeviceView {
                             descriptor: p.clone(),
                             value,
                             text: p.format(value),
+                            menu_option: description.menu_options.contains(&p.id),
+                            other: device.can_compare().then(|| {
+                                description
+                                    .value(device.other_params(), p.id)
+                                    .unwrap_or(p.default)
+                            }),
                         }
                     })
                     .collect()
@@ -276,6 +353,9 @@ impl DeviceView {
             .unwrap_or_default();
         DeviceParameters {
             device: device.id,
+            active: device
+                .can_compare()
+                .then(|| if device.b_active { "B" } else { "A" }.to_owned()),
             params,
         }
     }
@@ -298,8 +378,19 @@ impl DeviceView {
         let exists = |d: &DeviceId| doc.device(*d).is_some();
         self.selected = self.selected.filter(exists);
         self.hot_swap = self.hot_swap.filter(exists);
+        self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
+        self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.armed = self.armed.filter(|(d, _)| exists(d));
+        self.display_views.retain(|d, _| exists(d));
+        self.displays.retain(|d, _| exists(d));
+    }
+
+    /// Whether `device`'s type has an expanded part.
+    fn expandable(&self, device: &Device) -> bool {
+        self.description(&device.kind)
+            .is_some_and(|d| d.layout.has_expanded())
     }
 
     /// Whether a device's sidechain section is shown.
@@ -327,6 +418,71 @@ impl DeviceView {
                 })
             }),
             can_paste: self.clipboard.is_some(),
+            armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
+        }
+    }
+
+    /// The lit Map button, if one is: its modulator and slot (WP-5.10).
+    #[must_use]
+    pub fn armed(&self) -> Option<(DeviceId, u8)> {
+        self.armed
+    }
+
+    /// What a modulator's panel shows beside its parameters.
+    fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
+        use bl_model::modulator::{CURVE_MOD, default_shape, is_modulator_kind};
+        if !is_modulator_kind(&d.kind) {
+            return None;
+        }
+        let curve =
+            matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
+        Some(ModulatorFrame {
+            mappings: d
+                .mappings
+                .iter()
+                .map(|m| MappingRow {
+                    slot: m.slot,
+                    target: m.target,
+                    label: self.target_label(doc, m.target),
+                })
+                .collect(),
+            armed: self
+                .armed
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, slot)| slot),
+            shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
+        })
+    }
+
+    /// How a mapping's slot names its target: a device's title and the
+    /// parameter's name, or a track's label and its control.
+    fn target_label(&self, doc: &Document, target: bl_model::modulator::ModTarget) -> String {
+        use bl_model::MixerParam;
+        use bl_model::modulator::ModTarget;
+        match target {
+            ModTarget::Device { device, param } => {
+                doc.device(device).map_or_else(String::new, |d| {
+                    let name = self
+                        .description(&d.kind)
+                        .and_then(|description| description.param(param))
+                        .map_or_else(|| format!("Parameter {}", param.0), |p| p.name.clone());
+                    format!("{} / {name}", d.title())
+                })
+            }
+            ModTarget::Mixer { track, param } => format!(
+                "{} {}",
+                crate::routing::track_label(doc, track),
+                match param {
+                    MixerParam::Volume => "Volume",
+                    MixerParam::Pan => "Pan",
+                    MixerParam::Mute => "Track Activator",
+                }
+            ),
+            ModTarget::Send { track, to } => format!(
+                "{} Send {}",
+                crate::routing::track_label(doc, track),
+                crate::routing::track_label(doc, to)
+            ),
         }
     }
 
@@ -432,17 +588,24 @@ impl DeviceView {
             enabled: d.enabled,
             takes_sample: matches!(
                 &d.kind,
-                DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER
+                DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
+            ),
+            swaps_to_snapshot: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER
             ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
+            expandable: self.expandable(d),
+            expanded: self.expandable(d) && self.expanded.contains(&d.id),
             floating: d.floating,
+            b_active: d.b_active,
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             panel: self.panel(d),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
-                    bl_model::Input::Track { track, tap } => {
+                    bl_model::Input::Track { track, tap, .. } => {
                         (crate::routing::track_label(doc, *track), Some(*tap))
                     }
                     _ => ("No Input".to_owned(), None),
@@ -457,7 +620,45 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            display_view: self.display_view(d),
+            modulator: self.modulator_frame(doc, d),
         }
+    }
+
+    /// The view `device`'s display shows: the one chosen, or the first its
+    /// description offers; none for a display with one view.
+    fn display_view(&self, device: &Device) -> Option<String> {
+        let views = &self.description(&device.kind)?.views;
+        self.display_views
+            .get(&device.id)
+            .filter(|view| views.contains(view))
+            .or_else(|| views.first())
+            .cloned()
+    }
+
+    /// The display data the engine published, to fill from.
+    pub fn displays_mut(
+        &mut self,
+    ) -> &mut std::collections::BTreeMap<DeviceId, bl_engine::DisplayData> {
+        &mut self.displays
+    }
+
+    /// What `device`'s display shows now: its type's display from the
+    /// device's values and the newest data its node published.
+    #[must_use]
+    pub fn display(&self, device: &Device) -> bl_model::DeviceDisplay {
+        let DeviceKind::Native { device_type } = &device.kind else {
+            return empty_display(device.id);
+        };
+        let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
+        let mut display = self
+            .description(&device.kind)
+            .and_then(|description| {
+                bl_devices::display(device_type, device.id, description, &device.params, data)
+            })
+            .unwrap_or_else(|| empty_display(device.id));
+        display.view = self.display_view(device);
+        display
     }
 
     /// The device a command acts on: `device`, or the selected one.
@@ -479,9 +680,15 @@ impl DeviceView {
             .and_then(|v| serde_json::from_value(v.clone()).ok());
         let has_target = || self.target(doc, named).is_ok();
         match id {
-            ids::CUT | ids::COPY | ids::SAVE_PRESET | ids::SAVE_DEFAULT_PRESET | ids::FOLD => {
-                has_target()
-            }
+            ids::CUT
+            | ids::COPY
+            | ids::SAVE_PRESET
+            | ids::SAVE_DEFAULT_PRESET
+            | ids::FOLD
+            | ids::SELECT_SLOT => has_target(),
+            ids::EXPAND => self
+                .target(doc, named)
+                .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
             ids::SHOW_SIDECHAIN => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
@@ -495,8 +702,27 @@ impl DeviceView {
                     .and_then(|t| doc.track(t))
                     .is_some_and(|t| device.role.fits(t.kind()))
             }),
+            ids::GROUP => {
+                let devices: Vec<DeviceId> = args
+                    .get("devices")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                args.get("chains").is_some()
+                    || (devices.is_empty()
+                        && self.selected.is_some_and(|d| doc.device(d).is_some()))
+                    || devices.iter().any(|d| doc.device(*d).is_some())
+            }
+            ids::UNGROUP => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| d.rack_kind().is_some() && d.chains.len() <= 1)
+            }),
+            ids::CHAIN_PASTE => self.chain_clipboard.is_some(),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::PARAMETERS => has_target(),
+            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
+            ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+            }),
             ids::SET_WINDOW => named
                 .and_then(|device| doc.device(device))
                 .is_some_and(|d| d.floating),
@@ -586,6 +812,21 @@ impl DeviceView {
                 }
                 self.selected = device;
             }
+            ids::SELECT_SLOT => {
+                let SelectSlotArgs { device, slot } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let count = editor
+                    .document()
+                    .device(device)
+                    .and_then(|d| self.description(&d.kind))
+                    .map_or(0, |d| d.layout.slot_count());
+                if slot >= count {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device} has {count} sample slots, counted from 0; there is no slot {slot}"
+                    )));
+                }
+                self.slots.insert(device, slot);
+            }
             ids::FOLD => {
                 let FoldDeviceArgs { device, folded } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -594,6 +835,25 @@ impl DeviceView {
                     self.folded.insert(device);
                 } else {
                     self.folded.remove(&device);
+                }
+            }
+            ids::EXPAND => {
+                let ExpandDeviceArgs { device, expanded } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if editor
+                    .document()
+                    .device(device)
+                    .is_none_or(|d| !self.expandable(d))
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} has no expanded part"
+                    )));
+                }
+                let expanded = expanded.unwrap_or(!self.expanded.contains(&device));
+                if expanded {
+                    self.expanded.insert(device);
+                } else {
+                    self.expanded.remove(&device);
                 }
             }
             ids::ADD => {
@@ -646,30 +906,69 @@ impl DeviceView {
                 self.clipboard = editor.document().device(device).cloned();
             }
             ids::PASTE => {
-                let PasteDeviceArgs { track: to, before } = parse(args)?;
+                let PasteDeviceArgs {
+                    track: to,
+                    chain,
+                    before,
+                } = parse(args)?;
                 let copy = self
                     .clipboard
                     .clone()
                     .ok_or_else(|| DeviceError::Unavailable("nothing to paste".to_owned()))?;
-                let to = to
-                    .or(track)
-                    .ok_or_else(|| DeviceError::Unavailable("select a track first".to_owned()))?;
                 let doc = editor.document();
-                let chain = doc
-                    .track(to)
-                    .ok_or_else(|| DeviceError::InvalidArgs(format!("no {to}")))?;
-                // Spec: device-chains R15. Before the selected device, as
-                // Live pastes.
-                let before = before.or(self
-                    .selected
-                    .filter(|d| chain.device_position(*d).is_some()));
-                let index = match before {
-                    Some(device) => chain.device_position(device).ok_or_else(|| {
-                        DeviceError::InvalidArgs(format!("{device} isn't on {to}"))
-                    })?,
-                    None => chain.devices().len(),
+                let place = match (chain, before) {
+                    (Some(chain), _) => {
+                        let track = doc
+                            .chain_track(chain)
+                            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {chain}")))?;
+                        // Spec: device-chains R15. Before the selected
+                        // device, as Live pastes, if it's in this chain.
+                        let at = before
+                            .or(self.selected)
+                            .and_then(|d| doc.device_place(d))
+                            .filter(|p| p.chain == Some(chain));
+                        DevicePlace {
+                            track,
+                            chain: Some(chain),
+                            index: at.map_or_else(
+                                || doc.chain(chain).map_or(0, |c| c.devices.len()),
+                                |p| p.index,
+                            ),
+                        }
+                    }
+                    (None, Some(device)) => {
+                        let place = doc
+                            .device_place(device)
+                            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {device}")))?;
+                        if let Some(to) = to.filter(|to| *to != place.track) {
+                            return Err(DeviceError::InvalidArgs(format!(
+                                "{device} isn't on {to}"
+                            )));
+                        }
+                        place
+                    }
+                    (None, None) => {
+                        let to = to.or(track).ok_or_else(|| {
+                            DeviceError::Unavailable("select a track first".to_owned())
+                        })?;
+                        let chain = doc
+                            .track(to)
+                            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {to}")))?;
+                        match self
+                            .selected
+                            .and_then(|d| doc.device_place(d))
+                            .filter(|p| p.track == to)
+                        {
+                            Some(place) => place,
+                            None => DevicePlace {
+                                track: to,
+                                chain: None,
+                                index: chain.devices().len(),
+                            },
+                        }
+                    }
                 };
-                let added = self.insert_copy(editor, &copy, to, index, "Copy Device")?;
+                let added = self.insert_copy(editor, &copy, place, "Copy Device")?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
                 return Ok(outcome);
@@ -679,14 +978,78 @@ impl DeviceView {
                 let device = self.target(editor.document(), device)?;
                 let doc = editor.document();
                 let copy = doc.device(device).cloned().expect("the target exists");
-                let owner = doc.device_track(device).expect("the target has a track");
-                let index = doc
-                    .track(owner)
-                    .and_then(|t| t.device_position(device))
-                    .map_or(0, |i| i + 1);
-                let added = self.insert_copy(editor, &copy, owner, index, "Duplicate Device")?;
+                let mut place = doc.device_place(device).expect("the target has a place");
+                place.index += 1;
+                let added = self.insert_copy(editor, &copy, place, "Duplicate Device")?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
+            ids::SWAP_TO_SNAPSHOT => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let added = self.swap_to_snapshot(editor, device)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
+            ids::GROUP => {
+                let args: GroupArgs = parse(args)?;
+                let grouped = self.group(editor, args)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&grouped);
+                return Ok(outcome);
+            }
+            ids::UNGROUP => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let ungrouped = self.ungroup(editor, device)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&ungrouped);
+                return Ok(outcome);
+            }
+            ids::CHAIN_COPY | ids::CHAIN_CUT => {
+                let ChainArgs { chain } = parse(args)?;
+                let copy = editor
+                    .document()
+                    .chain(chain)
+                    .cloned()
+                    .ok_or_else(|| DeviceError::InvalidArgs(format!("no {chain}")))?;
+                if id == ids::CHAIN_CUT {
+                    editor
+                        .apply(Command::RemoveChain { chain })
+                        .map_err(|e| DeviceError::Failed(e.to_string()))?;
+                    outcome.document_changed = true;
+                }
+                self.chain_clipboard = Some(copy);
+            }
+            ids::CHAIN_PASTE => {
+                let PasteChainArgs { rack, index } = parse(args)?;
+                let copy = self
+                    .chain_clipboard
+                    .clone()
+                    .ok_or_else(|| DeviceError::Unavailable("no chain to paste".to_owned()))?;
+                let at = index.unwrap_or_else(|| {
+                    editor
+                        .document()
+                        .device(rack)
+                        .map_or(0, |device| device.chains.len())
+                });
+                outcome.value = to_value(&self.insert_chain_copy(editor, &copy, rack, at)?);
+                outcome.document_changed = true;
+                return Ok(outcome);
+            }
+            ids::CHAIN_DUPLICATE => {
+                let ChainArgs { chain } = parse(args)?;
+                let doc = editor.document();
+                let copy = doc
+                    .chain(chain)
+                    .cloned()
+                    .ok_or_else(|| DeviceError::InvalidArgs(format!("no {chain}")))?;
+                let (rack, index) = doc.chain_place(chain).expect("the chain has a rack");
+                outcome.value =
+                    to_value(&self.insert_chain_copy(editor, &copy, rack, index + 1)?);
+                outcome.document_changed = true;
                 return Ok(outcome);
             }
             ids::SAVE_PRESET => {
@@ -726,6 +1089,58 @@ impl DeviceView {
                 ));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
+            }
+            ids::ARM_MAP => {
+                let ArmMapArgs {
+                    device,
+                    slot,
+                    armed,
+                } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if !editor
+                    .document()
+                    .device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} isn't a modulator"
+                    )));
+                }
+                if slot >= bl_model::modulator::SLOTS {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "a modulator's slots are 0 to {}",
+                        bl_model::modulator::SLOTS - 1
+                    )));
+                }
+                let lit = self.armed == Some((device, slot));
+                self.armed = if armed.unwrap_or(!lit) {
+                    Some((device, slot))
+                } else if lit {
+                    None
+                } else {
+                    self.armed
+                };
+            }
+            ids::DISPLAY => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                outcome.value = to_value(&self.display(current));
+                return Ok(outcome);
+            }
+            ids::SET_DISPLAY_VIEW => {
+                let ids::SetDisplayViewArgs { device, view } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                let offered = self
+                    .description(&current.kind)
+                    .map_or(&[][..], |d| d.views.as_slice());
+                if !offered.contains(&view) {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device}'s display has no view {view:?}; it offers {offered:?}"
+                    )));
+                }
+                self.display_views.insert(device, view);
             }
             ids::PARAMETERS => {
                 let DeviceArgs { device } = parse(args)?;
@@ -769,6 +1184,67 @@ impl DeviceView {
         Ok(outcome)
     }
 
+    /// Replaces the Strike drum sampler `device` with Snapshot in One-Shot
+    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
+    /// same place, sample and on or off state, and the same Start and
+    /// Length, in one undo step.
+    fn swap_to_snapshot(
+        &mut self,
+        editor: &mut Editor,
+        device: DeviceId,
+    ) -> Result<DeviceAdded, DeviceError> {
+        use bl_devices::{drum_sampler, sampler};
+        let doc = editor.document();
+        let old = doc.device(device).expect("the target exists");
+        let strike = drum_sampler::drum_sampler_type();
+        if old.kind != strike.kind {
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't a drum sampler"
+            )));
+        }
+        let place = doc.device_place(device).expect("the target has a place");
+        let kept = |id| {
+            strike
+                .description
+                .value(&old.params, id)
+                .expect("Strike describes it")
+        };
+        let (enabled, media) = (old.enabled, old.media.clone());
+        let (start, length) = (kept(drum_sampler::START), kept(drum_sampler::LENGTH));
+        let id: DeviceId = editor.new_id();
+        let mut snapshot = sampler::sampler_type().device(id);
+        snapshot.enabled = enabled;
+        snapshot.media = media;
+        snapshot.params.insert(sampler::MODE, 1.0);
+        snapshot.params.insert(sampler::START, start);
+        snapshot.params.insert(sampler::LENGTH, length);
+        // A chain holds one instrument, so the old one goes first.
+        editor
+            .transact("Swap to Snapshot", |editor| {
+                editor.apply(Command::RemoveDevice { device })?;
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                }
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(id);
+        Ok(DeviceAdded {
+            device: id,
+            track: place.track,
+            new_track: false,
+            default_preset: None,
+        })
+    }
+
     /// Adds a device as a person does (`device.add`).
     fn add(
         &mut self,
@@ -778,6 +1254,9 @@ impl DeviceView {
         user_library: Option<&Path>,
         shown: Option<TrackId>,
     ) -> Result<DeviceAdded, DeviceError> {
+        if let Some(chain) = args.chain {
+            return self.add_to_chain(args, chain, editor, user_library);
+        }
         let role = args.device.role;
         let target = args
             .track
@@ -792,11 +1271,7 @@ impl DeviceView {
         // track that can't hold it goes on a new MIDI track at the end.
         let new_track = !role.fits(kind);
         let id: DeviceId = editor.new_id();
-        let mut device =
-            Device::new(id, args.device.name.clone(), args.device.kind.clone()).with_role(role);
-        if args.device.sidechain {
-            device = device.with_sidechain();
-        }
+        let device = new_device(id, args);
         let default = user_library
             .map(|library| preset::default_preset_path(library, &device))
             .filter(|path| path.is_file())
@@ -838,6 +1313,7 @@ impl DeviceView {
                     device: id,
                     params: self.sanitize(&args.device.kind, preset.params.clone()),
                     name: preset::preset_name(path),
+                    shape: preset.shape.clone(),
                 })?;
             }
             Ok::<_, bl_model::EditError>(())
@@ -855,29 +1331,58 @@ impl DeviceView {
         })
     }
 
-    /// Inserts a copy of `device` with a new ID, selected, as one undo step
-    /// named `label`.
-    fn insert_copy(
+    /// Adds a device to a rack's chain (`device.add` with `chain`), after
+    /// the selected device if it's in the chain, with its default preset.
+    fn add_to_chain(
         &mut self,
+        args: &AddDeviceArgs,
+        chain: ChainId,
         editor: &mut Editor,
-        device: &Device,
-        track: TrackId,
-        index: usize,
-        label: &'static str,
+        user_library: Option<&Path>,
     ) -> Result<DeviceAdded, DeviceError> {
+        let doc = editor.document();
+        let track = doc
+            .chain_track(chain)
+            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {chain}")))?;
+        let roles: Vec<DeviceRole> = doc
+            .chain(chain)
+            .map(|c| c.devices.iter().map(|d| d.role).collect())
+            .unwrap_or_default();
+        let after = self
+            .selected
+            .and_then(|d| doc.device_place(d))
+            .filter(|p| p.chain == Some(chain))
+            .map(|p| p.index);
+        let index = args
+            .index
+            .unwrap_or_else(|| index_among(&roles, args.device.role, after));
         let id: DeviceId = editor.new_id();
-        let mut copy = device.clone();
-        copy.id = id;
-        // A copy goes in the chain, docked, whether or not the original
-        // floats (WP-2.5b).
-        copy.floating = false;
+        let device = new_device(id, args);
+        let default = user_library
+            .map(|library| preset::default_preset_path(library, &device))
+            .filter(|path| path.is_file())
+            .and_then(|path| {
+                Preset::load(&path)
+                    .ok()
+                    .filter(|p| p.fits(&device))
+                    .map(|p| (path, p))
+            });
         editor
-            .transact(label, |editor| {
-                editor.apply(Command::InsertDevice {
-                    track,
+            .transact("Insert Device", |editor| {
+                editor.apply(Command::InsertChainDevice {
+                    chain,
                     index,
-                    device: copy,
-                })
+                    device,
+                })?;
+                if let Some((path, preset)) = &default {
+                    editor.apply(Command::SetDeviceState {
+                        device: id,
+                        params: self.sanitize(&args.device.kind, preset.params.clone()),
+                        name: preset::preset_name(path),
+                        shape: preset.shape.clone(),
+                    })?;
+                }
+                Ok::<_, bl_model::EditError>(())
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         self.selected = Some(id);
@@ -885,9 +1390,230 @@ impl DeviceView {
             device: id,
             track,
             new_track: false,
+            default_preset: default.map(|(path, _)| preset::preset_name(&path)),
+        })
+    }
+
+    /// Inserts a copy of `device` with new IDs for it and everything in it,
+    /// selected, at `place` as one undo step named `label`.
+    fn insert_copy(
+        &mut self,
+        editor: &mut Editor,
+        device: &Device,
+        place: DevicePlace,
+        label: &'static str,
+    ) -> Result<DeviceAdded, DeviceError> {
+        let mut copy = device.clone();
+        // A copy goes in the chain, docked, whether or not the original
+        // floats (WP-5.1, WP-2.5b), and so does everything inside a rack.
+        copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        // Spec: modulation R19. A modulator copied alone keeps its settings
+        // and no mappings; one copied inside a rack maps the copies of its
+        // targets inside it.
+        let pairs: Vec<(&Device, DeviceId)> =
+            device.walk().zip(copy.walk().map(|d| d.id)).collect();
+        copy.clear_mappings();
+        let id = copy.id;
+        editor
+            .transact(label, |editor| {
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: copy,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: copy,
+                    }),
+                }?;
+                map_inner_copies(editor, &pairs)
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(id);
+        Ok(DeviceAdded {
+            device: id,
+            track: place.track,
+            new_track: false,
             default_preset: None,
         })
     }
+
+    /// Inserts a copy of `chain` with new IDs at `index` in `rack`'s list
+    /// of chains, as one undo step named after Insert Chain.
+    fn insert_chain_copy(
+        &mut self,
+        editor: &mut Editor,
+        chain: &Chain,
+        rack: DeviceId,
+        index: usize,
+    ) -> Result<ChainAdded, DeviceError> {
+        let mut copy = chain.clone();
+        copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        let pairs: Vec<(&Device, DeviceId)> = chain
+            .devices_deep()
+            .zip(copy.devices_deep().map(|d| d.id))
+            .collect();
+        copy.devices.iter_mut().for_each(Device::clear_mappings);
+        let id = copy.id;
+        let command = Command::AddChain {
+            rack,
+            index,
+            chain: copy,
+        };
+        editor
+            .transact(command.label(), |editor| {
+                editor.apply(command)?;
+                map_inner_copies(editor, &pairs)
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ChainAdded { chain: id, rack })
+    }
+
+    /// Group (Cmd-G): wraps devices of one chain, or chains of one rack, in
+    /// a new rack (the racks spec, R9, R10).
+    fn group(&mut self, editor: &mut Editor, args: GroupArgs) -> Result<Grouped, DeviceError> {
+        let doc = editor.document();
+        let chains = args.chains.unwrap_or_default();
+        let devices = args.devices.unwrap_or_default();
+        if !chains.is_empty() {
+            if !devices.is_empty() {
+                return Err(DeviceError::InvalidArgs(
+                    "group devices or chains, not both".to_owned(),
+                ));
+            }
+            return self.group_chains(editor, &chains);
+        }
+        let devices = if devices.is_empty() {
+            vec![
+                self.selected
+                    .ok_or_else(|| DeviceError::Unavailable("select a device first".to_owned()))?,
+            ]
+        } else {
+            devices
+        };
+        let mut placed = Vec::with_capacity(devices.len());
+        for &id in &devices {
+            let device = doc
+                .device(id)
+                .ok_or_else(|| DeviceError::InvalidArgs(format!("no {id}")))?;
+            let place = doc
+                .device_place(id)
+                .ok_or_else(|| DeviceError::InvalidArgs(format!("no {id}")))?;
+            placed.push((place.index, device.role, device.title().to_owned()));
+        }
+        placed.sort();
+        let kind = RackKind::holding(placed.iter().map(|(_, role, _)| *role));
+        let rack: DeviceId = editor.new_id();
+        let chain: ChainId = editor.new_id();
+        let first = placed[0].2.clone();
+        editor
+            .apply(Command::GroupDevices {
+                devices,
+                rack: Device::rack(rack, kind).with_chain(Chain::new(chain, first)),
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(rack);
+        Ok(Grouped { rack, chain })
+    }
+
+    /// Group with several chains of one rack selected (R10): a new chain in
+    /// the first one's place holds a new rack of the same kind, and they
+    /// become its chains.
+    fn group_chains(
+        &mut self,
+        editor: &mut Editor,
+        chains: &[ChainId],
+    ) -> Result<Grouped, DeviceError> {
+        let doc = editor.document();
+        let mut placed = Vec::with_capacity(chains.len());
+        for &chain in chains {
+            let (rack, index) = doc
+                .chain_place(chain)
+                .ok_or_else(|| DeviceError::InvalidArgs(format!("no {chain}")))?;
+            placed.push((index, chain, rack));
+        }
+        placed.sort();
+        let rack = placed[0].2;
+        if placed.iter().any(|&(.., r)| r != rack) {
+            return Err(DeviceError::Unavailable(
+                "the chains to group must be in one rack".to_owned(),
+            ));
+        }
+        let kind = doc
+            .device(rack)
+            .and_then(Device::rack_kind)
+            .ok_or_else(|| DeviceError::InvalidArgs(format!("{rack} isn't a rack")))?;
+        let (inner, outer): (DeviceId, ChainId) = (editor.new_id(), editor.new_id());
+        editor
+            .transact("Group", |editor| {
+                editor.apply(Command::AddChain {
+                    rack,
+                    index: placed[0].0,
+                    chain: Chain::new(outer, "Chain").with_devices(vec![Device::rack(inner, kind)]),
+                })?;
+                for &(_, chain, _) in &placed {
+                    let end = editor
+                        .document()
+                        .device(inner)
+                        .map_or(0, |d| d.chains.len());
+                    editor.apply(Command::MoveChain {
+                        chain,
+                        rack: inner,
+                        index: end,
+                    })?;
+                }
+                Ok::<_, bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(inner);
+        Ok(Grouped {
+            rack: inner,
+            chain: outer,
+        })
+    }
+
+    /// Ungroup (Cmd-Shift-G): takes a rack of one chain, or none, apart
+    /// (R11), selecting the first device that took its place.
+    fn ungroup(&mut self, editor: &mut Editor, rack: DeviceId) -> Result<Ungrouped, DeviceError> {
+        let current = editor
+            .document()
+            .device(rack)
+            .ok_or_else(|| DeviceError::InvalidArgs(format!("no {rack}")))?;
+        if current.rack_kind().is_none() {
+            return Err(DeviceError::Unavailable(format!("{rack} isn't a rack")));
+        }
+        if current.chains.len() > 1 {
+            return Err(DeviceError::Unavailable(
+                "a rack of several chains can't be ungrouped".to_owned(),
+            ));
+        }
+        let devices: Vec<DeviceId> = current
+            .chains
+            .first()
+            .map(|chain| chain.devices.iter().map(|d| d.id).collect())
+            .unwrap_or_default();
+        editor
+            .apply(Command::UngroupDevice { device: rack })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = devices.first().copied();
+        Ok(Ungrouped { devices })
+    }
+}
+
+/// A new device as `device.add` makes it: a rack of its kind, or a device of
+/// the type and role the arguments name.
+fn new_device(id: DeviceId, args: &AddDeviceArgs) -> Device {
+    if let DeviceKind::Rack { kind } = args.device.kind {
+        return Device::rack(id, kind);
+    }
+    let mut device = Device::new(id, args.device.name.clone(), args.device.kind.clone())
+        .with_role(args.device.role);
+    if args.device.sidechain {
+        device = device.with_sidechain();
+    }
+    device
 }
 
 /// Selects one track in the Arrangement, which the Device View then shows.
@@ -926,6 +1652,7 @@ fn load_preset(
             device,
             params: view.sanitize(&loaded.kind, loaded.params),
             name: preset::preset_name(path),
+            shape: loaded.shape,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))
@@ -990,4 +1717,35 @@ pub fn load_hot_swapped(
         .ok_or_else(|| DeviceError::Unavailable("no device is being hot-swapped".to_owned()))?;
     load_preset(view, editor, device, path)?;
     Ok(preset_result(device, path))
+}
+
+/// Maps the copies of the modulators in a copied rack or chain to the
+/// copies of their targets inside it (the modulation spec, R19); a mapping
+/// whose target is outside the copy isn't copied. `pairs` pairs each
+/// original with its copy's ID.
+fn map_inner_copies(
+    editor: &mut Editor,
+    pairs: &[(&Device, DeviceId)],
+) -> Result<(), bl_model::EditError> {
+    use bl_model::modulator::ModTarget;
+    let copy_of = |original: DeviceId| {
+        pairs
+            .iter()
+            .find(|(o, _)| o.id == original)
+            .map(|(_, c)| *c)
+    };
+    for &(original, copy) in pairs {
+        for mapping in &original.mappings {
+            if let ModTarget::Device { device, param } = mapping.target
+                && let Some(device) = copy_of(device)
+            {
+                editor.apply(Command::MapModulator {
+                    device: copy,
+                    slot: mapping.slot,
+                    target: ModTarget::Device { device, param },
+                })?;
+            }
+        }
+    }
+    Ok(())
 }

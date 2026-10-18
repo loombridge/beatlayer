@@ -21,7 +21,10 @@ use std::f64::consts::TAU;
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
+    DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
@@ -80,7 +83,7 @@ pub const TYPES: [&str; 8] = [
 
 /// A band's response: the eight [`TYPES`], by their index.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Type {
+pub(crate) enum Type {
     LowCut48,
     LowCut12,
     LowShelf,
@@ -331,7 +334,7 @@ pub fn make(config: &NodeConfig) -> Contour {
 
 /// A biquad's coefficients, normalised so `a0` is 1.
 #[derive(Clone, Copy, Default)]
-struct Coeffs {
+pub(crate) struct Coeffs {
     b0: f32,
     b1: f32,
     b2: f32,
@@ -342,8 +345,8 @@ struct Coeffs {
 /// One second-order section: its coefficients and its state, transposed
 /// direct form II.
 #[derive(Clone, Copy, Default)]
-struct Biquad {
-    c: Coeffs,
+pub(crate) struct Biquad {
+    pub(crate) c: Coeffs,
     z1: f32,
     z2: f32,
 }
@@ -351,7 +354,7 @@ struct Biquad {
 impl Biquad {
     /// Its output for `x`, advancing its state.
     #[inline]
-    fn process(&mut self, x: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32) -> f32 {
         let y = flush(self.c.b0 * x + self.z1);
         self.z1 = flush(self.c.b1 * x - self.c.a1 * y + self.z2);
         self.z2 = flush(self.c.b2 * x - self.c.a2 * y);
@@ -371,7 +374,7 @@ fn flush(x: f32) -> f32 {
 /// A shelf's `q` is the Q of the cookbook's `alpha` in place of its slope
 /// `S`, and a cut filter's is its resonance; the 48 dB cuts are four
 /// identical stages, so their curve is a plain cascade.
-fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
+pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
     let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
     let (sin, cos) = w0.sin_cos();
     let amplitude = 10f64.powf(gain_db / 40.0);
@@ -900,6 +903,158 @@ impl NativeDevice for Contour {
     fn latency(&self) -> u32 {
         self.latency
     }
+
+    fn display_len(&self) -> usize {
+        ANALYSER_BANDS
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        out.copy_from_slice(self.analyser.bands());
+    }
+}
+
+/// How many places along 20 Hz to 20 kHz each curve of the display is
+/// worked out at.
+pub const CURVE_POINTS: usize = 96;
+
+/// The levels the display shows between its bottom and its top, in dB: the
+/// curves' boost and cut, and the spectrum's level.
+const CURVE_RANGE_DB: [f32; 2] = [-18.0, 18.0];
+const SPECTRUM_RANGE_DB: [f32; 2] = [-90.0, 0.0];
+
+/// The rate the display's curves are worked out at. The curves are analytic
+/// and the display doesn't know the engine's rate; they differ from the
+/// running filters' only near Nyquist at other rates.
+/// shortcut: 48 kHz for every set, when the engine's rate reaches the shell.
+const DISPLAY_RATE: f64 = 48_000.0;
+
+/// A stage's response at `hz`, in dB.
+fn response_db(c: Coeffs, hz: f64, rate: f64) -> f64 {
+    let w = TAU * hz / rate;
+    let (s1, c1) = w.sin_cos();
+    let (s2, c2) = (2.0 * w).sin_cos();
+    let (b0, b1, b2) = (f64::from(c.b0), f64::from(c.b1), f64::from(c.b2));
+    let (a1, a2) = (f64::from(c.a1), f64::from(c.a2));
+    let num = (b0 + b1 * c1 + b2 * c2).powi(2) + (b1 * s1 + b2 * s2).powi(2);
+    let den = (1.0 + a1 * c1 + a2 * c2).powi(2) + (a1 * s1 + a2 * s2).powi(2);
+    10.0 * (num / den.max(1e-30)).max(1e-30).log10()
+}
+
+/// The device's display (the eq spec, R10 to R12): the spectrum while
+/// Analyze is on, each switched-on band's response and their sum on each
+/// curve, and a dot for each such band. `data` is what the node published,
+/// if an engine runs.
+#[must_use]
+pub fn display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
+    let text = |id: ParamId, v: f64| {
+        description
+            .param(id)
+            .map_or_else(String::new, |p| p.format(v))
+    };
+    let mode = Mode::of(value(MODE));
+    let adaptive = value(ADAPTIVE_Q) >= 0.5;
+    let plan = Plan {
+        mode,
+        adaptive,
+        bands: [[(false, Type::Peak); BANDS]; CURVES],
+    };
+    let names: &[&str] = match mode {
+        Mode::Stereo => &["Response"],
+        Mode::LeftRight => &["Left Response", "Right Response"],
+        Mode::MidSide => &["Mid Response", "Side Response"],
+    };
+    let series = |name: String, y_range: [f32; 2], detail: bool, values: Vec<f32>| DisplaySeries {
+        name,
+        unit: "dB".to_owned(),
+        x_unit: "Hz".to_owned(),
+        x_range: [EQ_MIN_HZ as f32, EQ_MAX_HZ as f32],
+        log_x: true,
+        y_range,
+        detail,
+        values,
+    };
+    let mut out = DeviceDisplay {
+        device,
+        live: data.is_some(),
+        view: None,
+        series: Vec::new(),
+        markers: Vec::new(),
+        readings: Vec::new(),
+    };
+    if let (Some(data), true) = (data, value(ANALYZE) >= 0.5) {
+        let mut spectrum = series(
+            "Spectrum".to_owned(),
+            SPECTRUM_RANGE_DB,
+            false,
+            data.to_vec(),
+        );
+        // Each band is read at its centre.
+        let centre = |band: f64| {
+            (ANALYSER_MIN_HZ
+                * (ANALYSER_MAX_HZ / ANALYSER_MIN_HZ).powf(band / ANALYSER_BANDS as f64))
+                as f32
+        };
+        spectrum.x_range = [centre(0.5), centre(ANALYSER_BANDS as f64 - 0.5)];
+        out.series.push(spectrum);
+    }
+    let freqs: Vec<f64> = (0..CURVE_POINTS)
+        .map(|i| EQ_MIN_HZ * (EQ_MAX_HZ / EQ_MIN_HZ).powf(i as f64 / (CURVE_POINTS - 1) as f64))
+        .collect();
+    for (curve, name) in names.iter().enumerate() {
+        let label = ['A', 'B'][curve];
+        let mut sum = vec![0.0f32; CURVE_POINTS];
+        for band in 0..BANDS {
+            if value(band_param(curve, band, ON)) < 0.5 {
+                continue;
+            }
+            let kind = Type::of(value(band_param(curve, band, TYPE)) as usize);
+            let freq = value(band_param(curve, band, FREQ));
+            let gain = if kind.has_gain() {
+                value(band_param(curve, band, GAIN_SLOT))
+            } else {
+                0.0
+            };
+            let q = plan.q(kind, value(band_param(curve, band, Q)), gain);
+            let c = coeffs(kind, freq, gain, q, DISPLAY_RATE);
+            let stages = kind.stages() as f64;
+            let response: Vec<f32> = freqs
+                .iter()
+                .map(|&hz| (stages * response_db(c, hz, DISPLAY_RATE)) as f32)
+                .collect();
+            for (total, r) in sum.iter_mut().zip(&response) {
+                *total += r;
+            }
+            let n = band + 1;
+            out.series.push(series(
+                format!("{label}{n} Response"),
+                CURVE_RANGE_DB,
+                true,
+                response,
+            ));
+            let freq_text = text(band_param(curve, band, FREQ), freq);
+            let mut marker = format!("{label}{n} {} {freq_text}", TYPES[kind.index()]);
+            if kind.has_gain() {
+                marker.push(' ');
+                marker.push_str(&text(band_param(curve, band, GAIN_SLOT), gain));
+            }
+            out.markers.push(DisplayMarker {
+                name: format!("{label}{n}"),
+                series: (*name).to_owned(),
+                x: freq as f32,
+                y: gain as f32,
+                text: marker,
+            });
+        }
+        out.series
+            .push(series((*name).to_owned(), CURVE_RANGE_DB, false, sum));
+    }
+    out
 }
 
 #[cfg(test)]

@@ -7,10 +7,12 @@ use core::ops::Range;
 use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
+use bl_engine::modbus::{Bus, Control};
 use bl_engine::{
-    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
-    ParamValue, Registry, segments,
+    AutomationList, Block, DeviceType, DisplayReader, DisplayWriter, Node, NodeConfig, NodeData,
+    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, display_channel, segments,
 };
+use bl_model::modulation::Travel;
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
 /// A native device: what it does to audio, given its parameters.
@@ -24,6 +26,22 @@ pub trait NativeDevice: Send + 'static {
     /// may change; within one, `params` gives every parameter's value frame
     /// by frame ([`ParamBank::ramp`]).
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank);
+
+    /// Ends every note the device started and still holds, by writing a
+    /// note-off for each at offset 0 into `out`, and forgets them. The engine
+    /// calls it while the device is switched off, and on the first block after
+    /// the device was removed or moved (spec: device-framework R32). The
+    /// default writes nothing, for a device that starts no notes.
+    fn release(&mut self, out: &mut NoteBuffer) {
+        let _ = out;
+    }
+
+    /// How many notes the device has dropped since it was made, for lack of
+    /// room in its fixed tables and queues (real-time rule 4). The default is
+    /// none.
+    fn dropped_notes(&self) -> u64 {
+        0
+    }
 
     /// Takes parameter changes while the device is switched off and
     /// doesn't process; `params` already holds them. A device that keeps
@@ -46,6 +64,86 @@ pub trait NativeDevice: Send + 'static {
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// Whether the device is a modulator (WP-5.10): the engine works its
+    /// output out in [`control`](Self::control) before any track runs, and
+    /// [`process`](Self::process) is never called.
+    fn is_modulator(&self) -> bool {
+        false
+    }
+
+    /// A modulator's output for a stretch between parameter changes: it
+    /// writes the rows [`Modulation`] gives, from its parameters, which
+    /// are already worked out for the stretch.
+    fn control(&mut self, modulation: &mut Modulation<'_, '_>, params: &ParamBank) {
+        let _ = (modulation, params);
+    }
+    /// How many values the device's display data has (the framework spec,
+    /// R35): 0 for a device with no display to draw from the audio. Asked
+    /// once, when the node is made.
+    fn display_len(&self) -> usize {
+        0
+    }
+
+    /// Writes the display's latest values into `out`, [`display_len`] of
+    /// them, after each block. It runs on the audio thread: it allocates,
+    /// locks and blocks nothing.
+    ///
+    /// [`display_len`]: Self::display_len
+    fn display(&mut self, out: &mut [f32]) {
+        let _ = out;
+    }
+}
+
+/// A stretch of the rows a modulator writes, between parameter changes
+/// (WP-5.10).
+pub struct Modulation<'c, 'a> {
+    ctl: &'c mut Control<'a>,
+    range: Range<usize>,
+}
+
+impl Modulation<'_, '_> {
+    /// Frames in the stretch.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        self.range.len()
+    }
+
+    /// The sample rate.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.ctl.sample_rate
+    }
+
+    /// The song's tempo map.
+    #[must_use]
+    pub fn tempo(&self) -> &TempoMap {
+        self.ctl.tempo
+    }
+
+    /// The song position of the stretch's first frame.
+    #[must_use]
+    pub fn song_position(&self) -> Frames {
+        Frames(self.ctl.transport.position.get() + self.range.start as i64)
+    }
+
+    /// Whether the song is playing.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.ctl.transport.playing
+    }
+
+    /// Row `index` of the modulator's rows, over the stretch, writable
+    /// ([`bl_engine::modbus::ROWS`] of them, a contribution row and a hold
+    /// row per slot).
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't a row.
+    pub fn row_mut(&mut self, index: usize) -> &mut [f32] {
+        let range = self.range.clone();
+        &mut self.ctl.row_mut(index)[range]
     }
 }
 
@@ -78,6 +176,19 @@ impl<'a> Audio<'_, 'a> {
                 ..*note
             })
         })
+    }
+
+    /// Sends a note on from the stretch, at `note.offset` frames after its
+    /// first frame (clamped into it): the notes go out in order of offset,
+    /// note-offs before note-ons on one frame (spec: device-framework R30).
+    /// A note past the out buffer's room is dropped and counted. Never
+    /// allocates.
+    pub fn send(&mut self, note: NoteEvent) {
+        let offset = note.offset.min(self.range.len().saturating_sub(1) as u32);
+        self.block.insert_note(NoteEvent {
+            offset: offset + self.range.start as u32,
+            ..note
+        });
     }
 
     /// Every channel's samples in the stretch, in order.
@@ -120,6 +231,13 @@ impl<'a> Audio<'_, 'a> {
         Frames(self.block.transport().position.get() + self.range.start as i64)
     }
 
+    /// Whether the song is playing, so a tempo-synced device locks to the
+    /// song position.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.block.transport().playing
+    }
+
     /// One channel's samples in the stretch.
     ///
     /// # Panics
@@ -153,6 +271,9 @@ struct Slot {
     smoother: LinearSmoother,
     /// Its value at each frame of the current stretch.
     ramp: Vec<f32>,
+    /// Its base and the value it played at the stretch's last frame, while
+    /// a clip's modulation acts on it.
+    modulated: Option<(f64, f64)>,
 }
 
 /// A device's parameters on the audio thread: each clamped to its range,
@@ -187,6 +308,7 @@ impl ParamBank {
                     descriptor: descriptor.clone(),
                     smoother: LinearSmoother::new(value, frames),
                     ramp: vec![value as f32; config.max_frames.max(1)],
+                    modulated: None,
                 }
             })
             .collect();
@@ -239,12 +361,15 @@ impl ParamBank {
 
     /// Works out every parameter's value for the next `frames` frames: an
     /// automated one from its envelope, on the exact frame, when the song
-    /// plays at song frame `from`; the clips' modulation added on top
-    /// (WP-3.15), clamped to the parameter's range; the rest gliding toward
-    /// their values as always.
-    fn advance(&mut self, frames: usize, from: Option<i64>) {
+    /// plays at song frame `from`; a held one at the position a modulator
+    /// in Remote Control holds it at; then the clips' and the modulators'
+    /// modulation on top of that base (the modulation spec, R2, R3 and
+    /// R14), clamped to the parameter's range; the rest gliding toward
+    /// their values as always. `bus` holds the modulators' rows, whose
+    /// frame `offset` is the stretch's first.
+    fn advance(&mut self, frames: usize, from: Option<i64>, bus: Bus<'_>, offset: usize) {
         self.frames = frames;
-        let automation = from.and_then(|_| self.automation.clone());
+        let automation = self.automation.clone();
         let automation = automation
             .as_ref()
             .and_then(|data| data.downcast_ref::<AutomationList>());
@@ -252,39 +377,73 @@ impl ParamBank {
             let frames = frames.min(slot.ramp.len());
             let id = slot.descriptor.id;
             let descriptor = &slot.descriptor;
-            let modulation = |frame: i64| {
-                automation
-                    .and_then(|list| list.modulation(id, frame))
-                    .unwrap_or(0.0)
+            slot.modulated = None;
+            let Some(list) = automation else {
+                Self::glide(slot, frames);
+                continue;
             };
-            let envelope = automation.and_then(|list| list.envelope(id));
-            let modulated = automation.is_some_and(|list| list.modulates(id));
-            // Spec: clip-envelopes R3. The clips' modulation is added on the
-            // frame, clamped to the parameter's range; the control (or the
-            // track's envelope) is the value underneath.
-            if let (Some(envelope), Some(from)) = (envelope, from) {
-                for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
-                    let frame = from + i as i64;
-                    *value = descriptor.clamp(envelope.value_at(frame) + modulation(frame)) as f32;
-                }
-                let last = from + frames as i64 - 1;
-                slot.smoother
-                    .snap(descriptor.clamp(envelope.value_at(last) + modulation(last)));
-            } else if let (true, Some(from)) = (modulated, from) {
-                // The control glides as it always does; the modulation is
-                // added on the frame. When the modulation goes, the value
-                // steps back to the control, which is where the smoother
-                // still is.
-                for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
-                    let frame = from + i as i64;
-                    *value = descriptor.clamp(slot.smoother.step() + modulation(frame)) as f32;
-                }
-            } else if slot.smoother.is_settled() {
-                slot.ramp[..frames].fill(slot.smoother.value() as f32);
-            } else {
-                for value in &mut slot.ramp[..frames] {
-                    *value = slot.smoother.step() as f32;
-                }
+            let envelope = from.and_then(|_| list.envelope(id));
+            let modulates = list.modulates(id);
+            if envelope.is_none() && !modulates {
+                Self::glide(slot, frames);
+                continue;
+            }
+            // The base is a modulator's hold, else the envelope's value on
+            // each frame, else the control's, which glides as it always
+            // does; the modulation acts on it on the frame, without a glide
+            // of its own, and never changes it: when it goes, the parameter
+            // plays its base again.
+            let travel = Travel::Param(descriptor);
+            let mut base = 0.0;
+            let mut played = 0.0;
+            let mut held = false;
+            for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
+                let song = from.map(|from| from + i as i64);
+                let at = offset + i;
+                let control = if envelope.is_none() {
+                    slot.smoother.step()
+                } else {
+                    0.0
+                };
+                let position = list.held(id, bus, at);
+                held = position.is_some();
+                base = match (position, envelope, song) {
+                    (Some(position), ..) => travel.value(position),
+                    (None, Some(envelope), Some(frame)) => envelope.value_at(frame),
+                    _ => control,
+                };
+                played = descriptor.clamp(list.played(travel, id, song, base, bus, at));
+                *value = played as f32;
+            }
+            if frames == 0 {
+                continue;
+            }
+            if envelope.is_some() && !held {
+                slot.smoother.snap(descriptor.clamp(base));
+            }
+            slot.modulated =
+                (modulates && (held || played != descriptor.clamp(base))).then_some((base, played));
+        }
+    }
+
+    /// Fills the next `frames` frames of `slot`'s ramp from its smoother:
+    /// the control's gliding value.
+    fn glide(slot: &mut Slot, frames: usize) {
+        if slot.smoother.is_settled() {
+            slot.ramp[..frames].fill(slot.smoother.value() as f32);
+        } else {
+            for value in &mut slot.ramp[..frames] {
+                *value = slot.smoother.step() as f32;
+            }
+        }
+    }
+
+    /// Calls `report` with the id, base and played value of each parameter
+    /// a clip's modulation acted on in the last stretch (WP-5.9).
+    pub fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        for slot in &self.slots {
+            if let Some((base, played)) = slot.modulated {
+                report(slot.descriptor.id, base, played);
             }
         }
     }
@@ -380,6 +539,9 @@ impl DelayLine {
 pub struct NativeNode<D> {
     device: D,
     params: ParamBank,
+    /// Where the device publishes its display after each block, and the
+    /// reader the compiler takes once.
+    display: Option<(DisplayWriter, Option<DisplayReader>)>,
 }
 
 impl<D: NativeDevice> NativeNode<D> {
@@ -392,9 +554,15 @@ impl<D: NativeDevice> NativeNode<D> {
         values: &Device,
         config: &NodeConfig,
     ) -> Self {
+        let len = device.display_len();
+        let display = (len > 0).then(|| {
+            let (writer, reader) = display_channel(len);
+            (writer, Some(reader))
+        });
         Self {
             device,
             params: ParamBank::new(description, values, config),
+            display,
         }
     }
 
@@ -402,6 +570,12 @@ impl<D: NativeDevice> NativeNode<D> {
     #[must_use]
     pub fn params(&self) -> &ParamBank {
         &self.params
+    }
+
+    /// How many notes the device has dropped for lack of room.
+    #[must_use]
+    pub fn dropped_notes(&self) -> u64 {
+        self.device.dropped_notes()
     }
 
     /// The device.
@@ -413,8 +587,12 @@ impl<D: NativeDevice> NativeNode<D> {
 
 impl<D: NativeDevice> Node for NativeNode<D> {
     fn process(&mut self, block: &mut Block<'_>) {
+        if self.device.is_modulator() {
+            return;
+        }
         let frames = block.frames();
         let transport = block.transport();
+        let bus = block.modulation();
         for segment in segments(block.events(), frames) {
             for event in segment.events {
                 self.params.apply(event);
@@ -425,7 +603,8 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             let from = transport
                 .playing
                 .then(|| transport.position.get() + segment.range.start as i64);
-            self.params.advance(segment.range.len(), from);
+            self.params
+                .advance(segment.range.len(), from, bus, segment.range.start);
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
@@ -435,6 +614,35 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.process(&mut audio, &self.params);
         }
+        // Spec: device-framework R35. The display's latest values, after
+        // each block.
+        if let Some((writer, _)) = &mut self.display {
+            writer.publish(|out| self.device.display(out));
+        }
+    }
+
+    fn control(&mut self, ctl: &mut Control<'_>) -> bool {
+        if !self.device.is_modulator() {
+            return false;
+        }
+        let transport = ctl.transport;
+        let (events, frames, earlier) = (ctl.events, ctl.frames, ctl.earlier);
+        for segment in segments(events, frames) {
+            for event in segment.events {
+                self.params.apply(event);
+            }
+            let from = transport
+                .playing
+                .then(|| transport.position.get() + segment.range.start as i64);
+            self.params
+                .advance(segment.range.len(), from, earlier, segment.range.start);
+            let mut modulation = Modulation {
+                ctl: &mut *ctl,
+                range: segment.range,
+            };
+            self.device.control(&mut modulation, &self.params);
+        }
+        true
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {
@@ -442,6 +650,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             self.params.apply_now(event);
         }
         self.device.flush(events, &self.params);
+    }
+
+    fn release(&mut self, out: &mut NoteBuffer) {
+        self.device.release(out);
     }
 
     fn receive_data(&mut self, data: NodeData) {
@@ -454,8 +666,16 @@ impl<D: NativeDevice> Node for NativeNode<D> {
         }
     }
 
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        self.params.modulated(report);
+    }
+
     fn latency(&self) -> u32 {
         self.device.latency()
+    }
+
+    fn display(&mut self) -> Option<DisplayReader> {
+        self.display.as_mut().and_then(|(_, reader)| reader.take())
     }
 }
 

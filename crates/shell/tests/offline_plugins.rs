@@ -16,6 +16,7 @@ use bl_engine::{
     EngineConfig, MediaLibrary, NodeConfig, Offline, Registry, TransportCommand, When,
 };
 use bl_model::{DeviceId, Document};
+use bl_plugin_host::Hosts;
 use bl_plugin_host::clap::{ClapHost, PluginStatus};
 use bl_shell::export::{self, ExportError, Job, Length, Render, Rendered};
 use bl_shell::export_commands::{self as export_ids, ExportResult};
@@ -151,7 +152,7 @@ fn spec(sample_rate: u32, block: usize) -> Render {
 fn render(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     spec: &Render,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(Vec<f32>, Rendered), ExportError> {
@@ -168,6 +169,7 @@ fn render(
             samples.extend_from_slice(block);
             Ok(())
         },
+        None,
     )?;
     assert_eq!(rendered.heap_operations, 0, "the real-time rules");
     Ok((samples, rendered))
@@ -218,7 +220,7 @@ fn an_export_renders_the_plugin_as_the_engine_plays_it() {
     let (exported, rendered) = render(
         &document,
         media(&shell),
-        Some(shell.plugins()),
+        shell.plugin_hosts(),
         &spec(48_000, export::BLOCK),
         &mut |_| {},
     )
@@ -231,7 +233,7 @@ fn an_export_renders_the_plugin_as_the_engine_plays_it() {
     let (through, _) = render(
         &document,
         media(&shell),
-        None,
+        Hosts::default(),
         &spec(48_000, export::BLOCK),
         &mut |_| {},
     )
@@ -288,7 +290,7 @@ fn a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back()
     render(
         &document,
         media(&shell),
-        Some(plugins),
+        shell.plugin_hosts(),
         &spec(96_000, 100),
         &mut |_| {
             if during.is_none() {
@@ -336,7 +338,7 @@ fn a_set_without_a_plugin_renders_without_borrowing_from_the_host() {
     let without = render(
         &document,
         media(&shell),
-        None,
+        Hosts::default(),
         &spec(48_000, 256),
         &mut |_| {},
     )
@@ -349,7 +351,7 @@ fn a_set_without_a_plugin_renders_without_borrowing_from_the_host() {
     let (with, _) = render(
         &document,
         media(&shell),
-        Some(plugins),
+        shell.plugin_hosts(),
         &spec(48_000, 256),
         &mut |_| {},
     )
@@ -372,7 +374,7 @@ fn a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes() {
     let report = export::export(
         &document,
         media(&shell),
-        Some(plugins),
+        shell.plugin_hosts(),
         &Job {
             path: path.clone(),
             file_type: bl_media::FileType::Wav,
@@ -384,6 +386,7 @@ fn a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes() {
             start: Ticks::ZERO,
             length: Length::Frames(FRAMES),
             replace: false,
+            render_as_loop: false,
             block: export::BLOCK,
         },
         &AtomicBool::new(false),
@@ -433,7 +436,7 @@ fn a_cancelled_export_gives_every_plugin_back() {
     let result = export::export(
         &document,
         media(&shell),
-        Some(shell.plugins()),
+        shell.plugin_hosts(),
         &Job {
             path: scratch.path("cancelled.wav"),
             file_type: bl_media::FileType::Wav,
@@ -445,6 +448,7 @@ fn a_cancelled_export_gives_every_plugin_back() {
             start: Ticks::ZERO,
             length: Length::Frames(FRAMES),
             replace: false,
+            render_as_loop: false,
             block: export::BLOCK,
         },
         &cancel,
@@ -472,7 +476,7 @@ fn renders_with_a_plugin_are_the_same_every_time_and_at_any_block_size() {
         render(
             &document,
             media(&shell),
-            Some(shell.plugins()),
+            shell.plugin_hosts(),
             &spec(48_000, block),
             &mut |_| {},
         )
@@ -599,7 +603,7 @@ fn an_export_renders_a_kit_device_and_stays_off_the_heap() {
     let (dry, _) = render(
         &dry_doc,
         media(&dry_shell),
-        None,
+        Hosts::default(),
         &spec(48_000, export::BLOCK),
         &mut |_| {},
     )
@@ -613,7 +617,7 @@ fn an_export_renders_a_kit_device_and_stays_off_the_heap() {
     let (exported, rendered) = render(
         &document,
         media(&shell),
-        None,
+        Hosts::default(),
         &spec(48_000, export::BLOCK),
         &mut |_| {},
     )
@@ -687,7 +691,7 @@ fn renders_with_a_kit_device_are_the_same_every_time_and_at_any_block_size() {
         render(
             &document,
             media(&shell),
-            None,
+            Hosts::default(),
             &spec(48_000, block),
             &mut |_| {},
         )

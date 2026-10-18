@@ -730,6 +730,10 @@ struct EngineHost {
 
 impl EngineHost {
     fn new(block: usize) -> Self {
+        Self::with_registry(block, Registry::new())
+    }
+
+    fn with_registry(block: usize, registry: Registry) -> Self {
         // Not autonomous: the transport's commands are `read`, so they run
         // without asking anyway.
         let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
@@ -737,7 +741,7 @@ impl EngineHost {
         client.transport().agent.set_engine_attached(true);
         Self {
             client,
-            offline: Offline::new(EngineConfig::new(SAMPLE_RATE, block), Registry::new()),
+            offline: Offline::new(EngineConfig::new(SAMPLE_RATE, block), registry),
             block,
             clock: 0,
             samples: Vec::new(),
@@ -787,6 +791,112 @@ impl EngineHost {
 
     fn status(&mut self) -> Value {
         self.call("transport", json!({ "action": "status" }))
+    }
+
+    /// Hands the display data the devices published to the shell, as the
+    /// app's poll of the engine does.
+    fn publish_displays(&mut self) {
+        let mut data = std::collections::BTreeMap::new();
+        self.offline.displays().read_all(&mut data);
+        let shell = &mut self.client.transport().shell;
+        for (device, data) in data {
+            shell.set_device_display_data(device, &data.values);
+        }
+    }
+}
+
+/// An agent reads the Contour's spectrum and the Squeeze's gain reduction
+/// by their device IDs, as the engine published them after the last block,
+/// at any block size (the device framework spec, R26 and R28).
+#[test]
+fn an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id() {
+    for block in [1, 64, 512, 4_096] {
+        let mut registry = Registry::new();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Contour", bl_devices::eq::EQ),
+                device(2, "Squeeze", bl_devices::compressor::COMPRESSOR),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Squeeze"}, "param": 0, "value": -30.0 } },
+            ] }),
+        );
+        let ids: Vec<_> = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().map(|d| d.id).collect()
+        };
+        let (contour, squeeze) = (ids[1], ids[2]);
+        host.play_to(16_384);
+        host.publish_displays();
+        let read = |host: &mut EngineHost, device| {
+            let reply = host.call(
+                "run",
+                json!({ "label": "Read", "commands": [
+                    { "command": "device.display", "args": { "device": device } },
+                ] }),
+            );
+            reply["results"][0]["result"].clone()
+        };
+
+        let contour = read(&mut host, contour);
+        assert_eq!(contour["live"], true);
+        let series = |name: &str| {
+            contour["series"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+                .unwrap_or_else(|| panic!("block {block}: no {name} in {contour}"))
+                .clone()
+        };
+        let spectrum: Vec<f64> = series("Spectrum")["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let loudest = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        let centre = 20.0 * (1000.0f64).powf((loudest as f64 + 0.5) / 64.0);
+        assert!(
+            (centre / 1000.0).ln().abs() < 0.2,
+            "block {block}: the 1 kHz tone is read at {centre:.0} Hz"
+        );
+
+        let squeeze = read(&mut host, squeeze);
+        let reduction = squeeze["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "Gain Reduction")
+            .unwrap_or_else(|| panic!("block {block}: no reduction in {squeeze}"));
+        assert!(
+            reduction["value"].as_f64().unwrap() < -1.0,
+            "block {block}: {reduction}"
+        );
+        assert_eq!(squeeze["view"], "Transfer Curve");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
     }
 }
 
@@ -1322,6 +1432,402 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
         0,
         "the engine's blocks stay off the heap"
     );
+}
+
+// Spec: racks R17. An agent builds a nested rack by command ID, edits its
+// chains and groups and ungroups devices, and reads each result back
+// through the query tool's `device` object, chains and their IDs included.
+#[test]
+fn an_agent_builds_and_reads_back_a_nested_rack() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("racks").unwrap();
+    let audio = default_tracks(&mut client)[2];
+    let native = |name: &str| {
+        json!({
+            "id": {"$new": name}, "name": name, "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "test.through" } },
+        })
+    };
+
+    // A rack of two chains, the second holding a device and a rack of its
+    // own, and the chains' mixers, in one call.
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+                "id": {"$new": "outer"}, "name": "Layers", "enabled": true, "params": [],
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "chains": [
+                    { "id": {"$new": "dry"}, "name": "Dry", "devices": [] },
+                    { "id": {"$new": "wet"}, "name": "Wet", "devices": [
+                        native("Delay"),
+                        {
+                            "id": {"$new": "inner"}, "name": "Inner", "enabled": true, "params": [],
+                            "kind": { "rack": { "kind": "audio_effect" } },
+                            "chains": [{ "id": {"$new": "deep"}, "name": "Deep", "devices": [] }],
+                        },
+                    ] },
+                ],
+            } } },
+            { "command": "chain.set_gain", "args": { "chain": {"$ref": "wet"}, "volume": 0.5 } },
+            { "command": "chain.set_pan", "args": { "chain": {"$ref": "wet"}, "pan": -0.5 } },
+            { "command": "chain.set_colour", "args": { "chain": {"$ref": "dry"}, "colour": 7 } },
+            { "command": "chain.set_solo", "args": { "chain": {"$ref": "dry"}, "solo": true } },
+        ] }),
+    );
+    assert_eq!(built["ran"], 5);
+    let ids = &built["ids"];
+    let id = |name: &str| {
+        ids[name]
+            .as_u64()
+            .unwrap_or_else(|| panic!("no `{name}`: {ids}"))
+    };
+    let (outer, dry, wet, inner, deep, delay) = (
+        id("outer"),
+        id("dry"),
+        id("wet"),
+        id("inner"),
+        id("deep"),
+        id("Delay"),
+    );
+
+    // The rack reads back with its chains, their mixers and devices, racks
+    // inside racks included.
+    let rack = call(
+        &mut client,
+        "query",
+        json!({ "id": outer, "detail": "full" }),
+    );
+    let chains = rack["chains"].as_array().unwrap();
+    assert_eq!(chains.len(), 2);
+    assert_eq!(chains[0]["id"].as_u64(), Some(dry));
+    assert_eq!(chains[0]["name"], "Dry");
+    assert_eq!(chains[0]["colour"], 7);
+    assert_eq!(chains[0]["mixer"]["solo"], true);
+    assert_eq!(chains[1]["mixer"]["volume"], 0.5);
+    assert_eq!(chains[1]["mixer"]["pan"], -0.5);
+    let nested = &chains[1]["devices"][1];
+    assert_eq!(nested["id"].as_u64(), Some(inner));
+    assert_eq!(nested["chains"][0]["id"].as_u64(), Some(deep));
+    assert_eq!(
+        rack["saved"]["chains"]["total"], 2,
+        "the saved form pages chains"
+    );
+
+    // A chain is read by its ID, with the rack and track it belongs to, and
+    // so is a device inside a rack.
+    let chain = call(&mut client, "query", json!({ "id": deep }));
+    assert_eq!(chain["name"], "Deep");
+    assert_eq!(chain["rack"].as_u64(), Some(inner));
+    assert_eq!(chain["track"].as_u64(), Some(audio));
+    let device = call(&mut client, "query", json!({ "id": delay }));
+    assert_eq!(device["track"].as_u64(), Some(audio));
+
+    // Group and Ungroup by ID: the delay and the inner rack go in a rack of
+    // their own, in the wet chain, and come out again.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.group", "args": { "devices": [delay, inner] } },
+        ] }),
+    );
+    let wet_chain = call(&mut client, "query", json!({ "id": wet }));
+    let devices = wet_chain["devices"].as_array().unwrap();
+    assert_eq!(devices.len(), 1);
+    let group = devices[0]["id"].as_u64().unwrap();
+    assert_eq!(
+        devices[0]["chains"][0]["devices"].as_array().unwrap().len(),
+        2
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.ungroup", "args": { "device": group } }] }),
+    );
+    let wet_chain = call(&mut client, "query", json!({ "id": wet }));
+    let order: Vec<u64> = wet_chain["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(order, [delay, inner]);
+
+    // Deleting a chain is destructive: an agent that isn't autonomous is
+    // refused, and the chain stays.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "chain.remove", "args": { "chain": dry } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(refused.text.contains("destructive"), "{}", refused.text);
+    let rack = call(&mut client, "query", json!({ "id": outer }));
+    assert_eq!(rack["chains"].as_array().unwrap().len(), 2);
+
+    // Undo takes each step back whole.
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"][0], "racks: Ungroup");
+}
+
+// Spec: racks R41 (WP-5.7): an agent takes a rack chain's tap as a track's
+// input by command ID, reads it back as the track's input, and sees it go
+// to No Input with the chain.
+#[test]
+fn an_agent_takes_a_chain_tap() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("racks").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (source, tapper) = (tracks[2], tracks[3]);
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": source, "index": 0, "device": {
+                "id": {"$new": "rack"}, "name": "Layers", "enabled": true, "params": [],
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "chains": [{ "id": {"$new": "wet"}, "name": "Wet", "devices": [] }],
+            } } },
+        ] }),
+    );
+    let wet = built["ids"]["wet"].as_u64().unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "routing.set_input", "args": { "track": tapper,
+            "input": { "type": "track", "track": source, "tap": "post_fx", "chain": wet } } }] }),
+    );
+
+    let read = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": tapper, "detail": "full" }))["saved"]["routing"]["input"]
+            .clone()
+    };
+    assert_eq!(
+        read(&mut client),
+        json!({ "type": "track", "track": source, "tap": "post_fx", "chain": wet })
+    );
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"][0], "racks: Set Input");
+
+    // A chain that isn't on the track is refused.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "routing.set_input", "args": { "track": tapper,
+                "input": { "type": "track", "track": tracks[0], "chain": wet } } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+
+    // Removing the chain leaves No Input; undo brings the tap back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "chain.remove", "args": { "chain": wet } }] }),
+    );
+    assert_eq!(read(&mut client), json!({ "type": "none" }));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo", "args": {} }] }),
+    );
+    assert_eq!(
+        read(&mut client),
+        json!({ "type": "track", "track": source, "tap": "post_fx", "chain": wet })
+    );
+}
+
+// Spec: device-chains R34 and R35, device-framework R14 (WP-5.42): an agent
+// adds the framework's test effects, shows and hides its expanded part,
+// switches its own menu option, and reads all of it back, by command ID.
+#[test]
+fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
+    use bl_devices::testing::{self, EFFECTS_INVERT};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(testing::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("effects-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let effects = testing::effects_type();
+    let added = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": { "kind": effects.kind, "name": effects.name, "role": effects.role },
+            },
+        }] }),
+    );
+    let device = added["results"][0]["result"]["device"].clone();
+
+    // The expanded part: hidden at first, shown and hidden by command, read
+    // back from the Device View's state.
+    let frame = |client: &mut Client<InProcess>| {
+        let state = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device_view.state" }] }),
+        );
+        state["results"][0]["result"]["devices"][0].clone()
+    };
+    let hidden = frame(&mut client);
+    assert_eq!(
+        (hidden["expandable"].clone(), hidden["expanded"].clone()),
+        (json!(true), json!(false))
+    );
+    let shown = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.expand", "args": { "device": device } }] }),
+    );
+    assert_eq!(
+        shown["results"][0]["result"]["devices"][0]["expanded"],
+        json!(true)
+    );
+    assert_eq!(frame(&mut client)["expanded"], json!(true));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.expand",
+            "args": { "device": device, "expanded": false },
+        }] }),
+    );
+    assert_eq!(frame(&mut client)["expanded"], json!(false));
+
+    // The menu option is a parameter: set by ID, read back as one that
+    // lives in the menu.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.set_param",
+            "args": { "device": device, "param": EFFECTS_INVERT, "value": 1.0 },
+        }] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    let invert = params.iter().find(|p| p["name"] == "Invert LFO").unwrap();
+    assert_eq!(
+        (
+            invert["value"].clone(),
+            invert["menu_option"].clone(),
+            invert["automatable"].clone()
+        ),
+        (json!(1.0), json!(true), json!(true))
+    );
+}
+
+// Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Strike,
+// reads its parameters with its two menu options, switches one by ID, and
+// swaps it to Snapshot, by command ID.
+#[test]
+fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id() {
+    use bl_devices::drum_sampler::{ENV_FOLLOWS_PITCH, PER_NOTE_BEND, drum_sampler_type};
+
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("strike-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let strike = drum_sampler_type();
+    let added = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": { "kind": strike.kind, "name": strike.name, "role": strike.role },
+            },
+        }] }),
+    );
+    let device = added["results"][0]["result"]["device"].clone();
+    let read = |client: &mut Client<InProcess>, device: &serde_json::Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let option = |params: &serde_json::Value, name: &str| {
+        let param = params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()
+            .clone();
+        (param["value"].clone(), param["menu_option"].clone())
+    };
+    let params = read(&mut client, &device);
+    assert_eq!(
+        option(&params, "Enable Per-Note Pitch Bend"),
+        (json!(1.0), json!(true)),
+        "on in a new device"
+    );
+    assert_eq!(
+        option(&params, "Envelope Follows Pitch"),
+        (json!(0.0), json!(true))
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.set_param",
+            "args": { "device": device, "param": ENV_FOLLOWS_PITCH, "value": 1.0 },
+        }, {
+            "command": "device.set_param",
+            "args": { "device": device, "param": PER_NOTE_BEND, "value": 0.0 },
+        }] }),
+    );
+    let params = read(&mut client, &device);
+    assert_eq!(option(&params, "Envelope Follows Pitch").0, json!(1.0));
+    assert_eq!(option(&params, "Enable Per-Note Pitch Bend").0, json!(0.0));
+
+    let swapped = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.swap_to_snapshot",
+            "args": { "device": device },
+        }] }),
+    );
+    let snapshot = swapped["results"][0]["result"]["device"].clone();
+    assert_ne!(snapshot, device);
+    let params = read(&mut client, &snapshot);
+    let mode = params
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Mode")
+        .unwrap();
+    assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
 }
 
 /// Spec: warping R1, R4 to R11, R52. An agent warps a clip, edits its warp

@@ -129,6 +129,20 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: fader_move,
     },
     Fixture {
+        name: "volume-modulation",
+        about: "A tone whose volume is automated down over two bars while its clip's volume \
+                modulation envelope rises: the modulation acts on the automation, so the \
+                result follows it down.",
+        build: volume_modulation,
+    },
+    Fixture {
+        name: "device-modulation",
+        about: "A tone through a Utility whose gain a clip's modulation envelope lowers and \
+                then hands back across two bars: the envelope moves the gain from where its \
+                control is.",
+        build: device_modulation,
+    },
+    Fixture {
         name: "crossfade",
         about: "Two tracks, one assigned to the crossfader's A side and one to B, swept from \
                 the A end to the B end in 1/16 steps every 1/32 beat, closer than the 20 ms a \
@@ -751,6 +765,96 @@ fn fader_move() -> Scene {
         song.schedule(at, key, mixer::PAN, pan);
     }
     song.finish(3.25)
+}
+
+/// A two-bar MIDI clip at the song's start on `track`, with `envelope`'s
+/// breakpoints (a position in ticks and a value) for `target`, modulating it
+/// while the clip plays.
+fn modulated_clip(
+    song: &mut Song,
+    track: TrackId,
+    target: bl_model::AutomationTarget,
+    envelope: &[(Ticks, f64)],
+) {
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::WHOLE * 2,
+            ClipData::Midi(bl_model::MidiData::default()),
+        ),
+    });
+    for &(at, value) in envelope {
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target,
+            at,
+            value,
+        });
+    }
+}
+
+/// Spec: modulation R2, R4. The manual's example of modulation on top of
+/// automation: the volume automation fades from 0 dB to a quarter of the
+/// fader over two bars, and the clip's modulation envelope rises from 20 %
+/// to 100 % of it, so the sound follows the fade down.
+fn volume_modulation() -> Scene {
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let volume = bl_model::AutomationTarget::Mixer {
+        param: bl_model::MixerParam::Volume,
+    };
+    for (at, value) in [(Ticks::ZERO, 1.0), (Ticks::WHOLE * 2, 0.25)] {
+        song.apply(Command::SetAutomationBreakpoint {
+            track: lead,
+            target: volume,
+            at,
+            value,
+        });
+    }
+    modulated_clip(
+        &mut song,
+        lead,
+        volume,
+        &[(Ticks::ZERO, 0.2), (Ticks::WHOLE * 2, 1.0)],
+    );
+    song.finish(4.25)
+}
+
+/// Spec: modulation R3, R4. A clip's modulation envelope moves a device
+/// parameter relative to its control: the Utility's gain is at 0 dB, and the
+/// envelope takes it a third of its travel down at the start and back to
+/// where the control is at the end of the second bar.
+fn device_modulation() -> Scene {
+    use bl_devices::utility::{GAIN, UTILITY};
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let id = song.editor.new_id();
+    song.apply(Command::InsertDevice {
+        track: lead,
+        index: 1,
+        device: Device::new(
+            id,
+            "Utility",
+            DeviceKind::Native {
+                device_type: UTILITY.to_owned(),
+            },
+        ),
+    });
+    modulated_clip(
+        &mut song,
+        lead,
+        bl_model::AutomationTarget::Device {
+            device: id,
+            param: GAIN,
+        },
+        &[(Ticks::ZERO, -0.33), (Ticks::WHOLE * 2, 0.0)],
+    );
+    song.finish(4.25)
 }
 
 /// Spec: mixer R23. The crossfader swept from the A end to the B end with

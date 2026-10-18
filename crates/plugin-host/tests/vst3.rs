@@ -12,10 +12,14 @@ bl_rt::install_trap!();
 
 mod common;
 
-use bl_engine::{Node, NodeFactory, NoteEvent, NoteKind};
+use bl_core::time::{Frames, Ticks};
+use bl_engine::{AutomationList, Node, NodeData, NodeFactory, NoteEvent, NoteKind, TransportInfo};
+use bl_model::modulation::Travel;
 use bl_model::{DeviceKind, DeviceRole, ParamId, ParamKind, PluginFormat, PluginState};
 use bl_plugin_host::vst3::{ParamChange, Vst3Error, Vst3Host, plugin_state};
-use common::{CHANNELS, FRAMES, config, run, set, vst3_bundle, vst3_device};
+use common::{
+    CHANNELS, FRAMES, config, modulation_for, run, run_at, set, vst3_bundle, vst3_device,
+};
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
     NoteEvent {
@@ -168,6 +172,67 @@ fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
             note(40, NoteKind::Off, 72, 0.0)
         ],
         "echoed an octave up on the same frames"
+    );
+}
+
+// Spec: vst3-hosting R18. The test plug-in's controller maps control change 1
+// on channel 1 and the pitch bend on channel 3 to its gain: a message sets it
+// on the message's frame; one the controller doesn't map does nothing.
+#[test]
+fn channel_messages_set_the_parameters_the_controller_maps_them_to() {
+    let (_host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let message = |offset, channel, kind| NoteEvent {
+        offset,
+        kind,
+        channel,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let notes = [
+        // Gain 2 (the top of its range) from frame 10.
+        message(
+            10,
+            0,
+            NoteKind::Control {
+                controller: 1,
+                value: 1.0,
+            },
+        ),
+        // Not mapped: another channel, and another controller.
+        message(
+            15,
+            1,
+            NoteKind::Control {
+                controller: 1,
+                value: 0.0,
+            },
+        ),
+        message(
+            16,
+            0,
+            NoteKind::Control {
+                controller: 7,
+                value: 0.0,
+            },
+        ),
+        // The wheel at its bottom: gain 0 from frame 30.
+        message(30, 2, NoteKind::PitchBend { value: -1.0 }),
+        // A bend at its centre: half of 2.
+        message(50, 2, NoteKind::PitchBend { value: 0.0 }),
+    ];
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &notes);
+    let channel = &out.channels[0];
+    assert!(channel[..10].iter().all(|s| *s == 0.5), "{channel:?}");
+    assert!(channel[10..30].iter().all(|s| *s == 2.0), "{channel:?}");
+    assert!(channel[30..50].iter().all(|s| *s == 0.0), "{channel:?}");
+    // 8192 of 16383 is just short of the middle.
+    let centre = 2.0 * 8192.0 / 16383.0;
+    assert!(
+        channel[50..]
+            .iter()
+            .all(|s| (f64::from(*s) - centre).abs() < 1e-6),
+        "{channel:?}"
     );
 }
 
@@ -398,4 +463,82 @@ fn main_thread_calls_from_another_thread_are_refused() {
             assert_eq!(host.load(vst3_bundle()), Err(Vst3Error::WrongThread));
         });
     });
+}
+
+/// Channel 0 of `blocks` blocks of `FRAMES / blocks` frames of 1.0 through
+/// a node for a Test Gain Echo with a gain of 0.5 and the clip envelope
+/// `data`, from song frame `from`.
+fn gain_render(data: &NodeData, from: i64, blocks: usize) -> Vec<f32> {
+    let (_host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    node.receive_data(data.clone());
+    let each = FRAMES / blocks;
+    (0..blocks)
+        .flat_map(|i| {
+            let transport = TransportInfo {
+                playing: true,
+                position: Frames(from + (i * each) as i64),
+            };
+            run_at(node.as_mut(), &vec![1.0; each], &[], &[], transport).channels[0].clone()
+        })
+        .collect()
+}
+
+// Spec: modulation R6, R10
+#[test]
+fn a_vst3_parameter_takes_the_played_value() {
+    // A clip's envelope climbs from nothing to the whole travel over the
+    // bar.
+    let data = modulation_for(
+        vst3_device(1, &[]),
+        bl_test_vst3::GAIN,
+        &[(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)],
+    );
+    let list = data.downcast_ref::<AutomationList>().expect("a list");
+    let host = Vst3Host::new();
+    let types = host.load(vst3_bundle()).unwrap();
+    let gain = types[0]
+        .device_type
+        .description
+        .param(ParamId(bl_test_vst3::GAIN))
+        .unwrap();
+    let id = ParamId(bl_test_vst3::GAIN);
+    let played = |frame: i64| {
+        list.played(
+            Travel::Param(gain),
+            id,
+            Some(frame),
+            0.5,
+            bl_engine::modbus::Bus::EMPTY,
+            0,
+        )
+    };
+
+    // Every VST3 parameter is given the value it plays, as a parameter
+    // change on the block's first frame and on each song frame that is a
+    // multiple of 32.
+    let from = 1000;
+    let out = gain_render(&data, from, 1);
+    for (i, sample) in out.iter().enumerate() {
+        let frame = from + i as i64;
+        // Before the first grid point the first frame's value holds.
+        let want = played(if frame < 1024 { from } else { frame / 32 * 32 });
+        assert_eq!(*sample, want as f32, "frame {frame}");
+    }
+    assert_ne!(played(from), 0.5, "the clip modulates the gain");
+
+    // A render is the same at any block size.
+    for blocks in [2, 4, 64] {
+        assert_eq!(gain_render(&data, from, blocks), out, "{blocks} blocks");
+    }
+
+    // The song stops: the plug-in has its control's value again.
+    let (_host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    node.receive_data(data);
+    let transport = TransportInfo {
+        playing: true,
+        position: Frames(from),
+    };
+    run_at(node.as_mut(), &[1.0; FRAMES], &[], &[], transport);
+    let stopped = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    assert!(stopped.channels[0].iter().all(|s| *s == 0.5));
 }

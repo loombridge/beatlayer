@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ModelError;
-use crate::ids::{DeviceId, ParamId, TrackId};
+use crate::ids::{ChainId, DeviceId, ParamId, TrackId};
 
 /// One of a track's mixer controls.
 #[derive(
@@ -51,8 +51,8 @@ pub enum MixerParam {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     description = "Which parameter of the track an envelope drives: `mixer` with a `param`, \
-                   `send` with the return track it feeds (`to`), or `device` with the device \
-                   and its `param`."
+                   `send` with the return track it feeds (`to`), `device` with the device \
+                   and its `param`, or `chain` with a rack's chain and its mixer `param`."
 )]
 pub enum AutomationTarget {
     /// A control of the track's mixer.
@@ -71,6 +71,14 @@ pub enum AutomationTarget {
         device: DeviceId,
         /// Its parameter.
         param: ParamId,
+    },
+    /// A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume,
+    /// Pan, or Chain Activator (`mute`: 1 muted, 0 not).
+    Chain {
+        /// The chain.
+        chain: ChainId,
+        /// The control.
+        param: MixerParam,
     },
 }
 
@@ -190,6 +198,14 @@ pub fn envelope_value(points: &[Breakpoint], at: f64) -> Option<f64> {
 }
 
 impl Envelope {
+    /// Replaces every breakpoint's value by `f` of it, leaving positions and
+    /// bends alone.
+    pub(crate) fn map_values(&mut self, f: impl Fn(f64) -> f64) {
+        for point in &mut self.points {
+            point.value = f(point.value);
+        }
+    }
+
     /// Its breakpoints, in position order.
     pub fn points(&self) -> impl ExactSizeIterator<Item = Breakpoint> + '_ {
         self.points.iter().copied()
@@ -372,10 +388,9 @@ pub(crate) fn override_target(automation: &mut TrackAutomation, target: &Automat
     }
 }
 
-/// Drops every envelope of `device`'s parameters from `automation`: what
-/// deleting the device, or moving it to another track, does. A device's
-/// automation belongs to the track it's in.
-pub(crate) fn drop_device(automation: &mut TrackAutomation, device: DeviceId) {
+/// Turns every envelope of `device`'s parameters off in `automation`: what
+/// switching the device's A and B states does (device compare R7).
+pub(crate) fn override_device(automation: &mut TrackAutomation, device: DeviceId) {
     let targets: Vec<AutomationTarget> = automation
         .keys()
         .filter(
@@ -384,7 +399,7 @@ pub(crate) fn drop_device(automation: &mut TrackAutomation, device: DeviceId) {
         .copied()
         .collect();
     for target in targets {
-        automation.remove(&target);
+        override_target(automation, &target);
     }
 }
 

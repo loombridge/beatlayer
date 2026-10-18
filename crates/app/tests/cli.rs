@@ -32,6 +32,7 @@ fn help_lists_the_flags() {
     for flag in [
         "--version",
         "--check",
+        "--check-audio",
         "--config-dir",
         "--screenshot",
         "[set file]",
@@ -49,6 +50,18 @@ fn check_loads_everything_the_window_needs() {
     // macOS adds the application menu; Windows and Linux have the other eight.
     let menus = if cfg!(target_os = "macos") { 9 } else { 8 };
     assert!(stdout.contains(&format!("{menus} menus")), "{stdout}");
+}
+
+/// Runs the default output for a second, or says no device started (3, as
+/// on a CI runner with no sound card). A crash would show as no exit code.
+#[test]
+fn check_audio_runs_the_default_output_or_says_why_not() {
+    let (code, stdout, stderr) = run(&["--check-audio"]);
+    match code {
+        Some(0) => assert!(stdout.contains("ran for a second"), "{stdout}"),
+        Some(3) => assert!(stdout.contains("no audio device started"), "{stdout}"),
+        other => panic!("--check-audio exited with {other:?}: {stdout}{stderr}"),
+    }
 }
 
 #[test]

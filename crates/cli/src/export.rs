@@ -65,6 +65,11 @@ pub struct ExportArgs {
     /// Replace OUTPUT if it exists.
     #[arg(long)]
     pub replace: bool,
+
+    /// Add the tail the song leaves after the range's end onto the file's
+    /// start, so the file loops without a cut tail.
+    #[arg(long)]
+    pub render_as_loop: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -120,6 +125,7 @@ fn command_args(args: &ExportArgs, shell: &Shell) -> Result<Value, String> {
         },
         "normalize": args.normalize,
         "replace": args.replace,
+        "render_as_loop": args.render_as_loop,
     });
     if let Some(file_type) = args.file_type {
         command["file_type"] = json!(match file_type {

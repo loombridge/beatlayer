@@ -168,6 +168,52 @@ impl AuHost {
     pub fn take_param_changes(&self) -> Vec<ParamChange> {
         Vec::new()
     }
+
+    /// Lends the units to an offline render: there are none here, so the
+    /// loan holds nothing and its factory makes no nodes.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::WrongThread`] off the host's own thread.
+    pub fn lend(&self) -> Result<Loan, AuError> {
+        if std::thread::current().id() != self.owner {
+            return Err(AuError::WrongThread);
+        }
+        Ok(Loan)
+    }
+}
+
+/// The host's units, lent to an offline render: nothing, on this platform.
+#[derive(Debug)]
+pub struct Loan;
+
+impl Loan {
+    /// The factory for the render's registry: it makes no nodes here.
+    #[must_use]
+    pub fn factory(&self) -> LoanFactory {
+        LoanFactory
+    }
+
+    /// The devices whose unit the render couldn't borrow: none here.
+    #[must_use]
+    pub fn problems(&self) -> Vec<(DeviceId, String)> {
+        Vec::new()
+    }
+}
+
+/// A loan's factory for an offline render's registry: it makes no nodes on
+/// this platform.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoanFactory;
+
+impl NodeFactory for LoanFactory {
+    fn create(&self, _device: &Device, _config: &NodeConfig) -> Option<Box<dyn Node>> {
+        None
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        Vec::new()
+    }
 }
 
 /// The Audio Units' factory for the engine's registry: it offers no device

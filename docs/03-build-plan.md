@@ -506,7 +506,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.22b | todo |  |  |
 | 5.23 | todo |  |  |
 | 5.24 | done | 18 October 2026 | [#155](https://github.com/loombridge/beatlayer/pull/155); Degrade, Crush and Wax, the digital-degradation effect, bit-crusher and vinyl distortion ([digital degradation](specs/digital-degradation.md), [bit-crusher](specs/bit-crusher.md), [vinyl distortion](specs/vinyl-distortion.md)), with seeded noise, jitter and crackle and the input's spectrum in Degrade's display; its X–Y drag waits |
-| 5.25 | todo |  |  |
+| 5.25 | done | 18 October 2026 | [#158](https://github.com/loombridge/beatlayer/pull/158); Trident, Scatter and Plumb, the filter, grain and alignment delays ([filter delay](specs/filter-delay.md), [grain delay](specs/grain-delay.md), [alignment delay](specs/alignment-delay.md)), sharing Reprise's line and synced timing, with Scatter's seeded spray and random pitch and its X–Y axes as parameters; displays wait |
 | 5.26 | todo |  |  |
 | 5.26b | todo |  |  |
 | 5.27 | todo |  |  |

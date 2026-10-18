@@ -2403,6 +2403,61 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  form yet (multisampler R10)",
             )),
         ),
+        // Sample editing in the sampler devices (WP-5.15): the display's
+        // context menu, which the keyboard doesn't open yet, and gestures
+        // on the waveform.
+        (
+            "device.edit_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R55)",
+            )),
+        ),
+        (
+            "device.crop_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.reverse_sample",
+            Exception(Gap(
+                "the sample display's context menu, which the keyboard doesn't open yet \
+                 (multisampler R59)",
+            )),
+        ),
+        (
+            "device.audition_sample",
+            Exception(Gap(
+                "a click on the sample display, which has no keyboard form yet (multisampler R54)",
+            )),
+        ),
+        (
+            "device.convert",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R62)",
+            )),
+        ),
+        (
+            "device.add_sample_edit",
+            Exception(Equivalent(
+                "`device.edit_sample`, which checks the selection against the sample",
+            )),
+        ),
+        (
+            "device.clear_sample_edits",
+            Exception(Equivalent(
+                "`device.edit_sample` with `revert`, which reads the unedited length itself",
+            )),
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Exception(Equivalent(
+                "`device.crop_sample` and `device.reverse_sample`, which write the copy",
+            )),
+        ),
         (
             "device.snap_layer_markers",
             Exception(Gap(
@@ -2880,13 +2935,18 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         gaps,
         [
             "device.add_layers",
+            "device.audition_sample",
+            "device.convert",
+            "device.crop_sample",
             "device.delete_layers",
             "device.distribute_layers",
             "device.duplicate_layers",
+            "device.edit_sample",
             "device.load_sample",
             "device.move_layers",
             "device.normalize_layers",
             "device.rename_layer",
+            "device.reverse_sample",
             "device.set_layer_zone",
             "device.snap_layer_markers",
             "device.sort_layers",

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-424 commands in 35 areas.
+432 commands in 35 areas.
 
 ## Permission classes
 
@@ -186,15 +186,21 @@ Each command has:
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
+| [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
+| [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
+| [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
 | [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
+| [`device.convert`](#deviceconvert) | Convert Sampler | `edit` |  |  |
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
+| [`device.crop_sample`](#devicecrop_sample) | Crop Sample | `edit` |  |  |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.delete_layers`](#devicedelete_layers) | Delete Samples | `edit` |  |  |
 | [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.distribute_layers`](#devicedistribute_layers) | Distribute Ranges | `edit` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`device.duplicate_layers`](#deviceduplicate_layers) | Duplicate Samples | `edit` |  |  |
+| [`device.edit_sample`](#deviceedit_sample) | Edit Sample | `edit` |  |  |
 | [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.group`](#devicegroup) | Group | `edit` | `Cmd+G` | `Ctrl+G` |
@@ -214,6 +220,7 @@ Each command has:
 | [`device.remove`](#deviceremove) | Delete Device | `destructive` | `Delete` | `Delete` |
 | [`device.rename`](#devicerename) | Rename Device | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`device.rename_layer`](#devicerename_layer) | Rename Sample | `edit` |  |  |
+| [`device.reverse_sample`](#devicereverse_sample) | Reverse Sample | `edit` |  |  |
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
@@ -230,6 +237,7 @@ Each command has:
 | [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
+| [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | External Sidechain On/Off | `edit` |  |  |
@@ -3250,7 +3258,7 @@ Result: [`DeviceAdded`](#deviceadded).
 
 **Add Samples**. Permission: `external`. Contexts: `device-view`.
 
-Adds audio files to a multisampler as layers, as dropping them on the zone editor's layer list does: each file is imported into the set's media, and gets one layer after the selected layers (or at the end), or at `index`, with every zone whole and unfaded, its Root Key from the file's sampler metadata (C3 where it has none), Sample Start and End at the file's ends, and its loop points from the file's first loop with Sustain Mode left off. The new layers become the selected ones. A file that isn't audio is skipped and named in `skipped`. One undo step. It reads files outside the set.
+Adds audio files to a multisampler as layers, as dropping them on the zone editor's layer list does: each file is imported into the set's media, and gets one layer after the selected layers (or at the end), or at `index`, or straight after the layer `after`, with every zone whole and unfaded (or copied from the layer `like`, so the new layers sound together with it), its Root Key from the file's sampler metadata (C3 where it has none), Sample Start and End at the file's ends, and its loop points from the file's first loop with Sustain Mode left off. The new layers become the selected ones. A file that isn't audio is skipped and named in `skipped`. One undo step. It reads files outside the set.
 
 Default keys: none.
 
@@ -3259,10 +3267,67 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `paths` | array of string | yes | The audio files, one layer each. |
+| `after` | [`LayerId`](#layerid) or null | no | Puts the first straight after this layer, instead of at `index` or after the selected ones (R61). |
 | `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
 | `index` | integer or null | no | Where in the layer list the first goes; after the selected layers (or at the end with none selected) if left out. |
+| `like` | [`LayerId`](#layerid) or null | no | Gives each new layer this layer's key, velocity and sample select zones with their fades, so the two sound together (R61). |
 
 Result: [`LayersAdded`](#layersadded).
+
+#### `device.add_sample_edit`
+
+**Edit Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Adds one edit to the end of a sample's edit list without looking at the audio: `edit.kind` is `trim`, `cut`, `reverse`, `fade_in`, `fade_out` or `normalize`, and `edit.range` (`from` to `to`, in frames of the sample as the earlier edits left it) is its selection, left out for the whole sample (Trim and Cut need one). With a `layer` the edit joins that layer's list and its length and markers follow the audio; with none it joins the sample of the device itself, which this command doesn't check against the sample's length. The source file is never written. One undo step named for the edit. `device.edit_sample` checks the selection against the sample.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `edit` | [`SampleEdit`](#sampleedit) | yes | The edit. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer, or `null` for the device's own sample. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.audition_sample`
+
+**Audition Sample**. Permission: `read`. Contexts: `device-view`.
+
+Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Snapshot, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
+| `down` | boolean | no | Whether the button goes down (`true`, the default) or comes up. |
+| `from` | number | no | Where in the sample to start, as a share of its length from 0 to 1. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
+
+Result: [`Auditioned`](#auditioned).
+
+#### `device.clear_sample_edits`
+
+**Revert Edits**. Permission: `edit`. Contexts: `device-view`.
+
+Empties a sample's edit list, a layer's (`layer`) or the device's own (none given). A layer's sample is `length` frames long again, the unedited sample's length at its own rate, and its markers keep their share of it. One undo step. `device.edit_sample` with `revert` reads the length itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `length` | integer, at least 0 | yes | The unedited sample's length in frames at its own rate. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer, or `null` for the device's own sample. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.compare_copy`
 
@@ -3300,6 +3365,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.convert`
+
+**Convert Sampler**. Permission: `edit`. Contexts: `device-view`.
+
+Converts Snapshot to a multisampler (`to: multisampler`) or a multisampler to Snapshot (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Snapshot becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Snapshot in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `to` | [`ConvertTo`](#convertto) | yes | What to convert it to. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
+
+Result: [`Converted`](#converted).
+
 #### `device.copy`
 
 **Copy Device**. Permission: `read`. Contexts: `device-view`.
@@ -3319,6 +3401,23 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.crop_sample`
+
+**Crop Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the sample outside Snapshot's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
+
+Result: [`SampleProcessed`](#sampleprocessed).
 
 #### `device.cut`
 
@@ -3428,6 +3527,26 @@ Arguments:
 | `layers` | array of [`LayerId`](#layerid) | yes | The layers to copy. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `device.edit_sample`
+
+**Edit Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Snapshot's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Snapshot and as `edits` in each layer of `layers` for the multisampler.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
+| `kind` | [`SampleEditKind`](#sampleeditkind) or null | no | What the edit does. Leave it out with `revert`. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Snapshot has one sample and no layers. |
+| `range` | [`SampleRange`](#samplerange) or null | no | The selection it acts on, in frames of the sample as the earlier edits left it, at its own rate. Left out it acts on the whole sample; Trim and Cut need one. |
+| `revert` | boolean | no | Clears the sample's edit list instead of adding to it. |
+
+Result: [`SampleEdited`](#sampleedited).
 
 #### `device.expand`
 
@@ -3781,6 +3900,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.reverse_sample`
+
+**Reverse Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Reverses the whole sample by writing a processed copy: a WAV with the sample's edits applied and then reversed, at its rate and channels, in the project's `Samples/Processed/Reverse/` folder. The device or layer then plays the copy with its edit list empty and its markers where they were, as one undo step; the original file stays as it was. A set that has never been saved is refused with a message in the Status Bar. The copy reads back as the device's or layer's `media`. `device.edit_sample` with `kind: reverse` reverses without a file.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
+
+Result: [`SampleProcessed`](#sampleprocessed).
+
 #### `device.save_default_preset`
 
 **Save as Default Preset**. Permission: `external`. Contexts: `device-view`.
@@ -4071,6 +4207,26 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `param` | [`ParamId`](#paramid) | yes | The parameter. |
 | `value` | number | yes | The value, in the parameter's own units. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_processed_layer_sample`
+
+**Replace With Processed Copy**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces a layer's sample with a processed copy of its edited sample that is already in the media store (`media`, `length` frames at its own rate): the copy holds the edits, so the layer's list empties. `crop` is the span of the edited sample the copy keeps, which moves the markers as a Trim does; with none the markers stay where they are. One undo step, named Crop with a `crop` and Reverse without. `device.crop_sample` and `device.reverse_sample` write the copy.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer. |
+| `media` | [`ContentHash`](#contenthash) | yes | The copy, by content hash. |
+| `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
+| `crop` | [`SampleRange`](#samplerange) or null | no | The edited sample's span the copy keeps, or `null` for all of it. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -8001,13 +8157,18 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
+| [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
+| [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
+| [`device.convert`](#deviceconvert) | the query tool's `track` | `devices` |
+| [`device.crop_sample`](#devicecrop_sample) | the query tool's `device` | `media` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
 | [`device.delete_layers`](#devicedelete_layers) | the query tool's `device` | `layers` |
 | [`device.distribute_layers`](#devicedistribute_layers) | the query tool's `device` | `layers` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
+| [`device.edit_sample`](#deviceedit_sample) | the query tool's `device` | `sample_edits` |
 | [`device.group`](#devicegroup) | the query tool's `track` | `devices` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
 | [`device.insert_in_chain`](#deviceinsert_in_chain) | the query tool's `device` | `chains` |
@@ -8022,6 +8183,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.remove`](#deviceremove) | the query tool's `track` | `devices` |
 | [`device.rename`](#devicerename) | the query tool's `device` | `name` |
 | [`device.rename_layer`](#devicerename_layer) | the query tool's `device` | `layers` |
+| [`device.reverse_sample`](#devicereverse_sample) | the query tool's `device` | `media` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
 | [`device.set_floating`](#deviceset_floating) | the query tool's `device` | `floating` |
@@ -8031,6 +8193,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
+| [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | the query tool's `device` | `sidechain.enabled` |
@@ -9383,6 +9546,34 @@ What `audio.status` returns.
     "test_tone",
     "tone",
     "error"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Auditioned`
+
+What `device.audition_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | boolean | yes | Whether the audio engine took it: it is off, or has no device, when this is `false`, and nothing plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.audition_sample` returns.",
+  "properties": {
+    "sent": {
+      "description": "Whether the audio engine took it: it is off, or has no device, when this is `false`, and nothing plays.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sent"
   ],
   "type": "object"
 }
@@ -11183,6 +11374,80 @@ A band of controls, of a fixed size.
 
 </details>
 
+### `ConvertTo`
+
+What `device.convert` makes.
+
+One of:
+
+- `"snapshot"`: Snapshot, from a multisampler.
+- `"multisampler"`: A multisampler, from Snapshot.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.convert` makes.",
+  "oneOf": [
+    {
+      "const": "snapshot",
+      "description": "Snapshot, from a multisampler.",
+      "type": "string"
+    },
+    {
+      "const": "multisampler",
+      "description": "A multisampler, from Snapshot.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Converted`
+
+What `device.convert` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The new device, in the old one's place. |
+| `to` | [`ConvertTo`](#convertto) | yes | What it is. |
+| `dropped` | array of string | yes | What of the old device didn't carry over, each in a sentence. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.convert` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The new device, in the old one's place."
+    },
+    "dropped": {
+      "description": "What of the old device didn't carry over, each in a sentence.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "to": {
+      "$ref": "#/$defs/ConvertTo",
+      "description": "What it is."
+    }
+  },
+  "required": [
+    "device",
+    "to",
+    "dropped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CountIn`
 
 The count-in length before playback or recording starts (Live manual 19.6).
@@ -11339,6 +11604,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
@@ -11462,6 +11728,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "sample_edits": {
+      "description": "The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none.",
+      "items": {
+        "$ref": "#/$defs/SampleEdit"
+      },
+      "type": "array"
     },
     "shape": {
       "description": "The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
@@ -14966,7 +15239,7 @@ One sample of a multisample (R2).
 | `id` | [`LayerId`](#layerid) | yes | The layer's ID, unique within its device. |
 | `name` | string | yes | Its name: the file's name until renamed. |
 | `media` | [`ContentHash`](#contenthash) | yes | Its sample, which the media store holds. |
-| `length` | integer, at least 0 | yes | The sample's length in frames at its own rate. |
+| `length` | integer, at least 0 | yes | The sample's length in frames at its own rate, after its edits. |
 | `sample_rate` | integer, at least 0 | yes | The sample's own rate, in hertz: the unit its markers count in. |
 | `channels` | integer from 0 to 255 | yes | How many channels the sample has. |
 | `key` | [`Zone`](#zone) | yes | The notes it plays over. |
@@ -14981,6 +15254,7 @@ One sample of a multisample (R2).
 | `release_loop` | integer, at least 0 | yes | Where the release loop begins, between Loop End and Sample End. |
 | `crossfade_ms` | number | no | The loop's crossfade in milliseconds (R19). |
 | `detune` | number | no | Its tuning, in cents from −50 to 50. |
+| `edits` | array of [`SampleEdit`](#sampleedit) | no | The sample's edits, applied in order to the media (WP-5.15, R55). The markers, [`length`](Self::length) and the sample the engine plays are the edited sample's; the source file is never written. |
 | `link` | boolean | no | Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off. |
 | `loop_detune` | number | no | How the voice is retuned inside a loop, in cents (R19). |
 | `pan` | number | no | Its place in the stereo field, −50 to 50. |
@@ -15011,6 +15285,13 @@ One sample of a multisample (R2).
       "format": "double",
       "type": "number"
     },
+    "edits": {
+      "description": "The sample's edits, applied in order to the media (WP-5.15, R55). The markers, [`length`](Self::length) and the sample the engine plays are the edited sample's; the source file is never written.",
+      "items": {
+        "$ref": "#/$defs/SampleEdit"
+      },
+      "type": "array"
+    },
     "end": {
       "description": "Sample End, in frames of the sample.",
       "format": "uint64",
@@ -15026,7 +15307,7 @@ One sample of a multisample (R2).
       "description": "The notes it plays over."
     },
     "length": {
-      "description": "The sample's length in frames at its own rate.",
+      "description": "The sample's length in frames at its own rate, after its edits.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
@@ -19034,7 +19315,7 @@ What the last recording that ended came to, in `transport.state`: the same facts
 | `error` | string or null | yes | Why it failed, if it did: it made no clips. Null when it made its clips, or when nothing was played. |
 | `clips_made` | boolean | yes | Whether it made clips in the set. |
 | `files` | array of [`RecordedFileReport`](#recordedfilereport) | yes | The audio files it wrote, one per armed audio track that was played. |
-| `midi_tracks` | array of [`TrackId`](#trackid) | yes | The MIDI tracks that received notes. |
+| `midi_tracks` | array of [`TrackId`](#trackid) | yes | The MIDI tracks that received notes or controllers. |
 | `dropped_frames` | integer, at least 0 | yes | Frames and MIDI messages dropped: the recording ended early. |
 | `delay_frames` | integer | yes | Frames the audio was moved earlier to line up with what was played. |
 
@@ -19074,7 +19355,7 @@ What the last recording that ended came to, in `transport.state`: the same facts
       "type": "array"
     },
     "midi_tracks": {
-      "description": "The MIDI tracks that received notes.",
+      "description": "The MIDI tracks that received notes or controllers.",
       "items": {
         "$ref": "#/$defs/TrackId"
       },
@@ -19581,6 +19862,258 @@ The recording under way, in `transport.state`.
     "armed_tracks",
     "dropped_frames",
     "session_slots"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleEdit`
+
+One edit in a sample's list. Its range counts frames of the sample as the edits before it left it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | [`SampleEditKind`](#sampleeditkind) | yes | What it does. |
+| `range` | [`SampleRange`](#samplerange) or null | no | The selection it acts on; the whole sample if left out. Trim and Cut need one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One edit in a sample's list. Its range counts frames of the sample as the edits before it left it.",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/SampleEditKind",
+      "description": "What it does."
+    },
+    "range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selection it acts on; the whole sample if left out. Trim and Cut need one."
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleEditKind`
+
+What an edit does (R55).
+
+One of:
+
+- `"trim"`: Keeps the selection and drops the rest.
+- `"cut"`: Removes the selection and closes the gap.
+- `"reverse"`: Reverses the selection, or the whole sample with none.
+- `"fade_in"`: A straight line in gain from silence to full over the selection, or the whole sample with none.
+- `"fade_out"`: A straight line in gain from full to silence over the selection, or the whole sample with none.
+- `"normalize"`: Scales the selection, or the whole sample with none, so its largest magnitude reaches 0 dBFS.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an edit does (R55).",
+  "oneOf": [
+    {
+      "const": "trim",
+      "description": "Keeps the selection and drops the rest.",
+      "type": "string"
+    },
+    {
+      "const": "cut",
+      "description": "Removes the selection and closes the gap.",
+      "type": "string"
+    },
+    {
+      "const": "reverse",
+      "description": "Reverses the selection, or the whole sample with none.",
+      "type": "string"
+    },
+    {
+      "const": "fade_in",
+      "description": "A straight line in gain from silence to full over the selection, or the whole sample with none.",
+      "type": "string"
+    },
+    {
+      "const": "fade_out",
+      "description": "A straight line in gain from full to silence over the selection, or the whole sample with none.",
+      "type": "string"
+    },
+    {
+      "const": "normalize",
+      "description": "Scales the selection, or the whole sample with none, so its largest magnitude reaches 0 dBFS.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SampleEdited`
+
+What `device.edit_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The sampler device. |
+| `edits` | array of [`SampleEdit`](#sampleedit) | yes | The sample's edit list now. |
+| `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Snapshot's sample. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.edit_sample` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The sampler device."
+    },
+    "edits": {
+      "description": "The sample's edit list now.",
+      "items": {
+        "$ref": "#/$defs/SampleEdit"
+      },
+      "type": "array"
+    },
+    "layer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayerId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The layer edited; none for Snapshot's sample."
+    },
+    "length": {
+      "description": "The edited sample's length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "edits",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleProcessed`
+
+What `device.crop_sample` and `device.reverse_sample` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The sampler device. |
+| `media` | [`ContentHash`](#contenthash) | yes | The processed copy, now the sample's media. |
+| `path` | string | yes | Where the copy is in the project folder. |
+| `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Snapshot's sample. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.crop_sample` and `device.reverse_sample` return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The sampler device."
+    },
+    "layer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayerId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The layer; none for Snapshot's sample."
+    },
+    "length": {
+      "description": "Its length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The processed copy, now the sample's media."
+    },
+    "path": {
+      "description": "Where the copy is in the project folder.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "device",
+    "media",
+    "path",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleRange`
+
+A span of a sample, in frames at the sample's own rate: `from` inclusive to `to` exclusive.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | integer, at least 0 | yes | The first frame. |
+| `to` | integer, at least 0 | yes | The frame after the last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A span of a sample, in frames at the sample's own rate: `from` inclusive to `to` exclusive.",
+  "properties": {
+    "from": {
+      "description": "The first frame.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "description": "The frame after the last.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "from",
+    "to"
   ],
   "type": "object"
 }

@@ -4,7 +4,8 @@
 //!
 //! - Notes are logged with the transport stopped, stamped with the clock
 //!   only, and with it running, stamped with the song frame too.
-//! - Only monitoring tracks are logged, and only notes.
+//! - Only monitoring tracks are logged, and only notes and the controllers
+//!   a clip keeps.
 //! - A full ring drops the note and counts it.
 //! - Every block runs as a real-time section under the allocation trap.
 
@@ -81,8 +82,10 @@ impl Midi {
     }
 }
 
-// Spec: capture-midi R1. With the transport stopped a note is logged on the
-// engine-clock frame it landed on, with no song frame.
+// Spec: capture-midi R1; midi-controller-data R15. With the transport
+// stopped a note or controller is logged on the engine-clock frame it
+// landed on, with no song frame. A message no clip keeps, such as All Notes
+// Off, is not logged.
 #[test]
 fn notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples() {
     let mut midi = Midi::new(Monitor::In);
@@ -91,8 +94,10 @@ fn notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples() {
         MidiMessage::note_off(0, 60),
     );
     let controller = MidiMessage::from_bytes(&[0xB0, 1, 64]).unwrap();
+    let all_notes_off = MidiMessage::from_bytes(&[0xB0, 123, 0]).unwrap();
     midi.block();
     midi.send(0, 70, controller);
+    midi.send(0, 80, all_notes_off);
     midi.send(1, 100, on);
     midi.block();
     midi.send(2, 40, off);
@@ -107,6 +112,12 @@ fn notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples() {
         vec![
             CapturedMidi {
                 track,
+                clock: BLOCK as u64 + 70,
+                song: None,
+                message: controller,
+            },
+            CapturedMidi {
+                track,
                 clock: 2 * BLOCK as u64 + 100,
                 song: None,
                 message: on,
@@ -118,7 +129,7 @@ fn notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples() {
                 message: off,
             },
         ],
-        "the notes, not the controller"
+        "the notes and the controller, not All Notes Off"
     );
     assert!(midi.captured().is_empty(), "taken once");
 }

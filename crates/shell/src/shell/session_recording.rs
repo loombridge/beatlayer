@@ -556,10 +556,11 @@ impl Shell {
                             messages, take.start, take.end, &tempo, rate,
                         );
                         let data = ClipData::Midi(new_midi(notes));
-                        match slot.clip {
+                        let clip = match slot.clip {
                             Some(clip) => {
                                 self.editor.apply(Command::SetClipLength { clip, length })?;
                                 self.editor.apply(Command::SetClipData { clip, data })?;
+                                clip
                             }
                             None => {
                                 let clip: ClipId = self.editor.new_id();
@@ -568,8 +569,14 @@ impl Shell {
                                     scene,
                                     clip: Clip::new(clip, Ticks::ZERO, length, data),
                                 })?;
+                                clip
                             }
-                        }
+                        };
+                        // Spec: midi-controller-data R14. The controllers
+                        // become the clip's envelopes when the take ends.
+                        let moves =
+                            crate::recording::session_moves(messages, take.start, &tempo, rate);
+                        crate::recording::write_moves(&mut self.editor, clip, &moves, None)?;
                     }
                     _ => {
                         let Some((_, hash, path, _)) =
@@ -656,7 +663,15 @@ impl Shell {
             };
             let notes =
                 crate::recording::session_notes(&played.messages, started, take.end, &tempo, rate);
-            for (_, pass) in crate::recording::overdub_passes(data, clip.length, notes) {
+            let moves = crate::recording::session_moves(&played.messages, started, &tempo, rate);
+            let mut passes = crate::recording::overdub_passes(data, clip.length, notes);
+            let mut stepped = crate::recording::overdub_moves(data, clip.length, &moves);
+            // A pass with notes only, or with controllers only, is a step too.
+            let numbers: std::collections::BTreeSet<usize> =
+                passes.keys().chain(stepped.keys()).copied().collect();
+            for number in numbers {
+                let pass = passes.remove(&number).unwrap_or_default();
+                let (end, steps) = stepped.remove(&number).unwrap_or_default();
                 let result = self
                     .editor
                     .transact(crate::recording::LOOP_UNDO_LABEL, |editor| {
@@ -666,12 +681,14 @@ impl Shell {
                             return Ok(());
                         };
                         data.notes.extend(pass);
-                        editor
-                            .apply(Command::SetClipData {
-                                clip: clip.id,
-                                data: ClipData::Midi(data),
-                            })
-                            .map(|_| ())
+                        editor.apply(Command::SetClipData {
+                            clip: clip.id,
+                            data: ClipData::Midi(data),
+                        })?;
+                        // Spec: midi-controller-data R14. A controller
+                        // replaces its envelope from its first message to the
+                        // end of the loop.
+                        crate::recording::write_moves(editor, clip.id, &steps, Some(end))
                     });
                 if let Err(error) = result {
                     failure = Some(error.to_string());

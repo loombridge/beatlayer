@@ -849,6 +849,7 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-rt",
+ "libc",
  "libm",
  "rtgc",
  "rtrb",

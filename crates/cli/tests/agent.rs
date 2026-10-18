@@ -2386,6 +2386,198 @@ fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id
     assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
 }
 
+// Spec: beat-repeat R14, device-framework R14 (WP-5.26): an agent inserts
+// Stutter by its type, sets its parameters by ID and reads every one back
+// with its descriptor.
+#[test]
+fn an_agent_inserts_stutter_by_its_type_and_sets_and_reads_its_parameters_by_id() {
+    use bl_devices::beat_repeat::{BEAT_REPEAT, CHANCE, GRID, INTERVAL, MODE, REPEAT};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("stutter-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Stutter"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Stutter", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Stutter"}, "name": "Stutter",
+                                    "kind": { "native": { "device_type": BEAT_REPEAT } },
+                                    "enabled": true, "params": [] } } },
+            set(INTERVAL, 3.0),
+            set(CHANCE, 25.0),
+            set(GRID, 6.0),
+            set(MODE, 2.0),
+            set(REPEAT, 1.0),
+        ] }),
+    );
+    let device = reply["ids"]["Stutter"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 17, "every parameter is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [INTERVAL, CHANCE, GRID, MODE, REPEAT]
+        .iter()
+        .map(|id| get(*id)["value"].clone())
+        .collect();
+    assert_eq!(
+        values,
+        [json!(3.0), json!(25.0), json!(6.0), json!(2.0), json!(1.0)]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}
+
+// Spec: filter-delay R9, grain-delay R8, alignment-delay R8 (WP-5.25): an
+// agent inserts the three delays by command ID, sets parameters by ID,
+// reads them back with their descriptors, saves the set and reopens it
+// with every value, and moves Scatter's X–Y axis as one undo step.
+#[test]
+fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
+    use bl_devices::alignment_delay::{self, ALIGNMENT_DELAY};
+    use bl_devices::filter_delay::{self, FILTER_DELAY};
+    use bl_devices::grain_delay::{self, GRAIN_DELAY};
+    use bl_model::{DeviceId, ParamId};
+
+    let dir = TempDir::new("delays");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("delays").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let kinds = [
+        ("trident", FILTER_DELAY),
+        ("scatter", GRAIN_DELAY),
+        ("plumb", ALIGNMENT_DELAY),
+    ];
+    let inserts: Vec<Value> = kinds
+        .iter()
+        .enumerate()
+        .map(|(index, (name, kind))| {
+            json!({ "command": "device.insert", "args": { "track": track, "index": index, "device": {
+                "id": {"$new": name}, "name": name, "enabled": true, "params": [],
+                "kind": { "native": { "device_type": kind } },
+            } } })
+        })
+        .collect();
+    let inserted = call(&mut client, "run", json!({ "commands": inserts }));
+    let id = |name: &str| inserted["ids"][name].as_u64().unwrap();
+
+    // Parameters by ID, one value in each device that isn't its default.
+    let sets = [
+        (
+            "trident",
+            filter_delay::line_param(1, filter_delay::FREQ),
+            2_500.0,
+        ),
+        ("trident", filter_delay::FEEDBACK, 35.0),
+        ("scatter", grain_delay::PITCH, 12.0),
+        ("scatter", grain_delay::SPRAY, 120.0),
+        ("plumb", alignment_delay::MODE, 2.0),
+        (
+            "plumb",
+            alignment_delay::side_param(0, alignment_delay::METRES),
+            3.43,
+        ),
+    ];
+    let commands: Vec<Value> = sets
+        .iter()
+        .map(|(name, param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": id(name), "param": param.0, "value": value } })
+        })
+        .collect();
+    call(&mut client, "run", json!({ "commands": commands }));
+
+    let read = |client: &mut Client<InProcess>, name: &str| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": id(name) } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let value_of = |params: &Value, param: ParamId| {
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == param.0)
+            .unwrap_or_else(|| panic!("parameter {}", param.0))["value"]
+            .clone()
+    };
+    for (name, param, value) in &sets {
+        let params = read(&mut client, name);
+        assert_eq!(
+            value_of(&params, *param),
+            json!(value),
+            "{name} {}",
+            param.0
+        );
+    }
+    assert_eq!(read(&mut client, "trident").as_array().unwrap().len(), 32);
+    assert_eq!(read(&mut client, "scatter").as_array().unwrap().len(), 12);
+    assert_eq!(read(&mut client, "plumb").as_array().unwrap().len(), 14);
+
+    // The X–Y axis is a parameter: one undo step puts it back.
+    let axis =
+        |client: &mut Client<InProcess>| value_of(&read(client, "scatter"), grain_delay::X_AXIS);
+    assert_eq!(axis(&mut client), json!(0.0), "Delay Time to start");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_param", "args": {
+            "device": id("scatter"), "param": grain_delay::X_AXIS.0, "value": 4.0 } }] }),
+    );
+    assert_eq!(axis(&mut client), json!(4.0), "Spray");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo", "args": {} }] }),
+    );
+    assert_eq!(axis(&mut client), json!(0.0), "one undo step");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_param", "args": {
+            "device": id("scatter"), "param": grain_delay::X_AXIS.0, "value": 4.0 } }] }),
+    );
+
+    // Saved and reopened, every value comes back.
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Delays.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let reopened = |name: &str, param: ParamId| {
+        let device = project
+            .document
+            .device(DeviceId(bl_core::id::Id::new(id(name)).unwrap()))
+            .unwrap_or_else(|| panic!("{name} is in the set"));
+        device.params.get(&param).copied()
+    };
+    for (name, param, value) in &sets {
+        assert_eq!(reopened(name, *param), Some(*value), "{name} {}", param.0);
+    }
+    assert_eq!(reopened("scatter", grain_delay::X_AXIS), Some(4.0));
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Degrade, Crush and Wax, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved

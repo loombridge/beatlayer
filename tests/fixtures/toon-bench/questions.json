@@ -234,7 +234,7 @@
     "question": "What are the names of the properties of the command's arguments, alphabetically?"
   },
   {
-    "answer": "26",
+    "answer": "27",
     "fixture": "describe_clip_create",
     "id": "describe-defs",
     "question": "How many definitions does the argument schema hold under $defs?"

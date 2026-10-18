@@ -2706,7 +2706,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Add Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
+Sets the value of one of a clip's envelopes at a position, adding a breakpoint there or replacing the one that's there, as clicking or dragging a breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of the clip's track the envelope modulates (a control of its mixer, one of its sends, or a parameter of a device in its chain), `at` the position in ticks from the beginning of the clip's contents, and `value` the value there, in the parameter's own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in the Envelopes tab): `{"type": "midi.cc", "number": 1}` (a controller from 1 to 31 or 33 to 119, value 0 to 127), `{"type": "midi.pitch_bend"}` (-8192 to 8191, 0 at rest) or `{"type": "midi.channel_pressure"}` (0 to 127); the value is the message the clip sends to its track's devices while it plays, on any channel. A parameter with no clip envelope gets one, linked to the clip, with this breakpoint as its first.
 
 Default keys: none.
 
@@ -2715,9 +2715,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
-| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates: a control of its mixer, one of its sends, or a parameter of a device in its chain. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates: a control of its mixer, one of its sends, or a parameter of a device in its chain; or, in a MIDI clip, a MIDI controller (`midi.cc`, `midi.pitch_bend` or `midi.channel_pressure`). |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint sits, in ticks from the beginning of the clip's contents, as a note's start is: 0 or later. |
-| `value` | number | yes | The value there, in the parameter's own units. |
+| `value` | number | yes | The value there, in the parameter's own units; a MIDI controller's own range (0 to 127, pitch bend -8192 to 8191). |
 | `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
@@ -9295,7 +9295,7 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
 
 ### `AutomationTarget`
 
-Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.
+Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.
 
 One of:
 
@@ -9303,12 +9303,15 @@ One of:
 - an object with `type` = `"send"`, `to` ([`TrackId`](#trackid)): The level of the track's send to a return track.
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device in the track's chain.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer (WP-5.1, G2): the chain's Volume, Pan, or Chain Activator (`mute`: 1 muted, 0 not).
+- an object with `type` = `"midi.cc"`, `number` (integer from 0 to 255): A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.
+- an object with `type` = `"midi.pitch_bend"`: A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.
+- an object with `type` = `"midi.channel_pressure"`: A MIDI clip's channel pressure envelope, from 0 to 127.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`.",
+  "description": "Which parameter of the track an envelope drives: `mixer` with a `param`, `send` with the return track it feeds (`to`), `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param`. A MIDI clip's envelope can instead name a MIDI controller: `midi.cc` with its `number` (1 to 31 or 33 to 119), `midi.pitch_bend` or `midi.channel_pressure`.",
   "oneOf": [
     {
       "description": "A control of the track's mixer.",
@@ -9389,6 +9392,53 @@ One of:
         "type",
         "chain",
         "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A continuous controller of a MIDI clip's MIDI Ctrl envelopes (WP-2.29), 1 to 31 or 33 to 119, from 0 to 127. Only a MIDI clip's envelope names it; a track has no automation for it.",
+      "properties": {
+        "number": {
+          "description": "The controller number.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "midi.cc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "number"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI clip's pitch bend envelope, from −8192 to 8191, 0 at rest.",
+      "properties": {
+        "type": {
+          "const": "midi.pitch_bend",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI clip's channel pressure envelope, from 0 to 127.",
+      "properties": {
+        "type": {
+          "const": "midi.channel_pressure",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
       ],
       "type": "object"
     }
@@ -16819,6 +16869,7 @@ A note in a MIDI clip.
 | `start` | [`Ticks`](#ticks) | yes | Where the note starts, counted from the beginning of the clip's contents: the clip's start less its offset. Never negative. |
 | `length` | [`Ticks`](#ticks) | yes | How long the note lasts. Always positive. |
 | `mute` | boolean | no | Whether the note is switched off, so it stays in place but doesn't play. |
+| `pressure` | array of [`PressurePoint`](#pressurepoint) | no | The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure. |
 | `probability` | number from 0 to 1 | no | The chance the note will play, from 0 to 1: 1 (100 %) unless given. |
 | `release_velocity` | integer from 1 to 127 | no | The release velocity, from 1 to 127; 64 unless given. |
 | `velocity_deviation` | integer from -127 to 127 | no | How far velocity may deviate randomly, from -127 to +127: 0 unless given. |
@@ -16843,6 +16894,13 @@ A note in a MIDI clip.
     "mute": {
       "description": "Whether the note is switched off, so it stays in place but doesn't play.",
       "type": "boolean"
+    },
+    "pressure": {
+      "description": "The note's own pressure, played as polyphonic pressure over its length: points in order of `at`, none at the same place. A note with none plays no pressure.",
+      "items": {
+        "$ref": "#/$defs/PressurePoint"
+      },
+      "type": "array"
     },
     "probability": {
       "description": "The chance the note will play, from 0 to 1: 1 (100 %) unless given.",
@@ -18126,6 +18184,43 @@ What the preset commands return.
     "device",
     "path",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PressurePoint`
+
+One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Ticks`](#ticks) | yes | Where it takes effect, counted from the note's start: 0 or more and before the note's length. |
+| `value` | integer from 0 to 127 | yes | The pressure, from 0 to 127. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One point of a note's pressure (WP-2.29): from `at` after the note's start the note's key is pressed to `value`, until the next point.",
+  "properties": {
+    "at": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it takes effect, counted from the note's start: 0 or more and before the note's length."
+    },
+    "value": {
+      "description": "The pressure, from 0 to 127.",
+      "format": "uint8",
+      "maximum": 127,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "at",
+    "value"
   ],
   "type": "object"
 }

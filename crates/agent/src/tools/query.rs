@@ -326,7 +326,7 @@ impl View<'_> {
         if let ClipData::Midi(midi) = &clip.data
             && self.detail == Detail::Full
         {
-            let mut notes: Vec<_> = midi.notes.iter().copied().collect();
+            let mut notes: Vec<_> = midi.notes.iter().cloned().collect();
             notes.sort_by_key(|note| (note.start, note.key));
             value["content"]["notes"] = self.page.slice(notes);
         }
@@ -606,6 +606,9 @@ fn target_label(target: &AutomationTarget) -> String {
                 .and_then(|name| name.as_str().map(str::to_owned))
                 .unwrap_or_default()
         ),
+        AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
+        AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
+        AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),
     }
 }
 

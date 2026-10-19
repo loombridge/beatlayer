@@ -158,6 +158,12 @@ pub enum Area {
 /// switch (M-OPT-025).
 const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
 const CUE_MODE: &str = "mixer.set_cue_mode";
+/// `mixer.set_delay_compensation`, which Options ▸ Delay Compensation runs
+/// as a switch (M-OPT-008).
+const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
+/// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
+/// When Monitoring runs as a switch (M-OPT-009).
+const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -5003,6 +5009,10 @@ impl Shell {
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
+            DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
+            REDUCED_LATENCY_MONITORING => {
+                Some(self.editor.document().settings().reduced_latency_monitoring)
+            }
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5130,6 +5140,12 @@ impl Shell {
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.dirty,
+            // Options ▸ Reduced Latency When Monitoring is available only
+            // while Delay Compensation is on (the delay-compensation spec,
+            // R8).
+            REDUCED_LATENCY_MONITORING => {
+                return self.editor.document().settings().delay_compensation;
+            }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
@@ -5515,6 +5531,18 @@ impl Shell {
             let on = self.editor.document().settings().solo_in_place;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == DELAY_COMPENSATION && !fields.contains_key("enabled") {
+            // Options ▸ Delay Compensation switches the setting to the
+            // other state (the delay-compensation spec, R7).
+            let on = self.editor.document().settings().delay_compensation;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
+        if id == REDUCED_LATENCY_MONITORING && !fields.contains_key("enabled") {
+            // Options ▸ Reduced Latency When Monitoring switches the
+            // setting to the other state (the delay-compensation spec, R8).
+            let on = self.editor.document().settings().reduced_latency_monitoring;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == session_launch_ids::SET_QUANTIZATION_ENABLED && !fields.contains_key("enabled") {
             // Spec: launch-quantisation R3. Options ▸ Launch Quantization
             // Enabled switches the setting to the other state.
@@ -5802,6 +5830,10 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
+            DELAY_COMPENSATION | REDUCED_LATENCY_MONITORING if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             "transport.set_midi_overdub" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -5984,6 +6016,45 @@ impl Shell {
         }
         self.editor.commit().ok();
         Ok(changes)
+    }
+
+    /// Applies the document edits `steps` as one undo step named `label`,
+    /// each with the macro law's follow-ups (macros spec, R6, R7, R11 and
+    /// R13), as [`Shell::run`] does for one. The agent's `run` tool calls it
+    /// for a batch of edits, so a macro moves the same way through the agent
+    /// API as through a gesture.
+    ///
+    /// # Errors
+    ///
+    /// [`ShellError`] saying which step failed and why; the set is unchanged.
+    pub fn run_document_edits(
+        &mut self,
+        label: &str,
+        steps: &[(String, Value)],
+    ) -> Result<(Vec<Value>, bool), ShellError> {
+        self.editor.begin(label.to_owned());
+        let start = self.editor.document().clone();
+        let mut results = Vec::with_capacity(steps.len());
+        for (index, (id, args)) in steps.iter().enumerate() {
+            match self.run_document_edit(id, args.clone()) {
+                Ok(changes) => results.push(json!({ "command": id, "result": changes })),
+                Err(error) => {
+                    self.editor.cancel().ok();
+                    return Err(ShellError::Failed {
+                        command: id.clone(),
+                        message: format!("command {} (`{id}`): {error}", index + 1),
+                    });
+                }
+            }
+        }
+        let changed = !ChangeSet::between(&start, self.editor.document()).is_empty();
+        self.editor.commit().ok();
+        if changed {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        Ok((results, changed))
     }
 
     /// The macro edit `command` makes, if it makes one.

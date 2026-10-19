@@ -55,6 +55,16 @@ pub enum Slot {
     Volume,
     /// Pan.
     Pan,
+    /// The Track Delay field in the Track Options section (WP-5.36).
+    TrackDelay,
+    /// The Track Delay's ms/samples unit switch (WP-5.36).
+    TrackDelayUnit,
+    /// Keep Monitoring Latency, in the Track Options section (WP-5.36).
+    KeepMonitoring,
+    /// The left split stereo pan control (WP-5.36).
+    SplitPanLeft,
+    /// The right split stereo pan control (WP-5.36).
+    SplitPanRight,
     /// The clip slot in the Session View's grid (WP-3.7), which a track's
     /// strip holds after its title bar.
     ClipSlot,
@@ -348,6 +358,11 @@ impl Slot {
                 Self::Arm => 9,
                 Self::Volume => 10,
                 Self::Pan => 11,
+                Self::TrackDelay => 12,
+                Self::TrackDelayUnit => 13,
+                Self::KeepMonitoring => 14,
+                Self::SplitPanLeft => 15,
+                Self::SplitPanRight => 16,
                 Self::Send(index) => SENDS + index,
                 Self::Peak => AFTER_SENDS,
                 _ => 0,
@@ -360,6 +375,11 @@ impl Slot {
                 Self::Solo => AFTER_SENDS + 4,
                 Self::Arm => AFTER_SENDS + 5,
                 Self::Volume => AFTER_SENDS + 6,
+                Self::TrackDelay => AFTER_SENDS + 7,
+                Self::TrackDelayUnit => AFTER_SENDS + 8,
+                Self::KeepMonitoring => AFTER_SENDS + 9,
+                Self::SplitPanLeft => AFTER_SENDS + 10,
+                Self::SplitPanRight => AFTER_SENDS + 11,
                 _ => 0,
             },
         }

@@ -188,6 +188,12 @@ impl Document {
                                     Travel::Fader.legacy_share(mixer.volume, old)
                                 }
                                 crate::MixerParam::Pan => Travel::Pan.legacy_share(mixer.pan, old),
+                                crate::MixerParam::SplitLeft => {
+                                    Travel::Pan.legacy_share(mixer.split_left, old)
+                                }
+                                crate::MixerParam::SplitRight => {
+                                    Travel::Pan.legacy_share(mixer.split_right, old)
+                                }
                                 crate::MixerParam::Mute => Travel::Switch
                                     .legacy_share(f64::from(u8::from(mixer.mute)), old),
                             }

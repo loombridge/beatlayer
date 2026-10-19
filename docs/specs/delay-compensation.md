@@ -1,9 +1,9 @@
 # Plug-in delay compensation
 
 - **Status:** partial
-- **Work packages:** WP-2.11
+- **Work packages:** WP-2.11; the Delay Compensation, Reduced Latency When Monitoring, and Keep Monitoring Latency rules (R7 to R9) since WP-5.36
 - **Parity-matrix row:** Mixing: Delay compensation
-- **Checked against:** Live 12.4.3, on 14 October 2026
+- **Checked against:** Live 12.4.3 on 14 October 2026, and the Live 12 reference manual, chapter 23 section 23.3 "Device Delay Compensation" and chapter 18 sections 18.7 "Track Delays" and 18.8 "Keep Monitoring Latency", read 17 October 2026
 
 ## The behaviour
 
@@ -17,6 +17,13 @@ clips and a device's sidechain source to match, and offsets a parameter change
 meant for a song position by the same latency so automation acts on the audio it
 is meant for.
 
+Two set settings switch the compensation: Delay Compensation turns it on or
+off, and Reduced Latency When Monitoring gives a monitored track the lowest
+possible latency at the cost of lining up with the rest of the set. Every track
+also has a delay of its own, which joins this model ([mixer](mixer.md) R28), and
+a Keep Monitoring Latency switch ([mixer](mixer.md) R30) deciding what a
+recording made while the track is monitored holds.
+
 This spec covers the latency model and the compensation the engine applies. It
 leaves the latency a particular device reports to that device's own spec
 (`device-chains.md` for the native framework, `clap-hosting.md` for plug-ins),
@@ -28,6 +35,10 @@ and automation editing to `automation.md`.
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, "Mixing", delay compensation | Live delays every track so that signals through high-latency devices stay aligned at the Main output; automation and sidechains are compensated with the audio; compensation is recomputed when the device set changes. |
 | S2 | Observation | Live 12.4.3 on macOS, 14 October 2026 | A device disabled from its title bar reports no latency and the chain realigns; re-enabling restores it. |
+| S3 | Manual | Live 12 reference manual, chapter 23, section 23.3 "Device Delay Compensation" | Compensation is on by default and switched in the Options menu; while it's on, Reduced Latency When Monitoring is available; while it's off, no path is held back and a track's Track Delay controls are unavailable. A monitored track with Reduced Latency When Monitoring on takes the lowest possible latency and may be out of sync with other tracks such as returns, which stay compensated. |
+| S4 | Manual | Live 12 reference manual, chapter 18, section 18.7 "Track Delays" | Every track has a Track Delay control that shifts its output against the others, positive to delay and negative to play early, in milliseconds or in samples. |
+| S5 | Manual | Live 12 reference manual, chapter 18, section 18.8 "Keep Monitoring Latency" | A track's Keep Monitoring Latency switch decides what a recording made while the track is monitored holds: on, the track keeps the compensation of its monitoring path so the recording lines up with the rest of the set; off, the monitoring path keeps none and the recording matches what was heard. |
+| S6 | Beatlayer | [the build plan](../03-build-plan.md) WP-5.36; [mixer](mixer.md) R16, R28, R30 | A track's delay joins the delay-compensation model so its path counts the delay with the path's latency; the set saves the switches as Beatlayer saves its other settings; what Reduced Latency When Monitoring does to a monitored track and its neighbours is Beatlayer's own reading of the manual until Live is observed. |
 
 ## Rules
 
@@ -37,6 +48,9 @@ and automation editing to `automation.md`.
 - **R4.** A device's sidechain source is held back to line up with the device's own input at the point in the chain where the device sits. (S1)
 - **R5.** A parameter change sent for a song frame is held back by its node's latency, so automation acts on the audio it is meant for; a change sent to take effect now, such as a person's control move, is not delayed. (S1)
 - **R6.** Compensation is recomputed when the graph or a device's latency changes. The delay lines are preallocated and processed in place, so the audio thread allocates nothing. (S1)
+- **R7.** Delay Compensation is a set setting, `delay_compensation`, on in a new set and saved with the set only where it's off, as [mixer](mixer.md) R16 saves Solo in Place in the same pattern; `mixer.set_delay_compensation { "enabled": … }` sets it as one undo step. While it's off: no path is held back and no node's latency counts (R2 to R5 stand aside), a track's delay ([mixer](mixer.md) R28) has no effect, and every Track Delay control and every external device's Hardware Latency control is disabled, keeping its value (the external devices' controls it disables are [external devices](external-devices.md) R14). The manual puts the switch in chapter 23. (S3, S6)
+- **R8.** Reduced Latency When Monitoring is a set setting, `reduced_latency_monitoring`, off in a new set and saved with the set only where it's on; `mixer.set_reduced_latency_monitoring { "enabled": … }` sets it as one undo step, and it can be on only while Delay Compensation is on (R7). With it on, a track whose input is monitored — Monitor In, or Auto while the track is armed and no clip is playing ([routing](routing.md) R11) — is given no input or route compensation into its summing point while the rest of the set stays held back, so the monitored track reaches the output earliest; this is Beatlayer's own reading of the manual until Live is observed. What it does to the track's neighbours, and how Keep Monitoring Latency interacts with it, aren't settled by the manual; Beatlayer's own choice is R9's. (S3, S6)
+- **R9.** A monitored track's compensation follows Keep Monitoring Latency ([mixer](mixer.md) R30) and R8: with Reduced Latency When Monitoring on, a monitored track is given no compensation, so the recording matches what is heard and Keep Monitoring Latency has nothing to keep; with it off, an input-monitored track whose Keep Monitoring Latency is off also loses its compensation (the recording matches the lowest-latency monitoring path), while with Keep Monitoring Latency on the track's normal compensation stands, so a recording made from its input is moved to line up with the rest of the set. (S5, S6)
 
 ## Tests
 
@@ -48,6 +62,9 @@ and automation editing to `automation.md`.
 | R4 | `crates/engine/tests/pdc.rs`, `a_sidechain_keyed_from_another_track_lines_up` | golden render |
 | R5 | `crates/engine/tests/pdc.rs`, `automation_lands_on_the_compensated_sample` | golden render |
 | R6 | `crates/engine/tests/pdc.rs`, `a_latency_change_recompiles_and_the_compensation_follows`; every block in `crates/engine/tests/pdc.rs` runs under the allocation trap | golden render |
+| R7 | `crates/engine/tests/pdc.rs`, `the_delay_compensation_switch_holds_nothing_back_and_disables_track_delay` | golden render |
+| R8 | `crates/engine/tests/pdc.rs`, `reduced_latency_monitoring_gives_a_monitored_track_no_compensation` | golden render |
+| R9 | `crates/engine/tests/pdc.rs`, `keep_monitoring_latency_gives_a_monitored_tracks_compensation_back` | golden render |
 
 ## Not built yet
 

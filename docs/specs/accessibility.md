@@ -89,6 +89,10 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 14. `chain.save_preset`: a chain's row is saved by dragging it into the browser (R46), which has no keyboard form yet.
 
+**Gaps in macros** ([macros](macros.md), WP-5.4):
+
+15. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
+
 ## Tests
 
 | Rule | Test | Kind |

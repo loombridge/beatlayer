@@ -348,3 +348,57 @@ fn a_broken_mapping_doesnt_load() {
         })
         .unwrap_err();
 }
+
+// Spec: macros R17
+#[test]
+fn macros_and_mappings_save_with_the_set_and_load_back() {
+    let mut song = Song::new();
+    let rack = song.rack(RackKind::AudioEffect, 1);
+    let rack_id = rack.id;
+    let chain = rack.chains[0].id;
+    song.insert(rack);
+    let device = song.device(DeviceRole::AudioEffect);
+    let device_id = device.id;
+    song.insert_in(chain, 0, device);
+    let target = MacroTarget::Device {
+        device: device_id,
+        param: ParamId(2),
+    };
+    song.editor
+        .apply(Command::MapMacro {
+            rack: rack_id,
+            macro_number: 3,
+            target,
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::SetMappingRange {
+            rack: rack_id,
+            target,
+            min: 0.75,
+            max: 0.25,
+        })
+        .unwrap();
+    let saved = song.editor.document().device(rack_id).unwrap().clone();
+    let json = serde_json::to_value(&saved).unwrap();
+    let back: Device = serde_json::from_value(json).unwrap();
+    assert_eq!(back.macros, saved.macros);
+    assert_eq!(back.macros.mappings.len(), 1);
+    assert_eq!(back.macros.mappings[0].macro_number, 3);
+    assert_eq!(
+        (back.macros.mappings[0].min, back.macros.mappings[0].max),
+        (0.75, 0.25)
+    );
+}
+
+// Spec: macros R17
+#[test]
+fn a_set_saved_before_macros_loads_with_none() {
+    let mut song = Song::new();
+    let rack = song.rack(RackKind::AudioEffect, 1);
+    let mut json = serde_json::to_value(&rack).unwrap();
+    json.as_object_mut().unwrap().remove("macros");
+    let back: Device = serde_json::from_value(json).unwrap();
+    assert_eq!(back.macros, bl_model::RackMacros::default());
+    assert!(back.macros.mappings.is_empty());
+}

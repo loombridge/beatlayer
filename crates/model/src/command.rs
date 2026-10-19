@@ -36,7 +36,8 @@ use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
+    TrackDelay, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
@@ -506,6 +507,65 @@ pub enum Command {
         track: TrackId,
         /// `a`, `b`, or `none`.
         assign: CrossfadeAssign,
+    },
+    /// Sets a track's delay (the mixer spec, manual 18.7): positive delays
+    /// the track, negative plays it early. Its value names its unit, as
+    /// Hardware Latency's does; the unit switch converts the value. The
+    /// command is unavailable while delay compensation is off.
+    SetTrackDelay {
+        /// The track.
+        track: TrackId,
+        /// The delay and the unit it is in.
+        delay: TrackDelay,
+    },
+    /// Sets a track's pan mode (the mixer spec, manual 18.1): Stereo Pan Mode
+    /// or Split Stereo Pan Mode.
+    SetPanMode {
+        /// The track.
+        track: TrackId,
+        /// `stereo` or `split`.
+        mode: PanMode,
+    },
+    /// In Split Stereo Pan Mode, sets the left input channel's position, from
+    /// −1 (left) to 1 (right), on the constant-power law.
+    SetSplitPanLeft {
+        /// The track.
+        track: TrackId,
+        /// The position, from −1 (left) through 0 (centre) to 1 (right).
+        #[schemars(range(min = -1.0, max = 1.0))]
+        pan: f64,
+    },
+    /// In Split Stereo Pan Mode, sets the right input channel's position, as
+    /// [`Command::SetSplitPanLeft`].
+    SetSplitPanRight {
+        /// The track.
+        track: TrackId,
+        /// The position, from −1 (left) through 0 (centre) to 1 (right).
+        #[schemars(range(min = -1.0, max = 1.0))]
+        pan: f64,
+    },
+    /// Switches the set's delay compensation on or off (the delay-compensation
+    /// spec, manual 23.3). While it's off, nothing is held back, no node's
+    /// latency counts, and a track's delay has no effect.
+    SetDelayCompensation {
+        /// Whether compensation is on.
+        enabled: bool,
+    },
+    /// Switches Reduced Latency When Monitoring (the delay-compensation spec,
+    /// manual 23.3), which gives a monitored track the lowest possible
+    /// latency. Only enabled while delay compensation is on.
+    SetReducedLatencyMonitoring {
+        /// Whether a monitored track is given the lowest possible latency.
+        enabled: bool,
+    },
+    /// Sets a track's Keep Monitoring Latency (the delay-compensation spec,
+    /// manual 18.8): whether a monitored track's recording keeps its delay
+    /// compensation to match what is heard.
+    SetKeepMonitoringLatency {
+        /// The track.
+        track: TrackId,
+        /// Whether it keeps its compensation.
+        enabled: bool,
     },
     /// Sets where an audio or MIDI track takes its input from: Audio From
     /// or MIDI From, with its channel.
@@ -1366,6 +1426,74 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Switches a device's Warp on or off (WP-5.15b).
+    SetDeviceWarp {
+        /// The device.
+        device: DeviceId,
+        /// Whether Warp is on.
+        warp: bool,
+    },
+    /// Sets a device's warp mode (WP-5.15b).
+    SetDeviceWarpMode {
+        /// The device.
+        device: DeviceId,
+        /// The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro.
+        mode: WarpMode,
+    },
+    /// Sets controls of a device's warp modes (WP-5.15b).
+    SetDeviceWarpSettings {
+        /// The device.
+        device: DeviceId,
+        /// Beats' controls to change.
+        #[serde(default)]
+        beats: Option<BeatsUpdate>,
+        /// Tones' controls to change.
+        #[serde(default)]
+        tones: Option<TonesUpdate>,
+        /// Texture's controls to change.
+        #[serde(default)]
+        texture: Option<TextureUpdate>,
+        /// Complex Pro's controls to change.
+        #[serde(default)]
+        complex_pro: Option<ComplexProUpdate>,
+    },
+    /// Sets a device's sample tempo in BPM (WP-5.15b).
+    SetDeviceSampleBpm {
+        /// The device.
+        device: DeviceId,
+        /// The tempo in BPM: positive, from 1 to 1,000.
+        bpm: f64,
+    },
+    /// Multiplies a device's sample tempo by a factor (Live's ×2 and ÷2, WP-5.15b).
+    ScaleDeviceTempo {
+        /// The device.
+        device: DeviceId,
+        /// What to multiply by: 2 for ×2, 0.5 for ÷2.
+        factor: f64,
+    },
+    /// Adds a manual slice at `frame` in the sample (WP-5.15b).
+    AddSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame into the sample.
+        frame: u64,
+    },
+    /// Moves a manual slice from `from` to `to` frame (WP-5.15b).
+    MoveSlice {
+        /// The device.
+        device: DeviceId,
+        /// The existing slice's frame.
+        from: u64,
+        /// The new frame.
+        to: u64,
+    },
+    /// Deletes a manual slice at `frame` (WP-5.15b).
+    DeleteSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame of the slice to delete.
+        frame: u64,
+    },
     /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
     /// `index` or at the end. Each layer's own `id` is ignored: the device
     /// gives each the next of its layer IDs, in order, and they read back
@@ -1936,6 +2064,12 @@ impl Command {
             }
             Self::SetCrossfader { .. } => "Change crossfader",
             Self::SetCrossfadeAssign { .. } => "Assign crossfade",
+            Self::SetTrackDelay { .. } => "Change track delay",
+            Self::SetPanMode { .. } => "Change track pan mode",
+            Self::SetSplitPanLeft { .. } | Self::SetSplitPanRight { .. } => "Change split pan",
+            Self::SetDelayCompensation { .. } => "Switch Delay Compensation",
+            Self::SetReducedLatencyMonitoring { .. } => "Switch Reduced Latency When Monitoring",
+            Self::SetKeepMonitoringLatency { .. } => "Switch Keep Monitoring Latency",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetCueMode { .. } => "Switch Cue mode",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
@@ -2048,6 +2182,16 @@ impl Command {
             Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // WP-5.15b: Warp controls and slices.
+            Self::SetDeviceWarp { .. } => "Switch Warp",
+            Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
+            Self::SetDeviceWarpSettings { .. } => "Change Warp Settings",
+            Self::SetDeviceSampleBpm { .. } | Self::ScaleDeviceTempo { .. } => {
+                "Change sample tempo"
+            }
+            Self::AddSlice { .. } => "Add Slice",
+            Self::MoveSlice { .. } => "Move Slice",
+            Self::DeleteSlice { .. } => "Delete Slice",
             // WP-5.13: Live's names for the layer list's items where it has
             // them (S6); the rest are Beatlayer's own.
             Self::InsertLayers { .. } => "Add Samples",
@@ -2478,6 +2622,81 @@ impl Document {
                 check_kind(current, TrackKind::has_crossfade_assign, NOT_MAIN)?;
                 if current.mixer.crossfade != *assign {
                     self.track_mut(*track)?.mixer.crossfade = *assign;
+                }
+                Ok(())
+            }
+            Command::SetTrackDelay { track, delay } => {
+                // Spec: delay-compensation R7. While compensation is off the
+                // Track Delay is unavailable: the command is refused and the
+                // value stays as it was.
+                if !self.settings.delay_compensation {
+                    return Err(ModelError::TrackDelayNeedsCompensation);
+                }
+                check_value(
+                    "track delay",
+                    match *delay {
+                        TrackDelay::Milliseconds { value } => value,
+                        TrackDelay::Samples { value } => value as f64,
+                    },
+                    delay.is_valid(),
+                )?;
+                if self.track_ref(*track)?.delay != *delay {
+                    self.track_mut(*track)?.delay = *delay;
+                }
+                Ok(())
+            }
+            Command::SetPanMode { track, mode } => {
+                if self.track_ref(*track)?.mixer.pan_mode != *mode {
+                    self.track_mut(*track)?.mixer.pan_mode = *mode;
+                }
+                Ok(())
+            }
+            Command::SetSplitPanLeft { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::SplitLeft,
+                })?;
+                check_value("split pan", *pan, (-1.0..=1.0).contains(pan))?;
+                if self.track_ref(*track)?.mixer.split_left != *pan {
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.split_left = *pan;
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::SplitLeft,
+                    });
+                }
+                Ok(())
+            }
+            Command::SetSplitPanRight { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::SplitRight,
+                })?;
+                check_value("split pan", *pan, (-1.0..=1.0).contains(pan))?;
+                if self.track_ref(*track)?.mixer.split_right != *pan {
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.split_right = *pan;
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::SplitRight,
+                    });
+                }
+                Ok(())
+            }
+            Command::SetDelayCompensation { enabled } => {
+                self.settings.delay_compensation = *enabled;
+                Ok(())
+            }
+            Command::SetReducedLatencyMonitoring { enabled } => {
+                // Spec: delay-compensation R8. It can be on only while
+                // compensation is on; turning it off is always allowed.
+                if *enabled && !self.settings.delay_compensation {
+                    return Err(ModelError::ReducedLatencyNeedsCompensation);
+                }
+                self.settings.reduced_latency_monitoring = *enabled;
+                Ok(())
+            }
+            Command::SetKeepMonitoringLatency { track, enabled } => {
+                if self.track_ref(*track)?.keep_monitoring_latency != *enabled {
+                    self.track_mut(*track)?.keep_monitoring_latency = *enabled;
                 }
                 Ok(())
             }
@@ -3006,6 +3225,62 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetDeviceWarp { device, warp } => {
+                self.device_mut(*device)?.warp.warp = *warp;
+                Ok(())
+            }
+            Command::SetDeviceWarpMode { device, mode } => {
+                self.device_mut(*device)?.warp.mode = *mode;
+                Ok(())
+            }
+            Command::SetDeviceWarpSettings {
+                device,
+                beats,
+                tones,
+                texture,
+                complex_pro,
+            } => {
+                let settings = self.device_ref(*device)?.warp.settings.updated(
+                    *beats,
+                    *tones,
+                    *texture,
+                    *complex_pro,
+                )?;
+                self.device_mut(*device)?.warp.settings = settings;
+                Ok(())
+            }
+            Command::SetDeviceSampleBpm { device, bpm } => {
+                check_value("sample bpm", *bpm, (1.0..=1000.0).contains(bpm))?;
+                self.device_mut(*device)?.warp.bpm = Some(*bpm);
+                Ok(())
+            }
+            Command::ScaleDeviceTempo { device, factor } => {
+                check_value("scale factor", *factor, factor.is_finite() && *factor > 0.0)?;
+                let current = self.device_ref(*device)?.warp.bpm.unwrap_or(120.0);
+                self.device_mut(*device)?.warp.bpm = Some((current * factor).clamp(1.0, 1000.0));
+                Ok(())
+            }
+            Command::AddSlice { device, frame } => {
+                let d = self.device_mut(*device)?;
+                if !d.slices.contains(frame) {
+                    d.slices.push(*frame);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::MoveSlice { device, from, to } => {
+                let d = self.device_mut(*device)?;
+                d.slices.retain(|f| f != from);
+                if !d.slices.contains(to) {
+                    d.slices.push(*to);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::DeleteSlice { device, frame } => {
+                self.device_mut(*device)?.slices.retain(|f| f != frame);
+                Ok(())
+            }
             Command::InsertLayers {
                 device,
                 index,
@@ -3460,6 +3735,9 @@ impl Document {
                 mixer.enabled = enabled;
                 changed
             }
+            MixerParam::SplitLeft | MixerParam::SplitRight => {
+                return Err(ModelError::ChainHasNoSplitPan(chain));
+            }
         };
         if changed {
             self.chain_mut(chain)?.mixer = mixer;
@@ -3493,11 +3771,14 @@ impl Document {
                     ));
                 }
             }
-            MacroTarget::Chain { chain, .. } => {
+            MacroTarget::Chain { chain, param } => {
                 if current.find_chain(chain).is_none() {
                     return Err(ModelError::InvalidInput(
                         "a macro can only map a chain inside its rack",
                     ));
+                }
+                if matches!(param, MixerParam::SplitLeft | MixerParam::SplitRight) {
+                    return Err(ModelError::ChainHasNoSplitPan(chain));
                 }
             }
         }
@@ -5078,6 +5359,9 @@ impl Document {
                 if no_mixer && param != MixerParam::Mute {
                     return Err(ModelError::ChainHasNoMixer(chain));
                 }
+                if matches!(param, MixerParam::SplitLeft | MixerParam::SplitRight) {
+                    return Err(ModelError::ChainHasNoSplitPan(chain));
+                }
             }
             AutomationTarget::ChainSend { chain, to } => {
                 let track_ref = self.track_ref(track)?;
@@ -5860,6 +6144,10 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
             (0.0..=1.0).contains(&sidechain.mix),
         )?;
     }
+    if let Some(bpm) = device.warp.bpm {
+        check_value("sample bpm", bpm, (1.0..=1000.0).contains(&bpm))?;
+    }
+    device.warp.settings.check()?;
     Ok(())
 }
 
@@ -5898,6 +6186,16 @@ pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
         mixer.volume.is_finite() && mixer.volume >= 0.0,
     )?;
     check_value("pan", mixer.pan, (-1.0..=1.0).contains(&mixer.pan))?;
+    check_value(
+        "split pan",
+        mixer.split_left,
+        (-1.0..=1.0).contains(&mixer.split_left),
+    )?;
+    check_value(
+        "split pan",
+        mixer.split_right,
+        (-1.0..=1.0).contains(&mixer.split_right),
+    )?;
     if mixer.mute || mixer.solo {
         check_kind(track, TrackKind::has_mute_and_solo, NOT_MAIN)?;
     }
@@ -6852,6 +7150,128 @@ mod tests {
         assert_eq!(loaded, song.doc);
         loaded.check_invariants().unwrap();
         assert_eq!(loaded.track(audio_track).unwrap().take_lanes().len(), 2);
+    }
+
+    // Spec: mixer R28, R29, R30; delay-compensation R7, R8, R9
+    #[test]
+    fn the_track_delay_the_pan_mode_and_the_switches_save_and_undo() {
+        let mut editor = crate::Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+
+        editor
+            .apply(Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::Milliseconds { value: 10.0 },
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change track delay"));
+        editor
+            .apply(Command::SetPanMode {
+                track,
+                mode: PanMode::Split,
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change track pan mode"));
+        editor
+            .apply(Command::SetSplitPanLeft { track, pan: -0.5 })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change split pan"));
+        editor
+            .apply(Command::SetSplitPanRight { track, pan: 0.5 })
+            .unwrap();
+        editor
+            .apply(Command::SetKeepMonitoringLatency {
+                track,
+                enabled: false,
+            })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Keep Monitoring Latency")
+        );
+        editor
+            .apply(Command::SetReducedLatencyMonitoring { enabled: true })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Reduced Latency When Monitoring")
+        );
+        editor
+            .apply(Command::SetDelayCompensation { enabled: false })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Delay Compensation")
+        );
+        // While compensation is off neither can be set: the delay is refused
+        // and Reduced Latency When Monitoring can't be turned on (the delay
+        // compensation spec, R7 and R8). No undo step is made.
+        assert!(matches!(
+            editor.apply(Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::default(),
+            }),
+            Err(crate::editor::EditError::Command(
+                crate::error::ModelError::TrackDelayNeedsCompensation
+            ))
+        ));
+        assert!(matches!(
+            editor.apply(Command::SetReducedLatencyMonitoring { enabled: true }),
+            Err(crate::editor::EditError::Command(
+                crate::error::ModelError::ReducedLatencyNeedsCompensation
+            ))
+        ));
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Delay Compensation"),
+            "a refused command leaves no step"
+        );
+
+        // The set keeps them and reads them back.
+        let saved =
+            serde_json::to_string(&crate::repr::DocumentRepr::from(editor.document())).unwrap();
+        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
+        let loaded = Document::try_from(loaded).unwrap();
+        let loaded_track = loaded.track(track).unwrap();
+        assert_eq!(
+            loaded_track.delay(),
+            TrackDelay::Milliseconds { value: 10.0 }
+        );
+        assert_eq!(loaded_track.mixer().pan_mode, PanMode::Split);
+        assert_eq!(
+            (
+                loaded_track.mixer().split_left,
+                loaded_track.mixer().split_right
+            ),
+            (-0.5, 0.5)
+        );
+        assert!(!loaded_track.keep_monitoring_latency());
+        assert!(!loaded.settings().delay_compensation);
+        assert!(loaded.settings().reduced_latency_monitoring);
+
+        // Each command is one undo step and restores what it replaced.
+        for _ in 0..7 {
+            editor.undo().unwrap();
+        }
+        let undone = editor.document().track(track).unwrap();
+        assert_eq!(undone.delay(), TrackDelay::default());
+        assert_eq!(undone.mixer().pan_mode, PanMode::Stereo);
+        assert_eq!(
+            (undone.mixer().split_left, undone.mixer().split_right),
+            (0.0, 0.0)
+        );
+        assert!(undone.keep_monitoring_latency());
+        assert!(editor.document().settings().delay_compensation);
+        assert!(!editor.document().settings().reduced_latency_monitoring);
     }
 
     // Spec: audio-clips R7

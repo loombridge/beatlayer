@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-512 commands in 37 areas.
+528 commands in 37 areas.
 
 ## Permission classes
 
@@ -220,6 +220,7 @@ Each command has:
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
+| [`device.add_slice`](#deviceadd_slice) | Add Slice | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
@@ -229,6 +230,7 @@ Each command has:
 | [`device.crop_sample`](#devicecrop_sample) | Crop Sample | `edit` |  |  |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.delete_layers`](#devicedelete_layers) | Delete Samples | `edit` |  |  |
+| [`device.delete_slice`](#devicedelete_slice) | Delete Slice | `edit` |  |  |
 | [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.distribute_layers`](#devicedistribute_layers) | Distribute Ranges | `edit` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
@@ -248,6 +250,7 @@ Each command has:
 | [`device.load_sample`](#deviceload_sample) | Load Sample | `external` |  |  |
 | [`device.move`](#devicemove) | Move Device | `edit` |  |  |
 | [`device.move_layers`](#devicemove_layers) | Move Samples | `edit` |  |  |
+| [`device.move_slice`](#devicemove_slice) | Move Slice | `edit` |  |  |
 | [`device.move_to_chain`](#devicemove_to_chain) | Move Device to Chain | `edit` |  |  |
 | [`device.normalize_layers`](#devicenormalize_layers) | Normalize | `edit` |  |  |
 | [`device.parameters`](#deviceparameters) | Device Parameters | `read` |  |  |
@@ -259,6 +262,7 @@ Each command has:
 | [`device.reverse_sample`](#devicereverse_sample) | Reverse Sample | `edit` |  |  |
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
+| [`device.scale_tempo`](#devicescale_tempo) | Scale Device Sample Tempo | `edit` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
 | [`device.select_layers`](#deviceselect_layers) | Select Samples | `read` |  |  |
 | [`device.select_slot`](#deviceselect_slot) | Select Sample Slot | `read` |  |  |
@@ -278,6 +282,7 @@ Each command has:
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
+| [`device.set_sample_bpm`](#deviceset_sample_bpm) | Set Device Sample BPM | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | External Sidechain On/Off | `edit` |  |  |
 | [`device.set_sidechain_gain`](#deviceset_sidechain_gain) | Set SC Gain | `edit` |  |  |
@@ -285,6 +290,9 @@ Each command has:
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | Sidechain Listen | `edit` |  |  |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | Set Sidechain Mix | `edit` |  |  |
 | [`device.set_state`](#deviceset_state) | Set Device State | `edit` |  |  |
+| [`device.set_warp`](#deviceset_warp) | Device Warp On/Off | `edit` |  |  |
+| [`device.set_warp_mode`](#deviceset_warp_mode) | Set Device Warp Mode | `edit` |  |  |
+| [`device.set_warp_settings`](#deviceset_warp_settings) | Set Device Warp Settings | `edit` |  |  |
 | [`device.set_window`](#deviceset_window) | Move Device Window | `read` |  |  |
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
@@ -323,12 +331,19 @@ Each command has:
 | [`mixer.set_crossfader`](#mixerset_crossfader) | Set Crossfader | `edit` |  |  |
 | [`mixer.set_cue_mode`](#mixerset_cue_mode) | Cue Switches | `edit` |  |  |
 | [`mixer.set_cue_volume`](#mixerset_cue_volume) | Set Cue Volume | `edit` |  |  |
+| [`mixer.set_delay_compensation`](#mixerset_delay_compensation) | Delay Compensation | `edit` |  |  |
+| [`mixer.set_keep_monitoring_latency`](#mixerset_keep_monitoring_latency) | Keep Monitoring Latency | `edit` |  |  |
 | [`mixer.set_mute`](#mixerset_mute) | Activate/Deactivate Track | `edit` | `0`; `F1..F8` | `0`; `F1..F8` |
 | [`mixer.set_pan`](#mixerset_pan) | Set Track Pan | `edit` |  |  |
+| [`mixer.set_pan_mode`](#mixerset_pan_mode) | Set Split Pan Mode | `edit` |  |  |
+| [`mixer.set_reduced_latency_monitoring`](#mixerset_reduced_latency_monitoring) | Reduced Latency When Monitoring | `edit` |  |  |
 | [`mixer.set_send`](#mixerset_send) | Set Send Level | `edit` |  |  |
 | [`mixer.set_send_tap`](#mixerset_send_tap) | Set Sends Pre/Post | `edit` |  |  |
 | [`mixer.set_solo`](#mixerset_solo) | Solo Track | `edit` | `S` | `S` |
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | Solo in Place | `edit` |  |  |
+| [`mixer.set_split_pan_left`](#mixerset_split_pan_left) | Set Split Pan Left | `edit` |  |  |
+| [`mixer.set_split_pan_right`](#mixerset_split_pan_right) | Set Split Pan Right | `edit` |  |  |
+| [`mixer.set_track_delay`](#mixerset_track_delay) | Set Track Delay | `edit` |  |  |
 | [`mixer.set_volume`](#mixerset_volume) | Set Track Volume | `edit` |  |  |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
@@ -340,6 +355,7 @@ Each command has:
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
+| [`mixer_view.track_options`](#mixer_viewtrack_options) | Track Options | `read` |  |  |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
 | [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
 | [`modulator.arm_map`](#modulatorarm_map) | Map | `read` |  |  |
@@ -3997,6 +4013,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.add_slice`
+
+**Add Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Adds a manual slice at a frame into the sample (WP-5.15b). In Slice mode, slices play chromatically from C3.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `frame` | integer, at least 0 | yes | Frame into the sample. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.audition_sample`
 
 **Audition Sample**. Permission: `read`. Contexts: `device-view`.
@@ -4158,6 +4191,23 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `layers` | array of [`LayerId`](#layerid) | yes | The layers to remove. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.delete_slice`
+
+**Delete Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Deletes a manual slice at `frame` into the sample (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `frame` | integer, at least 0 | yes | Frame of the slice to delete. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4511,6 +4561,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.move_slice`
+
+**Move Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Moves a manual slice from `from` frame to `to` frame into the sample (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer, at least 0 | yes | The existing slice's frame. |
+| `to` | integer, at least 0 | yes | The new frame. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.move_to_chain`
 
 **Move Device to Chain**. Permission: `edit`. Contexts: `device-view`.
@@ -4712,6 +4780,23 @@ Arguments:
 | `path` | string or null | no | The file to write, ending `.blpreset`; a new file in the User Library's folder for the device's presets, named after its title, if left out. |
 
 Result: [`PresetResult`](#presetresult).
+
+#### `device.scale_tempo`
+
+**Scale Device Sample Tempo**. Permission: `edit`. Contexts: `device-view`.
+
+Multiplies a device's sample tempo by a factor, Live's ×2 and ÷2 (WP-5.15b): 2 doubles the tempo, 0.5 halves it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.select`
 
@@ -5065,6 +5150,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_sample_bpm`
+
+**Set Device Sample BPM**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a device's sample tempo in BPM, from 1 to 1,000 (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `bpm` | number | yes | The tempo in BPM: positive, from 1 to 1,000. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_show_preset_name`
 
 **Show Preset Name**. Permission: `edit`. Contexts: `device-view`.
@@ -5183,6 +5285,60 @@ Arguments:
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp`
+
+**Device Warp On/Off**. Permission: `edit`. Contexts: `device-view`.
+
+Switches a device's Warp on or off (WP-5.15b). On, the sample plays through its warp map at the set's tempo; off, it plays at its own speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `warp` | boolean | yes | Whether Warp is on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp_mode`
+
+**Set Device Warp Mode**. Permission: `edit`. Contexts: `device-view`.
+
+Sets how a warped device's audio is fitted to the speed its warp map sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` (WP-5.15b). Until the other modes are built, they play as `re_pitch` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `mode` | [`WarpMode`](#warpmode) | yes | The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp_settings`
+
+**Set Device Warp Settings**. Permission: `edit`. Contexts: `device-view`.
+
+Sets controls of a device's warp modes, named by mode, any of them in one undo step (WP-5.15b). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 %, default 100), `envelope` (8 to 512, default 128).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `beats` | [`BeatsUpdate`](#beatsupdate) or null | no | Beats' controls to change. |
+| `complex_pro` | [`ComplexProUpdate`](#complexproupdate) or null | no | Complex Pro's controls to change. |
+| `texture` | [`TextureUpdate`](#textureupdate) or null | no | Texture's controls to change. |
+| `tones` | [`TonesUpdate`](#tonesupdate) or null | no | Tones' controls to change. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5832,6 +5988,39 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `mixer.set_delay_compensation`
+
+**Delay Compensation**. Permission: `edit`. Contexts: `global`.
+
+Switches Delay Compensation, the Options menu item. On in a new set, it holds every path back so signals through high-latency devices reach the Main output aligned. While it's off, nothing is held back, no device's latency counts, and a track's Track Delay has no effect; the Track Delay and Hardware Latency controls are disabled, keeping their values. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether compensation is on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_keep_monitoring_latency`
+
+**Keep Monitoring Latency**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's Keep Monitoring Latency, as its Track Options do. With monitoring In or Auto, it decides whether a monitored track keeps its delay compensation while Reduced Latency When Monitoring is on: with `enabled` true (a new track's), the track is compensated with the rest of the set; off, it is given the lowest possible latency. The setting is saved only where it's off, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `enabled` | boolean | yes | Whether it keeps its compensation. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `mixer.set_mute`
 
 **Activate/Deactivate Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
@@ -5868,6 +6057,39 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `pan` | number from -1 to 1 | yes | The pan position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_pan_mode`
+
+**Set Split Pan Mode**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's pan mode: `stereo` (the default) balances both channels with the one Pan control, and `split` gives each input channel its own control (`mixer.set_split_pan_left` and `mixer.set_split_pan_right`). Use it as the Pan control's context menu does. The mode is saved only where it isn't the default, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `mode` | [`PanMode`](#panmode) | yes | `stereo` or `split`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_reduced_latency_monitoring`
+
+**Reduced Latency When Monitoring**. Permission: `edit`. Contexts: `global`.
+
+Switches Reduced Latency When Monitoring, the Options menu item, which is available only while Delay Compensation is on; the command refuses `enabled` true while compensation is off. With it on, a track whose input is monitored (Monitor In, or Auto while armed and not playing a clip) is given the lowest possible latency: its input isn't held back with the rest of the set, so it may be out of sync with tracks such as the returns, which stay compensated. A monitored track that keeps its monitoring latency (`mixer.set_keep_monitoring_latency`) is compensated as usual. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether a monitored track is given the lowest possible latency. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5940,6 +6162,57 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `enabled` | boolean | yes | Whether soloing a track keeps the return tracks audible. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_split_pan_left`
+
+**Set Split Pan Left**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+In Split Stereo Pan Mode, sets the left input channel's position, from -1 (fully left) through 0 (centre) to 1 (fully right). Each channel is placed on the constant-power pan law, so a control fully to one side puts that channel on that side 3 dB louder. The position is an automation and modulation target, glides over 20 ms, and is saved only where it isn't the centre; each change is one undo step. It does nothing outside split mode.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `pan` | number from -1 to 1 | yes | The position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_split_pan_right`
+
+**Set Split Pan Right**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+In Split Stereo Pan Mode, sets the right input channel's position, as `mixer.set_split_pan_left` sets the left.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `pan` | number from -1 to 1 | yes | The position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_track_delay`
+
+**Set Track Delay**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's Track Delay, which shifts the track's whole output in time: positive delays the track, negative plays it early (the other paths then wait for it). `delay` names its unit, as Hardware Latency does: `{"unit": "milliseconds", "value": 10.0}` from -1000 to 1000 (kept in milliseconds when the sample rate changes) or `{"unit": "samples", "value": 480}` from -192000 to 192000 (kept in samples). The delay is saved with the set, and each change is one undo step. It is refused while Delay Compensation is off (`mixer.set_delay_compensation`), keeping its value.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `delay` | [`TrackDelay`](#trackdelay) | yes | The delay and the unit it is in. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6133,6 +6406,22 @@ Arguments:
 |---|---|---|---|
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 | `view` | [`MixerOf`](#mixerof) or null | no | Which view's mixer; the view in front if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.track_options`
+
+**Track Options**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the tracks' Track Options sections, as View > Mixer Controls > Track Options does: under each strip, the track delay (with its ms/samples unit switch) and Keep Monitoring Latency. Hidden in a new set; shown only while this shows. Switches unless `shown` says which. Changes only the view; the delay and the Keep Monitoring Latency switch are in the set (`mixer.set_track_delay`, `mixer.set_keep_monitoring_latency`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -9705,6 +9994,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
+| [`device.add_slice`](#deviceadd_slice) | the query tool's `device` | `slices` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
@@ -9712,6 +10002,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.crop_sample`](#devicecrop_sample) | the query tool's `device` | `media` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
 | [`device.delete_layers`](#devicedelete_layers) | the query tool's `device` | `layers` |
+| [`device.delete_slice`](#devicedelete_slice) | the query tool's `device` | `slices` |
 | [`device.distribute_layers`](#devicedistribute_layers) | the query tool's `device` | `layers` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
@@ -9726,6 +10017,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.load_sample`](#deviceload_sample) | the query tool's `device` | `media` |
 | [`device.move`](#devicemove) | the query tool's `track` | `devices` |
 | [`device.move_layers`](#devicemove_layers) | the query tool's `device` | `layers` |
+| [`device.move_slice`](#devicemove_slice) | the query tool's `device` | `slices` |
 | [`device.move_to_chain`](#devicemove_to_chain) | the query tool's `device` | `chains` |
 | [`device.normalize_layers`](#devicenormalize_layers) | the query tool's `device` | `layers` |
 | [`device.paste`](#devicepaste) | the query tool's `track` | `devices` |
@@ -9734,6 +10026,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.rename_layer`](#devicerename_layer) | the query tool's `device` | `layers` |
 | [`device.replace`](#devicereplace) | the query tool's `track` | `devices` |
 | [`device.reverse_sample`](#devicereverse_sample) | the query tool's `device` | `media` |
+| [`device.scale_tempo`](#devicescale_tempo) | the query tool's `device` | `warp.bpm` |
 | [`device.set_configured_params`](#deviceset_configured_params) | `device.parameters` | `params` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
@@ -9748,6 +10041,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
+| [`device.set_sample_bpm`](#deviceset_sample_bpm) | the query tool's `device` | `warp.bpm` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | the query tool's `device` | `sidechain.enabled` |
 | [`device.set_sidechain_gain`](#deviceset_sidechain_gain) | the query tool's `device` | `sidechain.gain` |
@@ -9755,6 +10049,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | the query tool's `device` | `sidechain.listen` |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | the query tool's `device` | `sidechain.mix` |
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
+| [`device.set_warp`](#deviceset_warp) | the query tool's `device` | `warp.warp` |
+| [`device.set_warp_mode`](#deviceset_warp_mode) | the query tool's `device` | `warp.mode` |
+| [`device.set_warp_settings`](#deviceset_warp_settings) | the query tool's `device` | `warp.settings` |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | the query tool's `device` | `layers` |
 | [`device.sort_layers`](#devicesort_layers) | the query tool's `device` | `layers` |
 | [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | the query tool's `track` | `devices` |
@@ -9774,12 +10071,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_crossfader`](#mixerset_crossfader) | the query tool's `song` | `settings.crossfader` |
 | [`mixer.set_cue_mode`](#mixerset_cue_mode) | the query tool's `song` | `settings.cue_mode` |
 | [`mixer.set_cue_volume`](#mixerset_cue_volume) | the query tool's `song` | `settings.cue_volume` |
+| [`mixer.set_delay_compensation`](#mixerset_delay_compensation) | the query tool's `song` | `settings.delay_compensation` |
+| [`mixer.set_keep_monitoring_latency`](#mixerset_keep_monitoring_latency) | the query tool's `track` | `keep_monitoring_latency` |
 | [`mixer.set_mute`](#mixerset_mute) | the query tool's `track` | `mixer.mute` |
 | [`mixer.set_pan`](#mixerset_pan) | the query tool's `track` | `mixer.pan` |
+| [`mixer.set_pan_mode`](#mixerset_pan_mode) | the query tool's `track` | `mixer.pan_mode` |
+| [`mixer.set_reduced_latency_monitoring`](#mixerset_reduced_latency_monitoring) | the query tool's `song` | `settings.reduced_latency_monitoring` |
 | [`mixer.set_send`](#mixerset_send) | the query tool's `track` | `sends` |
 | [`mixer.set_send_tap`](#mixerset_send_tap) | the query tool's `track` | `mixer.tap` |
 | [`mixer.set_solo`](#mixerset_solo) | the query tool's `track` | `mixer.solo` |
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | the query tool's `song` | `settings.solo_in_place` |
+| [`mixer.set_split_pan_left`](#mixerset_split_pan_left) | the query tool's `track` | `mixer.split_left` |
+| [`mixer.set_split_pan_right`](#mixerset_split_pan_right) | the query tool's `track` | `mixer.split_right` |
+| [`mixer.set_track_delay`](#mixerset_track_delay) | the query tool's `track` | `delay` |
 | [`mixer.set_volume`](#mixerset_volume) | the query tool's `track` | `mixer.volume` |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | the query tool's `track` | `mixer.solo` |
 | [`modulator.map`](#modulatormap) | the query tool's `device` | `mappings` |
@@ -13872,6 +14176,8 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
+| `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
+| `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
 
 <details><summary>JSON Schema</summary>
 
@@ -14060,6 +14366,19 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one."
+    },
+    "slices": {
+      "description": "Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty.",
+      "items": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "warp": {
+      "$ref": "#/$defs/DeviceWarp",
+      "description": "Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default."
     }
   },
   "required": [
@@ -15126,6 +15445,52 @@ What `device_view.state` returns.
     "can_paste_chain",
     "device_list"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceWarp`
+
+Warp settings for a device that plays media (WP-5.15b, Simpler).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `bpm` | number or null | no | The sample's tempo in BPM (from 1 to 1,000). None uses the default. |
+| `mode` | [`WarpMode`](#warpmode) | no | The warp mode. |
+| `settings` | [`WarpSettings`](#warpsettings) | no | Mode-specific controls. |
+| `warp` | boolean | no | Whether warping is enabled. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Warp settings for a device that plays media (WP-5.15b, Simpler).",
+  "properties": {
+    "bpm": {
+      "description": "The sample's tempo in BPM (from 1 to 1,000). None uses the default.",
+      "format": "double",
+      "maximum": 1000.0,
+      "minimum": 1.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode."
+    },
+    "settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Mode-specific controls."
+    },
+    "warp": {
+      "description": "Whether warping is enabled.",
+      "type": "boolean"
+    }
+  },
   "type": "object"
 }
 ```
@@ -20145,19 +20510,21 @@ One of:
 
 ### `MixerParam`
 
-A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), or `mute` (the Track Activator: 1 muted, 0 not).
+A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), `mute` (the Track Activator: 1 muted, 0 not), or, in Split Stereo Pan Mode, `split_left` and `split_right` (each −1 left to 1 right).
 
 One of:
 
 - `"volume"`: The track's volume, as linear gain.
 - `"pan"`: The track's pan, from −1 (left) to 1 (right).
 - `"mute"`: The Track Activator: 1 muted, 0 not.
+- `"split_left"`: In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right). A track mixer's control, not a chain's.
+- `"split_right"`: In Split Stereo Pan Mode, the right input channel's position, as [`MixerParam::SplitLeft`].
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), or `mute` (the Track Activator: 1 muted, 0 not).",
+  "description": "A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), `mute` (the Track Activator: 1 muted, 0 not), or, in Split Stereo Pan Mode, `split_left` and `split_right` (each −1 left to 1 right).",
   "oneOf": [
     {
       "const": "volume",
@@ -20172,6 +20539,16 @@ One of:
     {
       "const": "mute",
       "description": "The Track Activator: 1 muted, 0 not.",
+      "type": "string"
+    },
+    {
+      "const": "split_left",
+      "description": "In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right). A track mixer's control, not a chain's.",
+      "type": "string"
+    },
+    {
+      "const": "split_right",
+      "description": "In Split Stereo Pan Mode, the right input channel's position, as [`MixerParam::SplitLeft`].",
       "type": "string"
     }
   ]
@@ -20194,6 +20571,7 @@ What `mixer_view.state` and the other view commands return.
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
+| `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20229,6 +20607,10 @@ What `mixer_view.state` and the other view commands return.
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Session View's mixer."
     },
+    "track_options": {
+      "description": "Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set.",
+      "type": "boolean"
+    },
     "volume": {
       "description": "Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show.",
       "type": "boolean"
@@ -20242,7 +20624,8 @@ What `mixer_view.state` and the other view commands return.
     "volume",
     "crossfader",
     "scene_tempo",
-    "return_tracks"
+    "return_tracks",
+    "track_options"
   ],
   "type": "object"
 }
@@ -21466,6 +21849,37 @@ One of:
     {
       "const": "mixed",
       "description": "On for some of them.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PanMode`
+
+A track's pan mode: `stereo` (the default) balances both channels with one control, `split` places the left and right channels with two controls.
+
+One of:
+
+- `"stereo"`: One control balances both channels (the default).
+- `"split"`: Two controls place each input channel on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's pan mode: `stereo` (the default) balances both channels with one control, `split` places the left and right channels with two controls.",
+  "oneOf": [
+    {
+      "const": "stereo",
+      "description": "One control balances both channels (the default).",
+      "type": "string"
+    },
+    {
+      "const": "split",
+      "description": "Two controls place each input channel on its own.",
       "type": "string"
     }
   ]
@@ -26687,6 +27101,65 @@ Changes to Tones' controls.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `TrackDelay`
+
+A track's delay (the mixer spec): `{ "unit": "milliseconds", "value": 10.0 }` (−1000 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 480 }` (−192000 to 192000; kept in samples). Positive delays the track, negative plays it early.
+
+One of:
+
+- an object with `unit` = `"milliseconds"`, `value` (number): Milliseconds, −1000 to 1000.
+- an object with `unit` = `"samples"`, `value` (integer): Samples (frames of the current sample rate), −192000 to 192000.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's delay (the mixer spec): `{ \"unit\": \"milliseconds\", \"value\": 10.0 }` (−1000 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ \"unit\": \"samples\", \"value\": 480 }` (−192000 to 192000; kept in samples). Positive delays the track, negative plays it early.",
+  "oneOf": [
+    {
+      "description": "Milliseconds, −1000 to 1000.",
+      "properties": {
+        "unit": {
+          "const": "milliseconds",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay: positive delays the track, negative plays it early.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Samples (frames of the current sample rate), −192000 to 192000.",
+      "properties": {
+        "unit": {
+          "const": "samples",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay: positive delays the track, negative plays it early.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 

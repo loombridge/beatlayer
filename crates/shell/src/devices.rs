@@ -700,6 +700,8 @@ impl DeviceView {
                     MixerParam::Volume => "Volume",
                     MixerParam::Pan => "Pan",
                     MixerParam::Mute => "Track Activator",
+                    MixerParam::SplitLeft => "Split Pan Left",
+                    MixerParam::SplitRight => "Split Pan Right",
                 }
             ),
             ModTarget::Send { track, to } => format!(

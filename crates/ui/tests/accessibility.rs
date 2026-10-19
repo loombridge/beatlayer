@@ -1541,6 +1541,33 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// A Simpler on the first MIDI track, that track selected, no device selected
+/// (WP-5.15b): the Warp controls show in the Device View.
+fn a_snapshot(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let midi = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let t = bl_devices::sampler_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
@@ -2552,7 +2579,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "rack.set_macro_info_text",
-            Exception(Equivalent("Edit Info Text on a macro's context menu")),
+            Exception(Gap(
+                "a macro's info text has no UI yet; M-EDIT-025 (Edit Info Text) adds the menu \
+                 item",
+            )),
         ),
         (
             "rack.set_macro_randomize_excluded",
@@ -2937,6 +2967,50 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "`device.crop_sample` and `device.reverse_sample`, which write the copy",
             )),
         ),
+        // Manual slicing in the sample display, and the Warp controls
+        // (WP-5.15b): the slicing gestures have no keyboard form yet, and
+        // the Warp controls are in the Device View's Tab order.
+        (
+            "device.add_slice",
+            Exception(Gap(
+                "a double-click on the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.move_slice",
+            Exception(Gap(
+                "dragging a slice in the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.delete_slice",
+            Exception(Gap(
+                "a double-click on a slice in the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.set_warp",
+            main(a_snapshot, device_view, "Warp", Key::Enter),
+        ),
+        (
+            "device.set_warp_mode",
+            main(a_snapshot, device_view, "Warp Mode", Key::Enter),
+        ),
+        (
+            "device.set_warp_settings",
+            main(a_snapshot, device_view, "Preserve", Key::Enter),
+        ),
+        (
+            "device.set_sample_bpm",
+            main(a_snapshot, device_view, "Sample BPM", Key::ArrowUp),
+        ),
+        (
+            "device.scale_tempo",
+            main(a_snapshot, device_view, "Double Tempo", Key::Enter),
+        ),
         (
             "device.snap_layer_markers",
             Exception(Gap(
@@ -3168,6 +3242,41 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "mixer.set_crossfade_assign",
             Exception(Unobserved(
                 "a click on a track's A or B button in the Crossfader section",
+            )),
+        ),
+        // The Track Options section (WP-5.36): a track's Track Delay, its
+        // ms/samples unit switch, and its Keep Monitoring Latency switch,
+        // and the pan control's Split Stereo Pan Mode controls (C-PAN-001,
+        // C-PAN-002). Live's own keys for them and their place in the
+        // mixers' Tab order aren't observed yet.
+        (
+            "mixer.set_track_delay",
+            Exception(Unobserved(
+                "a drag or typed value in a track's Track Options",
+            )),
+        ),
+        (
+            "mixer.set_pan_mode",
+            Exception(Unobserved(
+                "a choice from the pan control's context menu (C-PAN-001, C-PAN-002)",
+            )),
+        ),
+        (
+            "mixer.set_split_pan_left",
+            Exception(Unobserved(
+                "a drag on a split pan control in Split Stereo Pan Mode",
+            )),
+        ),
+        (
+            "mixer.set_split_pan_right",
+            Exception(Unobserved(
+                "a drag on a split pan control in Split Stereo Pan Mode",
+            )),
+        ),
+        (
+            "mixer.set_keep_monitoring_latency",
+            Exception(Unobserved(
+                "a click on a track's Keep Monitoring Latency switch",
             )),
         ),
         // Live's own exception.
@@ -3487,15 +3596,18 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         [
             "chain.save_preset",
             "device.add_layers",
+            "device.add_slice",
             "device.audition_sample",
             "device.convert",
             "device.crop_sample",
             "device.delete_layers",
+            "device.delete_slice",
             "device.distribute_layers",
             "device.duplicate_layers",
             "device.edit_sample",
             "device.load_sample",
             "device.move_layers",
+            "device.move_slice",
             "device.normalize_layers",
             "device.rename_layer",
             "device.reverse_sample",
@@ -3503,6 +3615,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.snap_layer_markers",
             "device.sort_layers",
             "export.audio",
+            "rack.set_macro_info_text",
             "set.discard_recovery",
             "set.recover",
             "settings.set_continuous_save",

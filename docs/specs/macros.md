@@ -91,7 +91,7 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | R14 | `crates/shell/tests/macros.rs`, `rename_colour_and_info_text_are_one_undo_step_each_and_save` | unit |
 | R15 | `crates/shell/tests/macros.rs`, `randomize_moves_only_mapped_macros_not_excluded` | unit |
 | R16 | `crates/shell/tests/macros.rs`, `exclusion_switches_in_one_undo_step_and_saves` | unit |
-| R17 | `crates/model/tests/macros.rs`, `a_broken_mapping_doesnt_load` | unit |
+| R17 | `crates/model/tests/macros.rs`, `macros_and_mappings_save_with_the_set_and_load_back`, `a_broken_mapping_doesnt_load`, `a_set_saved_before_macros_loads_with_none` | unit |
 | R18 | `crates/model/tests/macros.rs`, `a_device_leaving_its_rack_takes_its_mappings`, `a_copied_rack_maps_its_own_devices` | unit |
 | R19 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`, `every_command_runs_by_id`; `crates/shell/tests/macros.rs`, `rack_macros_reads_back_names_values_mappings_and_the_count` | unit |
 | R20 | `crates/ui/tests/macros.rs`, `a_macro_is_a_knob_with_its_name_and_value` | UI script |

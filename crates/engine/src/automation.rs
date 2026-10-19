@@ -972,6 +972,8 @@ pub(crate) fn lists(
                         MixerParam::Volume => MacroTravel::Fader,
                         MixerParam::Pan => MacroTravel::Pan,
                         MixerParam::Mute => MacroTravel::Switch,
+                        // A chain has no split pan (the macros spec, R4).
+                        MixerParam::SplitLeft | MixerParam::SplitRight => continue,
                     };
                     (key, id, travel)
                 }
@@ -1044,6 +1046,8 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> Option<(NodeKey
                 MixerParam::Volume => mixer::track::VOLUME,
                 MixerParam::Pan => mixer::track::PAN,
                 MixerParam::Mute => mixer::track::MUTE,
+                MixerParam::SplitLeft => mixer::track::SPLIT_LEFT,
+                MixerParam::SplitRight => mixer::track::SPLIT_RIGHT,
             },
         ),
         AutomationTarget::Send { to } => (NodeKey::Send { track, to }, mixer::route::LEVEL),
@@ -1054,6 +1058,9 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> Option<(NodeKey
                 MixerParam::Volume => mixer::track::VOLUME,
                 MixerParam::Pan => mixer::track::PAN,
                 MixerParam::Mute => mixer::track::MUTE,
+                // A chain has no split pan; the model refuses it, so this
+                // is unreachable in a loaded set.
+                MixerParam::SplitLeft | MixerParam::SplitRight => mixer::track::MUTE,
             },
         ),
         AutomationTarget::ChainSend { chain, to } => {

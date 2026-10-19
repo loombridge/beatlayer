@@ -748,6 +748,104 @@ const ENTRIES: &[Entry] = &[
             it.",
     },
     Entry {
+        id: "mixer.set_track_delay",
+        action: Action::Apply("set_track_delay"),
+        label: "Set Track Delay",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's Track Delay, which shifts the track's whole output in \
+            time: positive delays the track, negative plays it early (the other paths then wait \
+            for it). `delay` names its unit, as Hardware Latency does: `{\"unit\": \
+            \"milliseconds\", \"value\": 10.0}` from -1000 to 1000 (kept in milliseconds when \
+            the sample rate changes) or `{\"unit\": \"samples\", \"value\": 480}` from -192000 \
+            to 192000 (kept in samples). The delay is saved with the set, and each change is \
+            one undo step. It is refused while Delay Compensation is off \
+            (`mixer.set_delay_compensation`), keeping its value.",
+    },
+    Entry {
+        id: "mixer.set_pan_mode",
+        action: Action::Apply("set_pan_mode"),
+        label: "Set Split Pan Mode",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's pan mode: `stereo` (the default) balances both channels \
+            with the one Pan control, and `split` gives each input channel its own control \
+            (`mixer.set_split_pan_left` and `mixer.set_split_pan_right`). Use it as the Pan \
+            control's context menu does. The mode is saved only where it isn't the default, \
+            and each change is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_split_pan_left",
+        action: Action::Apply("set_split_pan_left"),
+        label: "Set Split Pan Left",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "In Split Stereo Pan Mode, sets the left input channel's position, from -1 \
+            (fully left) through 0 (centre) to 1 (fully right). Each channel is placed on the \
+            constant-power pan law, so a control fully to one side puts that channel on that \
+            side 3 dB louder. The position is an automation and modulation target, glides over \
+            20 ms, and is saved only where it isn't the centre; each change is one undo step. \
+            It does nothing outside split mode.",
+    },
+    Entry {
+        id: "mixer.set_split_pan_right",
+        action: Action::Apply("set_split_pan_right"),
+        label: "Set Split Pan Right",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "In Split Stereo Pan Mode, sets the right input channel's position, as \
+            `mixer.set_split_pan_left` sets the left.",
+    },
+    Entry {
+        id: "mixer.set_delay_compensation",
+        action: Action::Apply("set_delay_compensation"),
+        label: "Delay Compensation",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Delay Compensation, the Options menu item. On in a new set, it \
+            holds every path back so signals through high-latency devices reach the Main output \
+            aligned. While it's off, nothing is held back, no device's latency counts, and a \
+            track's Track Delay has no effect; the Track Delay and Hardware Latency controls are \
+            disabled, keeping their values. The setting is saved with the set, and each change \
+            is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_reduced_latency_monitoring",
+        action: Action::Apply("set_reduced_latency_monitoring"),
+        label: "Reduced Latency When Monitoring",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Reduced Latency When Monitoring, the Options menu item, which is \
+            available only while Delay Compensation is on; the command refuses `enabled` true \
+            while compensation is off. With it on, a track whose input is \
+            monitored (Monitor In, or Auto while armed and not playing a clip) is given the \
+            lowest possible latency: its input isn't held back with the rest of the set, so it \
+            may be out of sync with tracks such as the returns, which stay compensated. A \
+            monitored track that keeps its monitoring latency \
+            (`mixer.set_keep_monitoring_latency`) is compensated as usual. The setting is saved \
+            with the set, and each change is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_keep_monitoring_latency",
+        action: Action::Apply("set_keep_monitoring_latency"),
+        label: "Keep Monitoring Latency",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's Keep Monitoring Latency, as its Track Options do. With \
+            monitoring In or Auto, it decides whether a monitored track keeps its delay \
+            compensation while Reduced Latency When Monitoring is on: with `enabled` true (a new \
+            track's), the track is compensated with the rest of the set; off, it is given the \
+            lowest possible latency. The setting is saved only where it's off, and each change \
+            is one undo step.",
+    },
+    Entry {
         id: "automation.set_breakpoint",
         action: Action::Apply("set_automation_breakpoint"),
         label: "Set Automation Breakpoint",
@@ -2044,6 +2142,89 @@ const ENTRIES: &[Entry] = &[
             ignore it. The set keeps the reference, so it reopens playing the same file. Null \
             clears the slot, one undo step named Clear Sample. To load a file from disk as a \
             person does, use `device.load_sample`.",
+    },
+    Entry {
+        id: "device.set_warp",
+        action: Action::Apply("set_device_warp"),
+        label: "Device Warp On/Off",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a device's Warp on or off (WP-5.15b). On, the sample plays \
+            through its warp map at the set's tempo; off, it plays at its own speed.",
+    },
+    Entry {
+        id: "device.set_warp_mode",
+        action: Action::Apply("set_device_warp_mode"),
+        label: "Set Device Warp Mode",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets how a warped device's audio is fitted to the speed its warp map \
+            sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` (WP-5.15b). \
+            Until the other modes are built, they play as `re_pitch` does.",
+    },
+    Entry {
+        id: "device.set_warp_settings",
+        action: Action::Apply("set_device_warp_settings"),
+        label: "Set Device Warp Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets controls of a device's warp modes, named by mode, any of them in \
+            one undo step (WP-5.15b). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, \
+            `eighth`, `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, \
+            `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: \
+            `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, \
+            default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 \
+            %, default 100), `envelope` (8 to 512, default 128).",
+    },
+    Entry {
+        id: "device.set_sample_bpm",
+        action: Action::Apply("set_device_sample_bpm"),
+        label: "Set Device Sample BPM",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets a device's sample tempo in BPM, from 1 to 1,000 (WP-5.15b).",
+    },
+    Entry {
+        id: "device.scale_tempo",
+        action: Action::Apply("scale_device_tempo"),
+        label: "Scale Device Sample Tempo",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Multiplies a device's sample tempo by a factor, Live's ×2 and ÷2 (WP-5.15b): \
+            2 doubles the tempo, 0.5 halves it.",
+    },
+    Entry {
+        id: "device.add_slice",
+        action: Action::Apply("add_slice"),
+        label: "Add Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds a manual slice at a frame into the sample (WP-5.15b). In Slice mode, \
+            slices play chromatically from C3.",
+    },
+    Entry {
+        id: "device.move_slice",
+        action: Action::Apply("move_slice"),
+        label: "Move Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves a manual slice from `from` frame to `to` frame into the sample (WP-5.15b).",
+    },
+    Entry {
+        id: "device.delete_slice",
+        action: Action::Apply("delete_slice"),
+        label: "Delete Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Deletes a manual slice at `frame` into the sample (WP-5.15b).",
     },
     Entry {
         id: "device.insert_layers",

@@ -93,6 +93,8 @@ impl DeviceView {
                     MixerParam::Volume => ("Volume", OwnedTravel::Fader),
                     MixerParam::Pan => ("Pan", OwnedTravel::Pan),
                     MixerParam::Mute => ("Chain Activator", OwnedTravel::Switch),
+                    // A chain has no split pan (the macros spec, R4).
+                    MixerParam::SplitLeft | MixerParam::SplitRight => return None,
                 };
                 Some(TargetInfo {
                     travel,
@@ -257,6 +259,8 @@ impl DeviceView {
                     MixerParam::Volume => chain.mixer.volume,
                     MixerParam::Pan => chain.mixer.pan,
                     MixerParam::Mute => f64::from(u8::from(!chain.mixer.enabled)),
+                    // A chain has no split pan (the macros spec, R4).
+                    MixerParam::SplitLeft | MixerParam::SplitRight => return None,
                 })
             }
         }

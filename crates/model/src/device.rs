@@ -19,6 +19,7 @@ use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::SampleEdit;
 use crate::track::Input;
+use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The most sample slots a device's media can fill.
 pub const MAX_MEDIA_SLOTS: usize = 16;
@@ -153,6 +154,44 @@ pub struct Device {
     /// R17). Left out of the saved set while it has neither.
     #[serde(default, skip_serializing_if = "RackMacros::is_default")]
     pub macros: RackMacros,
+    /// Warp settings for devices that play warped media (WP-5.15b, Simpler).
+    /// Left out of the saved set when default.
+    #[serde(default, skip_serializing_if = "DeviceWarp::is_default")]
+    pub warp: DeviceWarp,
+    /// Manual slice markers in frames into the sample, for devices that
+    /// support manual slicing (WP-5.15b, Simpler). Kept in increasing order
+    /// of frame. Left out of the saved set when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slices: Vec<u64>,
+}
+
+/// Warp settings for a device that plays media (WP-5.15b, Simpler).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceWarp {
+    /// Whether warping is enabled.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub warp: bool,
+    /// The warp mode.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub mode: WarpMode,
+    /// Mode-specific controls.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub settings: WarpSettings,
+    /// The sample's tempo in BPM (from 1 to 1,000). None uses the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1.0, max = 1000.0))]
+    pub bpm: Option<f64>,
+}
+
+impl DeviceWarp {
+    /// Whether this is default (unwarped, Beats mode, default settings, no BPM).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        !self.warp
+            && self.mode == WarpMode::default()
+            && self.settings == WarpSettings::default()
+            && self.bpm.is_none()
+    }
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -349,6 +388,10 @@ fn is_on(value: &bool) -> bool {
     *value
 }
 
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
 fn on() -> bool {
     true
 }
@@ -381,6 +424,8 @@ impl Device {
             shape: None,
             chains: Vec::new(),
             macros: RackMacros::default(),
+            warp: DeviceWarp::default(),
+            slices: Vec::new(),
         }
     }
 
@@ -392,10 +437,11 @@ impl Device {
 
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
     /// trimming empty slots off its end. Another sample in slot 0 clears the
-    /// edits made to the one before it.
+    /// edits made to the one before it and any manual slices.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
         if slot == 0 && self.media_at(0) != media {
             self.sample_edits.clear();
+            self.slices.clear();
         }
         if self.media.len() <= slot {
             if media.is_none() {

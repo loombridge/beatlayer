@@ -33,8 +33,163 @@ const ZOOM_PER_POINT: f64 = 0.01;
 /// The fewest frames a view spans.
 const MIN_SPAN: f64 = 64.0;
 
+/// The height of one row of Simpler's Warp controls (WP-5.15b).
+const WARP_ROW: f32 = 16.0;
+
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
+}
+
+/// A small button in Simpler's Warp row (WP-5.15b): draws `text`, and runs
+/// when it is clicked or when `key` is pressed while it has the keyboard.
+#[expect(clippy::too_many_arguments, reason = "a small button's parts")]
+fn warp_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    rect: Rect,
+    text: &str,
+    label: &str,
+    on: bool,
+    key: Key,
+) -> bool {
+    let response = ui.interact(rect, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let c = &theme.colors;
+    let (face, ink) = if on {
+        (c.accent.0, c.accent_text.0)
+    } else {
+        (c.control.0, c.text.0)
+    };
+    ui.painter().rect_filled(rect, theme.sizes.corner, face);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.small_font(),
+        ink,
+    );
+    crate::device_panel::focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(label.to_owned());
+    });
+    response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(key)))
+}
+
+/// A small value box in Simpler's Warp row (WP-5.15b): Arrow Up and Down step
+/// it by one, a vertical drag moves it, and it says which way the person
+/// asked for.
+fn warp_number(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    rect: Rect,
+    label: &str,
+    text: String,
+) -> Option<f64> {
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let c = &theme.colors;
+    ui.painter()
+        .rect_filled(rect, theme.sizes.corner, c.window.0);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.small_font(),
+        c.text.0,
+    );
+    crate::device_panel::focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::SpinButton);
+        node.set_label(label.to_owned());
+    });
+    if response.dragged() {
+        // Dragging up raises the value, as Live's number boxes do.
+        return Some(-f64::from(ui.input(|i| i.pointer.delta().y)) / 2.0);
+    }
+    if response.has_focus() && ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+        Some(1.0)
+    } else if response.has_focus() && ui.input(|i| i.key_pressed(Key::ArrowDown)) {
+        Some(-1.0)
+    } else {
+        None
+    }
+}
+
+/// What a warp mode reads (the warp modes spec, R1).
+fn mode_name(mode: bl_model::WarpMode) -> &'static str {
+    use bl_model::WarpMode;
+    match mode {
+        WarpMode::Beats => "Beats",
+        WarpMode::Tones => "Tones",
+        WarpMode::Texture => "Texture",
+        WarpMode::RePitch => "Re-Pitch",
+        WarpMode::Complex => "Complex",
+        WarpMode::ComplexPro => "Complex Pro",
+    }
+}
+
+/// The warp mode after `mode`, in the order the chooser offers them (R1).
+fn next_mode(mode: bl_model::WarpMode) -> bl_model::WarpMode {
+    use bl_model::WarpMode;
+    match mode {
+        WarpMode::Beats => WarpMode::Tones,
+        WarpMode::Tones => WarpMode::Texture,
+        WarpMode::Texture => WarpMode::RePitch,
+        WarpMode::RePitch => WarpMode::Complex,
+        WarpMode::Complex => WarpMode::ComplexPro,
+        WarpMode::ComplexPro => WarpMode::Beats,
+    }
+}
+
+/// What Beats' Preserve reads (R2).
+fn preserve_name(preserve: bl_model::Preserve) -> &'static str {
+    use bl_model::Preserve;
+    match preserve {
+        Preserve::Transients => "Transients",
+        Preserve::Bar => "1 Bar",
+        Preserve::Half => "Half",
+        Preserve::Quarter => "Quarter",
+        Preserve::Eighth => "Eighth",
+        Preserve::Sixteenth => "16th",
+        Preserve::ThirtySecond => "32nd",
+    }
+}
+
+/// The Preserve after `preserve`, in R2's order.
+fn next_preserve(preserve: bl_model::Preserve) -> bl_model::Preserve {
+    use bl_model::Preserve;
+    match preserve {
+        Preserve::Transients => Preserve::Bar,
+        Preserve::Bar => Preserve::Half,
+        Preserve::Half => Preserve::Quarter,
+        Preserve::Quarter => Preserve::Eighth,
+        Preserve::Eighth => Preserve::Sixteenth,
+        Preserve::Sixteenth => Preserve::ThirtySecond,
+        Preserve::ThirtySecond => Preserve::Transients,
+    }
+}
+
+/// What Beats' Transient Loop Mode reads (R2).
+fn loop_name(loop_mode: bl_model::TransientLoopMode) -> &'static str {
+    use bl_model::TransientLoopMode;
+    match loop_mode {
+        TransientLoopMode::LoopOff => "Loop Off",
+        TransientLoopMode::LoopForward => "Loop Forward",
+        TransientLoopMode::LoopBackAndForth => "Back & Forth",
+    }
+}
+
+/// The Transient Loop Mode after `loop_mode`, in R2's order.
+fn next_loop(loop_mode: bl_model::TransientLoopMode) -> bl_model::TransientLoopMode {
+    use bl_model::TransientLoopMode;
+    match loop_mode {
+        TransientLoopMode::LoopOff => TransientLoopMode::LoopForward,
+        TransientLoopMode::LoopForward => TransientLoopMode::LoopBackAndForth,
+        TransientLoopMode::LoopBackAndForth => TransientLoopMode::LoopOff,
+    }
 }
 
 /// The value of a device's parameter, from its panel.
@@ -104,6 +259,8 @@ pub struct Shown<'a> {
     /// Whether the sample is dropped on the display to replace or add a
     /// layer (R61).
     pub takes_drops: bool,
+    /// Whether Slice mode is active.
+    pub slice_mode: bool,
 }
 
 /// A press on the waveform and what it became.
@@ -136,6 +293,8 @@ struct State {
     /// from.
     slices: Vec<(u64, bool)>,
     slice_key: Option<(usize, Vec<u64>)>,
+    selected_slice: Option<u64>,
+    dragging_slice: Option<(u64, u64)>,
 }
 
 /// The sample displays of a window's devices.
@@ -223,6 +382,8 @@ impl Displays {
                 auditioning,
                 slices: Vec::new(),
                 slice_key: None,
+                selected_slice: None,
+                dragging_slice: None,
             },
         );
         true
@@ -247,6 +408,14 @@ impl Displays {
             return;
         };
         let rect = cell.shrink(2.0);
+        // The Warp controls sit along the cell's top edge (WP-5.15b), above
+        // the waveform.
+        let warp_height = (WARP_ROW * 2.0 + 2.0).min(rect.height() * 0.5);
+        let (warp_rect, rect) = (
+            Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + warp_height)),
+            Rect::from_min_max(pos2(rect.left(), rect.top() + warp_height), rect.max),
+        );
+        self.warp(ui, theme, device, warp_rect, events);
         let Some(media) = device.media_at(0) else {
             ui.painter_at(rect).text(
                 rect.center(),
@@ -280,8 +449,16 @@ impl Displays {
         // R14), worked out again when what they depend on changes.
         if slice_mode {
             let tempo = &shell.editor().document().settings().tempo;
-            let bpm = tempo.bpm_at(bl_core::time::Ticks::ZERO).get();
+            let bpm = if device.warp.warp {
+                device
+                    .warp
+                    .bpm
+                    .unwrap_or_else(|| tempo.bpm_at(bl_core::time::Ticks::ZERO).get())
+            } else {
+                tempo.bpm_at(bl_core::time::Ticks::ZERO).get()
+            };
             let sixteenth = f64::from(state.audio.sample_rate()) * 60.0 / bpm / 4.0;
+            let slice_by = value(s::SLICE_BY) as usize;
             let key = (
                 Arc::as_ptr(&state.audio) as usize,
                 [
@@ -295,19 +472,38 @@ impl Displays {
                 .iter()
                 .map(|id| value(*id).to_bits())
                 .chain([sixteenth.to_bits()])
+                .chain(device.slices.iter().copied())
                 .collect::<Vec<_>>(),
             );
             if state.slice_key.as_ref() != Some(&key) {
-                let bounds = bl_devices::slice_boundaries(&state.audio, &value, sixteenth);
-                // The first boundary is the region's start, and the last
-                // its end, which the flags show.
-                let inner = bounds.len().saturating_sub(1);
-                state.slices = bounds
-                    .into_iter()
-                    .skip(1)
-                    .take(inner.saturating_sub(1))
-                    .map(|frame| (frame, false))
-                    .collect();
+                if slice_by == 3 {
+                    state.slices = device
+                        .slices
+                        .iter()
+                        .copied()
+                        .filter(|&f| f > region_start && f < region_end)
+                        .map(|frame| (frame, true))
+                        .collect();
+                } else {
+                    let bounds = bl_devices::slice_boundaries(
+                        &state.audio,
+                        &value,
+                        sixteenth,
+                        &device.slices,
+                    );
+                    let inner = bounds.len().saturating_sub(1);
+                    let manual_set: std::collections::HashSet<u64> =
+                        device.slices.iter().copied().collect();
+                    state.slices = bounds
+                        .into_iter()
+                        .skip(1)
+                        .take(inner.saturating_sub(1))
+                        .map(|frame| {
+                            let is_manual = manual_set.contains(&frame);
+                            (frame, is_manual)
+                        })
+                        .collect();
+                }
                 state.slice_key = Some(key);
             }
         } else {
@@ -398,8 +594,289 @@ impl Displays {
             slices: &slices,
             snapshot: true,
             takes_drops: false,
+            slice_mode,
         };
         self.show(ui, shell, theme, &shown, rect, events);
+    }
+
+    /// Simpler's Warp controls (WP-5.15b, the sampler spec R18), along the
+    /// sample cell's top edge: the Warp switch, the warp mode with its own
+    /// controls, the sample's tempo, and Live's ÷2 and ×2. Each runs the
+    /// registered command an agent runs too.
+    fn warp(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        device: &bl_model::Device,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        use bl_model::WarpMode;
+        let device_id = device.id;
+        let w = &device.warp;
+        let mut x = rect.left();
+        let mut row = rect.top();
+        let mut place = move |width: f32| {
+            let r = Rect::from_min_size(pos2(x, row), egui::vec2(width, WARP_ROW));
+            x += width + 2.0;
+            r
+        };
+        // The Warp switch.
+        let on = w.warp;
+        if warp_button(
+            ui,
+            theme,
+            Id::new(("warp", device_id)),
+            place(26.0),
+            "Warp",
+            "Warp",
+            on,
+            Key::Enter,
+        ) {
+            invoke(
+                events,
+                "device.set_warp",
+                json!({ "device": device_id, "warp": !on }),
+            );
+        }
+        // The warp mode, which cycles on Enter.
+        let next = next_mode(w.mode);
+        if warp_button(
+            ui,
+            theme,
+            Id::new(("warp-mode", device_id)),
+            place(42.0),
+            mode_name(w.mode),
+            "Warp Mode",
+            false,
+            Key::Enter,
+        ) {
+            invoke(
+                events,
+                "device.set_warp_mode",
+                json!({ "device": device_id, "mode": next }),
+            );
+        }
+        // The sample's tempo: Arrow Up and Down step it by one BPM.
+        let bpm = w.bpm.unwrap_or(120.0);
+        if let Some(step) = warp_number(
+            ui,
+            theme,
+            Id::new(("warp-bpm", device_id)),
+            place(40.0),
+            "Sample BPM",
+            format!("{bpm:.0} BPM"),
+        ) {
+            let bpm = (bpm + step).clamp(1.0, 1000.0);
+            invoke(
+                events,
+                "device.set_sample_bpm",
+                json!({ "device": device_id, "bpm": bpm }),
+            );
+        }
+        // Live's ÷2 and ×2, which halve and double the sample's tempo.
+        if warp_button(
+            ui,
+            theme,
+            Id::new(("warp-half", device_id)),
+            place(18.0),
+            "÷2",
+            "Halve Tempo",
+            false,
+            Key::Enter,
+        ) {
+            invoke(
+                events,
+                "device.scale_tempo",
+                json!({ "device": device_id, "factor": 0.5 }),
+            );
+        }
+        if warp_button(
+            ui,
+            theme,
+            Id::new(("warp-double", device_id)),
+            place(18.0),
+            "×2",
+            "Double Tempo",
+            false,
+            Key::Enter,
+        ) {
+            invoke(
+                events,
+                "device.scale_tempo",
+                json!({ "device": device_id, "factor": 2.0 }),
+            );
+        }
+        // The mode's own controls (R18), on a second row.
+        row = rect.top() + WARP_ROW + 2.0;
+        x = rect.left();
+        let mut place = move |width: f32| {
+            let r = Rect::from_min_size(pos2(x, row), egui::vec2(width, WARP_ROW));
+            x += width + 2.0;
+            r
+        };
+        match w.mode {
+            WarpMode::Beats => {
+                let beats = w.settings.beats;
+                if warp_button(
+                    ui,
+                    theme,
+                    Id::new(("warp-preserve", device_id)),
+                    place(52.0),
+                    preserve_name(beats.preserve),
+                    "Preserve",
+                    false,
+                    Key::Enter,
+                ) {
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "beats": { "preserve": next_preserve(beats.preserve) },
+                        }),
+                    );
+                }
+                if warp_button(
+                    ui,
+                    theme,
+                    Id::new(("warp-loop", device_id)),
+                    place(46.0),
+                    loop_name(beats.transient_loop_mode),
+                    "Loop Mode",
+                    false,
+                    Key::Enter,
+                ) {
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "beats": { "transient_loop_mode": next_loop(beats.transient_loop_mode) },
+                        }),
+                    );
+                }
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-env", device_id)),
+                    place(34.0),
+                    "Envelope",
+                    beats.transient_envelope.to_string(),
+                ) {
+                    let value = (f64::from(beats.transient_envelope) + step).clamp(0.0, 100.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "beats": { "transient_envelope": value.round() as u32 },
+                        }),
+                    );
+                }
+            }
+            WarpMode::Tones => {
+                let grain = w.settings.tones.grain_size;
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-grain", device_id)),
+                    place(46.0),
+                    "Grain Size",
+                    format!("{grain:.0} ms"),
+                ) {
+                    let value = (grain + step).clamp(10.0, 100.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "tones": { "grain_size": value },
+                        }),
+                    );
+                }
+            }
+            WarpMode::Texture => {
+                let texture = w.settings.texture;
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-grain", device_id)),
+                    place(46.0),
+                    "Grain Size",
+                    format!("{:.0} ms", texture.grain_size),
+                ) {
+                    let value = (texture.grain_size + step).clamp(10.0, 500.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "texture": { "grain_size": value },
+                        }),
+                    );
+                }
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-flux", device_id)),
+                    place(40.0),
+                    "Flux",
+                    format!("{:.0} %", texture.flux),
+                ) {
+                    let value = (texture.flux + step).clamp(0.0, 100.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "texture": { "flux": value },
+                        }),
+                    );
+                }
+            }
+            WarpMode::ComplexPro => {
+                let pro = w.settings.complex_pro;
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-formants", device_id)),
+                    place(46.0),
+                    "Formants",
+                    format!("{:.0} %", pro.formants),
+                ) {
+                    let value = (pro.formants + step).clamp(0.0, 100.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "complex_pro": { "formants": value },
+                        }),
+                    );
+                }
+                if let Some(step) = warp_number(
+                    ui,
+                    theme,
+                    Id::new(("warp-envelope", device_id)),
+                    place(40.0),
+                    "Envelope",
+                    pro.envelope.to_string(),
+                ) {
+                    let value = (f64::from(pro.envelope) + step).clamp(8.0, 512.0);
+                    invoke(
+                        events,
+                        "device.set_warp_settings",
+                        json!({
+                            "device": device_id,
+                            "complex_pro": { "envelope": value.round() as u32 },
+                        }),
+                    );
+                }
+            }
+            // Re-Pitch and Complex have no controls of their own (R2).
+            WarpMode::RePitch | WarpMode::Complex => {}
+        }
     }
 
     /// Draws a display in `rect` and runs what the person does in it.
@@ -439,8 +916,24 @@ impl Displays {
                 Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()))
             })
             .collect();
+        let slice_handle_rects: Vec<Rect> = if shown.slice_mode {
+            shown
+                .slices
+                .iter()
+                .map(|&(frame, _)| {
+                    let x =
+                        rect.left() + ((frame as f64 - state.first) / state.span * width) as f32;
+                    Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let pointer = ui.input(|i| i.pointer.latest_pos());
-        let on_handle = pointer.is_some_and(|p| handle_rects.iter().any(|r| r.contains(p)));
+        let on_handle = pointer.is_some_and(|p| {
+            handle_rects.iter().any(|r| r.contains(p))
+                || slice_handle_rects.iter().any(|r| r.contains(p))
+        });
         let frame_at = |state: &State, x: f32| {
             (state.first + f64::from(x - rect.left()) / width * state.span).clamp(0.0, total)
         };
@@ -550,6 +1043,35 @@ impl Displays {
             state.selection = None;
         }
 
+        // In Slice mode, double-clicking adds a manual slice (R14, R54).
+        if shown.slice_mode
+            && response.double_clicked()
+            && !on_handle
+            && let Some(p) = pointer.filter(|p| rect.contains(*p))
+        {
+            let frame = frame_at(state, p.x).round() as u64;
+            invoke(
+                events,
+                "device.add_slice",
+                json!({ "device": device, "frame": frame }),
+            );
+            state.selected_slice = Some(frame);
+        }
+
+        // Delete or Backspace deletes the selected slice (WP-5.15b).
+        if shown.slice_mode
+            && (response.hovered() || response.has_focus())
+            && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
+            && let Some(frame) = state.selected_slice
+        {
+            invoke(
+                events,
+                "device.delete_slice",
+                json!({ "device": device, "frame": frame }),
+            );
+            state.selected_slice = None;
+        }
+
         // ----- drawing -----------------------------------------------------
         let painter = ui.painter_at(rect);
         let fpp = state.span / width;
@@ -587,20 +1109,67 @@ impl Displays {
                 painter.rect_filled(band, 0.0, c.focus.0);
             }
         }
+        let mut slice_dragged = None;
         for (index, &(frame, manual)) in shown.slices.iter().enumerate() {
             let x = x_of(frame);
-            if x < rect.left() || x > rect.right() {
+            if x < rect.left() - 4.0 || x > rect.right() + 4.0 {
                 continue;
             }
+            let is_selected = state.selected_slice == Some(frame);
             // Automatic slices in one colour, manual ones in another (R54).
-            let colour = if manual { c.accent.0 } else { c.text_dim.0 };
+            let colour = if is_selected {
+                c.focus.0
+            } else if manual {
+                c.accent.0
+            } else {
+                c.text_dim.0
+            };
             painter.line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(1.0, colour),
+                Stroke::new(if is_selected { 2.0 } else { 1.0 }, colour),
             );
-            let node = Id::new(("slice", device, index));
-            let area = Rect::from_min_max(pos2(x - 1.0, rect.top()), pos2(x + 1.0, rect.bottom()));
-            ui.ctx().accesskit_node_builder(node, |n| {
+            painter.add(Shape::convex_polygon(
+                vec![
+                    pos2(x - 3.0, rect.top()),
+                    pos2(x + 3.0, rect.top()),
+                    pos2(x, rect.top() + 5.0),
+                ],
+                colour,
+                Stroke::NONE,
+            ));
+            let area = slice_handle_rects.get(index).copied().unwrap_or_else(|| {
+                Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()))
+            });
+            let sid = Id::new(("slice-handle", device, index));
+            let sr = ui.interact(area, sid, Sense::click_and_drag());
+            if sr.clicked() {
+                state.selected_slice = Some(frame);
+            }
+            if sr.double_clicked() {
+                invoke(
+                    events,
+                    "device.delete_slice",
+                    json!({ "device": device, "frame": frame }),
+                );
+                state.selected_slice = None;
+            }
+            if sr.drag_started() {
+                state.dragging_slice = Some((frame, frame));
+                state.selected_slice = Some(frame);
+                events.push(UiEvent::BeginGesture("Move Slice"));
+            }
+            if sr.dragged()
+                && let Some((_orig, cur)) = state.dragging_slice
+                && let Some(p) = pointer
+            {
+                let new_frame = frame_at(state, p.x).round() as u64;
+                slice_dragged = Some((cur, new_frame));
+            }
+            if sr.drag_stopped() {
+                state.dragging_slice = None;
+                events.push(UiEvent::EndGesture);
+            }
+            ui.ctx().accesskit_node_builder(sid, |n| {
                 n.set_role(Role::Group);
                 n.set_label(format!("Slice {}", index + 2));
                 n.set_value(frame.to_string());
@@ -619,6 +1188,19 @@ impl Displays {
                     y1: area.max.y.into(),
                 });
             });
+        }
+        if let Some((from, to)) = slice_dragged
+            && from != to
+        {
+            invoke(
+                events,
+                "device.move_slice",
+                json!({ "device": device, "from": from, "to": to }),
+            );
+            if let Some((orig, _)) = state.dragging_slice {
+                state.dragging_slice = Some((orig, to));
+            }
+            state.selected_slice = Some(to);
         }
         if let Some((from, to)) = state.selection {
             let band = Rect::from_min_max(

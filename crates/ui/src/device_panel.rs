@@ -757,7 +757,7 @@ fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     }
 }
 
-fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &Response) {
+pub(crate) fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &Response) {
     if response.has_focus() && crate::focus::outlined(ui.ctx()) {
         ui.painter().rect_stroke(
             rect.expand(1.5),

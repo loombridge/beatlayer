@@ -385,15 +385,17 @@ impl Compiler {
             {
                 self.send_layers(document, id, &mut update);
             }
-            // A sampler whose sample's edits changed gets the edited sample
-            // again as node data, with no new program (R57).
+            // A sampler whose sample's edits, warp or slices changed gets the
+            // edited sample again as node data, with no new program (R57).
             if let (Change::Modified, Some(before), Some(after)) =
                 (change, old.device(id), document.device(id))
-                && before.sample_edits != after.sample_edits
+                && (before.sample_edits != after.sample_edits
+                    || before.warp != after.warp
+                    || before.slices != after.slices)
                 && before.media == after.media
                 && let Some(media) = after.media_at(0)
             {
-                self.send_slot_sample(id, 0, media, &after.sample_edits, &mut update);
+                self.send_slot_sample(document, id, 0, media, &after.sample_edits, &mut update);
             }
         }
         // A new program's restatement of migrated nodes goes first.
@@ -512,6 +514,7 @@ impl Compiler {
     /// reported missing and plays silence.
     fn send_slot_sample(
         &mut self,
+        document: &Document,
         device: DeviceId,
         slot: usize,
         media: ContentHash,
@@ -519,6 +522,10 @@ impl Compiler {
         update: &mut Update,
     ) {
         let rate = self.config.sample_rate;
+        let (warp, slices) = match document.device(device) {
+            Some(d) => (d.warp.clone(), std::sync::Arc::from(d.slices.as_slice())),
+            None => (bl_model::DeviceWarp::default(), std::sync::Arc::from([])),
+        };
         match self
             .registry
             .media()
@@ -526,7 +533,12 @@ impl Compiler {
         {
             Some(sample) => update.data.push((
                 NodeKey::Device(device),
-                self.gc.data(SlotSample { slot, sample }),
+                self.gc.data(SlotSample {
+                    slot,
+                    sample,
+                    warp,
+                    slices,
+                }),
             )),
             None => update.missing.push(media),
         }
@@ -1000,7 +1012,7 @@ impl Compiler {
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
         for (device, slot, media, edits) in &build.media {
-            self.send_slot_sample(*device, *slot, *media, edits, &mut update);
+            self.send_slot_sample(document, *device, *slot, *media, edits, &mut update);
         }
         for &device in &build.layered {
             self.send_layers(document, device, &mut update);

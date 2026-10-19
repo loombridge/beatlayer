@@ -1316,6 +1316,74 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Switches a device's Warp on or off (WP-5.15b).
+    SetDeviceWarp {
+        /// The device.
+        device: DeviceId,
+        /// Whether Warp is on.
+        warp: bool,
+    },
+    /// Sets a device's warp mode (WP-5.15b).
+    SetDeviceWarpMode {
+        /// The device.
+        device: DeviceId,
+        /// The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro.
+        mode: WarpMode,
+    },
+    /// Sets controls of a device's warp modes (WP-5.15b).
+    SetDeviceWarpSettings {
+        /// The device.
+        device: DeviceId,
+        /// Beats' controls to change.
+        #[serde(default)]
+        beats: Option<BeatsUpdate>,
+        /// Tones' controls to change.
+        #[serde(default)]
+        tones: Option<TonesUpdate>,
+        /// Texture's controls to change.
+        #[serde(default)]
+        texture: Option<TextureUpdate>,
+        /// Complex Pro's controls to change.
+        #[serde(default)]
+        complex_pro: Option<ComplexProUpdate>,
+    },
+    /// Sets a device's sample tempo in BPM (WP-5.15b).
+    SetDeviceSampleBpm {
+        /// The device.
+        device: DeviceId,
+        /// The tempo in BPM: positive, from 1 to 1,000.
+        bpm: f64,
+    },
+    /// Multiplies a device's sample tempo by a factor (Live's ×2 and ÷2, WP-5.15b).
+    ScaleDeviceTempo {
+        /// The device.
+        device: DeviceId,
+        /// What to multiply by: 2 for ×2, 0.5 for ÷2.
+        factor: f64,
+    },
+    /// Adds a manual slice at `frame` in the sample (WP-5.15b).
+    AddSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame into the sample.
+        frame: u64,
+    },
+    /// Moves a manual slice from `from` to `to` frame (WP-5.15b).
+    MoveSlice {
+        /// The device.
+        device: DeviceId,
+        /// The existing slice's frame.
+        from: u64,
+        /// The new frame.
+        to: u64,
+    },
+    /// Deletes a manual slice at `frame` (WP-5.15b).
+    DeleteSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame of the slice to delete.
+        frame: u64,
+    },
     /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
     /// `index` or at the end. Each layer's own `id` is ignored: the device
     /// gives each the next of its layer IDs, in order, and they read back
@@ -1900,6 +1968,16 @@ impl Command {
             Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // WP-5.15b: Warp controls and slices.
+            Self::SetDeviceWarp { .. } => "Switch Warp",
+            Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
+            Self::SetDeviceWarpSettings { .. } => "Change Warp Settings",
+            Self::SetDeviceSampleBpm { .. } | Self::ScaleDeviceTempo { .. } => {
+                "Change sample tempo"
+            }
+            Self::AddSlice { .. } => "Add Slice",
+            Self::MoveSlice { .. } => "Move Slice",
+            Self::DeleteSlice { .. } => "Delete Slice",
             // WP-5.13: Live's names for the layer list's items where it has
             // them (S6); the rest are Beatlayer's own.
             Self::InsertLayers { .. } => "Add Samples",
@@ -2824,6 +2902,62 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetDeviceWarp { device, warp } => {
+                self.device_mut(*device)?.warp.warp = *warp;
+                Ok(())
+            }
+            Command::SetDeviceWarpMode { device, mode } => {
+                self.device_mut(*device)?.warp.mode = *mode;
+                Ok(())
+            }
+            Command::SetDeviceWarpSettings {
+                device,
+                beats,
+                tones,
+                texture,
+                complex_pro,
+            } => {
+                let settings = self.device_ref(*device)?.warp.settings.updated(
+                    *beats,
+                    *tones,
+                    *texture,
+                    *complex_pro,
+                )?;
+                self.device_mut(*device)?.warp.settings = settings;
+                Ok(())
+            }
+            Command::SetDeviceSampleBpm { device, bpm } => {
+                check_value("sample bpm", *bpm, (1.0..=1000.0).contains(bpm))?;
+                self.device_mut(*device)?.warp.bpm = Some(*bpm);
+                Ok(())
+            }
+            Command::ScaleDeviceTempo { device, factor } => {
+                check_value("scale factor", *factor, factor.is_finite() && *factor > 0.0)?;
+                let current = self.device_ref(*device)?.warp.bpm.unwrap_or(120.0);
+                self.device_mut(*device)?.warp.bpm = Some((current * factor).clamp(1.0, 1000.0));
+                Ok(())
+            }
+            Command::AddSlice { device, frame } => {
+                let d = self.device_mut(*device)?;
+                if !d.slices.contains(frame) {
+                    d.slices.push(*frame);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::MoveSlice { device, from, to } => {
+                let d = self.device_mut(*device)?;
+                d.slices.retain(|f| f != from);
+                if !d.slices.contains(to) {
+                    d.slices.push(*to);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::DeleteSlice { device, frame } => {
+                self.device_mut(*device)?.slices.retain(|f| f != frame);
                 Ok(())
             }
             Command::InsertLayers {
@@ -5274,6 +5408,10 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
             (0.0..=1.0).contains(&sidechain.mix),
         )?;
     }
+    if let Some(bpm) = device.warp.bpm {
+        check_value("sample bpm", bpm, (1.0..=1000.0).contains(&bpm))?;
+    }
+    device.warp.settings.check()?;
     Ok(())
 }
 

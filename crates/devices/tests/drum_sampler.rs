@@ -86,10 +86,11 @@ fn loaded(
 ) -> (Box<dyn Node>, Collector) {
     let collector = Collector::new();
     let mut node = strike(params);
-    node.receive_data(collector.handle().data(SlotSample {
-        slot: 0,
-        sample: Arc::clone(data),
-    }));
+    node.receive_data(
+        collector
+            .handle()
+            .data(SlotSample::new(0, Arc::clone(data))),
+    );
     (node, collector)
 }
 

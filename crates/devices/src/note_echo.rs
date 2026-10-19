@@ -179,6 +179,9 @@ impl NativeDevice for NoteEcho {
         let is_playing = audio.playing();
         if self.was_playing && !is_playing {
             self.router.clear_queue();
+            // A sounding echo's own note-off is only scheduled when its
+            // input note ends, so end those echoes here (R7).
+            self.router.cut(audio, 0, |_| true);
             self.active.clear();
         }
         self.was_playing = is_playing;
@@ -222,8 +225,12 @@ impl NativeDevice for NoteEcho {
                     let mut echoes = [ScheduledEcho::default(); MAX_REPEATS];
                     let mut num_echoes = 0;
 
-                    if !mute_input && self.router.track(&note, Some(src_key)) {
-                        self.router.send_now(audio, note, src_key);
+                    if !mute_input {
+                        // The input note passes through unchanged (R2); it
+                        // takes no table room, and an input note without an
+                        // ID, as monitored input has, still ends with its
+                        // own note-off.
+                        audio.send(note);
                     }
 
                     // Compute and schedule echoes
@@ -252,16 +259,8 @@ impl NativeDevice for NoteEcho {
                             velocity: current_vel * current_fb,
                             note_id: echo_note_id,
                         };
-                        let dummy_source = NoteEvent {
-                            offset: 0,
-                            kind: NoteKind::On,
-                            channel: note.channel,
-                            key: echo_key_val,
-                            velocity: current_vel * current_fb,
-                            note_id: echo_note_id,
-                        };
 
-                        if self.router.track(&dummy_source, Some(echo_key)) {
+                        if self.router.track(&echo_on, Some(echo_key)) {
                             self.router.hold(echo_start, echo_on, echo_key);
                             if num_echoes < MAX_REPEATS {
                                 echoes[num_echoes] = ScheduledEcho {
@@ -310,7 +309,7 @@ impl NativeDevice for NoteEcho {
                     }
 
                     if !mute_input {
-                        self.router.end(audio, &note, note.velocity);
+                        audio.send(note);
                     }
                 }
                 NoteKind::Expression {
@@ -318,7 +317,7 @@ impl NativeDevice for NoteEcho {
                     value: expr_val,
                 } => {
                     if !mute_input {
-                        self.router.expression(audio, &note);
+                        audio.send(note);
                     }
 
                     if mpe_enabled

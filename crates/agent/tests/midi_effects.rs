@@ -51,7 +51,8 @@ fn held(client: &mut Client<InProcess>, device: DeviceId, param: u32) -> Option<
 }
 
 // Spec: midi-transpose R9, midi-velocity R8, midi-random-pitch R8,
-// midi-scale-map R8, midi-chord R14, midi-note-length R9
+// midi-scale-map R8, midi-chord R14, midi-note-length R9, arpeggiator R13,
+// midi-echo R8
 #[test]
 fn an_agent_reaches_every_parameter_of_every_midi_effect() {
     let library = std::env::temp_dir().join(format!("bl-midi-effects-{}", std::process::id()));

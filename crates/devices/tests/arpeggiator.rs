@@ -251,3 +251,15 @@ fn stopping_transport_leaves_no_hanging_notes() {
     let offs = times(&heard, NoteKind::Off).len();
     assert_eq!(ons, offs, "all notes ended cleanly");
 }
+
+// Spec: arpeggiator R14. A chord of many held notes makes no heap use.
+#[test]
+fn a_chord_of_many_held_notes_allocates_nothing() {
+    let notes: Vec<_> = (0_u8..=127).map(|key| note(key, 0, 4)).collect();
+    let heard = play(&[(STEPS, 0.0), (STYLE, 14.0)], notes, 512);
+    assert!(
+        heard.iter().filter(|h| h.1 == NoteKind::On).count() > 100,
+        "the arpeggio plays a chord of a hundred notes: {} events",
+        heard.len()
+    );
+}

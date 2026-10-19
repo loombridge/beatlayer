@@ -31,7 +31,7 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 - **R5.** Each echo note sounds for the duration of the incoming note that generated it. (S1)
 - **R6.** When the MPE switch is active, per-note expressions (Pressure, Slide, Pitch Bend) repeat with the echoes, scaled by their respective feedback amounts (Press, Slide, Pitch Bend); when MPE is inactive, per-note expressions are excluded from echoes. (S1)
 - **R7.** When transport stops, or when the device is deactivated, moved, or deleted, sounding echo notes terminate immediately with no hanging notes. (S2, S4)
-- **R8.** Every parameter is automatable, has a description, can be edited and read back through the agent API, and presets save under `Presets/MIDI Effects/Note Echo/`. (S3)
+- **R8.** Every parameter is automatable, has a description, is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Note Echo/`. (S3)
 - **R9.** No allocation, lock, or blocking operation occurs on the audio thread. (S4)
 
 ## Tests
@@ -39,12 +39,12 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/devices/tests/note_echo.rs`, `sync_and_free_delay_time_land_on_exact_frames` | real-time trap |
-| R2 | `crates/devices/tests/note_echo.rs`, `input_mode_thru_and_mute` | real-time trap |
+| R2 | `crates/devices/tests/note_echo.rs`, `input_mode_thru_and_mute`, `input_notes_without_an_id_keep_their_echoes` | real-time trap |
 | R3 | `crates/devices/tests/note_echo.rs`, `pitch_transposition_applies_per_repeat` | real-time trap |
 | R4 | `crates/devices/tests/note_echo.rs`, `velocity_decay_and_feedback_diminish_repeats` | real-time trap |
 | R5 | `crates/devices/tests/note_echo.rs`, `echoes_preserve_original_note_duration` | real-time trap |
 | R6 | `crates/devices/tests/note_echo.rs`, `mpe_switch_and_expression_feedback` | real-time trap |
-| R7 | `crates/devices/tests/note_echo.rs`, `stopping_transport_leaves_no_hanging_echoes` | real-time trap |
+| R7 | `crates/devices/tests/note_echo.rs`, `stopping_transport_leaves_no_hanging_echoes`, `stopping_transport_while_an_echo_sounds_leaves_no_hanging_notes` | real-time trap |
 | R8 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R9 | `crates/devices/tests/rules.rs`; `rtsan/tests/midi_effects.rs` | real-time trap |
 

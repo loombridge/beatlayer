@@ -33,10 +33,10 @@ The device takes Live's name, Arpeggiator; its appearance is the device framewor
 - **R7.** Repeats limits the number of full pattern repetitions across all transposition steps (1 to 64), or runs indefinitely when set to 0 (representing ∞). (S1)
 - **R8.** Steps sets how many times the pattern is transposed (0 to 8), with each successive cycle transposed by Distance semitones. (S1)
 - **R9.** When the Velocity switch is active, note velocities ramp toward Target over Decay time; if Retrigger Velocity is enabled, the decay timer restarts when the pattern retriggers. (S1)
-- **R10.** Distance in scale degrees and Use Current Scale wait for Phase 6's scale support; Groove selection offers None until Phase 6's groove pool. (S1)
+- **R10.** Distance in scale degrees and Use Current Scale wait for Phase 6's scale support; until Phase 6's groove pool, the Groove chooser changes no timing. (S1)
 - **R11.** Random styles follow a seeded pseudo-random generator derived from the device ID, ensuring deterministic, bit-identical event generation across renders. (S1, S4)
 - **R12.** When transport stops, or when the device is deactivated, moved, or deleted, all currently sounding notes receive matching note-offs and no notes hang. (S2, S4)
-- **R13.** Every parameter is automatable, has a description, can be edited and read back through the agent API, and presets save under `Presets/MIDI Effects/Arpeggiator/`. (S3)
+- **R13.** Every parameter is automatable, has a description, is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Arpeggiator/`. (S3)
 - **R14.** No allocation, lock, or blocking operation occurs on the audio thread. (S4)
 
 ## Tests
@@ -56,7 +56,7 @@ The device takes Live's name, Arpeggiator; its appearance is the device framewor
 | R11 | `crates/devices/tests/arpeggiator.rs`, `random_styles_are_deterministic_and_repeat_identically` | real-time trap |
 | R12 | `crates/devices/tests/arpeggiator.rs`, `stopping_transport_leaves_no_hanging_notes` | real-time trap |
 | R13 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
-| R14 | `crates/devices/tests/rules.rs`; `rtsan/tests/midi_effects.rs` | real-time trap |
+| R14 | `crates/devices/tests/rules.rs`; `crates/devices/tests/arpeggiator.rs`, `a_chord_of_many_held_notes_allocates_nothing`; `rtsan/tests/midi_effects.rs` | real-time trap |
 
 ## Defaults, ranges and details
 

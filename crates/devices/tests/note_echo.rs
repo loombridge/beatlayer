@@ -13,9 +13,9 @@ use bl_devices::note_echo::{
     FEEDBACK, INPUT, MPE, NOTE_ECHO, PITCH, PRESS_FEEDBACK, SYNC, TIME_MS, TIME_SYNC,
     VELOCITY_DECAY,
 };
-use bl_engine::NoteKind;
-use bl_model::Command;
-use common::chain::{BEAT_FRAMES, Chain, note};
+use bl_engine::{Block, DeviceType, Node, NoteEvent, NoteKind};
+use bl_model::{Command, DeviceRole};
+use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -177,4 +177,66 @@ fn stopping_transport_leaves_no_hanging_echoes() {
     let ons = times(&heard, NoteKind::On).len();
     let offs = times(&heard, NoteKind::Off).len();
     assert_eq!(ons, offs, "all notes and echoes ended cleanly");
+}
+
+// Spec: midi-echo R7. A stop while an echo is sounding ends that echo too.
+#[test]
+fn stopping_transport_while_an_echo_sounds_leaves_no_hanging_notes() {
+    let mut chain = Chain::new(4096);
+    // Time 2 sixteenths is half a beat: the echo at 12,000 frames has
+    // sounded when the transport stops at 14,000, and the source note, two
+    // beats long, never reaches its own end.
+    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 2.0), (FEEDBACK, 0.0)]);
+    chain.clip(8, [note(60, 0, 2)]);
+    chain.sync();
+    chain.play();
+    chain.run(14_000, 512);
+    chain.stop();
+    chain.run(2 * BEAT_FRAMES as usize, 512);
+    let heard = chain.heard();
+    assert!(nothing_hangs(&heard), "no note hangs: {heard:?}");
+    assert_eq!(
+        times(&heard, NoteKind::On).len(),
+        times(&heard, NoteKind::Off).len(),
+        "every note ended: {heard:?}"
+    );
+}
+
+// Spec: midi-echo R2. A monitored-input note carries no ID, as the engine
+// makes it; the input passes through and its echoes outlive it.
+#[test]
+fn input_notes_without_an_id_keep_their_echoes() {
+    let mut chain = Chain::with_registry(4096, |registry| {
+        registry.add_device(strip_ids_type(), |_, _| Box::new(StripIds));
+    });
+    chain.effect(STRIP_IDS, &[]);
+    chain.effect(NOTE_ECHO, &[(TIME_SYNC, 8.0), (FEEDBACK, 0.0)]);
+    chain.clip(8, [note(60, 0, 1)]);
+    chain.sync();
+    chain.play();
+    chain.run(4 * BEAT_FRAMES as usize, 512);
+    let heard = chain.heard();
+    assert_eq!(times(&heard, NoteKind::On), [0, 48_000], "{heard:?}");
+    assert_eq!(times(&heard, NoteKind::Off), [24_000, 72_000], "{heard:?}");
+}
+
+/// A test device that forwards every note without its ID, as the engine's
+/// monitored MIDI input hands notes to a chain.
+const STRIP_IDS: &str = "test.strip_ids";
+
+fn strip_ids_type() -> DeviceType {
+    DeviceType::native(STRIP_IDS, "Test Strip IDs", DeviceRole::MidiEffect)
+}
+
+struct StripIds;
+
+impl Node for StripIds {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for note in block.notes() {
+            block.send_note(NoteEvent {
+                note_id: None,
+                ..*note
+            });
+        }
+    }
 }

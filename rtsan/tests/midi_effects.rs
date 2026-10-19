@@ -70,6 +70,8 @@ fn a_chain_of_midi_effects_passes_under_rtsan() {
         bl_devices::REMAP,
         bl_devices::STACK,
         bl_devices::HOLD,
+        bl_devices::ARPEGGIATOR,
+        bl_devices::NOTE_ECHO,
     ];
     let effects: Vec<DeviceId> = types
         .iter()

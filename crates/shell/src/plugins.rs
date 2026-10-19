@@ -273,7 +273,7 @@ pub fn capture_states(
 pub fn apply_param_changes(
     changes: impl IntoIterator<Item = (DeviceId, ParamId, f64)>,
     editor: &mut Editor,
-    view: &DeviceView,
+    view: &mut DeviceView,
 ) -> bool {
     let mut changed = false;
     for (device_id, param, value) in changes {
@@ -283,19 +283,57 @@ pub fn apply_param_changes(
         if device.params.get(&param) == Some(&value) {
             continue;
         }
+        let kind = device.kind.clone();
+        let all: Vec<ParamId> = view
+            .description(&kind)
+            .map(|d| d.params.iter().map(|p| p.id).collect())
+            .unwrap_or_default();
+        let configuring = view.configuring(device_id);
+        let is_configured = device.configured(&all).contains(&param);
+        // WP-5.40, manual 24.1.2. In Configure Mode the move and the
+        // parameter joining the configured list are one undo step; outside
+        // it an unconfigured parameter becomes the device's temporary
+        // chooser entry.
+        let configured: Option<Vec<ParamId>> =
+            (configuring && all.contains(&param) && !is_configured).then(|| {
+                let mut list = device.configured(&all).into_owned();
+                list.push(param);
+                list
+            });
         let name = view
-            .description(&device.kind)
+            .description(&kind)
             .and_then(|d| d.param(param))
             .map_or_else(|| "parameter".to_owned(), |p| p.name.clone());
         let label = format!("Change \"{name}\"");
         let applied = editor.transact(label, |editor| {
-            editor.apply(Command::SetDeviceParam {
-                device: device_id,
-                param,
-                value,
-            })
+            editor
+                .apply(Command::SetDeviceParam {
+                    device: device_id,
+                    param,
+                    value,
+                })
+                .and_then(|_| match &configured {
+                    Some(list) => editor
+                        .apply(Command::SetConfiguredParams {
+                            device: device_id,
+                            params: list.clone(),
+                        })
+                        .map(|_| ()),
+                    None => Ok(()),
+                })
         });
-        changed |= applied.is_ok();
+        if applied.is_ok() {
+            changed = true;
+            let now_configured = editor
+                .document()
+                .device(device_id)
+                .is_some_and(|d| d.configured(&all).contains(&param));
+            if now_configured || !all.contains(&param) {
+                view.clear_pending_param(device_id);
+            } else {
+                view.note_pending_param(device_id, param);
+            }
+        }
     }
     changed
 }

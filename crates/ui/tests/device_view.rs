@@ -657,6 +657,66 @@ fn the_external_instruments_choosers_route_it() {
     assert_eq!(Harness::node(&nodes, "Hardware Latency Unit").value, "smp");
 }
 
+// Spec: delay-compensation R7; external-devices R14. While Delay Compensation
+// is off the Hardware Latency controls are disabled, keeping their value: a
+// drag and the unit switch do nothing.
+#[test]
+fn hardware_latency_is_disabled_while_delay_compensation_is_off() {
+    use bl_model::HardwareLatency;
+    use bl_ui::external::rows;
+
+    let mut h = harness();
+    let device = add(&mut h, hardware());
+    let frame = frame_of(&mut h, device);
+    let [_, _, _, latency, unit] = rows(frame);
+    // A value worth keeping.
+    h.shell
+        .run(
+            "device.set_external",
+            json!({
+                "device": device,
+                "hardware_latency": { "unit": "milliseconds", "value": 100.0 },
+            }),
+        )
+        .unwrap();
+    h.settle();
+    h.shell
+        .run("mixer.set_delay_compensation", json!({ "enabled": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    for name in ["Hardware Latency", "Hardware Latency Unit"] {
+        let node = Harness::node(&nodes, name);
+        assert!(node.disabled, "{name} is disabled");
+        assert_eq!(
+            node.description, "Unavailable while Delay Compensation is off",
+            "{name} says why"
+        );
+    }
+    // A drag on the box and a click on the switch change nothing.
+    let steps = h.shell.editor().undo_history().len();
+    let from = latency.center();
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from - egui::vec2(0.0, 5.0 * step as f32),
+        )]);
+    }
+    h.frame(vec![press(
+        from - egui::vec2(0.0, 25.0),
+        false,
+        PointerButton::Primary,
+    )]);
+    h.click(unit.center());
+    h.settle();
+    assert_eq!(
+        external_of(&h, device).hardware_latency,
+        HardwareLatency::Milliseconds { value: 100.0 },
+        "the value is kept"
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), steps, "no undo step");
+}
+
 /// A file dropped into the window, as the app's drag and drop gives egui.
 #[derive(Debug)]
 struct DroppedFile(std::path::PathBuf);

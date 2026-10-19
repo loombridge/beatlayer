@@ -17,6 +17,7 @@
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
+use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
@@ -32,7 +33,7 @@ use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
-    TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
+    TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -408,7 +409,7 @@ const CREATE: &[Row] = &[
     (
         "M-CREATE-007",
         "Consolidate Time to New Scene",
-        Pending(None),
+        Cmd(CONSOLIDATE_TO_SCENE),
     ),
     SEPARATOR,
     (
@@ -581,7 +582,7 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032b", "Sends", Cmd(MIXER_SENDS)),
     ("M-VIEW-032c", "Volume", Cmd(MIXER_VOLUME)),
     ("M-VIEW-032-sep1", "", Action::Separator),
-    ("M-VIEW-032d", "Track Options", Pending(None)),
+    ("M-VIEW-032d", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-032e", "Crossfader", Cmd(MIXER_CROSSFADER)),
     ("M-VIEW-032f", "Performance Impact", Pending(None)),
     ("M-VIEW-032-sep2", "", Action::Separator),
@@ -589,7 +590,7 @@ const VIEW: &[Row] = &[
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
     ("M-VIEW-033a", "In/Out", Pending(None)),
     ("M-VIEW-033b", "Volume", Pending(None)),
-    ("M-VIEW-033c", "Track Options", Pending(None)),
+    ("M-VIEW-033c", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-033-sep1", "", Action::Separator),
     ("M-VIEW-033d", "Return Tracks", Pending(None)),
     SEPARATOR,
@@ -684,11 +685,15 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-006", "Browser File Preview", Cmd(BROWSER_PREVIEW)),
     SEPARATOR,
     ("M-OPT-007", "External Sync", Pending(None)),
-    ("M-OPT-008", "Delay Compensation", Pending(None)),
+    (
+        "M-OPT-008",
+        "Delay Compensation",
+        Cmd("mixer.set_delay_compensation"),
+    ),
     (
         "M-OPT-009",
         "Reduced Latency When Monitoring",
-        Pending(None),
+        Cmd("mixer.set_reduced_latency_monitoring"),
     ),
     SEPARATOR,
     ("M-OPT-010", "Time Ruler Format", Submenu),

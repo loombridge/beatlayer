@@ -31,6 +31,9 @@ pub const CROSSFADER: &str = "mixer_view.crossfader";
 pub const SCENE_TEMPO: &str = "mixer_view.scene_tempo";
 /// `mixer_view.return_tracks`: show or hide the return tracks' columns.
 pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
+/// `mixer_view.track_options`: show or hide the tracks' Track Options
+/// sections.
+pub const TRACK_OPTIONS: &str = "mixer_view.track_options";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
 pub const SCROLL: &str = "mixer_view.scroll";
 /// `mixer_view.focus`: move the keyboard focus to the Arrangement's mixer.
@@ -47,6 +50,7 @@ pub const IDS: &[&str] = &[
     CROSSFADER,
     SCENE_TEMPO,
     RETURN_TRACKS,
+    TRACK_OPTIONS,
     SCROLL,
     FOCUS,
 ];
@@ -105,6 +109,10 @@ pub struct MixerViewState {
     pub scene_tempo: bool,
     /// Whether the return tracks' columns show.
     pub return_tracks: bool,
+    /// Whether the tracks' Track Options sections show (track delay and
+    /// Keep Monitoring Latency). Shown only while this shows; hidden in a
+    /// new set.
+    pub track_options: bool,
 }
 
 /// Arguments of `mixer_view.toggle`.
@@ -246,6 +254,18 @@ fn specs() -> Vec<CommandSpec> {
         )
         .context(Global)
         .binding(Binding::new("S-TRACK-011"))
+        .args::<SectionArgs>(),
+        view(
+            TRACK_OPTIONS,
+            "Track Options",
+            "Shows or hides the tracks' Track Options sections, as View > Mixer Controls > \
+             Track Options does: under each strip, the track delay (with its ms/samples unit \
+             switch) and Keep Monitoring Latency. Hidden in a new set; shown only while this \
+             shows. Switches unless `shown` says which. Changes only the view; the delay and \
+             the Keep Monitoring Latency switch are in the set (`mixer.set_track_delay`, \
+             `mixer.set_keep_monitoring_latency`).",
+        )
+        .context(Global)
         .args::<SectionArgs>(),
         view(
             SCROLL,

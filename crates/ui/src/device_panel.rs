@@ -25,7 +25,8 @@ use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
 use bl_shell::device_commands as ids;
-use bl_shell::device_commands::{DeviceFrame, DevicePanel};
+use bl_shell::device_commands::{ConfiguredParam, DeviceFrame, DevicePanel};
+use bl_shell::plugin_commands;
 use egui::accesskit::{Action, Role};
 use egui::{
     Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
@@ -241,9 +242,17 @@ pub fn show(
             }
         });
     }
-    for (param, widget, rect) in controls {
-        let Some(index) = panel.description.params.iter().position(|p| p.id == param) else {
-            continue;
+    for (at, (param, widget, rect)) in controls.into_iter().enumerate() {
+        // A plug-in panel's controls are its knobs, in the panel's own order
+        // (WP-5.40), so a control's place is its knob; any other device's
+        // controls are found by their parameter.
+        let index = if panel.plugin {
+            at
+        } else {
+            let Some(found) = panel.description.params.iter().position(|p| p.id == param) else {
+                continue;
+            };
+            found
         };
         let descriptor = &panel.description.params[index];
         let value = panel.value(index);
@@ -261,6 +270,12 @@ pub fn show(
             } else {
                 &[]
             },
+            // Spec: clap-hosting R5 (WP-5.40). A plug-in panel's knobs offer
+            // the configured parameters on a right-click.
+            knob: panel
+                .plugin
+                .then(|| panel.knobs.get(index).copied().unwrap_or(index)),
+            configured: &panel.configured,
         };
         match widget {
             Widget::Knob => control.knob(ui, theme, events),
@@ -409,6 +424,13 @@ struct Control<'a> {
     /// For a knob whose context menu snaps it to a stop: the stops' names
     /// and values (the multisampler's Morph, spec R37).
     stops: &'static [(&'static str, f64)],
+    /// A plug-in panel knob's index, 0 for the first: its right-click menu
+    /// remaps that knob (clap-hosting R5, WP-5.40). None for any other
+    /// control.
+    knob: Option<usize>,
+    /// The parameters a plug-in device's panel is configured to show, in
+    /// order: what a knob's right-click menu offers. Empty otherwise.
+    configured: &'a [ConfiguredParam],
 }
 
 impl Control<'_> {
@@ -637,6 +659,36 @@ impl Control<'_> {
                 }
             });
         }
+        if let Some(knob) = self.knob {
+            // Spec: clap-hosting R5 (WP-5.40, manual 24.1.2). A person remaps
+            // a knob by right-clicking it and picking one of the device's
+            // configured parameters, or puts it back to following the list.
+            let remapped = self
+                .configured
+                .get(knob)
+                .is_none_or(|entry| entry.param != self.descriptor.id);
+            response.context_menu(|ui| {
+                if remapped && ui.button("Follow the List").clicked() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        plugin_commands::SET_PANEL_PARAM,
+                        json!({ "device": self.device, "index": knob, "param": null }),
+                    )));
+                    ui.close();
+                }
+                if remapped {
+                    ui.separator();
+                }
+                for entry in self.configured {
+                    if ui.button(&entry.name).clicked() {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            plugin_commands::SET_PANEL_PARAM,
+                            json!({ "device": self.device, "index": knob, "param": entry.param }),
+                        )));
+                        ui.close();
+                    }
+                }
+            });
+        }
     }
 
     /// A number box: a dark box with the value centred and a fill showing
@@ -757,7 +809,7 @@ fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     }
 }
 
-fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &Response) {
+pub(crate) fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &Response) {
     if response.has_focus() && crate::focus::outlined(ui.ctx()) {
         ui.painter().rect_stroke(
             rect.expand(1.5),

@@ -206,6 +206,23 @@ pub struct SlotSample {
     pub slot: usize,
     /// The audio, at the engine's rate.
     pub sample: Arc<SampleData>,
+    /// The device's warp configuration.
+    pub warp: bl_model::DeviceWarp,
+    /// Slices in frames from the sample's start.
+    pub slices: Arc<[u64]>,
+}
+
+impl SlotSample {
+    /// Makes a new slot sample with default warp and no slices.
+    #[must_use]
+    pub fn new(slot: usize, sample: Arc<SampleData>) -> Self {
+        Self {
+            slot,
+            sample,
+            warp: bl_model::DeviceWarp::default(),
+            slices: Arc::from([]),
+        }
+    }
 }
 
 /// A request to a sampler's node to play a sample from a point, as a click in

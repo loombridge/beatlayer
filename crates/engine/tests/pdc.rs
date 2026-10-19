@@ -22,7 +22,7 @@ use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    Editor, RackKind, TrackId, TrackKind, registry,
+    Editor, RackKind, TrackDelay, TrackId, TrackKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
@@ -870,4 +870,212 @@ fn a_drum_racks_chains_returns_and_sends_line_up() {
             "block size {size}: both chains and the return arrive together"
         );
     }
+}
+
+/// Two audio tracks: the first carrying `sa`, the second `sb`, both playing
+/// an impulse at frame 0 from 1.1.1. The caller syncs after further edits.
+fn two_tracks(sa: f32, sb: f32) -> (Rig, TrackId, TrackId) {
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(sa));
+    media.insert(hash(2), impulse(sb));
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    let b = track(ed, TrackKind::Audio, None);
+    clip(ed, a, hash(1));
+    clip(ed, b, hash(2));
+    (rig, a, b)
+}
+
+/// Whether two samples are the same to a hair.
+fn near(value: f32, expected: f32) -> bool {
+    (value - expected).abs() < 1e-4
+}
+
+// WP-5.36: a track delayed 10 ms is 480 frames late at 48 kHz, and one
+// playing early holds the others back.
+#[test]
+fn a_track_delay_moves_it_frames_at_main_and_a_negative_one_holds_the_others_back() {
+    // Spec: mixer R28.
+    // A carries 1 and B carries 4, both at frame 0, so the height says which
+    // one is where.
+    for frames in [1usize, 100, 512, 4096] {
+        let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+        rig.apply(Command::SetTrackDelay {
+            track: b,
+            delay: TrackDelay::Samples { value: 480 },
+        });
+        let out = rig.render(1024, frames);
+        assert!(near(out[0], 1.0), "block {frames}: A stays at 0");
+        assert!(near(out[480], 4.0), "block {frames}: B is 480 late");
+        assert!(
+            out[1..480].iter().all(|s| near(*s, 0.0)),
+            "block {frames}: nothing between"
+        );
+
+        let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+        rig.apply(Command::SetTrackDelay {
+            track: b,
+            delay: TrackDelay::Samples { value: -480 },
+        });
+        let out = rig.render(1024, frames);
+        assert!(near(out[0], 4.0), "block {frames}: B plays early");
+        assert!(near(out[480], 1.0), "block {frames}: A is held back for it");
+    }
+}
+
+// The same delay named in milliseconds: 10 ms is 480 frames at 48 kHz.
+#[test]
+fn a_delay_in_milliseconds_moves_it_by_the_frames_it_names() {
+    // Spec: mixer R28.
+    let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+    rig.apply(Command::SetTrackDelay {
+        track: b,
+        delay: TrackDelay::Milliseconds { value: 10.0 },
+    });
+    let out = rig.render(1024, 64);
+    assert!(near(out[0], 1.0));
+    assert!(near(out[480], 4.0));
+}
+
+// A delay in samples moves by exactly that many frames.
+#[test]
+fn a_delay_in_samples_moves_it_by_exactly_that_many_frames() {
+    // Spec: mixer R28.
+    let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+    rig.apply(Command::SetTrackDelay {
+        track: b,
+        delay: TrackDelay::Samples { value: 137 },
+    });
+    let out = rig.render(1024, 64);
+    assert!(near(out[0], 1.0));
+    assert!(near(out[137], 4.0));
+    assert!(near(out[138], 0.0));
+}
+
+// Spec: mixer R28. Main has a delay too: it holds the whole mix back, since
+// nothing feeds off Main.
+#[test]
+fn a_main_delay_holds_the_whole_mix_back() {
+    let (mut rig, _a, _b) = two_tracks(1.0, 4.0);
+    let main = rig.editor.document().main_id();
+    rig.apply(Command::SetTrackDelay {
+        track: main,
+        delay: TrackDelay::Samples { value: 480 },
+    });
+    let out = rig.render(1024, 64);
+    assert!(near(out[0], 0.0), "nothing lands at 0");
+    assert!(near(out[480], 5.0), "the whole mix is 480 late");
+    assert!(near(out[481], 0.0));
+}
+
+// With Delay Compensation off nothing is held back and the delay does nothing.
+#[test]
+fn with_compensation_off_a_track_delay_has_no_effect_and_nothing_is_held_back() {
+    // Spec: delay-compensation R7; mixer R28.
+    let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+    rig.apply(Command::SetTrackDelay {
+        track: b,
+        delay: TrackDelay::Samples { value: 480 },
+    });
+    rig.apply(Command::SetDelayCompensation { enabled: false });
+    // The command is refused while compensation is off, keeping the value.
+    assert!(
+        rig.editor
+            .apply(Command::SetTrackDelay {
+                track: b,
+                delay: TrackDelay::Samples { value: 0 },
+            })
+            .is_err(),
+        "the delay can't be set while compensation is off"
+    );
+    assert_eq!(
+        rig.editor.document().track(b).unwrap().delay(),
+        TrackDelay::Samples { value: 480 },
+        "the value stays as it was"
+    );
+    let out = rig.render(1024, 64);
+    assert!(near(out[0], 5.0), "both impulses stay at 0");
+    assert!(
+        out[1..].iter().all(|s| near(*s, 0.0)),
+        "nothing is held back or moved"
+    );
+}
+
+// The Delay Compensation switch: off, nothing is held back (a device's
+// latency included) and Track Delay has no effect.
+#[test]
+fn the_delay_compensation_switch_holds_nothing_back_and_disables_track_delay() {
+    // Spec: delay-compensation R7; mixer R28.
+    let (mut rig, _a, b) = two_tracks(1.0, 4.0);
+    delay_device(&mut rig.editor, b);
+    rig.apply(Command::SetTrackDelay {
+        track: b,
+        delay: TrackDelay::Samples { value: 480 },
+    });
+    rig.apply(Command::SetDelayCompensation { enabled: false });
+    // Turning Reduced Latency When Monitoring on is refused too (R8).
+    assert!(
+        rig.editor
+            .apply(Command::SetReducedLatencyMonitoring { enabled: true })
+            .is_err(),
+        "Reduced Latency When Monitoring needs compensation on"
+    );
+    let out = rig.render(1024, 64);
+    // A reaches Main at 0; B's own device latency isn't held back either, so
+    // it lands at 500, and the track delay adds nothing to it.
+    assert!(near(out[0], 1.0), "A isn't held back");
+    assert!(near(out[500], 4.0), "B's latency isn't compensated");
+    assert!(
+        out[501..].iter().all(|s| near(*s, 0.0)),
+        "the track delay has no effect"
+    );
+}
+
+// Reduced Latency When Monitoring, with Keep Monitoring Latency off: the
+// monitored track is given the lowest latency.
+#[test]
+fn reduced_latency_monitoring_gives_a_monitored_track_no_compensation() {
+    // Spec: delay-compensation R8, R9.
+    let (mut rig, _a, b) = two_tracks(1.0, -1.0);
+    delay_device(&mut rig.editor, b);
+    run(
+        &mut rig.editor,
+        "mixer.set_arm",
+        json!({ "track": b, "arm": true }),
+    );
+    rig.apply(Command::SetReducedLatencyMonitoring { enabled: true });
+    rig.apply(Command::SetKeepMonitoringLatency {
+        track: b,
+        enabled: false,
+    });
+    let doc = rig.editor.document();
+    let bt = doc.track(b).unwrap();
+    assert!(doc.settings().reduced_latency_monitoring);
+    assert!(!bt.keep_monitoring_latency());
+    assert!(bt.mixer().arm, "B is armed");
+    assert!(bt.routing().monitoring(bt.mixer().arm), "B is monitored");
+    let out = rig.render(2 * LATENCY + 512, 64);
+    let peak = out.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+    assert!(
+        peak > 0.5,
+        "the monitored track isn't held with the rest: peak {peak}"
+    );
+}
+
+// Keep Monitoring Latency gives the compensation back.
+#[test]
+fn keep_monitoring_latency_gives_a_monitored_tracks_compensation_back() {
+    // Spec: delay-compensation R8, R9.
+    let (mut rig, _a, b) = two_tracks(1.0, -1.0);
+    delay_device(&mut rig.editor, b);
+    run(
+        &mut rig.editor,
+        "mixer.set_arm",
+        json!({ "track": b, "arm": true }),
+    );
+    rig.apply(Command::SetReducedLatencyMonitoring { enabled: true });
+    // A new track keeps its monitoring latency, so B is compensated as usual.
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert_null(&out, "a track that keeps its monitoring latency cancels");
 }

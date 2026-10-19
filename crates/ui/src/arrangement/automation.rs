@@ -269,10 +269,10 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
             ..
         } => LaneScale::Volume,
         AutomationTarget::Mixer {
-            param: MixerParam::Pan,
+            param: MixerParam::Pan | MixerParam::SplitLeft | MixerParam::SplitRight,
         }
         | AutomationTarget::Chain {
-            param: MixerParam::Pan,
+            param: MixerParam::Pan | MixerParam::SplitLeft | MixerParam::SplitRight,
             ..
         } => LaneScale::Pan,
         AutomationTarget::Mixer {
@@ -379,6 +379,8 @@ pub fn control_choices(
                 ("Volume", MixerParam::Volume),
                 ("Pan", MixerParam::Pan),
                 ("Track Activator", MixerParam::Mute),
+                ("Split Pan Left", MixerParam::SplitLeft),
+                ("Split Pan Right", MixerParam::SplitRight),
             ] {
                 choices.push(Choice {
                     label: label.to_owned(),
@@ -403,14 +405,18 @@ pub fn control_choices(
             }
         }
         AutomationDevice::Device(device_id) => {
-            let description = doc
-                .device(device_id)
-                .and_then(|device| shell.devices().description(&device.kind));
-            if let Some(description) = description {
+            if let Some(device) = doc.device(device_id)
+                && let Some(description) = shell.devices().description(&device.kind)
+            {
+                // Spec: clap-hosting R5, WP-5.40. A plug-in lists the
+                // parameters it is configured to show, then the one its
+                // editor moved last (the temporary entry, manual 24.1.2);
+                // any other device lists them all.
+                let shown = shell.devices().plugin_configured(device, description);
                 choices.extend(
-                    description
-                        .params
+                    shown
                         .iter()
+                        .filter_map(|id| description.param(*id))
                         .filter(|param| param.automatable)
                         .map(|param| Choice {
                             label: param.name.clone(),
@@ -932,6 +938,8 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
             MixerParam::Volume => "Volume".to_owned(),
             MixerParam::Pan => "Pan".to_owned(),
             MixerParam::Mute => "Track Activator".to_owned(),
+            MixerParam::SplitLeft => "Split Pan Left".to_owned(),
+            MixerParam::SplitRight => "Split Pan Right".to_owned(),
         },
         AutomationTarget::Send { to } => doc.track(to).map_or_else(
             || "Send".to_owned(),
@@ -945,6 +953,8 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
                 MixerParam::Volume => format!("{name} Volume"),
                 MixerParam::Pan => format!("{name} Pan"),
                 MixerParam::Mute => format!("{name} Activator"),
+                MixerParam::SplitLeft => format!("{name} Split Pan Left"),
+                MixerParam::SplitRight => format!("{name} Split Pan Right"),
             }
         }
         AutomationTarget::ChainSend { chain, to } => {

@@ -28,7 +28,7 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2};
 
 use bl_core::time::SampleRate;
 use bl_model::modulation::Travel;
-use bl_model::{CrossfadeAssign, Document, Mixer, ParamId, Tap, TrackId, TrackKind};
+use bl_model::{CrossfadeAssign, Document, Mixer, PanMode, ParamId, Tap, TrackId, TrackKind};
 
 use crate::automation::{AutomationList, SessionNow, Song};
 use crate::modbus::Bus;
@@ -64,6 +64,14 @@ pub mod track {
     pub const CROSSFADE: ParamId = ParamId(3);
     /// The crossfader's position, from 0 (the A end) to 1 (the B end).
     pub const CROSSFADER: ParamId = ParamId(4);
+    /// In Split Stereo Pan Mode, the left input channel's position, from −1
+    /// (left) to 1 (right).
+    pub const SPLIT_LEFT: ParamId = ParamId(5);
+    /// In Split Stereo Pan Mode, the right input channel's position.
+    pub const SPLIT_RIGHT: ParamId = ParamId(6);
+    /// The pan mode: 0 Stereo Pan Mode (the default), 1 Split Stereo Pan
+    /// Mode.
+    pub const PAN_MODE: ParamId = ParamId(7);
 }
 
 /// A route's parameters: a track's output into its group or Main
@@ -112,6 +120,22 @@ pub fn pan_gains(pan: f64) -> [f64; 2] {
         SQRT_2 * libm::sin((1.0 - pan) * FRAC_PI_4),
         SQRT_2 * libm::sin((1.0 + pan) * FRAC_PI_4),
     ]
+}
+
+/// The gains of Split Stereo Pan Mode for a left control at `left` and a
+/// right control at `right`, each from −1 (left) to 1 (right): a 2×2 matrix
+/// `[[a, b], [c, d]]` where the left output is `left_in·a + right_in·b` and
+/// the right output `left_in·c + right_in·d`. Each input channel is placed on
+/// the constant-power law ([`pan_gains`]) with its own control: the left
+/// channel at `left`, the right at `right`. Both centred, each channel is
+/// centred and the pair sums to mono; a control fully to one side puts its
+/// channel on that side at the law's gain (√2). Beatlayer's own reading of
+/// manual 18.1, which leaves the mono case and the controls' travel open.
+#[must_use]
+pub fn split_pan_gains(left: f64, right: f64) -> [[f64; 2]; 2] {
+    let [ll, lr] = pan_gains(left);
+    let [rl, rr] = pan_gains(right);
+    [[ll, rl], [lr, rr]]
 }
 
 /// A level in decibels as linear gain: 0 dB is 1, −6.02 dB about 0.5, and
@@ -411,6 +435,13 @@ pub struct TrackMixer {
     pan: f64,
     mute: bool,
     crossfade: CrossfadeAssign,
+    /// Whether the track is in Split Stereo Pan Mode (the mixer spec,
+    /// manual 18.1).
+    split: bool,
+    /// In split mode, the left input channel's position, from −1 to 1.
+    split_left: f64,
+    /// In split mode, the right input channel's position.
+    split_right: f64,
     /// The crossfader's position the node heads for: 0 (the A end) to 1
     /// (the B end).
     position: f64,
@@ -418,13 +449,18 @@ pub struct TrackMixer {
     crossfader: Ramp,
     /// The left gain, the right gain, and the gain of any other channel.
     gains: [Ramp; 3],
+    /// In split mode, the two controls' gliding values.
+    split_ramps: [Ramp; 2],
+    /// In split mode, the gliding level (volume, silenced by the activator).
+    split_level: Ramp,
     smoothing: u32,
     meters: Meters,
     /// The envelopes driving its parameters while the song plays (WP-2.12).
     automation: Option<NodeData>,
     /// The base and the played value, at the last block's last frame, of the
-    /// volume, pan and activator while a clip's modulation acts on them.
-    modulated: [Option<(f64, f64)>; 3],
+    /// volume, pan, the activator, and the split controls, while a clip's
+    /// modulation acts on them.
+    modulated: [Option<(f64, f64)>; 5],
 }
 
 impl TrackMixer {
@@ -437,13 +473,18 @@ impl TrackMixer {
             pan: 0.0,
             mute: false,
             crossfade: CrossfadeAssign::None,
+            split: false,
+            split_left: 0.0,
+            split_right: 0.0,
             position: 0.5,
             crossfader: Ramp::at(0.5),
             gains: [Ramp::at(1.0); 3],
+            split_ramps: [Ramp::at(0.0); 2],
+            split_level: Ramp::at(1.0),
             smoothing: smoothing_frames(config.sample_rate),
             meters: Meters::new(config),
             automation: None,
-            modulated: [None; 3],
+            modulated: [None; 5],
         };
         node.set(track::VOLUME, ParamValue::Set(mixer.volume));
         node.set(track::PAN, ParamValue::Set(mixer.pan));
@@ -451,12 +492,24 @@ impl TrackMixer {
             track::MUTE,
             ParamValue::Set(f64::from(u8::from(mixer.mute))),
         );
+        node.set(track::SPLIT_LEFT, ParamValue::Set(mixer.split_left));
+        node.set(track::SPLIT_RIGHT, ParamValue::Set(mixer.split_right));
+        node.set(
+            track::PAN_MODE,
+            ParamValue::Set(if mixer.pan_mode == PanMode::Split {
+                1.0
+            } else {
+                0.0
+            }),
+        );
         node.set(
             track::CROSSFADE,
             ParamValue::Set(crossfade_value(mixer.crossfade)),
         );
         node.set(track::CROSSFADER, ParamValue::Set(crossfader));
         node.gains = node.targets().map(Ramp::at);
+        node.split_ramps = [Ramp::at(node.split_left), Ramp::at(node.split_right)];
+        node.split_level = Ramp::at(node.level());
         node.crossfader = Ramp::at(node.position);
         node
     }
@@ -464,9 +517,15 @@ impl TrackMixer {
     /// The gains the mixer is heading for: left, right, and other channels.
     /// The crossfade is applied frame by frame, from its gliding position.
     fn targets(&self) -> [f64; 3] {
-        let level = if self.mute { 0.0 } else { self.volume };
+        let level = self.level();
         let [left, right] = pan_gains(self.pan);
         [level * left, level * right, level]
+    }
+
+    /// The level the track plays at: the volume, or silence while its
+    /// activator is off.
+    fn level(&self) -> f64 {
+        if self.mute { 0.0 } else { self.volume }
     }
 
     /// Whether the mixer is muted: a track's Track Activator is off, or a
@@ -505,6 +564,16 @@ impl TrackMixer {
                 self.pan = pan.clamp(-1.0, 1.0);
             }
             (track::PAN, _) => self.pan = defaults.pan,
+            (track::SPLIT_LEFT, ParamValue::Set(pan)) if pan.is_finite() => {
+                self.split_left = pan.clamp(-1.0, 1.0);
+            }
+            (track::SPLIT_LEFT, _) => self.split_left = defaults.split_left,
+            (track::SPLIT_RIGHT, ParamValue::Set(pan)) if pan.is_finite() => {
+                self.split_right = pan.clamp(-1.0, 1.0);
+            }
+            (track::SPLIT_RIGHT, _) => self.split_right = defaults.split_right,
+            (track::PAN_MODE, ParamValue::Set(mode)) => self.split = mode != 0.0,
+            (track::PAN_MODE, _) => self.split = defaults.pan_mode == PanMode::Split,
             (track::MUTE, ParamValue::Set(mute)) => self.mute = mute != 0.0,
             (track::MUTE, ParamValue::Default) => self.mute = defaults.mute,
             (track::CROSSFADE, ParamValue::Set(assign)) => {
@@ -534,6 +603,14 @@ impl TrackMixer {
         for (ramp, target) in self.gains.iter_mut().zip(targets) {
             ramp.toward(target, smoothing);
         }
+        for (ramp, target) in self
+            .split_ramps
+            .iter_mut()
+            .zip([self.split_left, self.split_right])
+        {
+            ramp.toward(target, smoothing);
+        }
+        self.split_level.toward(self.level(), smoothing);
         self.crossfader.toward(self.position, smoothing);
     }
 }
@@ -561,7 +638,7 @@ impl Node for TrackMixer {
         let song = transport.playing.then(|| transport.position.get());
         let driven = automation.filter(|list| song.is_some() || list.has_mapped());
         if driven.is_none() {
-            self.modulated = [None; 3];
+            self.modulated = [None; 5];
         }
         // A control whose envelopes are gone heads back to what it asks for
         // from where the automation left it.
@@ -570,6 +647,14 @@ impl Node for TrackMixer {
             for (ramp, target) in self.gains.iter_mut().zip(targets) {
                 ramp.toward(target, smoothing);
             }
+            for (ramp, target) in self
+                .split_ramps
+                .iter_mut()
+                .zip([self.split_left, self.split_right])
+            {
+                ramp.toward(target, smoothing);
+            }
+            self.split_level.toward(self.level(), smoothing);
         }
         for segment in segments(block.events(), block.frames()) {
             self.apply(segment.events);
@@ -580,20 +665,48 @@ impl Node for TrackMixer {
                 }
                 None => {
                     let (mut after, mut crossfader) = (self.gains, self.crossfader);
+                    let (mut split, mut split_level) = (self.split_ramps, self.split_level);
                     for frame in segment.range.clone() {
                         let fade = crossfade_gain(crossfader.next(), self.crossfade) as f32;
-                        for c in 0..channels {
-                            let index = gain_index(c, channels);
-                            let mut ramp = after[index];
-                            let sample = &mut block.channel_mut(c)[frame];
-                            *sample *= ramp.next() as f32 * fade;
-                            after[index] = ramp;
-                            if c < 2 {
-                                self.meters.measure_one(c, *sample);
+                        if self.split {
+                            let [sl, sr] = [split[0].next(), split[1].next()];
+                            let level = split_level.next();
+                            let [[a, b], [c, d]] = split_pan_gains(sl, sr);
+                            if let Some((left, right)) = block.channels_pair_mut() {
+                                let l = f64::from(left[frame]);
+                                let r = f64::from(right[frame]);
+                                let fade = f64::from(fade);
+                                left[frame] = ((l * a + r * b) * level * fade) as f32;
+                                right[frame] = ((l * c + r * d) * level * fade) as f32;
+                                self.meters.measure_one(0, left[frame]);
+                                self.meters.measure_one(1, right[frame]);
+                            }
+                            for c in 2..channels {
+                                let sample = &mut block.channel_mut(c)[frame];
+                                *sample = (f64::from(*sample) * level * f64::from(fade)) as f32;
+                            }
+                            if channels < 2 {
+                                for c in 0..channels {
+                                    let sample = &mut block.channel_mut(c)[frame];
+                                    *sample = (f64::from(*sample) * level * f64::from(fade)) as f32;
+                                }
+                            }
+                        } else {
+                            for c in 0..channels {
+                                let index = gain_index(c, channels);
+                                let mut ramp = after[index];
+                                let sample = &mut block.channel_mut(c)[frame];
+                                *sample *= ramp.next() as f32 * fade;
+                                after[index] = ramp;
+                                if c < 2 {
+                                    self.meters.measure_one(c, *sample);
+                                }
                             }
                         }
                     }
                     self.gains = after;
+                    self.split_ramps = split;
+                    self.split_level = split_level;
                     self.crossfader = crossfader;
                 }
             }
@@ -611,9 +724,15 @@ impl Node for TrackMixer {
     }
 
     fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
-        for (param, entry) in [track::VOLUME, track::PAN, track::MUTE]
-            .into_iter()
-            .zip(self.modulated)
+        for (param, entry) in [
+            track::VOLUME,
+            track::PAN,
+            track::MUTE,
+            track::SPLIT_LEFT,
+            track::SPLIT_RIGHT,
+        ]
+        .into_iter()
+        .zip(self.modulated)
         {
             if let Some((base, played)) = entry {
                 report(param, base, played);
@@ -640,6 +759,10 @@ impl TrackMixer {
         bus: Bus<'_>,
     ) {
         let channels = block.channels();
+        if self.split {
+            self.scale_split(block, range, from, list, now, bus);
+            return;
+        }
         let controls = [self.volume, self.pan, f64::from(u8::from(self.mute))];
         // A pan the envelopes don't move keeps its gains over the whole
         // range; only an automated or modulated pan works out the law frame
@@ -692,6 +815,122 @@ impl TrackMixer {
                 .map(|(base, played, _)| (base, played));
         }
     }
+
+    /// In Split Stereo Pan Mode, scales `range` a frame at a time by the
+    /// split controls and the level, at the pan law of each input channel:
+    /// the left output takes the placed left and right channels, and the
+    /// right output the same, as [`split_pan_gains`] says (the mixer spec).
+    fn scale_split(
+        &mut self,
+        block: &mut Block<'_>,
+        range: core::ops::Range<usize>,
+        from: Option<i64>,
+        list: &AutomationList,
+        now: &SessionNow<'_>,
+        bus: Bus<'_>,
+    ) {
+        let channels = block.channels();
+        let controls = [
+            self.volume,
+            f64::from(u8::from(self.mute)),
+            self.split_left,
+            self.split_right,
+        ];
+        let (crossfade, start) = (self.crossfade, self.crossfader);
+        let mut crossfader = start;
+        for at in range.clone() {
+            let song = from.map(|from| from + at as i64);
+            let fade = crossfade_gain(crossfader.next(), crossfade);
+            let level = split_level_at(list, now, song, bus, at, controls);
+            let sl = played(list, now, song, bus, at, track::SPLIT_LEFT, controls[2])
+                .1
+                .clamp(-1.0, 1.0);
+            let sr = played(list, now, song, bus, at, track::SPLIT_RIGHT, controls[3])
+                .1
+                .clamp(-1.0, 1.0);
+            let [[a, b], [c, d]] = split_pan_gains(sl, sr);
+            if let Some((left, right)) = block.channels_pair_mut() {
+                let l = f64::from(left[at]);
+                let r = f64::from(right[at]);
+                left[at] = ((l * a + r * b) * level * fade) as f32;
+                right[at] = ((l * c + r * d) * level * fade) as f32;
+                self.meters.measure_one(0, left[at]);
+                self.meters.measure_one(1, right[at]);
+            }
+            for ch in 2..channels {
+                let sample = &mut block.channel_mut(ch)[at];
+                *sample = (f64::from(*sample) * level * fade) as f32;
+            }
+            if channels < 2 {
+                for ch in 0..channels {
+                    let sample = &mut block.channel_mut(ch)[at];
+                    *sample = (f64::from(*sample) * level * fade) as f32;
+                }
+            }
+        }
+        self.crossfader = crossfader;
+        let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
+        self.split_level = Ramp::at(split_level_at(list, now, last_song, bus, last, controls));
+        self.modulated[0] =
+            modulation_entry(list, now, last_song, bus, last, track::VOLUME, controls[0]);
+        self.modulated[1] = None;
+        self.modulated[2] =
+            modulation_entry(list, now, last_song, bus, last, track::MUTE, controls[1]);
+        self.modulated[3] = modulation_entry(
+            list,
+            now,
+            last_song,
+            bus,
+            last,
+            track::SPLIT_LEFT,
+            controls[2],
+        );
+        self.modulated[4] = modulation_entry(
+            list,
+            now,
+            last_song,
+            bus,
+            last,
+            track::SPLIT_RIGHT,
+            controls[3],
+        );
+    }
+}
+
+/// The level a split-mode frame plays at: the volume, or silence while the
+/// activator is off.
+fn split_level_at(
+    list: &AutomationList,
+    now: &SessionNow<'_>,
+    song: Option<i64>,
+    bus: Bus<'_>,
+    at: usize,
+    controls: [f64; 4],
+) -> f64 {
+    if played(list, now, song, bus, at, track::MUTE, controls[1]).1 != 0.0 {
+        0.0
+    } else {
+        played(list, now, song, bus, at, track::VOLUME, controls[0])
+            .1
+            .max(0.0)
+    }
+}
+
+/// The base and the played value of a mixer control at frame `at`, kept for
+/// the modulation readback when a modulator moves it.
+fn modulation_entry(
+    list: &AutomationList,
+    now: &SessionNow<'_>,
+    song: Option<i64>,
+    bus: Bus<'_>,
+    at: usize,
+    param: ParamId,
+    control: f64,
+) -> Option<(f64, f64)> {
+    list.modulates(param)
+        .then(|| played(list, now, song, bus, at, param, control))
+        .filter(|(base, played, held)| *held || played != base)
+        .map(|(base, played, _)| (base, played))
 }
 
 /// The gain of channel `index` at frame `at` of the block, song frame `song`:
@@ -1451,6 +1690,49 @@ mod tests {
         mixer.mute = true;
         let node = TrackMixer::new(&mixer, 0.5, &config());
         assert_eq!(node.gains(), [0.0, 0.0]);
+    }
+
+    // Spec: mixer R29
+    #[test]
+    fn split_mode_places_each_input_channel_on_its_own_control() {
+        // The left control fully right: the left channel is on the right at
+        // the law's gain (√2) and gone from the left.
+        let mixer = Mixer {
+            pan_mode: PanMode::Split,
+            split_left: 1.0,
+            ..Mixer::default()
+        };
+        let mut node = TrackMixer::new(&mixer, 0.5, &config());
+        let out = render(&mut node, [1.0, 0.0], 64, &[]);
+        assert!(out[..64].iter().all(|&s| s == 0.0), "the left is silent");
+        assert!(
+            out[64..].iter().all(|&s| (s - SQRT_2 as f32).abs() < 1e-6),
+            "the left channel is on the right at √2"
+        );
+
+        // The right control fully left puts the right channel on the left.
+        let mixer = Mixer {
+            pan_mode: PanMode::Split,
+            split_right: -1.0,
+            ..Mixer::default()
+        };
+        let mut node = TrackMixer::new(&mixer, 0.5, &config());
+        let out = render(&mut node, [0.0, 1.0], 64, &[]);
+        assert!(
+            out[..64].iter().all(|&s| (s - SQRT_2 as f32).abs() < 1e-6),
+            "the right channel is on the left at √2"
+        );
+        assert!(out[64..].iter().all(|&s| s == 0.0), "the right is silent");
+
+        // A centred control leaves its channel at 0 dB in both outputs.
+        let mixer = Mixer {
+            pan_mode: PanMode::Split,
+            ..Mixer::default()
+        };
+        let mut node = TrackMixer::new(&mixer, 0.5, &config());
+        let out = render(&mut node, [1.0, 0.0], 64, &[]);
+        assert!(out[..64].iter().all(|&s| s == 1.0));
+        assert!(out[64..].iter().all(|&s| s == 1.0));
     }
 
     // Spec: mixer R19

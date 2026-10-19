@@ -36,6 +36,7 @@ pub mod crusher;
 pub mod degrade;
 pub mod delay;
 pub mod dice;
+pub mod drum_bus;
 pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
@@ -91,6 +92,7 @@ pub use crusher::{CRUSHER, crusher_type};
 pub use degrade::{DEGRADE, degrade_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
+pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
@@ -146,6 +148,7 @@ pub fn display(
         DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
+        DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -210,6 +213,7 @@ pub fn register(registry: &mut Registry) {
     auto_filter::register(registry);
     auto_pan_tremolo::register(registry);
     saturator::register(registry);
+    drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
     beat_repeat::register(registry);

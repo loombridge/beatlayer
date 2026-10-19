@@ -114,7 +114,6 @@ fn fixture() -> Project {
         },
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
-        Command::SetDelayCompensation { enabled: false },
         Command::SetReducedLatencyMonitoring { enabled: true },
     ] {
         apply(&mut editor, command);
@@ -166,6 +165,9 @@ fn fixture() -> Project {
             track: vox,
             enabled: false,
         },
+        // Switched off only now: a track's delay can't be set while delay
+        // compensation is off (the delay compensation spec, R7).
+        Command::SetDelayCompensation { enabled: false },
         Command::SetInput {
             track: vox,
             input: Input::External {

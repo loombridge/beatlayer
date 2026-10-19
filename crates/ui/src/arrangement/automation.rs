@@ -405,14 +405,18 @@ pub fn control_choices(
             }
         }
         AutomationDevice::Device(device_id) => {
-            let description = doc
-                .device(device_id)
-                .and_then(|device| shell.devices().description(&device.kind));
-            if let Some(description) = description {
+            if let Some(device) = doc.device(device_id)
+                && let Some(description) = shell.devices().description(&device.kind)
+            {
+                // Spec: clap-hosting R5, WP-5.40. A plug-in lists the
+                // parameters it is configured to show, then the one its
+                // editor moved last (the temporary entry, manual 24.1.2);
+                // any other device lists them all.
+                let shown = shell.devices().plugin_configured(device, description);
                 choices.extend(
-                    description
-                        .params
+                    shown
                         .iter()
+                        .filter_map(|id| description.param(*id))
                         .filter(|param| param.automatable)
                         .map(|param| Choice {
                             label: param.name.clone(),

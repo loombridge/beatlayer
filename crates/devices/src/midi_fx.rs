@@ -344,6 +344,12 @@ impl Router {
         self.queue.truncate(kept);
     }
 
+    /// Forgets all held notes in the queue and drops entries that have not yet sounded.
+    pub(crate) fn clear_queue(&mut self) {
+        self.queue.clear();
+        self.entries.retain(|e| e.sounding);
+    }
+
     /// Writes a note-off at offset 0 for every sounding note, and forgets
     /// them and the queue (the device framework spec, R32).
     pub(crate) fn release(&mut self, out: &mut NoteBuffer) {

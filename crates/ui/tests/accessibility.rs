@@ -2204,6 +2204,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_loop", Exception(clip_view)),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        // The crop's document-level commands (WP-4.13): `clip.crop` is the
+        // one a person and an agent run, from the menus and Cmd-Shift-J, and
+        // it applies these.
+        (
+            "clip.crop_region",
+            Exception(Equivalent(
+                "clip.crop, from the clip's and time selection's menus and Cmd-Shift-J (audio-clip-editing R14)",
+            )),
+        ),
+        (
+            "clip.crop_span",
+            Exception(Equivalent(
+                "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
+            )),
+        ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
@@ -2958,9 +2973,42 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "plugin.configure",
+            main(a_plugin, device_view, "Configure", Key::Enter),
+        ),
+        (
+            "device.set_configured_params",
+            Exception(Equivalent(
+                "plugin.configure_param, plugin.unconfigure_param and \
+                 plugin.move_configured_param, which edit the configured list one entry at a \
+                 time",
+            )),
+        ),
+        (
+            "plugin.configure_param",
+            Exception(Equivalent(
+                "moving a parameter in the plug-in's own window while Configure is on, which \
+                 adds it to the device's panel",
+            )),
+        ),
+        (
+            "plugin.unconfigure_param",
+            Exception(AgentOnly(
+                "removing a configured parameter; the device panel draws knobs only, so a \
+                 person reaches it through the agent API",
+            )),
+        ),
+        (
+            "plugin.move_configured_param",
+            Exception(AgentOnly(
+                "reordering a device's configured parameters; the device panel draws knobs \
+                 only, so a person reaches it through the agent API",
+            )),
+        ),
+        (
             "plugin.set_panel_param",
-            Exception(LaterView(
-                "the plug-in device panel's configure mode (Phase 5)",
+            Exception(Equivalent(
+                "right-clicking a panel knob and picking a parameter, which remaps that knob",
             )),
         ),
         // WP-2.9b: Settings ▸ Plug-Ins' Rescan and Plug-In Sources

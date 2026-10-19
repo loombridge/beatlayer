@@ -4,7 +4,10 @@
 
 use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess};
-use bl_devices::{dice_type, hold_type, lift_type, remap_type, stack_type, touch_type};
+use bl_devices::{
+    arpeggiator_type, dice_type, hold_type, lift_type, note_echo_type, remap_type, stack_type,
+    touch_type,
+};
 use bl_model::{DeviceId, TrackId, TrackKind};
 use bl_shell::Shell;
 use serde_json::{Value, json};
@@ -48,7 +51,8 @@ fn held(client: &mut Client<InProcess>, device: DeviceId, param: u32) -> Option<
 }
 
 // Spec: midi-transpose R9, midi-velocity R8, midi-random-pitch R8,
-// midi-scale-map R8, midi-chord R14, midi-note-length R9
+// midi-scale-map R8, midi-chord R14, midi-note-length R9, arpeggiator R13,
+// midi-echo R8
 #[test]
 fn an_agent_reaches_every_parameter_of_every_midi_effect() {
     let library = std::env::temp_dir().join(format!("bl-midi-effects-{}", std::process::id()));
@@ -67,6 +71,8 @@ fn an_agent_reaches_every_parameter_of_every_midi_effect() {
         remap_type(),
         stack_type(),
         hold_type(),
+        arpeggiator_type(),
+        note_echo_type(),
     ] {
         let name = &device_type.name;
         assert_eq!(device_type.role, bl_model::DeviceRole::MidiEffect, "{name}");

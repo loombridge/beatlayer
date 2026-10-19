@@ -102,7 +102,7 @@ pub use bl_stretch::WarpMap;
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,
-    Note, PressurePoint, TakeClip, TakeLane,
+    Note, PressurePoint, TakeClip, TakeLane, consolidated_midi,
 };
 pub use command::Command;
 pub use device::{

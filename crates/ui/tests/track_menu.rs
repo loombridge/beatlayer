@@ -354,8 +354,8 @@ fn a_group_and_a_time_selection_add_their_items() {
             .all(|t| kind_of(&h, *t) != TrackKind::Group)
     );
 
-    // From a time selection on the track: Crop Clip waits for WP-4.13, and
-    // the edit items work.
+    // From a time selection on the track: Crop Clip is its own command now
+    // (WP-4.13), and the edit items work.
     let audio = tracks(&h)[2];
     h.shell
         .run(
@@ -365,8 +365,12 @@ fn a_group_and_a_time_selection_add_their_items() {
         .unwrap();
     let at = header_title(&mut h, "3 Audio");
     let nodes = Harness::nodes(&right_click(&mut h, at));
-    assert!(item(&nodes, "Crop Clip").disabled);
-    assert!(item(&nodes, "Crop Clip").description.contains("WP-4.13"));
+    let crop = item(&nodes, "Crop Clip");
+    assert!(
+        !crop.description.contains("WP-4.13"),
+        "the row is the crop's own command now: {}",
+        crop.description
+    );
     assert!(!item(&nodes, "Copy").disabled);
 }
 

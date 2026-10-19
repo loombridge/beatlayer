@@ -760,8 +760,8 @@ const ENTRIES: &[Entry] = &[
             \"milliseconds\", \"value\": 10.0}` from -1000 to 1000 (kept in milliseconds when \
             the sample rate changes) or `{\"unit\": \"samples\", \"value\": 480}` from -192000 \
             to 192000 (kept in samples). The delay is saved with the set, and each change is \
-            one undo step. It is unavailable while Delay Compensation is off \
-            (`mixer.set_delay_compensation`).",
+            one undo step. It is refused while Delay Compensation is off \
+            (`mixer.set_delay_compensation`), keeping its value.",
     },
     Entry {
         id: "mixer.set_pan_mode",
@@ -822,7 +822,8 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Global],
         keys: &[],
         description: "Switches Reduced Latency When Monitoring, the Options menu item, which is \
-            available only while Delay Compensation is on. With it on, a track whose input is \
+            available only while Delay Compensation is on; the command refuses `enabled` true \
+            while compensation is off. With it on, a track whose input is \
             monitored (Monitor In, or Auto while armed and not playing a clip) is given the \
             lowest possible latency: its input isn't held back with the rest of the set, so it \
             may be out of sync with tracks such as the returns, which stay compensated. A \
@@ -1152,6 +1153,38 @@ const ENTRIES: &[Entry] = &[
             the press lasts, then stops it on the grid after the release. A new clip starts with \
             the Default Launch Mode setting. The mode is read at each press and release, so \
             changing it doesn't touch a clip that is playing.",
+    },
+    Entry {
+        id: "clip.crop_region",
+        action: Action::Apply("crop_clip"),
+        label: "Crop Clip to Region",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Crops a clip to a region of its contents: an audio clip plays the file \
+            `media` names, whose frames are the region of its old file's audio, and a MIDI clip \
+            loses the notes that start outside the region, writing no file. The clip's Start and \
+            End markers, loop brace, and warp markers move back by the region's start, so it \
+            plays exactly what it played, and the clip stays where it is in the Arrangement. \
+            `from` and `to` are in the form the clip shows: seconds into an unwarped audio \
+            clip's file, or whole ticks of a warped audio clip's or a MIDI clip's contents. \
+            `clip.crop` is the command a person and an agent run: it works the region out, \
+            writes the new file through the processed-file writer, and applies this one. Used \
+            directly, it changes the clip and names a file the caller has already written.",
+    },
+    Entry {
+        id: "clip.crop_span",
+        action: Action::Apply("crop_clip_to_range"),
+        label: "Crop Clip to Span",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Crops a clip to a span of song time: its edges move to the span, and it \
+            plays the part of itself the span covered, at the same moments. An audio clip plays \
+            the file `media` names, whose frames are the span's part of its old file's audio; a \
+            MIDI clip loses the notes the span didn't hold, writing no file. `clip.crop` is the \
+            command a person and an agent run: it works the span out, writes the new file \
+            through the processed-file writer, and applies this one.",
     },
     Entry {
         id: "clip.set_data",
@@ -2000,6 +2033,21 @@ const ENTRIES: &[Entry] = &[
         description: "Sets one of a device's parameters to a value in the parameter's own \
             units. The value must be finite. Parameters that haven't been set keep their \
             defaults.",
+    },
+    Entry {
+        id: "device.set_configured_params",
+        action: Action::Apply("set_configured_params"),
+        label: "Configure Plug-In",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a plug-in device's list of configured parameters (clap-hosting \
+            R5, WP-5.40): the parameters its panel knobs and the automation and clip-envelope \
+            choosers show, in order. `params` holds them in their new order. One undo step. \
+            The list is saved with the set; `device.parameters` marks each parameter \
+            configured or not. The higher-level `plugin.configure_param`, \
+            `plugin.unconfigure_param` and `plugin.move_configured_param` edit one entry at a \
+            time and are what a person or an agent usually runs.",
     },
     Entry {
         id: "modulator.map",

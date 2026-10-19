@@ -886,7 +886,6 @@ fn the_context_menu_runs_the_warp_commands_and_disables_refused_ones() {
         "Warp From Here (Straight)",
         "Warp … BPM From Here",
         "Warp as x-Bar Loop",
-        "Crop Clip Sample",
     ] {
         assert!(item(pending).disabled, "{pending}");
     }
@@ -903,10 +902,14 @@ fn the_context_menu_runs_the_warp_commands_and_disables_refused_ones() {
     assert!(!item("Insert Transient").disabled);
     assert!(!item("Reset Transients").disabled);
     assert!(!item("Quantize").disabled);
+    // Spec: audio-clip-editing R14. The Sample Editor's own name for Crop
+    // Clip crops the clip shown (WP-4.13).
+    assert!(!item("Crop Clip Sample").disabled);
     assert!(!item("Show in Browser").disabled);
     s.h.click(centre_of(&nodes, "Insert Warp Marker"));
     assert_eq!(s.markers(), [(0.0, 0), (2.0, 4 * Ticks::QUARTER.get())]);
-    // With a time selection the menu adds its selection items.
+    // With a time selection the menu adds its selection items: the editor's
+    // selection crops the clip to it (WP-4.13, audio-clip-editing R16).
     s.run("clip_view.select_time", json!({ "start": 1.0, "end": 3.0 }));
     let output = s.right_click(at_beat(&g, 5, 0.8));
     let nodes = Harness::nodes(&output);
@@ -916,6 +919,13 @@ fn the_context_menu_runs_the_warp_commands_and_disables_refused_ones() {
     ] {
         assert!(nodes.iter().any(|n| n.label == label), "{label}");
     }
+    assert!(
+        nodes
+            .iter()
+            .find(|n| n.label == "Crop Clip Sample to Time Selection")
+            .is_some_and(|row| !row.disabled),
+        "the selection is a span the clip can be cropped to"
+    );
     // Show in Browser runs the browser's command.
     s.h.take_events();
     s.h.click(centre_of(&nodes, "Show in Browser"));

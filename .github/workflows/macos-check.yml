@@ -104,3 +104,13 @@ jobs:
           BL_TEST_DEPTH: full
           NEXTEST_PROFILE: ci
         run: cargo xtask check
+
+      # A test that failed and then passed on a retry (the ci profile in
+      # .config/nextest.toml) let the run pass. This names it, so it's
+      # fixed rather than left to fail another pull request.
+      - name: Report flaky tests
+        if: always()
+        shell: bash
+        run: |
+          py=$(command -v python3 || command -v python)
+          "$py" .github/scripts/flaky-report.py

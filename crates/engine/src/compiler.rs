@@ -1905,6 +1905,12 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                 .map_or(0, |track| track.delay().frames(rate))
         })
         .collect();
+    // Spec: mixer R28. A track's delay is applied where its output lands, at
+    // each input it feeds; Main feeds nothing, so its own delay is applied
+    // where its sum is made instead, holding back every input into Main and
+    // Main's own parameter changes by it.
+    let main = document.main_id();
+    let main_delay = document.main().delay().frames(rate);
     // Spec: delay-compensation R8 and R9. A track whose input is monitored,
     // while Reduced Latency When Monitoring is on and it doesn't keep its
     // monitoring latency, is given the lowest possible latency: its own input
@@ -2017,7 +2023,7 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
     // node's parameter changes up with the audio they act on.
     for t in 0..tasks {
         let task = build.tasks[t];
-        let a = i64::from(arrival[t]);
+        let a = (i64::from(arrival[t]) + if task.track == main { main_delay } else { 0 }).max(0);
         for i in task.inputs.range() {
             let input = build.inputs[i];
             if low_latency[input.from as usize] {

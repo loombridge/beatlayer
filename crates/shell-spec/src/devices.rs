@@ -432,6 +432,17 @@ pub struct DevicePanel {
     /// target that opens the plug-in's editor. False for a native device.
     #[serde(default)]
     pub plugin: bool,
+    /// The parameters a plug-in device's panel can show, in configured order
+    /// (clap-hosting R5, configure mode): a knob's context menu offers them,
+    /// each over the knob it is right-clicked on. Empty for a native device.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configured: Vec<ConfiguredParam>,
+    /// The knob each of the panel's parameters is drawn on, 0 to 7, parallel
+    /// to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's
+    /// context menu remaps the knob it is right-clicked on. Empty for a
+    /// device that isn't a plug-in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub knobs: Vec<usize>,
     /// For a device with sample slots (WP-5.17): the slot whose controls
     /// the panel shows, a view setting that isn't saved with the set.
     #[serde(default)]
@@ -443,6 +454,16 @@ pub struct DevicePanel {
     /// names notes (`C3`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slot_keys: Vec<String>,
+}
+
+/// One parameter a plug-in device's panel can show (clap-hosting R5,
+/// configure mode): its ID and the name its right-click menu lists it by.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ConfiguredParam {
+    /// The parameter.
+    pub param: ParamId,
+    /// Its name, as its control shows it.
+    pub name: String,
 }
 
 impl DevicePanel {
@@ -503,6 +524,11 @@ pub struct ParameterState {
     /// rather than a control in its body (C-DEVICE-015).
     #[serde(default)]
     pub menu_option: bool,
+    /// Whether it's one of the parameters the device's panel is configured
+    /// to show (clap-hosting R5, configure mode). True for every parameter of
+    /// a device that isn't a plug-in, since its panel shows them all.
+    #[serde(default)]
+    pub configured: bool,
     /// Its value in the A and B state that isn't active (device compare
     /// R11); left out for a device without two states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -579,6 +605,11 @@ pub struct DeviceFrame {
     /// "(B)" (device compare R5).
     #[serde(default)]
     pub b_active: bool,
+    /// Whether the device is in Plug-In Configure Mode (clap-hosting R5,
+    /// WP-5.40): its title bar's Configure switch is lit. View state, never
+    /// saved with the set. False for a device that isn't a plug-in.
+    #[serde(default)]
+    pub configure: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.

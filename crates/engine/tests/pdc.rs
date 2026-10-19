@@ -953,16 +953,47 @@ fn a_delay_in_samples_moves_it_by_exactly_that_many_frames() {
     assert!(near(out[138], 0.0));
 }
 
+// Spec: mixer R28. Main has a delay too: it holds the whole mix back, since
+// nothing feeds off Main.
+#[test]
+fn a_main_delay_holds_the_whole_mix_back() {
+    let (mut rig, _a, _b) = two_tracks(1.0, 4.0);
+    let main = rig.editor.document().main_id();
+    rig.apply(Command::SetTrackDelay {
+        track: main,
+        delay: TrackDelay::Samples { value: 480 },
+    });
+    let out = rig.render(1024, 64);
+    assert!(near(out[0], 0.0), "nothing lands at 0");
+    assert!(near(out[480], 5.0), "the whole mix is 480 late");
+    assert!(near(out[481], 0.0));
+}
+
 // With Delay Compensation off nothing is held back and the delay does nothing.
 #[test]
 fn with_compensation_off_a_track_delay_has_no_effect_and_nothing_is_held_back() {
-    // Spec: delay-compensation R7.
+    // Spec: delay-compensation R7; mixer R28.
     let (mut rig, _a, b) = two_tracks(1.0, 4.0);
-    rig.apply(Command::SetDelayCompensation { enabled: false });
     rig.apply(Command::SetTrackDelay {
         track: b,
         delay: TrackDelay::Samples { value: 480 },
     });
+    rig.apply(Command::SetDelayCompensation { enabled: false });
+    // The command is refused while compensation is off, keeping the value.
+    assert!(
+        rig.editor
+            .apply(Command::SetTrackDelay {
+                track: b,
+                delay: TrackDelay::Samples { value: 0 },
+            })
+            .is_err(),
+        "the delay can't be set while compensation is off"
+    );
+    assert_eq!(
+        rig.editor.document().track(b).unwrap().delay(),
+        TrackDelay::Samples { value: 480 },
+        "the value stays as it was"
+    );
     let out = rig.render(1024, 64);
     assert!(near(out[0], 5.0), "both impulses stay at 0");
     assert!(
@@ -978,11 +1009,18 @@ fn the_delay_compensation_switch_holds_nothing_back_and_disables_track_delay() {
     // Spec: delay-compensation R7; mixer R28.
     let (mut rig, _a, b) = two_tracks(1.0, 4.0);
     delay_device(&mut rig.editor, b);
-    rig.apply(Command::SetDelayCompensation { enabled: false });
     rig.apply(Command::SetTrackDelay {
         track: b,
         delay: TrackDelay::Samples { value: 480 },
     });
+    rig.apply(Command::SetDelayCompensation { enabled: false });
+    // Turning Reduced Latency When Monitoring on is refused too (R8).
+    assert!(
+        rig.editor
+            .apply(Command::SetReducedLatencyMonitoring { enabled: true })
+            .is_err(),
+        "Reduced Latency When Monitoring needs compensation on"
+    );
     let out = rig.render(1024, 64);
     // A reaches Main at 0; B's own device latency isn't held back either, so
     // it lands at 500, and the track delay adds nothing to it.

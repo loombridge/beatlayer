@@ -72,6 +72,19 @@ pub struct Settings {
     /// replacing them (WP-2.14). Off in a new set, and not written when off.
     #[serde(default, skip_serializing_if = "is_off")]
     pub midi_overdub: bool,
+    /// Delay Compensation: whether the engine holds every path back so
+    /// signals through high-latency devices reach the Main output aligned
+    /// (the delay-compensation spec, manual 23.3). On in a new set; a set
+    /// with it on doesn't write it.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub delay_compensation: bool,
+    /// Reduced Latency When Monitoring: whether a track with input monitoring
+    /// on is given the lowest possible latency at the cost of lining up with
+    /// the rest of the set (the delay-compensation spec, manual 23.3). Off in
+    /// a new set; a set with it off doesn't write it. Only meaningful while
+    /// delay compensation is on.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub reduced_latency_monitoring: bool,
 }
 
 impl Default for Settings {
@@ -91,6 +104,8 @@ impl Default for Settings {
             punch_in: false,
             punch_out: false,
             midi_overdub: false,
+            delay_compensation: true,
+            reduced_latency_monitoring: false,
         }
     }
 }

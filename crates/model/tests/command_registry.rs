@@ -14,8 +14,9 @@ use bl_model::{
     CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
     FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
     LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
-    Monitor, Note, Output, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip,
-    TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
+    Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap,
+    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
+    WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -53,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        165,
+        172,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -70,7 +71,8 @@ fn every_document_command_is_registered() {
          three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-         WP-3.18 the two for Cue mode and the Cue Volume, and WP-5.3 set_chain_zone"
+         WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, and WP-5.36 \
+         seven for track delay, the pan mode, each split side, and the two latency switches"
     );
 
     for op in &ops {
@@ -204,6 +206,40 @@ fn every_command_runs_by_id() {
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
     );
+    agent.run(
+        "mixer.set_pan_mode",
+        json!({ "track": drums, "mode": "split" }),
+    );
+    agent.run(
+        "mixer.set_split_pan_left",
+        json!({ "track": drums, "pan": -1.0 }),
+    );
+    agent.run(
+        "mixer.set_split_pan_right",
+        json!({ "track": drums, "pan": 1.0 }),
+    );
+    agent.run(
+        "mixer.set_track_delay",
+        json!({ "track": drums, "delay": { "unit": "samples", "value": 480 } }),
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": false }));
+    agent.run(
+        "mixer.set_reduced_latency_monitoring",
+        json!({ "enabled": true }),
+    );
+    agent.run(
+        "mixer.set_keep_monitoring_latency",
+        json!({ "track": drums, "enabled": false }),
+    );
+    let document = agent.editor.document();
+    assert!(!document.settings().delay_compensation);
+    assert!(document.settings().reduced_latency_monitoring);
+    assert!(!document.track(drums).unwrap().keep_monitoring_latency());
+    assert_eq!(
+        document.track(drums).unwrap().delay(),
+        TrackDelay::Samples { value: 480 }
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": true }));
     assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
     let document = agent.editor.document();
     let mixer = *document.track(drums).unwrap().mixer();
@@ -1870,6 +1906,43 @@ fn schemas_match_what_commands_serialise() {
             Command::SetCrossfadeAssign {
                 track,
                 assign: CrossfadeAssign::B,
+            },
+        ),
+        (
+            "mixer.set_track_delay",
+            Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::Samples { value: 480 },
+            },
+        ),
+        (
+            "mixer.set_pan_mode",
+            Command::SetPanMode {
+                track,
+                mode: PanMode::Split,
+            },
+        ),
+        (
+            "mixer.set_split_pan_left",
+            Command::SetSplitPanLeft { track, pan: -1.0 },
+        ),
+        (
+            "mixer.set_split_pan_right",
+            Command::SetSplitPanRight { track, pan: 1.0 },
+        ),
+        (
+            "mixer.set_delay_compensation",
+            Command::SetDelayCompensation { enabled: false },
+        ),
+        (
+            "mixer.set_reduced_latency_monitoring",
+            Command::SetReducedLatencyMonitoring { enabled: true },
+        ),
+        (
+            "mixer.set_keep_monitoring_latency",
+            Command::SetKeepMonitoringLatency {
+                track,
+                enabled: false,
             },
         ),
         (

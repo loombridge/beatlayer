@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-488 commands in 37 areas.
+496 commands in 37 areas.
 
 ## Permission classes
 
@@ -317,12 +317,19 @@ Each command has:
 | [`mixer.set_crossfader`](#mixerset_crossfader) | Set Crossfader | `edit` |  |  |
 | [`mixer.set_cue_mode`](#mixerset_cue_mode) | Cue Switches | `edit` |  |  |
 | [`mixer.set_cue_volume`](#mixerset_cue_volume) | Set Cue Volume | `edit` |  |  |
+| [`mixer.set_delay_compensation`](#mixerset_delay_compensation) | Delay Compensation | `edit` |  |  |
+| [`mixer.set_keep_monitoring_latency`](#mixerset_keep_monitoring_latency) | Keep Monitoring Latency | `edit` |  |  |
 | [`mixer.set_mute`](#mixerset_mute) | Activate/Deactivate Track | `edit` | `0`; `F1..F8` | `0`; `F1..F8` |
 | [`mixer.set_pan`](#mixerset_pan) | Set Track Pan | `edit` |  |  |
+| [`mixer.set_pan_mode`](#mixerset_pan_mode) | Set Split Pan Mode | `edit` |  |  |
+| [`mixer.set_reduced_latency_monitoring`](#mixerset_reduced_latency_monitoring) | Reduced Latency When Monitoring | `edit` |  |  |
 | [`mixer.set_send`](#mixerset_send) | Set Send Level | `edit` |  |  |
 | [`mixer.set_send_tap`](#mixerset_send_tap) | Set Sends Pre/Post | `edit` |  |  |
 | [`mixer.set_solo`](#mixerset_solo) | Solo Track | `edit` | `S` | `S` |
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | Solo in Place | `edit` |  |  |
+| [`mixer.set_split_pan_left`](#mixerset_split_pan_left) | Set Split Pan Left | `edit` |  |  |
+| [`mixer.set_split_pan_right`](#mixerset_split_pan_right) | Set Split Pan Right | `edit` |  |  |
+| [`mixer.set_track_delay`](#mixerset_track_delay) | Set Track Delay | `edit` |  |  |
 | [`mixer.set_volume`](#mixerset_volume) | Set Track Volume | `edit` |  |  |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
@@ -334,6 +341,7 @@ Each command has:
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
+| [`mixer_view.track_options`](#mixer_viewtrack_options) | Track Options | `read` |  |  |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
 | [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
 | [`modulator.arm_map`](#modulatorarm_map) | Map | `read` |  |  |
@@ -5688,6 +5696,39 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `mixer.set_delay_compensation`
+
+**Delay Compensation**. Permission: `edit`. Contexts: `global`.
+
+Switches Delay Compensation, the Options menu item. On in a new set, it holds every path back so signals through high-latency devices reach the Main output aligned. While it's off, nothing is held back, no device's latency counts, and a track's Track Delay has no effect; the Track Delay and Hardware Latency controls are disabled, keeping their values. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether compensation is on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_keep_monitoring_latency`
+
+**Keep Monitoring Latency**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's Keep Monitoring Latency, as its Track Options do. With monitoring In or Auto, it decides whether a monitored track keeps its delay compensation while Reduced Latency When Monitoring is on: with `enabled` true (a new track's), the track is compensated with the rest of the set; off, it is given the lowest possible latency. The setting is saved only where it's off, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `enabled` | boolean | yes | Whether it keeps its compensation. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `mixer.set_mute`
 
 **Activate/Deactivate Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
@@ -5724,6 +5765,39 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `pan` | number from -1 to 1 | yes | The pan position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_pan_mode`
+
+**Set Split Pan Mode**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's pan mode: `stereo` (the default) balances both channels with the one Pan control, and `split` gives each input channel its own control (`mixer.set_split_pan_left` and `mixer.set_split_pan_right`). Use it as the Pan control's context menu does. The mode is saved only where it isn't the default, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `mode` | [`PanMode`](#panmode) | yes | `stereo` or `split`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_reduced_latency_monitoring`
+
+**Reduced Latency When Monitoring**. Permission: `edit`. Contexts: `global`.
+
+Switches Reduced Latency When Monitoring, the Options menu item, which is available only while Delay Compensation is on. With it on, a track whose input is monitored (Monitor In, or Auto while armed and not playing a clip) is given the lowest possible latency: its input isn't held back with the rest of the set, so it may be out of sync with tracks such as the returns, which stay compensated. A monitored track that keeps its monitoring latency (`mixer.set_keep_monitoring_latency`) is compensated as usual. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether a monitored track is given the lowest possible latency. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5796,6 +5870,57 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `enabled` | boolean | yes | Whether soloing a track keeps the return tracks audible. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_split_pan_left`
+
+**Set Split Pan Left**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+In Split Stereo Pan Mode, sets the left input channel's position, from -1 (fully left) through 0 (centre) to 1 (fully right). Each channel is placed on the constant-power pan law, so a control fully to one side puts that channel on that side 3 dB louder. The position is an automation and modulation target, glides over 20 ms, and is saved only where it isn't the centre; each change is one undo step. It does nothing outside split mode.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `pan` | number from -1 to 1 | yes | The position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_split_pan_right`
+
+**Set Split Pan Right**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+In Split Stereo Pan Mode, sets the right input channel's position, as `mixer.set_split_pan_left` sets the left.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `pan` | number from -1 to 1 | yes | The position, from −1 (left) through 0 (centre) to 1 (right). |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_track_delay`
+
+**Set Track Delay**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
+
+Sets a track's Track Delay, which shifts the track's whole output in time: positive delays the track, negative plays it early (the other paths then wait for it). `delay` names its unit, as Hardware Latency does: `{"unit": "milliseconds", "value": 10.0}` from -1000 to 1000 (kept in milliseconds when the sample rate changes) or `{"unit": "samples", "value": 480}` from -192000 to 192000 (kept in samples). The delay is saved with the set, and each change is one undo step. It is unavailable while Delay Compensation is off (`mixer.set_delay_compensation`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `delay` | [`TrackDelay`](#trackdelay) | yes | The delay and the unit it is in. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5989,6 +6114,22 @@ Arguments:
 |---|---|---|---|
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 | `view` | [`MixerOf`](#mixerof) or null | no | Which view's mixer; the view in front if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.track_options`
+
+**Track Options**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the tracks' Track Options sections, as View > Mixer Controls > Track Options does: under each strip, the track delay (with its ms/samples unit switch) and Keep Monitoring Latency. Hidden in a new set; shown only while this shows. Switches unless `shown` says which. Changes only the view; the delay and the Keep Monitoring Latency switch are in the set (`mixer.set_track_delay`, `mixer.set_keep_monitoring_latency`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -9309,12 +9450,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_crossfader`](#mixerset_crossfader) | the query tool's `song` | `settings.crossfader` |
 | [`mixer.set_cue_mode`](#mixerset_cue_mode) | the query tool's `song` | `settings.cue_mode` |
 | [`mixer.set_cue_volume`](#mixerset_cue_volume) | the query tool's `song` | `settings.cue_volume` |
+| [`mixer.set_delay_compensation`](#mixerset_delay_compensation) | the query tool's `song` | `settings.delay_compensation` |
+| [`mixer.set_keep_monitoring_latency`](#mixerset_keep_monitoring_latency) | the query tool's `track` | `keep_monitoring_latency` |
 | [`mixer.set_mute`](#mixerset_mute) | the query tool's `track` | `mixer.mute` |
 | [`mixer.set_pan`](#mixerset_pan) | the query tool's `track` | `mixer.pan` |
+| [`mixer.set_pan_mode`](#mixerset_pan_mode) | the query tool's `track` | `mixer.pan_mode` |
+| [`mixer.set_reduced_latency_monitoring`](#mixerset_reduced_latency_monitoring) | the query tool's `song` | `settings.reduced_latency_monitoring` |
 | [`mixer.set_send`](#mixerset_send) | the query tool's `track` | `sends` |
 | [`mixer.set_send_tap`](#mixerset_send_tap) | the query tool's `track` | `mixer.tap` |
 | [`mixer.set_solo`](#mixerset_solo) | the query tool's `track` | `mixer.solo` |
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | the query tool's `song` | `settings.solo_in_place` |
+| [`mixer.set_split_pan_left`](#mixerset_split_pan_left) | the query tool's `track` | `mixer.split_left` |
+| [`mixer.set_split_pan_right`](#mixerset_split_pan_right) | the query tool's `track` | `mixer.split_right` |
+| [`mixer.set_track_delay`](#mixerset_track_delay) | the query tool's `track` | `delay` |
 | [`mixer.set_volume`](#mixerset_volume) | the query tool's `track` | `mixer.volume` |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | the query tool's `track` | `mixer.solo` |
 | [`modulator.map`](#modulatormap) | the query tool's `device` | `mappings` |
@@ -19065,19 +19213,21 @@ One of:
 
 ### `MixerParam`
 
-A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), or `mute` (the Track Activator: 1 muted, 0 not).
+A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), `mute` (the Track Activator: 1 muted, 0 not), or, in Split Stereo Pan Mode, `split_left` and `split_right` (each −1 left to 1 right).
 
 One of:
 
 - `"volume"`: The track's volume, as linear gain.
 - `"pan"`: The track's pan, from −1 (left) to 1 (right).
 - `"mute"`: The Track Activator: 1 muted, 0 not.
+- `"split_left"`: In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right). A track mixer's control, not a chain's.
+- `"split_right"`: In Split Stereo Pan Mode, the right input channel's position, as [`MixerParam::SplitLeft`].
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), or `mute` (the Track Activator: 1 muted, 0 not).",
+  "description": "A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 left to 1 right), `mute` (the Track Activator: 1 muted, 0 not), or, in Split Stereo Pan Mode, `split_left` and `split_right` (each −1 left to 1 right).",
   "oneOf": [
     {
       "const": "volume",
@@ -19092,6 +19242,16 @@ One of:
     {
       "const": "mute",
       "description": "The Track Activator: 1 muted, 0 not.",
+      "type": "string"
+    },
+    {
+      "const": "split_left",
+      "description": "In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right). A track mixer's control, not a chain's.",
+      "type": "string"
+    },
+    {
+      "const": "split_right",
+      "description": "In Split Stereo Pan Mode, the right input channel's position, as [`MixerParam::SplitLeft`].",
       "type": "string"
     }
   ]
@@ -19114,6 +19274,7 @@ What `mixer_view.state` and the other view commands return.
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
+| `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 
 <details><summary>JSON Schema</summary>
 
@@ -19149,6 +19310,10 @@ What `mixer_view.state` and the other view commands return.
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Session View's mixer."
     },
+    "track_options": {
+      "description": "Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set.",
+      "type": "boolean"
+    },
     "volume": {
       "description": "Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show.",
       "type": "boolean"
@@ -19162,7 +19327,8 @@ What `mixer_view.state` and the other view commands return.
     "volume",
     "crossfader",
     "scene_tempo",
-    "return_tracks"
+    "return_tracks",
+    "track_options"
   ],
   "type": "object"
 }
@@ -20386,6 +20552,37 @@ One of:
     {
       "const": "mixed",
       "description": "On for some of them.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PanMode`
+
+A track's pan mode: `stereo` (the default) balances both channels with one control, `split` places the left and right channels with two controls.
+
+One of:
+
+- `"stereo"`: One control balances both channels (the default).
+- `"split"`: Two controls place each input channel on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's pan mode: `stereo` (the default) balances both channels with one control, `split` places the left and right channels with two controls.",
+  "oneOf": [
+    {
+      "const": "stereo",
+      "description": "One control balances both channels (the default).",
+      "type": "string"
+    },
+    {
+      "const": "split",
+      "description": "Two controls place each input channel on its own.",
       "type": "string"
     }
   ]
@@ -25544,6 +25741,65 @@ Changes to Tones' controls.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `TrackDelay`
+
+A track's delay (the mixer spec): `{ "unit": "milliseconds", "value": 10.0 }` (−1000 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 480 }` (−192000 to 192000; kept in samples). Positive delays the track, negative plays it early.
+
+One of:
+
+- an object with `unit` = `"milliseconds"`, `value` (number): Milliseconds, −1000 to 1000.
+- an object with `unit` = `"samples"`, `value` (integer): Samples (frames of the current sample rate), −192000 to 192000.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's delay (the mixer spec): `{ \"unit\": \"milliseconds\", \"value\": 10.0 }` (−1000 to 1000, two decimals; kept in milliseconds when the sample rate changes) or `{ \"unit\": \"samples\", \"value\": 480 }` (−192000 to 192000; kept in samples). Positive delays the track, negative plays it early.",
+  "oneOf": [
+    {
+      "description": "Milliseconds, −1000 to 1000.",
+      "properties": {
+        "unit": {
+          "const": "milliseconds",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay: positive delays the track, negative plays it early.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Samples (frames of the current sample rate), −192000 to 192000.",
+      "properties": {
+        "unit": {
+          "const": "samples",
+          "type": "string"
+        },
+        "value": {
+          "description": "The delay: positive delays the track, negative plays it early.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 

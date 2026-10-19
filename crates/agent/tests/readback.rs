@@ -10,9 +10,9 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, External, HardwareLatency, Input,
     LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData,
-    MidiTo, MixerParam, Monitor, Note, Output, ParamId, PressurePoint, SendTap, Sidechain,
-    TakeClip, TakeLane, Tap, TonesSettings, TrackId, TrackKind, TransientEdits, WarpMarker,
-    WarpMode, WarpSettings,
+    MidiTo, MixerParam, Monitor, Note, Output, PanMode, ParamId, PressurePoint, SendTap, Sidechain,
+    TakeClip, TakeLane, Tap, TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits,
+    WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -114,6 +114,8 @@ fn fixture() -> Project {
         },
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
+        Command::SetDelayCompensation { enabled: false },
+        Command::SetReducedLatencyMonitoring { enabled: true },
     ] {
         apply(&mut editor, command);
     }
@@ -143,6 +145,26 @@ fn fixture() -> Project {
         Command::SetCrossfadeAssign {
             track: vox,
             assign: CrossfadeAssign::A,
+        },
+        Command::SetPanMode {
+            track: vox,
+            mode: PanMode::Split,
+        },
+        Command::SetSplitPanLeft {
+            track: vox,
+            pan: -1.0,
+        },
+        Command::SetSplitPanRight {
+            track: vox,
+            pan: 1.0,
+        },
+        Command::SetTrackDelay {
+            track: vox,
+            delay: TrackDelay::Samples { value: 480 },
+        },
+        Command::SetKeepMonitoringLatency {
+            track: vox,
+            enabled: false,
         },
         Command::SetInput {
             track: vox,

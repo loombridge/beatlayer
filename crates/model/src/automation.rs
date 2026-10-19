@@ -32,7 +32,8 @@ use crate::ids::{ChainId, DeviceId, ParamId, TrackId};
 #[serde(rename_all = "snake_case")]
 #[schemars(
     description = "A track's mixer control: `volume` (linear gain, 1 is 0 dB), `pan` (−1 \
-                   left to 1 right), or `mute` (the Track Activator: 1 muted, 0 not)."
+                   left to 1 right), `mute` (the Track Activator: 1 muted, 0 not), or, in Split \
+                   Stereo Pan Mode, `split_left` and `split_right` (each −1 left to 1 right)."
 )]
 pub enum MixerParam {
     /// The track's volume, as linear gain.
@@ -41,6 +42,12 @@ pub enum MixerParam {
     Pan,
     /// The Track Activator: 1 muted, 0 not.
     Mute,
+    /// In Split Stereo Pan Mode, the left input channel's position, from −1
+    /// (left) to 1 (right). A track mixer's control, not a chain's.
+    SplitLeft,
+    /// In Split Stereo Pan Mode, the right input channel's position, as
+    /// [`MixerParam::SplitLeft`].
+    SplitRight,
 }
 
 /// A parameter of a track that automation can drive: a mixer control, a send

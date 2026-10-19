@@ -25,7 +25,7 @@ use crate::ids::{SceneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::scene::{Scene, default_scenes};
 use crate::shared::Shared;
-use crate::track::{Mixer, Routing, Track, TrackKind};
+use crate::track::{Mixer, Routing, Track, TrackDelay, TrackKind};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct DocumentRepr {
@@ -73,6 +73,15 @@ struct TrackRepr {
     /// before it have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     take_lanes: Vec<TakeLane>,
+    /// The track's delay (the mixer spec). Sets saved before WP-5.36 have
+    /// none, which loads as 0 frames and milliseconds.
+    #[serde(default, skip_serializing_if = "TrackDelay::is_default")]
+    delay: TrackDelay,
+    /// Keep Monitoring Latency (the delay-compensation spec). On in a new
+    /// track, so a set writes it only when it's off; sets saved before
+    /// WP-5.36 have none, which loads as on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    keep_monitoring_latency: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
 }
@@ -200,6 +209,8 @@ impl TrackRepr {
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
             take_lanes: track.take_lanes().cloned().collect(),
+            delay: track.delay(),
+            keep_monitoring_latency: track.keep_monitoring_latency(),
             children: if with_children {
                 track
                     .children
@@ -339,6 +350,17 @@ impl Loader {
         }
         let mut track = Track::new(id, repr.kind, repr.name);
         track.mixer = repr.mixer;
+        track.delay = repr.delay;
+        if !track.delay.is_valid() {
+            return Err(ModelError::InvalidValue {
+                what: "track delay",
+                value: match track.delay {
+                    TrackDelay::Milliseconds { value } => value,
+                    TrackDelay::Samples { value } => value as f64,
+                },
+            });
+        }
+        track.keep_monitoring_latency = repr.keep_monitoring_latency;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }

@@ -748,6 +748,103 @@ const ENTRIES: &[Entry] = &[
             it.",
     },
     Entry {
+        id: "mixer.set_track_delay",
+        action: Action::Apply("set_track_delay"),
+        label: "Set Track Delay",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's Track Delay, which shifts the track's whole output in \
+            time: positive delays the track, negative plays it early (the other paths then wait \
+            for it). `delay` names its unit, as Hardware Latency does: `{\"unit\": \
+            \"milliseconds\", \"value\": 10.0}` from -1000 to 1000 (kept in milliseconds when \
+            the sample rate changes) or `{\"unit\": \"samples\", \"value\": 480}` from -192000 \
+            to 192000 (kept in samples). The delay is saved with the set, and each change is \
+            one undo step. It is unavailable while Delay Compensation is off \
+            (`mixer.set_delay_compensation`).",
+    },
+    Entry {
+        id: "mixer.set_pan_mode",
+        action: Action::Apply("set_pan_mode"),
+        label: "Set Split Pan Mode",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's pan mode: `stereo` (the default) balances both channels \
+            with the one Pan control, and `split` gives each input channel its own control \
+            (`mixer.set_split_pan_left` and `mixer.set_split_pan_right`). Use it as the Pan \
+            control's context menu does. The mode is saved only where it isn't the default, \
+            and each change is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_split_pan_left",
+        action: Action::Apply("set_split_pan_left"),
+        label: "Set Split Pan Left",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "In Split Stereo Pan Mode, sets the left input channel's position, from -1 \
+            (fully left) through 0 (centre) to 1 (fully right). Each channel is placed on the \
+            constant-power pan law, so a control fully to one side puts that channel on that \
+            side 3 dB louder. The position is an automation and modulation target, glides over \
+            20 ms, and is saved only where it isn't the centre; each change is one undo step. \
+            It does nothing outside split mode.",
+    },
+    Entry {
+        id: "mixer.set_split_pan_right",
+        action: Action::Apply("set_split_pan_right"),
+        label: "Set Split Pan Right",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "In Split Stereo Pan Mode, sets the right input channel's position, as \
+            `mixer.set_split_pan_left` sets the left.",
+    },
+    Entry {
+        id: "mixer.set_delay_compensation",
+        action: Action::Apply("set_delay_compensation"),
+        label: "Delay Compensation",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Delay Compensation, the Options menu item. On in a new set, it \
+            holds every path back so signals through high-latency devices reach the Main output \
+            aligned. While it's off, nothing is held back, no device's latency counts, and a \
+            track's Track Delay has no effect; the Track Delay and Hardware Latency controls are \
+            disabled, keeping their values. The setting is saved with the set, and each change \
+            is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_reduced_latency_monitoring",
+        action: Action::Apply("set_reduced_latency_monitoring"),
+        label: "Reduced Latency When Monitoring",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Reduced Latency When Monitoring, the Options menu item, which is \
+            available only while Delay Compensation is on. With it on, a track whose input is \
+            monitored (Monitor In, or Auto while armed and not playing a clip) is given the \
+            lowest possible latency: its input isn't held back with the rest of the set, so it \
+            may be out of sync with tracks such as the returns, which stay compensated. A \
+            monitored track that keeps its monitoring latency \
+            (`mixer.set_keep_monitoring_latency`) is compensated as usual. The setting is saved \
+            with the set, and each change is one undo step.",
+    },
+    Entry {
+        id: "mixer.set_keep_monitoring_latency",
+        action: Action::Apply("set_keep_monitoring_latency"),
+        label: "Keep Monitoring Latency",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a track's Keep Monitoring Latency, as its Track Options do. With \
+            monitoring In or Auto, it decides whether a monitored track keeps its delay \
+            compensation while Reduced Latency When Monitoring is on: with `enabled` true (a new \
+            track's), the track is compensated with the rest of the set; off, it is given the \
+            lowest possible latency. The setting is saved only where it's off, and each change \
+            is one undo step.",
+    },
+    Entry {
         id: "automation.set_breakpoint",
         action: Action::Apply("set_automation_breakpoint"),
         label: "Set Automation Breakpoint",

@@ -151,12 +151,12 @@ fn beats_playback_passes_under_rtsan() {
             }),
             _ => None,
         };
-        if let Some(command) = command {
-            if editor.apply(command).is_ok() {
-                let update = compiler.sync(editor.document());
-                programs += u64::from(update.program.is_some());
-                sender.send_update(update);
-            }
+        if let Some(command) = command
+            && editor.apply(command).is_ok()
+        {
+            let update = compiler.sync(editor.document());
+            programs += u64::from(update.program.is_some());
+            sender.send_update(update);
         }
         // Jump into the middle of the clip now and then.
         if round % 100 == 50 {

@@ -1043,7 +1043,7 @@ impl ClipPlayer {
             histories: None,
             scratch: vec![0.0; config.channels * config.max_frames],
             max_frames: config.max_frames,
-            warp: WarpScratch::new(config.channels, config.max_frames),
+            warp: WarpScratch::new(config.channels, config.max_frames, config.sample_rate),
             sounding: false,
             playing_clip: false,
             readied: None,
@@ -1213,7 +1213,15 @@ fn render_warped(
     level: impl Fn(&PlacedClip, u64) -> f64,
 ) {
     let channels = block.channels();
-    let plan = clip.geometry.warped.as_ref().map(|warped| warped.plan());
+    // A plan's segments lie on the Arrangement's song frames, so a launched
+    // Session clip, which follows the tempo from its launch, has none to
+    // shape its level by.
+    let plan = clip
+        .geometry
+        .warped
+        .as_ref()
+        .filter(|_| launched.is_none())
+        .map(|warped| warped.plan());
     let (mut at, mut elapsed, mut frame) = (range.start, elapsed, frame);
     while at < range.end {
         // Spec: warping R12, warp-modes R9, R14

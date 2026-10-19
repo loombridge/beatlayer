@@ -771,6 +771,13 @@ impl History {
     ) {
         let start = from.max(0) as u64;
         let end = start + len as u64;
+        if !self.held().contains(&start) && start != self.written {
+            // The read begins outside what it holds (a locate, or a loop's
+            // read back past it): what it held is no use, and the whole read
+            // comes from the source.
+            self.written = start;
+            self.held = 0;
+        }
         let held = self.held();
         let covered = start.max(held.start)..end.min(held.end);
         if covered.end > covered.start {
@@ -790,14 +797,9 @@ impl History {
                 left -= run;
             }
         }
-        let missing = start.max(held.end)..end;
+        let missing = held.end..end;
         if missing.end <= missing.start {
             return;
-        }
-        if missing.start != held.end || self.written != missing.start {
-            // The read reaches somewhere else: what it held is no use.
-            self.written = missing.start;
-            self.held = 0;
         }
         let at = (missing.start - start) as usize;
         let n = (missing.end - missing.start) as usize;
@@ -862,6 +864,9 @@ pub(crate) struct WarpScratch {
     rendered: Vec<f32>,
     /// The mode that was playing before a change, crossfaded in (R8).
     previous: Option<Changing>,
+    /// How many frames a mode change's crossfade takes: 20 ms at the
+    /// engine's rate (R8).
+    change_frames: u32,
     /// What the previous mode rendered, blended into [`rendered`](Self::rendered).
     rendered_previous: Vec<f32>,
     /// Every mode renders through Re-Pitch until its package builds it; Beats
@@ -871,7 +876,7 @@ pub(crate) struct WarpScratch {
 }
 
 impl WarpScratch {
-    pub(crate) fn new(channels: usize, max_frames: usize) -> Self {
+    pub(crate) fn new(channels: usize, max_frames: usize, rate: SampleRate) -> Self {
         Interpolation::warm();
         Self {
             channels,
@@ -880,6 +885,7 @@ impl WarpScratch {
             window: vec![0.0; channels * WINDOW_FRAMES],
             rendered: vec![0.0; channels * max_frames],
             previous: None,
+            change_frames: (CHANGE_SECONDS * rate.as_f64()).round() as u32,
             rendered_previous: vec![0.0; channels * max_frames],
             repitch: RePitch,
             beats: Beats,
@@ -890,9 +896,8 @@ impl WarpScratch {
     /// (R8), from the block the new list arrived in. A second change within
     /// the fade replaces the first.
     pub(crate) fn change(&mut self, clip: bl_model::ClipId) {
-        let frames = (CHANGE_SECONDS * 48_000.0) as u32;
         let mut fade = crate::mixer::Ramp::at(0.0);
-        fade.toward(1.0, frames.max(1));
+        fade.toward(1.0, self.change_frames.max(1));
         self.previous = Some(Changing { clip, fade });
     }
 
@@ -968,7 +973,7 @@ impl WarpScratch {
             first,
             n,
             past.playing,
-            Some(past.warped.plan()),
+            launched.is_none().then(|| past.warped.plan()),
             None,
             Out::Previous,
         );
@@ -1167,6 +1172,31 @@ mod tests {
             transients: &[],
             samples: &|| None,
         }
+    }
+
+    // Spec: warp-modes R15. A loop's read back, behind what the history
+    // holds or overlapping its start, plays the file's own frames.
+    #[test]
+    fn a_history_serves_reads_behind_what_it_holds() {
+        let ramp: Vec<f32> = (0..256).map(|i| i as f32).collect();
+        let data = Arc::new(SampleData::new(48_000, vec![ramp]).unwrap());
+        let mut source = bl_media::stream::MemorySource::new(data);
+        let mut history = History::new(1, 8);
+        let mut out = vec![0.0_f32; 8];
+        let mut read = |history: &mut History, from: i64, len: usize| {
+            history.read(&mut source, from, len, 1, 8, &mut out);
+            out[..len].to_vec()
+        };
+        assert_eq!(read(&mut history, 100, 4), [100.0, 101.0, 102.0, 103.0]);
+        // Backwards, wholly before what it holds (a Back-and-Forth pass).
+        assert_eq!(read(&mut history, 96, 4), [96.0, 97.0, 98.0, 99.0]);
+        // Overlapping its start (a Forward loop's turn).
+        assert_eq!(
+            read(&mut history, 94, 6),
+            [94.0, 95.0, 96.0, 97.0, 98.0, 99.0]
+        );
+        // Overlapping its end, the rest read on.
+        assert_eq!(read(&mut history, 98, 5), [98.0, 99.0, 100.0, 101.0, 102.0]);
     }
 
     fn clip(audio: &AudioData, start: Ticks, length: Ticks) -> Clip {

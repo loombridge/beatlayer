@@ -449,11 +449,10 @@ impl Displays {
         // R14), worked out again when what they depend on changes.
         if slice_mode {
             let tempo = &shell.editor().document().settings().tempo;
+            // The same tempo the node plays by: when the BPM control hasn't
+            // been set, its default of 120 (sampler R18).
             let bpm = if device.warp.warp {
-                device
-                    .warp
-                    .bpm
-                    .unwrap_or_else(|| tempo.bpm_at(bl_core::time::Ticks::ZERO).get())
+                device.warp.bpm.unwrap_or(120.0)
             } else {
                 tempo.bpm_at(bl_core::time::Ticks::ZERO).get()
             };

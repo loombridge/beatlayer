@@ -12,8 +12,7 @@ use bl_model::{
     Input, LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound,
     MidiData, MidiTo, MixerParam, Monitor, Note, Output, PanMode, ParamId, PressurePoint, SendTap,
     Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackDelay, TrackId, TrackKind,
-    TransientEdits,
-    WarpMarker, WarpMode, WarpSettings,
+    TransientEdits, WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;

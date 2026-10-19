@@ -516,7 +516,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.28 | todo |  | The oscilloscope waits on IMP-26's acceptance |
 | 5.29 | todo |  | Waits on IMP-25's acceptance |
 | 5.30 | done | 17 October 2026 | [#109](https://github.com/loombridge/beatlayer/pull/109); the note path between devices (notes sent in order, every note ended when a device is switched off, removed or moved) and six MIDI effects: Pitch, Velocity, Random, Scale, Chord and Note Length. Step buttons, indicators, Use Current Scale and Chord's menu items wait on display state, Phase 6's scales and device-chains R35 |
-| 5.31 | todo |  |  |
+| 5.31 | done | 19 October 2026 | [#231](https://github.com/loombridge/beatlayer/pull/231); native Arpeggiator and Note Echo MIDI effects on the note path between devices, with their specs and tests. |
 | 5.32 | todo |  |  |
 | 5.33 | todo |  | Waits on IMP-24's acceptance |
 | 5.34 | done | 18 October 2026 | [#170](https://github.com/loombridge/beatlayer/pull/170); a track's MIDI To sends to hardware ports, each message stamped for the moment its frame reaches the output (Core MIDI, ALSA and a Windows timer), with note-offs on stop and reroute, and the External Instrument routes to a port and brings the sound back on the interface's inputs after its Hardware Latency; switching Delay Compensation off is T175's, and the ranges and layout are Beatlayer's own until Live is observed; [the spec](specs/external-devices.md) |

@@ -4301,6 +4301,61 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: auto-pan-tremolo R16. An agent inserts Auto Pan-Tremolo by type and
+// sets and reads its parameters by ID.
+#[test]
+fn an_agent_inserts_auto_pan_tremolo_by_type_and_sets_and_reads_parameters() {
+    use bl_devices::auto_pan_tremolo::{AMOUNT, AUTO_PAN_TREMOLO, HARMONIC, MODE, RATE_HZ};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("auto-pan-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Auto Pan-Tremolo"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Auto Pan-Tremolo", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Auto Pan-Tremolo"}, "name": "Auto Pan-Tremolo",
+                                    "kind": { "native": { "device_type": AUTO_PAN_TREMOLO } },
+                                    "enabled": true, "params": [] } } },
+            set(MODE, 1.0),
+            set(RATE_HZ, 5.0),
+            set(AMOUNT, 50.0),
+            set(HARMONIC, 1.0),
+        ] }),
+    );
+    let device = reply["ids"]["Auto Pan-Tremolo"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 20, "every parameter is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [MODE, RATE_HZ, AMOUNT, HARMONIC]
+        .iter()
+        .map(|id| get(*id)["value"].clone())
+        .collect();
+    assert_eq!(values, [json!(1.0), json!(5.0), json!(50.0), json!(1.0)]);
+    assert_eq!(get(MODE)["name"], json!("Mode"));
+    assert_eq!(get(RATE_HZ)["name"], json!("Rate"));
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}
+
 // Spec: drum-racks R27. An agent builds a kit by command ID: a drum rack
 // with pads, a choke group, a send to a return chain and a drop on a pad,
 // and reads each chain's Receive, Play, Choke and sends and the rack's

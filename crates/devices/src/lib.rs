@@ -25,6 +25,7 @@
 
 pub mod alignment_delay;
 pub mod auto_filter;
+pub mod auto_pan_tremolo;
 pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
@@ -77,6 +78,7 @@ pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
+pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
@@ -139,6 +141,7 @@ pub fn display(
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
+        AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -199,6 +202,7 @@ pub fn register(registry: &mut Registry) {
     crusher::register(registry);
     wax::register(registry);
     auto_filter::register(registry);
+    auto_pan_tremolo::register(registry);
     saturator::register(registry);
     overdrive::register(registry);
     tube::register(registry);

@@ -292,3 +292,92 @@ fn right_clicking_a_knob_offers_the_configured_parameters() {
         "the knob follows the list again"
     );
 }
+
+/// The device's frame as `device_view.state` reports it.
+fn frame_state(h: &mut Harness, device: DeviceId) -> bl_shell::device_commands::DeviceFrame {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .unwrap()
+}
+
+/// The device's panel as `device_view.state` reports it.
+fn panel_of(h: &mut Harness, device: DeviceId) -> bl_shell::device_commands::DevicePanel {
+    frame_state(h, device).panel.unwrap()
+}
+
+/// The panel's knob parameter names, in the panel's own order.
+fn panel_names(h: &mut Harness, device: DeviceId) -> Vec<String> {
+    panel_of(h, device)
+        .description
+        .params
+        .iter()
+        .map(|p| p.name.clone())
+        .collect()
+}
+
+// Spec: clap-hosting R5 (WP-5.40, manual 24.1.2). A knob whose remap sits
+// past the end of the configured list is drawn after the list's knobs, but
+// its menu still acts on its own knob: Follow the List clears that knob's
+// remap and not a neighbour's.
+#[test]
+fn a_remapped_knob_past_the_configured_list_follows_its_own_list() {
+    let (mut h, device) = harness();
+    // Leave the first three parameters configured, so knobs 3 to 7 have
+    // nothing of the list to show.
+    for param in [
+        bl_test_clap::EDITOR_SCALE,
+        bl_test_clap::EDITOR_WIDTH,
+        bl_test_clap::EDITOR_HEIGHT,
+        bl_test_clap::DEPTH,
+        bl_test_clap::DEPTH_MOD,
+    ] {
+        h.shell
+            .run(
+                ids::UNCONFIGURE_PARAM,
+                json!({ "device": device, "param": param }),
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        panel_names(&mut h, device),
+        ["Gain", "Latency", "Last Note"],
+        "three configured parameters, three knobs"
+    );
+    // Remap knob 5, which the list has no entry for; it is drawn after the
+    // list's three knobs.
+    h.shell
+        .run(
+            ids::SET_PANEL_PARAM,
+            json!({ "device": device, "index": 5, "param": bl_test_clap::EDITOR_SCALE }),
+        )
+        .unwrap();
+    assert_eq!(
+        panel_names(&mut h, device),
+        ["Gain", "Latency", "Last Note", "Editor Scale"],
+        "the remapped knob is drawn after them"
+    );
+
+    // Right-click the knob the remap is drawn on — the panel's fourth knob,
+    // after the list's three — and take it back to the list.
+    let panel = panel_of(&mut h, device);
+    let expanded = frame_state(&mut h, device).expanded;
+    let frame = frame_of(&mut h, device);
+    let body = bl_ui::device_panel::body_rect(frame, bl_shell::device_commands::TITLE_BAR_HEIGHT);
+    let controls = bl_ui::device_panel::place_shown(&panel, expanded, body).0;
+    right_click(&mut h, controls[3].2.center());
+    let follow = Harness::node(&Harness::nodes(&h.settle()), "Follow the List")
+        .bounds
+        .unwrap();
+    h.click(pos2(
+        ((follow.x0 + follow.x1) / 2.0) as f32,
+        ((follow.y0 + follow.y1) / 2.0) as f32,
+    ));
+    assert_eq!(
+        panel_names(&mut h, device),
+        ["Gain", "Latency", "Last Note"],
+        "the remap is cleared, so the knob follows the list again"
+    );
+}

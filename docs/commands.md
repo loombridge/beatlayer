@@ -14264,6 +14264,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
+| `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -14283,6 +14284,15 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
     "description": {
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
+    },
+    "knobs": {
+      "description": "The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in.",
+      "items": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "loaded_slots": {
       "description": "For a device with sample slots: whether each slot holds a sample.",

@@ -345,6 +345,7 @@ impl DeviceView {
             description: shown,
             plugin: false,
             configured: Vec::new(),
+            knobs: Vec::new(),
             selected_slot: self.slot_of(device),
             loaded_slots: device.media.iter().map(Option::is_some).collect(),
             // shortcut: every device with slots plays them on the keys the
@@ -400,6 +401,12 @@ impl DeviceView {
             .filter_map(mapped)
             .cloned()
             .collect();
+        // The knob each drawn parameter sits on, 0 to 7 (WP-5.40): a knob
+        // past the configured list's end keeps its own index, so its
+        // context menu remaps that knob and not a neighbour.
+        let knobs: Vec<usize> = (0..bl_shell_spec::plugins::PANEL_KNOBS)
+            .filter(|index| mapped(*index).is_some())
+            .collect();
         let knob_params: Vec<bl_shell_spec::devices::ConfiguredParam> = configured
             .iter()
             .filter_map(|id| description.param(*id))
@@ -427,6 +434,7 @@ impl DeviceView {
             },
             plugin: true,
             configured: knob_params,
+            knobs,
             selected_slot: 0,
             loaded_slots: Vec::new(),
             slot_keys: Vec::new(),

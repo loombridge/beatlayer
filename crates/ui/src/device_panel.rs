@@ -242,9 +242,17 @@ pub fn show(
             }
         });
     }
-    for (param, widget, rect) in controls {
-        let Some(index) = panel.description.params.iter().position(|p| p.id == param) else {
-            continue;
+    for (at, (param, widget, rect)) in controls.into_iter().enumerate() {
+        // A plug-in panel's controls are its knobs, in the panel's own order
+        // (WP-5.40), so a control's place is its knob; any other device's
+        // controls are found by their parameter.
+        let index = if panel.plugin {
+            at
+        } else {
+            let Some(found) = panel.description.params.iter().position(|p| p.id == param) else {
+                continue;
+            };
+            found
         };
         let descriptor = &panel.description.params[index];
         let value = panel.value(index);
@@ -264,7 +272,9 @@ pub fn show(
             },
             // Spec: clap-hosting R5 (WP-5.40). A plug-in panel's knobs offer
             // the configured parameters on a right-click.
-            knob: panel.plugin.then_some(index),
+            knob: panel
+                .plugin
+                .then(|| panel.knobs.get(index).copied().unwrap_or(index)),
             configured: &panel.configured,
         };
         match widget {

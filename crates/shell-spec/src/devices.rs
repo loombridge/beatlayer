@@ -437,6 +437,12 @@ pub struct DevicePanel {
     /// each over the knob it is right-clicked on. Empty for a native device.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configured: Vec<ConfiguredParam>,
+    /// The knob each of the panel's parameters is drawn on, 0 to 7, parallel
+    /// to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's
+    /// context menu remaps the knob it is right-clicked on. Empty for a
+    /// device that isn't a plug-in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub knobs: Vec<usize>,
     /// For a device with sample slots (WP-5.17): the slot whose controls
     /// the panel shows, a view setting that isn't saved with the set.
     #[serde(default)]

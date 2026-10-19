@@ -1312,6 +1312,15 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Replaces a plug-in device's configured parameter list (clap-hosting
+    /// R5, configure mode): the parameters its panel knobs and the choosers
+    /// show, in order. Native devices ignore it.
+    SetConfiguredParams {
+        /// The device.
+        device: DeviceId,
+        /// The parameters in their new order.
+        params: Vec<ParamId>,
+    },
     /// Maps a slot of a modulator to a parameter (the modulation spec, R15):
     /// the Map button's gesture. The slot's earlier mapping goes.
     MapModulator {
@@ -1931,6 +1940,9 @@ impl Command {
             Self::CompareSwitch { .. } => "Compare: Switch",
             Self::CompareCopy { .. } => "Compare: Copy",
             Self::SetDeviceParam { .. } => "Change parameter",
+            // WP-5.40: Beatlayer's own name; Live's undo history says
+            // "Configure Plug-In".
+            Self::SetConfiguredParams { .. } => "Configure Plug-In",
             // WP-2.16. Live's undo name for loading a Simpler sample is to
             // observe; Beatlayer's names the edit.
             // WP-5.10: Beatlayer's own names.
@@ -2836,6 +2848,10 @@ impl Document {
                             param: *param,
                         });
                 }
+                Ok(())
+            }
+            Command::SetConfiguredParams { device, params } => {
+                self.device_mut(*device)?.set_configured(params.clone());
                 Ok(())
             }
             Command::MapModulator {

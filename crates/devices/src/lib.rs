@@ -24,6 +24,7 @@
 //! `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod arpeggiator;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
 pub mod beat_repeat;
@@ -56,6 +57,7 @@ pub mod modulator;
 pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
+pub mod note_echo;
 pub mod overdrive;
 pub mod phaser_flanger;
 pub mod play_mod;
@@ -77,6 +79,7 @@ pub mod utility;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
@@ -103,6 +106,7 @@ pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
+pub use note_echo::{NOTE_ECHO, note_echo_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
@@ -197,6 +201,8 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    arpeggiator::register(registry);
+    note_echo::register(registry);
     hardware::register(registry);
     degrade::register(registry);
     crusher::register(registry);

@@ -2459,6 +2459,153 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&self.device_view_state()))
             }
+            plugin_ids::CONFIGURE => {
+                let plugin_ids::ConfigureArgs { device, on } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                let kind = self
+                    .editor
+                    .document()
+                    .device(device)
+                    .map(|d| d.kind.clone())
+                    .ok_or_else(|| unavailable(format!("no {device}")))?;
+                if DeviceView::plugin_key(&kind).is_none() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("{device} isn't a plug-in device"),
+                    });
+                }
+                let on = on.unwrap_or(!self.devices.configuring(device));
+                self.devices.set_configuring(device, on);
+                self.touch();
+                Ok(to_value(&self.device_view_state()))
+            }
+            plugin_ids::CONFIGURE_PARAM => {
+                let plugin_ids::ConfigureParamArgs {
+                    device,
+                    param,
+                    index,
+                } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                let Some((all, mut configured)) = self.configured_lists(device) else {
+                    return Err(unavailable(format!(
+                        "{device} isn't a described plug-in device"
+                    )));
+                };
+                if !all.contains(&param) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("{} has no parameter {}", device, param.0),
+                    });
+                }
+                configured.retain(|p| *p != param);
+                let at = index.unwrap_or(configured.len()).min(configured.len());
+                configured.insert(at, param);
+                self.editor
+                    .transact("Configure Plug-In", |e| {
+                        e.apply(bl_model::Command::SetConfiguredParams {
+                            device,
+                            params: configured.clone(),
+                        })
+                    })
+                    .map_err(|error| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    })?;
+                self.devices.clear_pending_param(device);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                self.configured_params_result(id, device)
+            }
+            plugin_ids::UNCONFIGURE_PARAM => {
+                let plugin_ids::UnconfigureParamArgs {
+                    device,
+                    param,
+                    force,
+                } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                let Some((all, mut configured)) = self.configured_lists(device) else {
+                    return Err(unavailable(format!(
+                        "{device} isn't a described plug-in device"
+                    )));
+                };
+                if !all.contains(&param) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("{} has no parameter {}", device, param.0),
+                    });
+                }
+                if !force {
+                    let uses = self.param_uses(device, param);
+                    if !uses.is_empty() {
+                        // Manual 24.1.2: Live warns before deleting a
+                        // parameter with automation, clip envelopes, or
+                        // mappings.
+                        return Err(ShellError::Failed {
+                            command: id.to_owned(),
+                            message: format!(
+                                "this parameter has {}, so removing it from the panel changes \
+                                 what plays; run again with force to remove it",
+                                uses.join(", ")
+                            ),
+                        });
+                    }
+                }
+                configured.retain(|p| *p != param);
+                self.editor
+                    .transact("Unconfigure Plug-In Parameter", |e| {
+                        e.apply(bl_model::Command::SetConfiguredParams {
+                            device,
+                            params: configured.clone(),
+                        })
+                    })
+                    .map_err(|error| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    })?;
+                self.devices.clear_pending_param(device);
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                self.configured_params_result(id, device)
+            }
+            plugin_ids::MOVE_CONFIGURED_PARAM => {
+                let plugin_ids::MoveConfiguredParamArgs { device, from, to } =
+                    Self::args(id, args)?;
+                let device = target(self, device)?;
+                let Some((_all, mut configured)) = self.configured_lists(device) else {
+                    return Err(unavailable(format!(
+                        "{device} isn't a described plug-in device"
+                    )));
+                };
+                if from >= configured.len() || to >= configured.len() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!(
+                            "the configured list has {} entries, so {from} to {to} is out of \
+                             range",
+                            configured.len()
+                        ),
+                    });
+                }
+                let param = configured.remove(from);
+                configured.insert(to, param);
+                self.editor
+                    .transact("Move Plug-In Parameter", |e| {
+                        e.apply(bl_model::Command::SetConfiguredParams {
+                            device,
+                            params: configured.clone(),
+                        })
+                    })
+                    .map_err(|error| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    })?;
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                self.configured_params_result(id, device)
+            }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
                 let plugin_ids::ScanArgs { paths, background } = Self::args(id, args)?;
                 if background {
@@ -2579,6 +2726,99 @@ impl Shell {
         let doc = self.editor.document();
         self.devices
             .state(doc, devices::shown_track(&self.arrangement, doc))
+    }
+
+    /// A plug-in device's modifiable parameters and its configured list, in
+    /// order (WP-5.40, clap-hosting R5); `None` for a device that isn't a
+    /// plug-in, or whose type isn't described.
+    fn configured_lists(
+        &self,
+        device: bl_model::DeviceId,
+    ) -> Option<(Vec<bl_model::ParamId>, Vec<bl_model::ParamId>)> {
+        let doc = self.editor.document();
+        let kind = doc.device(device)?.kind.clone();
+        if !matches!(kind, bl_model::DeviceKind::Plugin { .. }) {
+            return None;
+        }
+        let description = self.devices.description(&kind)?;
+        let all: Vec<bl_model::ParamId> = description.params.iter().map(|p| p.id).collect();
+        let configured: Vec<bl_model::ParamId> = doc.device(device)?.configured(&all).into_owned();
+        Some((all, configured))
+    }
+
+    /// What uses a plug-in parameter, which Live warns about before the panel
+    /// drops it (manual 24.1.2): its automation, a clip envelope, or a
+    /// mapping.
+    fn param_uses(
+        &self,
+        device: bl_model::DeviceId,
+        param: bl_model::ParamId,
+    ) -> Vec<&'static str> {
+        use bl_model::modulator::ModTarget;
+        let doc = self.editor.document();
+        let target = AutomationTarget::Device { device, param };
+        let mut uses = Vec::new();
+        if let Some(track) = doc.device_track(device).and_then(|t| doc.track(t)) {
+            if track.automation_for(&target).is_some() {
+                uses.push("automation");
+            }
+            if track.clips().any(|clip| clip.envelope(&target).is_some()) {
+                uses.push("a clip envelope");
+            }
+        }
+        let mapped = doc.tracks().any(|track| {
+            track.devices_deep().any(|d| {
+                d.mappings
+                    .iter()
+                    .any(|m| m.target == ModTarget::Device { device, param })
+            })
+        });
+        if mapped {
+            uses.push("a mapping");
+        }
+        uses
+    }
+
+    /// Adds a plug-in parameter to its device's configured list, as one undo
+    /// step, when the device hasn't configured it (WP-5.40, manual 24.1.2):
+    /// using a parameter in the automation or clip-envelope choosers makes its
+    /// temporary entry permanent.
+    fn configure_on_use(&mut self, device: bl_model::DeviceId, param: bl_model::ParamId) {
+        let Some((all, mut configured)) = self.configured_lists(device) else {
+            return;
+        };
+        if !all.contains(&param) || configured.contains(&param) {
+            return;
+        }
+        configured.push(param);
+        let command = bl_model::Command::SetConfiguredParams {
+            device,
+            params: configured,
+        };
+        if self
+            .editor
+            .transact("Configure Plug-In", |e| e.apply(command))
+            .is_ok()
+        {
+            self.devices.clear_pending_param(device);
+            self.dirty = true;
+            self.document_changed();
+        }
+    }
+
+    /// `device.parameters` after a configure edit, as its command returns it.
+    fn configured_params_result(
+        &self,
+        id: &str,
+        device: bl_model::DeviceId,
+    ) -> Result<Value, ShellError> {
+        self.devices
+            .parameters_of(self.editor.document(), device)
+            .map(|params| to_value(&params))
+            .ok_or_else(|| ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("no {device}"),
+            })
     }
 
     /// The modulator slot whose Map button is lit, if one is (WP-5.10): a
@@ -3424,7 +3664,7 @@ impl Shell {
                     .map(|c| (c.device, c.param, c.value)),
             )
             .collect();
-        if crate::plugins::apply_param_changes(changes, &mut self.editor, &self.devices) {
+        if crate::plugins::apply_param_changes(changes, &mut self.editor, &mut self.devices) {
             self.dirty = true;
             self.document_changed();
             changed = true;
@@ -5936,6 +6176,19 @@ impl Shell {
             return Ok(to_value(&crate::transport::state(self, engine)));
         }
         if view_ids::handles(id) {
+            // Spec: clap-hosting R5 (WP-5.40). Choosing a plug-in parameter
+            // in the automation choosers makes its temporary entry permanent.
+            let chosen = (id == view_ids::SHOW_AUTOMATION)
+                .then(|| {
+                    Self::args::<view_ids::ShowAutomationArgs>(id, args.clone())
+                        .ok()
+                        .and_then(|a| a.target)
+                })
+                .flatten()
+                .and_then(|target| match target {
+                    AutomationTarget::Device { device, param } => Some((device, param)),
+                    _ => None,
+                });
             let result = self
                 .arrangement
                 .run(id, args, self.editor.document())
@@ -5966,6 +6219,11 @@ impl Shell {
                 // marker, where Play starts, and playback carries on.
                 let at = self.arrangement.insert_marker();
                 self.audio.set_insert_marker(at);
+            }
+            if result.is_ok()
+                && let Some((device, param)) = chosen
+            {
+                self.configure_on_use(device, param);
             }
             return result.map(|state| to_value(&state));
         }
@@ -7012,6 +7270,12 @@ impl Shell {
                     let shown = doc.clip(clip).ok_or_else(|| failed(format!("no {clip}")))?;
                     doc.check_clip_target(track, shown, target)
                         .map_err(|error| failed(error.to_string()))?;
+                    // Spec: clap-hosting R5 (WP-5.40). Choosing a plug-in
+                    // parameter in the clip-envelope choosers makes its
+                    // temporary entry permanent.
+                    if let AutomationTarget::Device { device, param } = target {
+                        self.configure_on_use(device, param);
+                    }
                 }
                 self.clip_view.set_envelope(target);
                 Ok(to_value(

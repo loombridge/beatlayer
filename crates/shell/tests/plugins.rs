@@ -67,6 +67,83 @@ fn info(shell: &mut Shell, device: DeviceId) -> PluginInfo {
     serde_json::from_value(value).unwrap()
 }
 
+/// `device.parameters`, each marked configured or not.
+fn parameters(shell: &mut Shell, device: DeviceId) -> DeviceParameters {
+    serde_json::from_value(
+        shell
+            .run("device.parameters", json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+/// The plug-in's configured parameter numbers, as `device.parameters` lists
+/// them (the plug-in's own order).
+fn configured(shell: &mut Shell, device: DeviceId) -> Vec<u32> {
+    parameters(shell, device)
+        .params
+        .iter()
+        .filter(|p| p.configured)
+        .map(|p| p.descriptor.id.0)
+        .collect()
+}
+
+/// The panel's knob parameter numbers, in the configured list's order.
+fn panel_order(shell: &mut Shell, device: DeviceId) -> Vec<u32> {
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    view.devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap()
+        .description
+        .params
+        .iter()
+        .map(|p| p.id.0)
+        .collect()
+}
+
+/// Plays `device` a note, as the engine would, so its editor would have set
+/// its Last Note: what a person moving a parameter in the plug-in's window
+/// does.
+fn plug_in_moves_last_note(shell: &mut Shell, device: DeviceId) {
+    use bl_engine::{Block, NodeConfig, NoteBuffer, NoteEvent, NoteKind, TransportInfo};
+
+    let device = shell.editor().document().device(device).unwrap().clone();
+    let config = NodeConfig {
+        sample_rate: bl_core::time::SampleRate::HZ_48000,
+        max_frames: 64,
+        channels: 2,
+    };
+    let mut node = bl_engine::NodeFactory::create(&shell.plugins().factory(), &device, &config)
+        .expect("a node");
+    let mut data = vec![0.0f32; 128];
+    let mut out = NoteBuffer::with_capacity(8);
+    let notes = [NoteEvent {
+        offset: 3,
+        kind: NoteKind::On,
+        channel: 0,
+        key: 67,
+        velocity: 1.0,
+        note_id: None,
+    }];
+    let mut block = Block::new(
+        &mut data,
+        2,
+        64,
+        64,
+        &[],
+        TransportInfo::default(),
+        bl_core::time::SampleRate::HZ_48000,
+    )
+    .with_notes(&notes, &mut out);
+    node.process(&mut block);
+    assert!(shell.poll());
+}
+
 // Spec: clap-hosting R1, R5, R8, R11, R13, R16
 #[test]
 fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
@@ -1048,4 +1125,194 @@ fn modulation_never_writes_a_plugins_value_into_the_set() {
     }
     assert_eq!(saved(&shell), Some(0.5));
     assert_eq!(shell.editor().undo_history().len(), history);
+}
+
+// Spec: clap-hosting R5, R16; WP-5.40 (IMP-03, manual 24.1 and 24.1.2).
+// Configure Mode: the switch, the configured list that the panel and the
+// choosers show, adding a parameter by moving it in the editor, removing and
+// reordering in undo steps, the warning before removing an automated one,
+// and the list saved with the set.
+#[test]
+fn configure_mode_edits_the_plugins_panel_and_is_remembered_with_the_set() {
+    let scratch = std::env::temp_dir().join(format!("bl-shell-configure-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+
+    // Manual 24.1: a plug-in with no more than 64 modifiable parameters
+    // starts with them all configured.
+    assert_eq!(configured(&mut shell, device).len(), 8);
+    assert!(
+        parameters(&mut shell, device)
+            .params
+            .iter()
+            .all(|p| p.configured)
+    );
+
+    // The Configure switch is view state: it isn't an undo step.
+    let steps = shell.editor().undo_history().len();
+    let view: DeviceViewState = serde_json::from_value(
+        shell
+            .run(ids::CONFIGURE, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        view.devices
+            .iter()
+            .find(|d| d.id == device)
+            .unwrap()
+            .configure
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+
+    // Removing a parameter is one undo step and leaves the panel.
+    shell
+        .run(
+            ids::UNCONFIGURE_PARAM,
+            json!({ "device": device, "param": LAST_NOTE }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Unconfigure Plug-In Parameter")
+    );
+    assert!(!configured(&mut shell, device).contains(&LAST_NOTE));
+
+    // In Configure Mode, a parameter the editor moves joins the panel in
+    // the same undo step as the change (manual 24.1.2).
+    let steps = shell.editor().undo_history().len();
+    plug_in_moves_last_note(&mut shell, device);
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Last Note\"")
+    );
+    assert!(configured(&mut shell, device).contains(&LAST_NOTE));
+
+    // Reordering the list is one undo step and moves the parameter to the
+    // front of the panel.
+    let list = panel_order(&mut shell, device);
+    let count = list.len();
+    assert!(count > 1);
+    shell
+        .run(
+            ids::MOVE_CONFIGURED_PARAM,
+            json!({ "device": device, "from": count - 1, "to": 0 }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Move Plug-In Parameter")
+    );
+    assert_eq!(panel_order(&mut shell, device)[0], list[count - 1]);
+
+    // Removing a parameter that has automation warns first (manual 24.1.2),
+    // and takes it away when the warning is accepted with `force`.
+    shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": track, "at": 0, "value": 0.5,
+                    "target": { "type": "device", "device": device, "param": LAST_NOTE } }),
+        )
+        .unwrap();
+    let error = shell
+        .run(
+            ids::UNCONFIGURE_PARAM,
+            json!({ "device": device, "param": LAST_NOTE }),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("automation"), "{error}");
+    assert!(configured(&mut shell, device).contains(&LAST_NOTE), "kept");
+    shell
+        .run(
+            ids::UNCONFIGURE_PARAM,
+            json!({ "device": device, "param": LAST_NOTE, "force": true }),
+        )
+        .unwrap();
+    assert!(!configured(&mut shell, device).contains(&LAST_NOTE));
+
+    // Adding one back by command is one undo step too.
+    let steps = shell.editor().undo_history().len();
+    shell
+        .run(
+            ids::CONFIGURE_PARAM,
+            json!({ "device": device, "param": LAST_NOTE, "index": 0 }),
+        )
+        .unwrap();
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Configure Plug-In")
+    );
+    assert_eq!(panel_order(&mut shell, device)[0], LAST_NOTE);
+
+    // The list is saved with the set and comes back (manual 24.1.2).
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Configure.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    let expected = configured(&mut shell, device);
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    shell.poll();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    assert_eq!(configured(&mut shell, device), expected);
+    assert_eq!(panel_order(&mut shell, device)[0], LAST_NOTE);
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: clap-hosting R5; WP-5.40 (manual 24.1.2). Outside Configure Mode a
+// parameter the editor moves appears in the automation chooser for now, and
+// choosing it there makes it part of the panel.
+#[test]
+fn a_parameter_moved_outside_configure_mode_joins_the_panel_when_used() {
+    let mut shell = Shell::headless();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+
+    // Take Last Note out of the panel, and move it in the editor with
+    // Configure off.
+    shell
+        .run(
+            ids::UNCONFIGURE_PARAM,
+            json!({ "device": device, "param": LAST_NOTE }),
+        )
+        .unwrap();
+    plug_in_moves_last_note(&mut shell, device);
+    assert!(!configured(&mut shell, device).contains(&LAST_NOTE));
+
+    // Choosing it in the automation choosers makes it permanent.
+    shell
+        .run(
+            "arrangement.show_automation",
+            json!({ "track": track,
+                    "target": { "type": "device", "device": device, "param": LAST_NOTE } }),
+        )
+        .unwrap();
+    assert!(
+        configured(&mut shell, device).contains(&LAST_NOTE),
+        "used once, so permanent"
+    );
 }

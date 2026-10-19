@@ -3,7 +3,8 @@
 //! sends gliding as solo, Solo in Place, and send levels change; pre-fader
 //! sends reading the copy of a chain's output; a program swap when a
 //! return's Pre/Post switch moves, with every mixer and route migrating; and
-//! the meters published after every block. RTSan stops the process at the
+//! the meters published after every block. Split Stereo Pan Mode and a
+//! changed Track Delay are mixed in too. RTSan stops the process at the
 //! first allocation, free, lock, or blocking call in any of it, and the
 //! allocation trap, installed as in every Beatlayer test binary, fails the
 //! test at any heap use it sees.
@@ -98,6 +99,24 @@ fn the_mixer_passes_under_rtsan() {
             3 => Some(Command::SetPan {
                 track: group,
                 pan: ((round % 5) as f64 - 2.0) / 2.0,
+            }),
+            2 => Some(Command::SetPanMode {
+                track: outer,
+                mode: if round % 96 < 48 {
+                    bl_model::PanMode::Split
+                } else {
+                    bl_model::PanMode::Stereo
+                },
+            }),
+            4 => Some(Command::SetSplitPanLeft {
+                track: outer,
+                pan: ((round % 5) as f64 - 2.0) / 2.0,
+            }),
+            20 => Some(Command::SetTrackDelay {
+                track: outer,
+                delay: bl_model::TrackDelay::Samples {
+                    value: ((round % 7) as i64 - 3) * 100,
+                },
             }),
             6 => Some(Command::SetSolo {
                 track: inner,

@@ -12,7 +12,10 @@
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
 use bl_model::modulator::ModTarget;
-use bl_model::{AutomationTarget, CrossfadeAssign, Document, MixerParam, TrackId, TrackKind};
+use bl_model::{
+    AutomationTarget, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
+    MixerParam, PanMode, TrackDelay, TrackId, TrackKind,
+};
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
@@ -31,7 +34,8 @@ use serde_json::json;
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     ARRANGEMENT_TITLE_ROW, Column, ColumnKind, MixerLayout, SCALE_LABELS, Sections, SessionLayout,
-    StripLayout, crossfade_buttons, crossfader_slider, in_out_row, send_knob,
+    StripLayout, crossfade_buttons, crossfader_slider, in_out_row, send_knob, split_pans,
+    track_options,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -48,6 +52,7 @@ pub fn sections(shell: &Shell) -> Sections {
         volume: view.volume(),
         crossfader: view.crossfader(),
         returns: view.return_tracks(),
+        track_options: view.track_options(),
     }
 }
 
@@ -79,6 +84,39 @@ pub fn switch_id(place: Place, switch: Switch, track: TrackId) -> Id {
 #[must_use]
 pub fn send_id(place: Place, track: TrackId, to: TrackId) -> Id {
     Id::new(("mixer-send", place, track, to))
+}
+
+/// Which half of a split stereo pan a control places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SplitSide {
+    /// The left input channel.
+    Left,
+    /// The right input channel.
+    Right,
+}
+
+/// The ID of a split stereo pan control.
+#[must_use]
+pub fn split_pan_id(place: Place, track: TrackId, side: SplitSide) -> Id {
+    Id::new(("mixer-split-pan", place, track, side))
+}
+
+/// The ID of a track's Track Delay field.
+#[must_use]
+pub fn track_delay_id(place: Place, track: TrackId) -> Id {
+    Id::new(("mixer-track-delay", place, track))
+}
+
+/// The ID of a track's Track Delay unit switch.
+#[must_use]
+pub fn delay_unit_id(place: Place, track: TrackId) -> Id {
+    Id::new(("mixer-delay-unit", place, track))
+}
+
+/// The ID of a track's Keep Monitoring Latency switch.
+#[must_use]
+pub fn keep_monitoring_id(place: Place, track: TrackId) -> Id {
+    Id::new(("mixer-keep-monitoring", place, track))
 }
 
 /// The ID of a meter.
@@ -407,6 +445,16 @@ impl MixerUi {
                     activator: &label,
                 };
                 parts.crossfade_section(&mut column_ui, column, span, events);
+            }
+            if let Some(span) = layout.track_options {
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.track_options_section(&mut column_ui, column.rect, span, events);
             }
         }
         self.scroll(&ui, sections_area, of, events);
@@ -925,6 +973,13 @@ impl StripParts<'_> {
         } else {
             self.peak_field(ui, strip.peak_field);
             self.pan(ui, strip.pan, Some(strip.pan_triangle), events);
+            // In Split Stereo Pan Mode two controls sit beside the pan knob,
+            // one placing each input channel (the mixer spec, R29).
+            if self.split_mode() {
+                let [left, right] = split_pans(strip.pan);
+                self.split_pan(ui, left, SplitSide::Left, events);
+                self.split_pan(ui, right, SplitSide::Right, events);
+            }
             self.fader(ui, strip.fader, events);
             self.meter(ui, strip.meter);
             self.scale(ui, strip);
@@ -1101,6 +1156,532 @@ impl StripParts<'_> {
             node.set_min_numeric_value(0.0);
             node.set_max_numeric_value(1.0);
         });
+    }
+
+    /// Whether the track's pan mode is Split Stereo Pan Mode.
+    fn split_mode(&self) -> bool {
+        self.doc()
+            .track(self.track)
+            .is_some_and(|t| t.mixer().pan_mode == PanMode::Split)
+    }
+
+    /// Whether Delay Compensation is on, so a Track Options control works
+    /// (the mixer spec, R28; delay compensation R7).
+    fn delay_compensation(&self) -> bool {
+        self.doc().settings().delay_compensation
+    }
+
+    /// The Track Options section (L-MIX-005; the mixer spec, R28, R30): a
+    /// track's Track Delay with its ms/samples unit switch, and its Keep
+    /// Monitoring Latency switch. Both are disabled while Delay
+    /// Compensation is off.
+    pub fn track_options_section(
+        &self,
+        ui: &mut Ui,
+        column: Rect,
+        span: (f32, f32),
+        events: &mut Vec<UiEvent>,
+    ) {
+        let [delay, unit, keep] = track_options(column, span);
+        self.track_delay(ui, delay, events);
+        self.delay_unit(ui, unit, events);
+        self.keep_monitoring(ui, keep, events);
+    }
+
+    /// The Track Delay field (R28): the delay in its current unit, dragged,
+    /// stepped, reset, or typed (`-12` and Return sets the delay); the Status
+    /// Bar names it while it's dragged.
+    fn track_delay(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let Some(track) = self.doc().track(self.track) else {
+            return;
+        };
+        let delay = track.delay();
+        let enabled = self.delay_compensation();
+        let id = track_delay_id(self.place, self.track);
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click_and_drag()
+            } else {
+                Sense::hover()
+            },
+        );
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(1.0));
+        if !enabled {
+            painter.rect_filled(
+                rect,
+                self.theme.sizes.corner,
+                c.control.0.gamma_multiply(0.6),
+            );
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                delay_text(delay),
+                self.theme.small_font(),
+                c.pending.0,
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, "Track Delay"));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Slider);
+                node.set_label("Track Delay".to_owned());
+                node.set_value(delay_spoken(delay));
+                node.set_disabled();
+                node.set_description("Unavailable while Delay Compensation is off".to_owned());
+            });
+            return;
+        }
+        self.register(ui, id, crate::focus::Slot::TrackDelay);
+        self.escape_to_title(ui, &response);
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag_id, (delay, 0.0f64)));
+            events.push(UiEvent::BeginGesture(TRACK_DELAY_GESTURE));
+        }
+        if response.dragged() {
+            let dy = response.drag_delta().y;
+            let fine = ui.input(|i| i.modifiers.shift);
+            let (start, moved) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(TrackDelay, f64)>(drag_id);
+                if dy != 0.0 {
+                    drag.1 += f64::from(-dy / if fine { FINE } else { 1.0 });
+                }
+                *drag
+            });
+            if dy != 0.0 {
+                let now = delay_moved(start, moved);
+                if now != delay {
+                    ui.data_mut(|d| d.insert_temp(readout_id(), delay_readout(now)));
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        "mixer.set_track_delay",
+                        json!({ "track": self.track, "delay": now }),
+                    )));
+                }
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(TrackDelay, f64)>(drag_id));
+            events.push(UiEvent::EndGesture);
+        }
+        let typed = self.delay_typing(ui, &response, delay, events);
+        let mut steps = ui.input(|i| {
+            i.num_accesskit_action_requests(id, Action::Increment) as i32
+                - i.num_accesskit_action_requests(id, Action::Decrement) as i32
+        });
+        let mut fine = false;
+        let mut reset = response.double_clicked();
+        let entry_open = ui.data(|d| d.get_temp::<(Id, String)>(typing_id()).is_some());
+        if response.has_focus() && !entry_open {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        escape: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            ui.input(|i| {
+                for event in &i.events {
+                    if let Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        match key {
+                            Key::ArrowUp => steps += 1,
+                            Key::ArrowDown => steps -= 1,
+                            Key::Delete => reset = true,
+                            _ => continue,
+                        }
+                        fine |= modifiers.shift;
+                    }
+                }
+            });
+        }
+        let change = if reset {
+            Some(TrackDelay::default())
+        } else if steps != 0 {
+            Some(delay_stepped(delay, steps, fine))
+        } else {
+            None
+        };
+        if let Some(now) = change
+            && now != delay
+        {
+            events.push(UiEvent::BeginGesture(TRACK_DELAY_GESTURE));
+            events.push(UiEvent::Invoke(Invocation::new(
+                "mixer.set_track_delay",
+                json!({ "track": self.track, "delay": now }),
+            )));
+            events.push(UiEvent::EndGesture);
+        }
+        let face = if typed.is_some() {
+            c.control_pressed.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            typed.unwrap_or_else(|| delay_text(delay)),
+            self.theme.small_font(),
+            c.text.0,
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        self.describe_value(
+            ui,
+            &response,
+            "Track Delay",
+            delay_spoken(delay),
+            delay_number(delay),
+            delay_range(delay),
+        );
+    }
+
+    /// Typing into the focused Track Delay field, in its current unit.
+    fn delay_typing(
+        &self,
+        ui: &Ui,
+        response: &Response,
+        delay: TrackDelay,
+        events: &mut Vec<UiEvent>,
+    ) -> Option<String> {
+        let id = response.id;
+        ui.data_mut(|d| d.insert_temp(id.with("typed-field"), true));
+        let mut entry = ui
+            .data(|d| d.get_temp::<(Id, String)>(typing_id()))
+            .filter(|(field, _)| *field == id)
+            .map(|(_, text)| text);
+        if !response.has_focus() {
+            if entry.is_some() {
+                ui.data_mut(|d| d.remove::<(Id, String)>(typing_id()));
+            }
+            return None;
+        }
+        let keys: Vec<Key> = ui.input_mut(|i| {
+            let mut taken = Vec::new();
+            i.events.retain(|event| match event {
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if !modifiers.command
+                    && !modifiers.ctrl
+                    && (digit(*key).is_some()
+                        || matches!(key, Key::Minus | Key::Period | Key::Backspace)
+                        || (entry.is_some() && key == &Key::Enter)
+                        || key == &Key::Escape) =>
+                {
+                    taken.push(*key);
+                    false
+                }
+                _ => true,
+            });
+            taken
+        });
+        for key in keys {
+            match key {
+                Key::Enter => {
+                    let text = entry.take().unwrap_or_default();
+                    let now = match delay {
+                        TrackDelay::Milliseconds { .. } => text
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|v| v.abs() <= MAX_TRACK_DELAY_MS)
+                            .map(|value| TrackDelay::Milliseconds { value }),
+                        TrackDelay::Samples { .. } => text
+                            .parse::<i64>()
+                            .ok()
+                            .filter(|v| v.abs() <= MAX_TRACK_DELAY_SAMPLES)
+                            .map(|value| TrackDelay::Samples { value }),
+                    };
+                    if let Some(now) = now {
+                        events.push(UiEvent::BeginGesture(TRACK_DELAY_GESTURE));
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            "mixer.set_track_delay",
+                            json!({ "track": self.track, "delay": now }),
+                        )));
+                        events.push(UiEvent::EndGesture);
+                    }
+                }
+                Key::Escape => {
+                    if entry.is_none() && self.place == Place::Header {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            bl_shell::arrangement_commands::FOCUS_TITLE_BAR,
+                            json!({}),
+                        )));
+                    } else {
+                        ui.memory_mut(|m| m.surrender_focus(id));
+                    }
+                    entry = None;
+                }
+                Key::Backspace => {
+                    if let Some(text) = entry.as_mut() {
+                        text.pop();
+                    }
+                }
+                key => {
+                    let c = digit(key).unwrap_or(match key {
+                        Key::Minus => '-',
+                        _ => '.',
+                    });
+                    let text = entry.get_or_insert_with(String::new);
+                    if text.len() < 9 {
+                        text.push(c);
+                    }
+                }
+            }
+        }
+        ui.data_mut(|d| match &entry {
+            Some(text) => {
+                d.insert_temp(typing_id(), (id, text.clone()));
+            }
+            None => d.remove::<(Id, String)>(typing_id()),
+        });
+        entry
+    }
+
+    /// The Track Delay unit switch (R28): a click converts the value to the
+    /// other unit at the current sample rate, as Hardware Latency's does.
+    fn delay_unit(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let Some(track) = self.doc().track(self.track) else {
+            return;
+        };
+        let delay = track.delay();
+        let enabled = self.delay_compensation();
+        let id = delay_unit_id(self.place, self.track);
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        let text = delay_unit_text(delay);
+        let c = &self.theme.colors;
+        let face = if !enabled {
+            c.control.0.gamma_multiply(0.6)
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        let painter = ui.painter_at(rect.expand(1.0));
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            self.theme.small_font(),
+            if enabled { c.text.0 } else { c.pending.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        if enabled {
+            self.register(ui, id, crate::focus::Slot::TrackDelayUnit);
+            self.escape_to_title(ui, &response);
+            let pressed = response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+            if pressed {
+                let rate = self.shell.audio().sample_rate().unwrap_or(48_000);
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_track_delay",
+                    json!({ "track": self.track, "delay": delay.switched(rate) }),
+                )));
+            }
+        }
+        response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Track Delay Unit"));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Track Delay Unit".to_owned());
+            node.set_value(text.to_owned());
+            node.set_description(
+                if enabled {
+                    "Switches the Track Delay between milliseconds and samples"
+                } else {
+                    "Unavailable while Delay Compensation is off"
+                }
+                .to_owned(),
+            );
+            if !enabled {
+                node.set_disabled();
+            }
+        });
+    }
+
+    /// A track's Keep Monitoring Latency switch (R30): a click sets the
+    /// other state.
+    fn keep_monitoring(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        let Some(track) = self.doc().track(self.track) else {
+            return;
+        };
+        let on = track.keep_monitoring_latency();
+        let enabled = self.delay_compensation();
+        let id = keep_monitoring_id(self.place, self.track);
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        let c = &self.theme.colors;
+        let lit = c.accent.0;
+        let face = if !enabled {
+            c.control.0.gamma_multiply(0.6)
+        } else if on {
+            lit
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        let painter = ui.painter_at(rect.expand(1.0));
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "K",
+            self.theme.small_font(),
+            if on && enabled {
+                c.accent_text.0
+            } else {
+                c.text.0
+            },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        if enabled {
+            self.register(ui, id, crate::focus::Slot::KeepMonitoring);
+            self.escape_to_title(ui, &response);
+            let pressed = response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+            if pressed {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_keep_monitoring_latency",
+                    json!({ "track": self.track, "enabled": !on }),
+                )));
+            }
+        }
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::Button, enabled, on, "Keep Monitoring Latency")
+        });
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Keep Monitoring Latency".to_owned());
+            node.set_value(if on { "on" } else { "off" }.to_owned());
+            node.set_description(
+                if enabled {
+                    "Keeps a monitored track's delay compensation while Reduced Latency When Monitoring is on"
+                } else {
+                    "Unavailable while Delay Compensation is off"
+                }
+                .to_owned(),
+            );
+            if !enabled {
+                node.set_disabled();
+            }
+        });
+    }
+
+    /// One of a strip's two split stereo pan controls (R29): a vertical
+    /// slider, dragged relative to the pointer, reset to centre on a
+    /// double-click.
+    pub fn split_pan(&self, ui: &mut Ui, rect: Rect, side: SplitSide, events: &mut Vec<UiEvent>) {
+        let Some(track) = self.doc().track(self.track) else {
+            return;
+        };
+        let pan = match side {
+            SplitSide::Left => track.mixer().split_left,
+            SplitSide::Right => track.mixer().split_right,
+        };
+        let id = split_pan_id(self.place, self.track, side);
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.register(
+            ui,
+            id,
+            match side {
+                SplitSide::Left => crate::focus::Slot::SplitPanLeft,
+                SplitSide::Right => crate::focus::Slot::SplitPanRight,
+            },
+        );
+        self.escape_to_title(ui, &response);
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag_id, (pan, 0.0f64)));
+            events.push(UiEvent::BeginGesture(split_gesture(side)));
+        }
+        if response.dragged() {
+            let dy = response.drag_delta().y;
+            let (start, moved) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(f64, f64)>(drag_id);
+                if dy != 0.0 {
+                    drag.1 += f64::from(-dy) * SPLIT_PAN_PER_POINT;
+                }
+                *drag
+            });
+            if dy != 0.0 {
+                let now = (start + moved).clamp(-1.0, 1.0);
+                if now != pan {
+                    events.push(UiEvent::Invoke(self.set_split_pan(side, now)));
+                }
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(f64, f64)>(drag_id));
+            events.push(UiEvent::EndGesture);
+        }
+        if response.double_clicked() && pan != 0.0 {
+            events.push(UiEvent::BeginGesture(split_gesture(side)));
+            events.push(UiEvent::Invoke(self.set_split_pan(side, 0.0)));
+            events.push(UiEvent::EndGesture);
+        }
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let x = rect.center().x;
+        painter.line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(1.5, c.separator.0),
+        );
+        let y = rect.bottom() - rect.height() * ((pan as f32 + 1.0) / 2.0);
+        let handle = Rect::from_center_size(pos2(x, y), vec2(rect.width().max(3.0), 3.0));
+        let face = if response.dragged() {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.text_dim.0
+        };
+        painter.rect_filled(handle, 1.0, face);
+        focus_ring(&painter, self.theme, rect, &response);
+        let name = match side {
+            SplitSide::Left => "Split Pan Left",
+            SplitSide::Right => "Split Pan Right",
+        };
+        self.describe_value(ui, &response, name, pan_text(pan), pan, (-1.0, 1.0));
+    }
+
+    /// The command that sets one split stereo pan side.
+    fn set_split_pan(&self, side: SplitSide, pan: f64) -> Invocation {
+        Invocation::new(
+            match side {
+                SplitSide::Left => "mixer.set_split_pan_left",
+                SplitSide::Right => "mixer.set_split_pan_right",
+            },
+            json!({ "track": self.track, "pan": pan }),
+        )
     }
 
     fn doc(&self) -> &Document {
@@ -1656,6 +2237,23 @@ impl StripParts<'_> {
         };
         let spoken = modulated_text(pan_text(pan), modulated.map(|(_, played)| pan_text(played)));
         self.describe_value(ui, &response, name, spoken, pan, (-1.0, 1.0));
+        // The pan control's context menu (C-PAN-001, C-PAN-002): two
+        // radio-ticked items, as a device parameter's menu is.
+        let mode = track.mixer().pan_mode;
+        response.context_menu(|ui| {
+            for (item, wanted) in [
+                ("Stereo Pan Mode", PanMode::Stereo),
+                ("Split Stereo Pan Mode", PanMode::Split),
+            ] {
+                if ui.selectable_label(mode == wanted, item).clicked() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        "mixer.set_pan_mode",
+                        json!({ "track": self.track, "mode": wanted }),
+                    )));
+                    ui.close();
+                }
+            }
+        });
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -2091,6 +2689,102 @@ fn ring_point(centre: egui::Pos2, radius: f32, position: f32) -> egui::Pos2 {
     let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
     let angle = -sweep + 2.0 * sweep * position;
     centre + vec2(angle.sin(), -angle.cos()) * radius
+}
+
+/// How far one point of drag moves a split stereo pan control.
+const SPLIT_PAN_PER_POINT: f64 = 0.05;
+
+/// The gesture a Track Delay change runs as.
+const TRACK_DELAY_GESTURE: &str = "Change track delay";
+
+/// The gesture a split stereo pan change runs as.
+fn split_gesture(side: SplitSide) -> &'static str {
+    match side {
+        SplitSide::Left => "Change \"Split Pan Left\"",
+        SplitSide::Right => "Change \"Split Pan Right\"",
+    }
+}
+
+/// The Track Delay as its field shows it: the number in its current unit.
+fn delay_text(delay: TrackDelay) -> String {
+    match delay {
+        TrackDelay::Milliseconds { value } => format!("{value:.2}"),
+        TrackDelay::Samples { value } => value.to_string(),
+    }
+}
+
+/// The delay as assistive technology reads it, unit named.
+fn delay_spoken(delay: TrackDelay) -> String {
+    match delay {
+        TrackDelay::Milliseconds { value } => format!("{value:.2} ms"),
+        TrackDelay::Samples { value } => format!("{value} samples"),
+    }
+}
+
+/// The Status Bar's readout while the Track Delay is dragged.
+fn delay_readout(delay: TrackDelay) -> String {
+    format!("Track Delay: {}", delay_spoken(delay))
+}
+
+/// The delay's unit switch's label.
+fn delay_unit_text(delay: TrackDelay) -> &'static str {
+    match delay {
+        TrackDelay::Milliseconds { .. } => "ms",
+        TrackDelay::Samples { .. } => "smp",
+    }
+}
+
+/// The delay's numeric value, whatever its unit.
+fn delay_number(delay: TrackDelay) -> f64 {
+    match delay {
+        TrackDelay::Milliseconds { value } => value,
+        TrackDelay::Samples { value } => value as f64,
+    }
+}
+
+/// The delay's range, whatever its unit.
+fn delay_range(delay: TrackDelay) -> (f64, f64) {
+    match delay {
+        TrackDelay::Milliseconds { .. } => (-MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_MS),
+        TrackDelay::Samples { .. } => (
+            -MAX_TRACK_DELAY_SAMPLES as f64,
+            MAX_TRACK_DELAY_SAMPLES as f64,
+        ),
+    }
+}
+
+/// The delay a drag of `points` points makes from `start`, in `start`'s unit.
+fn delay_moved(start: TrackDelay, points: f64) -> TrackDelay {
+    match start {
+        TrackDelay::Milliseconds { value } => TrackDelay::Milliseconds {
+            value: (value + points).clamp(-MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_MS),
+        },
+        TrackDelay::Samples { value } => TrackDelay::Samples {
+            value: (value + points.round() as i64)
+                .clamp(-MAX_TRACK_DELAY_SAMPLES, MAX_TRACK_DELAY_SAMPLES),
+        },
+    }
+}
+
+/// The delay `steps` steps of `from`, in `from`'s unit; Shift makes a step
+/// finer.
+fn delay_stepped(from: TrackDelay, steps: i32, fine: bool) -> TrackDelay {
+    match from {
+        TrackDelay::Milliseconds { value } => {
+            let step = if fine { 0.01 } else { 0.1 };
+            TrackDelay::Milliseconds {
+                value: (value + f64::from(steps) * step)
+                    .clamp(-MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_MS),
+            }
+        }
+        TrackDelay::Samples { value } => {
+            let step = if fine { 1 } else { 10 };
+            TrackDelay::Samples {
+                value: (value + i64::from(steps) * step)
+                    .clamp(-MAX_TRACK_DELAY_SAMPLES, MAX_TRACK_DELAY_SAMPLES),
+            }
+        }
+    }
 }
 
 fn digit(key: Key) -> Option<char> {

@@ -3107,6 +3107,41 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "a click on a track's A or B button in the Crossfader section",
             )),
         ),
+        // The Track Options section (WP-5.36): a track's Track Delay, its
+        // ms/samples unit switch, and its Keep Monitoring Latency switch,
+        // and the pan control's Split Stereo Pan Mode controls (C-PAN-001,
+        // C-PAN-002). Live's own keys for them and their place in the
+        // mixers' Tab order aren't observed yet.
+        (
+            "mixer.set_track_delay",
+            Exception(Unobserved(
+                "a drag or typed value in a track's Track Options",
+            )),
+        ),
+        (
+            "mixer.set_pan_mode",
+            Exception(Unobserved(
+                "a choice from the pan control's context menu (C-PAN-001, C-PAN-002)",
+            )),
+        ),
+        (
+            "mixer.set_split_pan_left",
+            Exception(Unobserved(
+                "a drag on a split pan control in Split Stereo Pan Mode",
+            )),
+        ),
+        (
+            "mixer.set_split_pan_right",
+            Exception(Unobserved(
+                "a drag on a split pan control in Split Stereo Pan Mode",
+            )),
+        ),
+        (
+            "mixer.set_keep_monitoring_latency",
+            Exception(Unobserved(
+                "a click on a track's Keep Monitoring Latency switch",
+            )),
+        ),
         // Live's own exception.
         (
             "clip.set_fades",

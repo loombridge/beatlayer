@@ -525,7 +525,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.37 | done | 18 October 2026 | [#152](https://github.com/loombridge/beatlayer/pull/152); a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains beside the audio thread, bit-identical to one thread; 128 tracks with an EQ and a compressor played ten minutes on an M1 Pro without a dropout; exports still render on one thread |
 | 5.38 | todo |  | IMP-15 waits on its acceptance |
 | 5.39 | todo |  |  |
-| 5.40 | todo |  |  |
+| 5.40 | done | 19 October 2026 | [#232](https://github.com/loombridge/beatlayer/pull/232); plug-in Configure Mode, the configured parameter list saved with the device, the panel's eight knobs over the list's first eight entries with the per-plug-in remap, and the temporary chooser entries a parameter moved outside configure mode adds ([the spec](specs/clap-hosting.md) R5) |
 | 5.41 | todo |  | Waits on IMP-20's acceptance |
 | 5.42 | done | 17 October 2026 | [#103](https://github.com/loombridge/beatlayer/pull/103); the effects LFO, envelope follower and seeded randomness every effect device shares, the Show Options menu items and expand toggle (`device.expand`), with Delay moved onto the shared LFO; [the spec](specs/device-framework.md) |
 | 5.43 | done | 17 October 2026 | [#117](https://github.com/loombridge/beatlayer/pull/117); devices publish display data after each block through a lock-free triple buffer, `device.display` reads it with Compressor's views as view state, and EQ Eight's spectrum, curves and band dots and Compressor's gain reduction meter and views are drawn in their cells; [the spec](specs/device-framework.md) |

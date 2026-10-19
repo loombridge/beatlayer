@@ -1,6 +1,6 @@
-//! Warped clips' playback (WP-4.2, the warping spec R12 to R19 and the warp
-//! modes spec R1 to R13): which file frame a warped clip plays at each song
-//! frame, and the reading of the file that follows.
+//! Warped clips' playback (WP-4.2, WP-4.4, the warping spec R12 to R19 and the
+//! warp modes spec R1 to R19): which file frame a warped clip plays at each
+//! song frame, and the reading of the file that follows.
 //!
 //! The compiler works out, off the audio thread, a [`WarpTable`] from song
 //! frames to file positions for each warped Arrangement clip: its warp map
@@ -11,15 +11,27 @@
 //! for: it follows the tempo map from its launch frame, frame by frame
 //! ([`Positions::Launched`]).
 //!
+//! A Beats clip's table is its [`Plan`] instead (R14 to R17): the segments the
+//! clip plays, each started on its song frame and read at the clip's pitch
+//! ratio, with the loop modes filling a short one. The plan is made with the
+//! clip list, off the audio thread, and the player reads its stretches.
+//!
 //! The player reads, for each run of frames over which the position advances
 //! smoothly, a window of the file around the run, and a warp mode turns the
 //! positions and the window into audio. The position at a frame depends on
 //! that frame alone, so a render is the same at any block size.
 
+use std::sync::Arc;
+
 use bl_core::time::{SampleRate, TempoMap, Ticks};
+use bl_media::SampleData;
 use bl_media::stream::{AudioSource, PlanarMut, Transition};
-use bl_model::{AudioData, Clip};
-use bl_stretch::{Interpolation, Piece, RePitch, Request, WarpMap, WarpMode, WarpTable, Window};
+use bl_model::WarpMode as ClipWarpMode;
+use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
+use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
+use bl_stretch::{
+    Beats, Interpolation, Piece, RePitch, Request, WarpMap, WarpMode, WarpTable, Window,
+};
 
 use crate::clip_source::WINDOW_FRAMES;
 
@@ -31,10 +43,30 @@ pub(crate) const CUE_BACK: u64 = 264;
 /// would otherwise be a table without end): past it the clip is silent.
 const MAX_RUNS: usize = 1 << 20;
 
+/// The most passes a Beats plan holds: past it the clip plays silence, since
+/// a plan of a million segments is not worth the memory.
+const MAX_SEGMENT_RUNS: usize = 4_096;
+
 /// How far, in file frames, a table's straight pieces may stray from the
 /// exact position at their middles, where a smooth curve strays most (the
 /// warping spec, R12 allows a hundredth of a frame).
 const TOLERANCE: f64 = 0.005;
+
+/// The clip's pitch ratio (the warp modes spec, R25): 1 until WP-4.7 wires
+/// Transpose and Detune. A Beats clip's segments read at this ratio (R14,
+/// R17).
+const PITCH: f64 = 1.0;
+
+/// How long a mode change takes to crossfade into the new one, in seconds
+/// (R8, Beatlayer's own).
+const CHANGE_SECONDS: f64 = 0.020;
+
+/// How a warped clip is played: its mode, its HiQ switch and its pitch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Playing {
+    pub(crate) mode: ClipWarpMode,
+    pub(crate) high_quality: bool,
+}
 
 /// A warped clip's contents, in beats of the clip: where it starts, ends and
 /// loops, and the map from a beat to the file.
@@ -87,6 +119,19 @@ pub(crate) struct Warped {
     /// The Arrangement clip's table; empty for a Session slot clip, and for
     /// a clip placed before its file's length is known.
     table: WarpTable,
+    /// A Beats clip's segments (R14 to R17); empty in every other mode.
+    plan: Arc<Plan>,
+}
+
+/// What a Beats plan needs of the clip's media: the file's transients and,
+/// where the loop turns must be found, its audio.
+pub(crate) struct BeatsMedia<'a> {
+    /// The clip's transients in seconds into its file, its own edits applied
+    /// (the warping spec, R23).
+    pub(crate) transients: &'a [f64],
+    /// The clip's file at the engine's rate, called only when a segment needs
+    /// its turn: the media library's own decode, cached.
+    pub(crate) samples: &'a dyn Fn() -> Option<Arc<SampleData>>,
 }
 
 impl Warped {
@@ -100,6 +145,7 @@ impl Warped {
         rate: SampleRate,
         length: Option<u64>,
         tabulate: bool,
+        media: &BeatsMedia<'_>,
     ) -> Option<Self> {
         let map = audio.warp_map().ok()?;
         let r = rate.as_f64();
@@ -117,14 +163,29 @@ impl Warped {
             loop_start: audio.loop_start,
             loop_end,
         };
+        let plan = if audio.warp_mode == ClipWarpMode::Beats {
+            Arc::new(contents.plan(clip, tempo, r, audio.warp_settings.beats, media))
+        } else {
+            Arc::new(Plan::default())
+        };
         let mut warped = Self {
             contents,
             table: WarpTable::new(Vec::new()),
+            plan,
         };
         if tabulate {
-            warped.table = warped.tabulate(clip, tempo, r);
+            warped.table = if warped.plan.is_empty() {
+                warped.tabulate(clip, tempo, r)
+            } else {
+                warped.beats_table(clip, tempo, r)
+            };
         }
         Some(warped)
+    }
+
+    /// A Beats clip's plan (R14, R15).
+    pub(crate) fn plan(&self) -> &Plan {
+        &self.plan
     }
 
     /// Where an Arrangement clip reads: its table.
@@ -172,6 +233,52 @@ impl Warped {
             .position(self.contents.loop_start)
             .round()
             .max(0.0) as u64
+    }
+
+    /// How many file frames a Beats clip's loop reads back into, at most: the
+    /// longest stretch from a segment's turn to its end (R15), or a window
+    /// where it holds none, so a read that overlaps is always served.
+    pub(crate) fn history_frames(&self) -> usize {
+        if self.plan.is_empty() {
+            return 0;
+        }
+        let longest = self
+            .plan
+            .segments()
+            .iter()
+            .filter(|segment| segment.end > segment.turn)
+            .map(|segment| segment.end - segment.turn)
+            .fold(0.0_f64, f64::max);
+        (longest.ceil() as usize).max(WINDOW_FRAMES)
+    }
+
+    /// The table of a Beats clip: its plan's stretches (R14 to R17).
+    fn beats_table(&self, clip: &Clip, tempo: &TempoMap, r: f64) -> WarpTable {
+        let mut pieces: Vec<Piece> = self
+            .plan
+            .stretches(PITCH)
+            .into_iter()
+            .map(|stretch| Piece {
+                frame: stretch.frame,
+                position: stretch.position,
+                slope: stretch.slope,
+            })
+            .collect();
+        // Past the last segment the clip plays on in silence, where its own
+        // length runs longer than the plan (a plan stops where the audio
+        // does).
+        let end = r * tempo.ticks_to_seconds(Ticks(clip.end().get()));
+        if let Some(last) = self.plan.segments().last()
+            && (last.until as f64) < end
+            && pieces.last().is_some_and(|piece| !piece.is_silent())
+        {
+            pieces.push(Piece {
+                frame: last.until as f64,
+                position: f64::NAN,
+                slope: 1.0,
+            });
+        }
+        WarpTable::new(pieces)
     }
 
     /// The table of `clip`: each pass through its contents, from the Start
@@ -327,6 +434,183 @@ impl Warped {
     }
 }
 
+impl Contents {
+    /// The plan of a Beats clip (R14 to R17): a segment at the clip's Start
+    /// marker, at each warp marker and at each of the file's transients, or
+    /// at each line of the clip's beats under a grid, over every pass through
+    /// its contents.
+    fn plan(
+        &self,
+        clip: &Clip,
+        tempo: &TempoMap,
+        rate: f64,
+        settings: BeatsSettings,
+        media: &BeatsMedia<'_>,
+    ) -> Plan {
+        let preserve = match settings.preserve {
+            ClipPreserve::Transients => Preserve::Transients,
+            ClipPreserve::Bar => Preserve::Grid {
+                division: beats::grid(4.0),
+            },
+            ClipPreserve::Half => Preserve::Grid {
+                division: beats::grid(2.0),
+            },
+            ClipPreserve::Quarter => Preserve::Grid {
+                division: beats::grid(1.0),
+            },
+            ClipPreserve::Eighth => Preserve::Grid {
+                division: beats::grid(0.5),
+            },
+            ClipPreserve::Sixteenth => Preserve::Grid {
+                division: beats::grid(0.25),
+            },
+            ClipPreserve::ThirtySecond => Preserve::Grid {
+                division: beats::grid(0.125),
+            },
+        };
+        let loop_mode = match settings.transient_loop_mode {
+            TransientLoopMode::LoopOff => Loop::Off,
+            TransientLoopMode::LoopForward => Loop::Forward,
+            TransientLoopMode::LoopBackAndForth => Loop::BackAndForth,
+        };
+        let frame_of = |tick: i64| rate * tempo.ticks_to_seconds(Ticks(tick));
+        let end = clip.end().get();
+        let mut segments: Vec<Segment> = Vec::new();
+        let mut tick = clip.start.get();
+        let mut beat = self.start;
+        if self.looping {
+            let length = self.loop_end - self.loop_start;
+            if length <= 0.0 {
+                return Plan::new(Vec::new(), loop_mode, settings.transient_envelope, rate);
+            }
+            if beat >= self.loop_end {
+                beat = self.loop_start + (beat - self.loop_end).rem_euclid(length);
+            }
+        }
+        for pass in 0..=MAX_SEGMENT_RUNS {
+            if tick >= end || pass == MAX_SEGMENT_RUNS {
+                break;
+            }
+            let room = if self.looping {
+                self.loop_end - beat
+            } else {
+                self.end.map_or(f64::INFINITY, |stop| stop - beat)
+            };
+            if room <= 0.0 {
+                break;
+            }
+            let reaches = tick as f64 + room;
+            let stop = if reaches >= end as f64 {
+                end
+            } else {
+                reaches.round() as i64
+            };
+            self.pass_segments(
+                &mut segments,
+                (tick, stop),
+                beat,
+                preserve,
+                media.transients,
+                &frame_of,
+            );
+            if stop >= end {
+                break;
+            }
+            if self.looping {
+                tick = stop;
+                beat = self.loop_start;
+            } else {
+                break;
+            }
+        }
+        // Fill in `until` and the turns: the segments tile the clip's passes,
+        // so each one ends where the next begins.
+        for i in 0..segments.len() {
+            let until = segments
+                .get(i + 1)
+                .map_or_else(|| frame_of(end).round() as i64, |next| next.frame);
+            segments[i].until = until;
+        }
+        let needs_fill = loop_mode != Loop::Off
+            && segments.iter().any(|segment| {
+                segment.end > segment.position
+                    && segment.end - segment.position < (segment.until - segment.frame) as f64
+            });
+        if needs_fill && let Some(samples) = (media.samples)() {
+            let channels: Vec<&[f32]> = samples.channels().collect();
+            for segment in &mut segments {
+                segment.turn = segment_turn(segment, &channels, samples.frames());
+            }
+        }
+        Plan::new(segments, loop_mode, settings.transient_envelope, rate)
+    }
+
+    /// Adds the segments of one pass through the contents, over song ticks
+    /// `from..to`, the first of which plays `beat` (R14).
+    fn pass_segments(
+        &self,
+        segments: &mut Vec<Segment>,
+        (from, to): (i64, i64),
+        beat: f64,
+        preserve: Preserve,
+        transients: &[f64],
+        frame_of: &dyn Fn(i64) -> f64,
+    ) {
+        let ticks = (to - from) as f64;
+        if ticks <= 0.0 {
+            return;
+        }
+        let mut beats = vec![beat];
+        match preserve {
+            Preserve::Transients => {
+                beats.extend(self.map.markers().iter().map(|marker| marker.beat as f64));
+                beats.extend(transients.iter().map(|time| self.map.time_to_beat(*time)));
+            }
+            Preserve::Grid { division } => {
+                beats.extend(beats::grid_lines(beat, ticks, division));
+            }
+        }
+        let mut lines: Vec<i64> = beats
+            .into_iter()
+            .filter(|b| b.is_finite() && *b >= beat && *b < beat + ticks)
+            .map(|b| from + (b - beat).round() as i64)
+            .filter(|tick| (from..to).contains(tick))
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        lines.push(to);
+        for pair in lines.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let position = self.position(beat + (a - from) as f64);
+            let end = self.position(beat + (b - from) as f64);
+            segments.push(Segment {
+                frame: frame_of(a).round() as i64,
+                until: frame_of(b).round() as i64,
+                position,
+                end,
+                turn: position + (end - position) / 2.0,
+            });
+        }
+    }
+}
+
+/// The file frame a segment's loop turns at (R15): the zero crossing of the
+/// channels' sum nearest its middle, or the middle where the file isn't at
+/// hand or the segment holds none.
+fn segment_turn(segment: &Segment, channels: &[&[f32]], frames: usize) -> f64 {
+    let middle = segment.position + (segment.end - segment.position) / 2.0;
+    if channels.is_empty() || segment.end <= segment.position {
+        return middle;
+    }
+    let from = segment.position.ceil().max(0.0) as usize;
+    let to = (segment.end.floor().max(0.0) as usize).min(frames);
+    if to <= from {
+        return middle;
+    }
+    let turn = beats::turn(channels, from, to) as f64;
+    turn.clamp(segment.position, segment.end)
+}
+
 /// Where a run of frames reads.
 pub(crate) enum Positions<'a> {
     /// An Arrangement clip's table.
@@ -428,6 +712,147 @@ impl Positions<'_> {
     }
 }
 
+/// What a clip has read of its file, kept so a Beats loop mode can read back
+/// into it without another read of the source (the warp modes spec, R15).
+///
+/// A ring of powers of two frames, holding the last frames read: a read the
+/// ring covers is served from memory, and the rest is read from the source
+/// and kept. A read behind what it holds, which is what the loop modes do, is
+/// therefore served without touching the disk.
+pub(crate) struct History {
+    channels: usize,
+    /// Frames per channel, a power of two.
+    capacity: usize,
+    mask: usize,
+    data: Vec<f32>,
+    /// How many frames have been kept: the frame numbers held are the ones
+    /// before it, `written - held..written`.
+    written: u64,
+    /// How many frames are held, at most the capacity.
+    held: usize,
+}
+
+impl History {
+    /// A history of `channels` channels holding `frames` frames at most, as
+    /// it rounds up to a power of two.
+    pub(crate) fn new(channels: usize, frames: usize) -> Self {
+        let capacity = frames.max(1).next_power_of_two();
+        Self {
+            channels,
+            capacity,
+            mask: capacity - 1,
+            data: vec![0.0; channels * capacity],
+            written: 0,
+            held: 0,
+        }
+    }
+
+    /// How many frames it holds at most.
+    pub(crate) fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// The frame numbers it holds: what a read inside them is served from
+    /// memory.
+    fn held(&self) -> std::ops::Range<u64> {
+        self.written.saturating_sub(self.held as u64)..self.written
+    }
+
+    /// Fills `out` (planar, `channels` channels `stride` apart) with the file
+    /// frames `from..from + len`, from what it holds and from `source`.
+    pub(crate) fn read(
+        &mut self,
+        source: &mut dyn AudioSource,
+        from: i64,
+        len: usize,
+        channels: usize,
+        stride: usize,
+        out: &mut [f32],
+    ) {
+        let start = from.max(0) as u64;
+        let end = start + len as u64;
+        if !self.held().contains(&start) && start != self.written {
+            // The read begins outside what it holds (a locate, or a loop's
+            // read back past it): what it held is no use, and the whole read
+            // comes from the source.
+            self.written = start;
+            self.held = 0;
+        }
+        let held = self.held();
+        let covered = start.max(held.start)..end.min(held.end);
+        if covered.end > covered.start {
+            let mut at = (covered.start - start) as usize;
+            let mut frame = covered.start;
+            let mut left = (covered.end - covered.start) as usize;
+            while left > 0 {
+                let index = (frame & self.mask as u64) as usize;
+                let run = left.min(self.capacity - index);
+                for c in 0..self.channels.min(channels) {
+                    let ring = &self.data[c * self.capacity..(c + 1) * self.capacity];
+                    out[c * stride + at..c * stride + at + run]
+                        .copy_from_slice(&ring[index..index + run]);
+                }
+                at += run;
+                frame += run as u64;
+                left -= run;
+            }
+        }
+        let missing = held.end..end;
+        if missing.end <= missing.start {
+            return;
+        }
+        let at = (missing.start - start) as usize;
+        let n = (missing.end - missing.start) as usize;
+        let mut view = PlanarMut::new(&mut out[at..], channels, n, stride);
+        source.read(missing.start, &mut view, Transition::Cut);
+        // The frames read are kept, for a loop mode's read back (R15).
+        self.push(n, &view);
+    }
+
+    /// Keeps `n` frames just read, given by `view`.
+    fn push(&mut self, frames: usize, view: &PlanarMut<'_>) {
+        let keep = frames.min(self.capacity);
+        let mut at = (self.written & self.mask as u64) as usize;
+        let mut left = keep;
+        let mut from = frames - keep;
+        while left > 0 {
+            let run = left.min(self.capacity - at);
+            for c in 0..self.channels.min(view.channels()) {
+                let ring = &mut self.data[c * self.capacity..(c + 1) * self.capacity];
+                ring[at..at + run].copy_from_slice(&view.channel(c)[from..from + run]);
+            }
+            at = (at + run) & self.mask;
+            from += run;
+            left -= run;
+        }
+        self.written += keep as u64;
+        self.held = (self.held + keep).min(self.capacity);
+    }
+}
+
+/// The plan a mode that isn't Beats is given: no segment at all.
+static EMPTY_PLAN: Plan = Plan::EMPTY;
+
+/// A list's loop read-back rooms, one per clip, in the list's order (R15).
+pub(crate) type Histories = Box<[Option<Box<History>>]>;
+
+/// What a clip was playing before a mode change, made with the new clip list
+/// so the change can crossfade from it (R8).
+pub(crate) struct Past {
+    pub(crate) playing: Playing,
+    pub(crate) warped: Arc<Warped>,
+}
+
+/// A mode change crossfading into the new one over 20 ms (R8): the clip it is
+/// for and how far the fade has come. It owns nothing, so nothing of it is
+/// freed on the audio thread.
+#[derive(Clone, Copy)]
+pub(crate) struct Changing {
+    pub(crate) clip: bl_model::ClipId,
+    /// The fade's progress, 0 to 1, a frame at a time.
+    pub(crate) fade: crate::mixer::Ramp,
+}
+
 /// The player's room for warped playback: the positions of a run, the window
 /// of the file around them, and what the mode rendered, all planar and made
 /// when the player was.
@@ -437,12 +862,21 @@ pub(crate) struct WarpScratch {
     positions: Vec<f64>,
     window: Vec<f32>,
     rendered: Vec<f32>,
-    /// Every mode renders through Re-Pitch until its package builds it.
-    mode: RePitch,
+    /// The mode that was playing before a change, crossfaded in (R8).
+    previous: Option<Changing>,
+    /// How many frames a mode change's crossfade takes: 20 ms at the
+    /// engine's rate (R8).
+    change_frames: u32,
+    /// What the previous mode rendered, blended into [`rendered`](Self::rendered).
+    rendered_previous: Vec<f32>,
+    /// Every mode renders through Re-Pitch until its package builds it; Beats
+    /// is WP-4.4's.
+    repitch: RePitch,
+    beats: Beats,
 }
 
 impl WarpScratch {
-    pub(crate) fn new(channels: usize, max_frames: usize) -> Self {
+    pub(crate) fn new(channels: usize, max_frames: usize, rate: SampleRate) -> Self {
         Interpolation::warm();
         Self {
             channels,
@@ -450,8 +884,27 @@ impl WarpScratch {
             positions: vec![0.0; max_frames],
             window: vec![0.0; channels * WINDOW_FRAMES],
             rendered: vec![0.0; channels * max_frames],
-            mode: RePitch,
+            previous: None,
+            change_frames: (CHANGE_SECONDS * rate.as_f64()).round() as u32,
+            rendered_previous: vec![0.0; channels * max_frames],
+            repitch: RePitch,
+            beats: Beats,
         }
+    }
+
+    /// Begins crossfading a clip's new mode in from the one it was playing
+    /// (R8), from the block the new list arrived in. A second change within
+    /// the fade replaces the first.
+    pub(crate) fn change(&mut self, clip: bl_model::ClipId) {
+        let mut fade = crate::mixer::Ramp::at(0.0);
+        fade.toward(1.0, self.change_frames.max(1));
+        self.previous = Some(Changing { clip, fade });
+    }
+
+    /// Forgets the crossfade a new list brings, so the next clip's change
+    /// starts a fresh one.
+    pub(crate) fn forget_change(&mut self) {
+        self.previous = None;
     }
 
     /// Channel `c` of the frames the last [`render`](Self::render) made.
@@ -463,13 +916,107 @@ impl WarpScratch {
     /// how many it covered, and whether they hold sound (if not, nothing was
     /// rendered). Starts the mode afresh when the clip starts or jumps is
     /// the caller's business ([`WarpMode::reset`]).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render(
+        &mut self,
+        clip: bl_model::ClipId,
+        source: &mut dyn AudioSource,
+        positions: &Positions<'_>,
+        launched: Option<i64>,
+        first: i64,
+        want: usize,
+        playing: Playing,
+        plan: Option<&Plan>,
+        past: Option<&Past>,
+        history: Option<&mut History>,
+    ) -> (usize, bool) {
+        // Spec: warp-modes R8. A clip the new list says was playing something
+        // else crossfades from it, from this block's first frame.
+        if past.is_some()
+            && self
+                .previous
+                .as_ref()
+                .is_none_or(|previous| previous.clip != clip)
+        {
+            self.change(clip);
+        }
+        let mut fade = self
+            .previous
+            .as_ref()
+            .filter(|previous| previous.clip == clip)
+            .map(|previous| previous.fade);
+        let (n, sound) = self.paint(
+            source,
+            positions,
+            first,
+            want,
+            playing,
+            plan,
+            history,
+            Out::New,
+        );
+        let (Some(mut fade), Some(past)) = (fade.take(), past) else {
+            return (n, sound);
+        };
+        if !sound || fade.is_settled() {
+            return (n, sound);
+        }
+        let old_positions = match launched {
+            Some(launch) => past
+                .warped
+                .launched(positions.tempo(), launch, positions.rate()),
+            None => past.warped.positions(),
+        };
+        let (old_n, old_sound) = self.paint(
+            source,
+            &old_positions,
+            first,
+            n,
+            past.playing,
+            launched.is_none().then(|| past.warped.plan()),
+            None,
+            Out::Previous,
+        );
+        let channels = self.channels;
+        let max_frames = self.max_frames;
+        if old_sound {
+            // A frame at a time, whatever the block size (R6).
+            let blend = old_n.min(n);
+            for i in 0..blend {
+                let now = fade.next();
+                for c in 0..channels {
+                    let at = c * max_frames + i;
+                    let was = f64::from(self.rendered_previous[at]);
+                    self.rendered[at] =
+                        (was * (1.0 - now) + f64::from(self.rendered[at]) * now) as f32;
+                }
+            }
+        }
+        // Whatever the old mode didn't cover goes on at the new mode's own
+        // level.
+        for _ in 0..(n - old_n.min(n)) {
+            fade.next();
+        }
+        if let Some(previous) = self.previous.as_mut()
+            && previous.clip == clip
+        {
+            previous.fade = fade;
+        }
+        (n, true)
+    }
+
+    /// Renders one mode's frames of the run, into the output `out` names.
+    #[allow(clippy::too_many_arguments)]
+    fn paint(
         &mut self,
         source: &mut dyn AudioSource,
         positions: &Positions<'_>,
         first: i64,
         want: usize,
-        high_quality: bool,
+        playing: Playing,
+        plan: Option<&Plan>,
+        history: Option<&mut History>,
+        out: Out,
     ) -> (usize, bool) {
         let want = want.min(self.max_frames);
         let fill = positions.fill(first, &mut self.positions[..want]);
@@ -482,26 +1029,47 @@ impl WarpScratch {
             positions: all,
             window,
             rendered,
-            mode,
+            rendered_previous,
+            repitch,
+            beats,
+            ..
         } = self;
+        let rendered = match out {
+            Out::New => rendered,
+            Out::Previous => rendered_previous,
+        };
         let mut n = fill.frames;
+        let mode: &mut dyn WarpMode = match playing.mode {
+            ClipWarpMode::Beats => beats,
+            _ => repitch,
+        };
+        let plan = plan.unwrap_or(&EMPTY_PLAN);
         let (request, lo, len) = loop {
             let run = &all[..n];
             let request = Request {
                 positions: run,
+                first,
                 speed: fill.speed,
                 neutral: fill.neutral,
-                high_quality,
+                high_quality: playing.high_quality,
+                beats: plan,
             };
             let (before, after) = mode.reach(&request);
-            let (lo, hi) = if fill.neutral {
-                (run[0].round() as i64, run[n - 1].round() as i64 + 1)
-            } else {
-                (
-                    run[0].floor() as i64 - before as i64,
-                    run[n - 1].floor() as i64 + after as i64 + 1,
-                )
-            };
+            // The window holds every position the run reads, whichever way it
+            // runs: a Back-and-Forth pass reads backwards, so the run's first
+            // and last frames don't bound it.
+            let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+            for &position in run {
+                if fill.neutral {
+                    let frame = position.round() as i64;
+                    lo = lo.min(frame);
+                    hi = hi.max(frame + 1);
+                } else {
+                    let floor = position.floor() as i64;
+                    lo = lo.min(floor - before as i64);
+                    hi = hi.max(floor + after as i64 + 1);
+                }
+            }
             let len = usize::try_from(hi - lo).unwrap_or(usize::MAX);
             if len <= WINDOW_FRAMES {
                 break (request, lo, len);
@@ -513,7 +1081,7 @@ impl WarpScratch {
             }
             n = (n / 2).max(1);
         };
-        load(window, *channels, source, lo, len);
+        load(window, *channels, source, lo, len, history);
         let view = Window {
             data: window,
             stride: WINDOW_FRAMES,
@@ -526,17 +1094,62 @@ impl WarpScratch {
     }
 }
 
+/// Which of the scratch's outputs a render writes.
+#[derive(Clone, Copy)]
+enum Out {
+    New,
+    Previous,
+}
+
+impl Positions<'_> {
+    /// The tempo map a launched clip follows; empty for a table.
+    fn tempo(&self) -> &TempoMap {
+        match self {
+            Self::Table(_) => unreachable!("a table has no tempo map"),
+            Self::Launched { tempo, .. } => tempo,
+        }
+    }
+
+    /// The rate a launched clip reads at.
+    fn rate(&self) -> f64 {
+        match self {
+            Self::Table(_) => unreachable!("a table has no rate"),
+            Self::Launched { rate, .. } => *rate,
+        }
+    }
+}
+
 /// Reads file frames `lo..lo + len` into the planar `window`, silence where
-/// they fall before the file; a mono file plays on every channel.
-fn load(window: &mut [f32], channels: usize, source: &mut dyn AudioSource, lo: i64, len: usize) {
+/// they fall before the file; a mono file plays on every channel. A `history`
+/// serves what it holds and keeps what it reads (R15).
+fn load(
+    window: &mut [f32],
+    channels: usize,
+    source: &mut dyn AudioSource,
+    lo: i64,
+    len: usize,
+    history: Option<&mut History>,
+) {
     let skip = usize::try_from(-lo).map_or(0, |before| before.min(len));
     for c in 0..channels {
         window[c * WINDOW_FRAMES..c * WINDOW_FRAMES + skip].fill(0.0);
     }
     let read = len - skip;
     if read > 0 {
-        let mut view = PlanarMut::new(&mut window[skip..], channels, read, WINDOW_FRAMES);
-        source.read(lo.max(0) as u64, &mut view, Transition::Cut);
+        match history {
+            Some(history) => history.read(
+                source,
+                lo.max(0),
+                read,
+                channels,
+                WINDOW_FRAMES,
+                &mut window[skip..],
+            ),
+            None => {
+                let mut view = PlanarMut::new(&mut window[skip..], channels, read, WINDOW_FRAMES);
+                source.read(lo.max(0) as u64, &mut view, Transition::Cut);
+            }
+        }
     }
     let source_channels = source.channels().clamp(1, channels);
     for c in source_channels..channels {
@@ -553,6 +1166,39 @@ mod tests {
 
     use super::*;
 
+    /// What a Beats clip's plan asks of the media: nothing in these tests.
+    fn media() -> BeatsMedia<'static> {
+        BeatsMedia {
+            transients: &[],
+            samples: &|| None,
+        }
+    }
+
+    // Spec: warp-modes R15. A loop's read back, behind what the history
+    // holds or overlapping its start, plays the file's own frames.
+    #[test]
+    fn a_history_serves_reads_behind_what_it_holds() {
+        let ramp: Vec<f32> = (0..256).map(|i| i as f32).collect();
+        let data = Arc::new(SampleData::new(48_000, vec![ramp]).unwrap());
+        let mut source = bl_media::stream::MemorySource::new(data);
+        let mut history = History::new(1, 8);
+        let mut out = vec![0.0_f32; 8];
+        let mut read = |history: &mut History, from: i64, len: usize| {
+            history.read(&mut source, from, len, 1, 8, &mut out);
+            out[..len].to_vec()
+        };
+        assert_eq!(read(&mut history, 100, 4), [100.0, 101.0, 102.0, 103.0]);
+        // Backwards, wholly before what it holds (a Back-and-Forth pass).
+        assert_eq!(read(&mut history, 96, 4), [96.0, 97.0, 98.0, 99.0]);
+        // Overlapping its start (a Forward loop's turn).
+        assert_eq!(
+            read(&mut history, 94, 6),
+            [94.0, 95.0, 96.0, 97.0, 98.0, 99.0]
+        );
+        // Overlapping its end, the rest read on.
+        assert_eq!(read(&mut history, 98, 5), [98.0, 99.0, 100.0, 101.0, 102.0]);
+    }
+
     fn clip(audio: &AudioData, start: Ticks, length: Ticks) -> Clip {
         Clip::new(
             ClipId(bl_core::id::Id::new(1).unwrap()),
@@ -562,11 +1208,14 @@ mod tests {
         )
     }
 
+    /// A four-beat loop, one second a beat at 60 BPM, warped at `bpm` from
+    /// the file's start. It plays through Re-Pitch, whose table follows the
+    /// warp map frame for frame; a Beats clip's table is its plan's segments
+    /// instead, which these tests don't cover.
     fn loop_at(bpm: f64) -> AudioData {
-        // A four-beat loop, one second a beat at 60 BPM, warped at `bpm`
-        // from the file's start.
         AudioData {
             warp: true,
+            warp_mode: bl_model::WarpMode::RePitch,
             warp_markers: vec![WarpMarker {
                 time: 0.0,
                 beat: Ticks::ZERO,
@@ -585,11 +1234,11 @@ mod tests {
         let c = clip(&audio, Ticks::ZERO, Ticks::WHOLE * 4);
         let slow = TempoMap::constant(Bpm::new(60.0).unwrap());
         let fast = TempoMap::constant(Bpm::new(120.0).unwrap());
-        let on = Warped::new(&c, &audio, &slow, rate, Some(480_000), true).unwrap();
+        let on = Warped::new(&c, &audio, &slow, rate, Some(480_000), true, &media()).unwrap();
         assert_eq!(on.table.pieces().len(), 1);
         assert_eq!(on.table.pieces()[0].slope, 1.0);
         assert_eq!(on.table.position_at(1_000), 1_000.0);
-        let twice = Warped::new(&c, &audio, &fast, rate, Some(480_000), true).unwrap();
+        let twice = Warped::new(&c, &audio, &fast, rate, Some(480_000), true, &media()).unwrap();
         assert!((twice.table.pieces()[0].slope - 2.0).abs() < 1e-12);
         assert!((twice.table.position_at(24_000) - 48_000.0).abs() < 1e-6);
     }
@@ -606,7 +1255,8 @@ mod tests {
             (Ticks::WHOLE * 6, Bpm::new(180.0).unwrap()),
         ])
         .unwrap();
-        let warped = Warped::new(&c, &audio, &tempo, rate, Some(48_000 * 60), true).unwrap();
+        let warped =
+            Warped::new(&c, &audio, &tempo, rate, Some(48_000 * 60), true, &media()).unwrap();
         assert!(warped.table.pieces().len() > 4, "a ramp takes many pieces");
         let r = 48_000.0;
         let start = tempo.ticks_to_frames(c.start, rate).get();
@@ -634,7 +1284,7 @@ mod tests {
         };
         let c = clip(&audio, Ticks::ZERO, Ticks::WHOLE * 2);
         let tempo = TempoMap::constant(Bpm::new(60.0).unwrap());
-        let warped = Warped::new(&c, &audio, &tempo, rate, Some(480_000), true).unwrap();
+        let warped = Warped::new(&c, &audio, &tempo, rate, Some(480_000), true, &media()).unwrap();
         // Two beats at 60 BPM are two seconds: the file position goes back
         // to 0 on frame 96,000.
         assert_eq!(warped.table.position_at(95_999), 95_999.0);

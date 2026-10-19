@@ -26,6 +26,9 @@
 //!   files ahead of the playhead, and an [`AudioSource`] ([`StreamSource`]
 //!   or [`MemorySource`]) is what a clip player reads on the audio thread.
 //!
+//! A header that declares more than [`limits`] allows is refused before
+//! anything is allocated for it.
+//!
 //! Decoding reads files and allocates, so it never runs on an audio thread.
 //! The engine receives `Arc<SampleData>`, which it reads without locks, or
 //! an [`AudioSource`], whose reads are real-time safe.
@@ -35,6 +38,7 @@ pub mod edits;
 pub mod encode;
 mod error;
 mod hash;
+pub mod limits;
 mod mp4;
 pub mod peaks;
 mod progressive;

@@ -81,7 +81,7 @@ pub(crate) fn read_trim(reader: &mut (impl Read + Seek)) -> Option<RecordedTrim>
 fn find_moov(reader: &mut (impl Read + Seek)) -> Option<Vec<u8>> {
     let end = reader.seek(SeekFrom::End(0)).ok()?;
     let mut position = 0u64;
-    while position + 8 <= end {
+    while end.saturating_sub(position) >= 8 {
         reader.seek(SeekFrom::Start(position)).ok()?;
         let mut header = [0; 16];
         reader.read_exact(&mut header[..8]).ok()?;

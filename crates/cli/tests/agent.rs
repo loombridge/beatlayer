@@ -3734,6 +3734,100 @@ fn an_agent_edits_warp_markers_as_the_sample_editor_does() {
     assert!(from > 0.0 && (to - 3.0 * from).abs() < 2.0, "{view:?}");
 }
 
+/// Warping R49, R50 (WP-4.12): an agent quantises a warped clip's transients
+/// by command ID, one undo step, and reads the markers back in the query
+/// tool's `clip`; 0 percent changes nothing and records no step.
+#[test]
+fn an_agent_quantises_a_warped_clip_by_command_id() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Loop"}, "kind": "audio", "name": "Loop", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Loop")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Break"}, "name": "Break", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "audio": { "media": "ab".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let markers = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            ["warp_markers"]["items"]
+            .clone()
+    };
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    // Two late hits at 120 BPM, quantised at 100 percent onto the sixteenths
+    // they are nearest (0.5 s and 1 s), in one undo step.
+    let before = steps(&mut client);
+    run(
+        &mut client,
+        "clip.quantize_audio",
+        json!({ "clip": clip, "amount": 100, "grid": Ticks::SIXTEENTH.get(),
+                "transients": [0.52, 1.03] }),
+    );
+    assert_eq!(steps(&mut client), before + 1);
+    assert_eq!(
+        markers(&mut client),
+        json!([
+            { "time": 0.0, "beat": 0 },
+            { "time": 0.52, "beat": 4 * Ticks::SIXTEENTH.get() },
+            { "time": 1.03, "beat": 8 * Ticks::SIXTEENTH.get() },
+        ])
+    );
+    // 0 percent changes nothing and records no step.
+    run(
+        &mut client,
+        "clip.quantize_audio",
+        json!({ "clip": clip, "amount": 0, "grid": Ticks::SIXTEENTH.get(),
+                "transients": [0.52, 1.03] }),
+    );
+    assert_eq!(markers(&mut client).as_array().unwrap().len(), 3);
+    assert_eq!(steps(&mut client), before + 1);
+}
+
 /// Warping R29 to R41 (WP-4.9): an agent drops a generated 40-second track
 /// at 128 BPM, reads the warp settings, auto-warps it from its first click,
 /// fixes its downbeat, and warps a loop, every command run by ID, one undo

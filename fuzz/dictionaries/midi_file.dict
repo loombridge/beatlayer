@@ -1,0 +1,12 @@
+# Chunk names and meta events for the midi_file target.
+"MThd"
+"MTrk"
+"\x00\x00\x00\x06"
+"\x00\x01"
+"\x00\x60"
+"\xff\x2f\x00"
+"\xff\x51\x03"
+"\xff\x58\x04"
+"\xff\x03"
+"\x90"
+"\x80"

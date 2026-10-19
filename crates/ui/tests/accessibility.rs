@@ -2301,16 +2301,6 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // `note.move` has its own path now: the note-selection keys
         // transpose the selected notes (S-A11Y-008, S-A11Y-009).
         ("note.resize", Exception(note_editor)),
-        // The Quantize settings are the Quantize Settings dialog's values
-        // (M-EDIT-036, Cmd-Shift-U): its controls aren't recorded yet, so
-        // the menu item shows disabled and agents reach the command until
-        // the dialog is built (the piano-roll spec, part 3).
-        (
-            "clip_view.quantize_settings",
-            Exception(LaterView(
-                "the Quantize Settings dialog (M-EDIT-036, milestone M2)",
-            )),
-        ),
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),

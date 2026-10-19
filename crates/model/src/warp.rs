@@ -193,11 +193,7 @@ impl AudioData {
 
     /// The clip with the same markers replaced by `markers` and its tempo by
     /// `tempo`, if they make a map (increasing order, a tempo in range).
-    pub(crate) fn with_map(
-        &self,
-        markers: Vec<WarpMarker>,
-        tempo: f64,
-    ) -> Result<Self, ModelError> {
+    pub fn with_map(&self, markers: Vec<WarpMarker>, tempo: f64) -> Result<Self, ModelError> {
         let next = Self {
             warp_markers: markers,
             tempo: Some(tempo),

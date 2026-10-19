@@ -22,6 +22,20 @@ bl-project = { path = "../crates/project" }
 libfuzzer-sys = "=0.4.13"
 
 [[bin]]
+name = "audio_header"
+path = "fuzz_targets/audio_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "midi_file"
+path = "fuzz_targets/midi_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "peak_file"
 path = "fuzz_targets/peak_file.rs"
 test = false

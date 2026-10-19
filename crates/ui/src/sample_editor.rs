@@ -1820,7 +1820,7 @@ impl SampleEditorUi {
                 json!({ "clip": clip }),
             );
             ui.separator();
-            pending(ui, "Quantize", "WP-4.12 (audio quantise)");
+            run(ui, "Quantize", "clip.quantize_audio", json!({}));
             ui.separator();
             pending(
                 ui,

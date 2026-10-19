@@ -14,6 +14,7 @@
 //! question; this module only says what the file holds.
 
 use std::fmt;
+use std::io::Read as _;
 use std::path::Path;
 
 use bl_core::time::{
@@ -80,6 +81,10 @@ pub struct Imported {
     pub has_time_signature: bool,
 }
 
+/// The largest MIDI file Beatlayer reads: 64 MiB, far past any real
+/// arrangement, so a file that size or past it is refused before it's read.
+pub const MAX_FILE_BYTES: u64 = 64 << 20;
+
 /// Why a MIDI file couldn't be read or written.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -90,6 +95,8 @@ pub enum MidiFileError {
     Parse(midly::Error),
     /// A number in the file doesn't fit Beatlayer's time.
     OutOfRange,
+    /// The file is larger than [`MAX_FILE_BYTES`].
+    TooLarge(u64),
 }
 
 impl fmt::Display for MidiFileError {
@@ -98,6 +105,10 @@ impl fmt::Display for MidiFileError {
             Self::Io(error) => error.fmt(f),
             Self::Parse(error) => write!(f, "not a MIDI file Beatlayer reads: {error}"),
             Self::OutOfRange => f.write_str("a number in the file is out of range"),
+            Self::TooLarge(bytes) => write!(
+                f,
+                "the file is {bytes} bytes, more than the {MAX_FILE_BYTES} a MIDI file may be"
+            ),
         }
     }
 }
@@ -107,7 +118,7 @@ impl std::error::Error for MidiFileError {
         match self {
             Self::Io(error) => Some(error),
             Self::Parse(error) => Some(error),
-            Self::OutOfRange => None,
+            Self::OutOfRange | Self::TooLarge(_) => None,
         }
     }
 }
@@ -118,15 +129,67 @@ impl From<std::io::Error> for MidiFileError {
     }
 }
 
+/// The Standard MIDI File in `bytes`, from its `MThd` chunk: the bytes
+/// themselves, or the `data` chunk of an RMID file, found as midly finds it.
+fn smf_bytes(bytes: &[u8]) -> Option<&[u8]> {
+    match bytes.get(..4)? {
+        b"MThd" => Some(bytes),
+        b"RIFF" if bytes.get(8..12)? == b"RMID" => {
+            let riff_len = u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?) as usize;
+            let mut rest = bytes.get(12..)?;
+            rest = &rest[..rest.len().min(riff_len.saturating_sub(4))];
+            while rest.len() >= 8 {
+                let id = &rest[..4];
+                let len = u32::from_le_bytes(rest[4..8].try_into().ok()?) as usize;
+                rest = &rest[8..];
+                let chunk = &rest[..rest.len().min(len)];
+                if id == b"data" {
+                    return Some(chunk);
+                }
+                rest = &rest[chunk.len()..];
+                if len % 2 == 1 && !rest.is_empty() {
+                    rest = &rest[1..];
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Whether any `MThd` chunk, walked as midly walks the chunks, has a timing
+/// field whose high byte is 0x80.
+fn has_minus_128_fps(mut smf: &[u8]) -> bool {
+    while smf.len() >= 8 {
+        let id = &smf[..4];
+        let len = u32::from_be_bytes([smf[4], smf[5], smf[6], smf[7]]) as usize;
+        smf = &smf[8..];
+        let chunk = &smf[..smf.len().min(len)];
+        if id == b"MThd" && chunk.get(4) == Some(&0x80) {
+            return true;
+        }
+        smf = &smf[chunk.len()..];
+    }
+    false
+}
+
 /// Reads the Standard MIDI File at `path`.
 ///
 /// # Errors
 ///
 /// [`MidiFileError`] if the file can't be read or isn't a Standard MIDI File
-/// with a metrical (ticks per quarter note) time division. Timecode timing,
-/// which no sequencer writes for note data, is refused.
+/// with a metrical (ticks per quarter note) time division, or is larger than
+/// [`MAX_FILE_BYTES`]. Timecode timing, which no sequencer writes for note
+/// data, is refused.
 pub fn read(path: &Path) -> Result<Imported, MidiFileError> {
-    let bytes = std::fs::read(path)?;
+    let file = std::fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    if length > MAX_FILE_BYTES {
+        return Err(MidiFileError::TooLarge(length));
+    }
+    // The length can change after the check, so the read stops past the cap.
+    let mut bytes = Vec::with_capacity(length as usize);
+    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
     read_bytes(&bytes)
 }
 
@@ -135,8 +198,17 @@ pub fn read(path: &Path) -> Result<Imported, MidiFileError> {
 /// # Errors
 ///
 /// [`MidiFileError`] if the bytes aren't a Standard MIDI File with a metrical
-/// time division.
+/// time division, or are more than [`MAX_FILE_BYTES`].
 pub fn read_bytes(bytes: &[u8]) -> Result<Imported, MidiFileError> {
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(MidiFileError::TooLarge(bytes.len() as u64));
+    }
+    // midly overflows negating a timecode of -128 frames per second, in any
+    // header chunk it reads, so such a file is refused before midly sees it.
+    // (Timecode timing is refused below anyway.)
+    if smf_bytes(bytes).is_some_and(has_minus_128_fps) {
+        return Err(MidiFileError::OutOfRange);
+    }
     let smf = Smf::parse(bytes).map_err(MidiFileError::Parse)?;
     let division = match smf.header.timing {
         Timing::Metrical(division) if division.as_int() > 0 => i64::from(division.as_int()),

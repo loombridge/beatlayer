@@ -655,3 +655,44 @@ fn q_toggles_hot_swap() {
         }
     }
 }
+
+// Spec: warping R49, R50. Cmd+U (S-SAMPLE-001) and Cmd+Shift+U (S-SAMPLE-002)
+// are bound in the Sample Editor to clip.quantize_audio and clip_view.quantize_settings.
+#[test]
+fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::SampleEditor, Context::Global];
+    for (platform, u_mods, shift_u_mods) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        let quantize = keymap
+            .resolve(platform, Key::U, u_mods, &contexts)
+            .map(|hit| hit.command.id.clone());
+        assert_eq!(
+            quantize.as_deref(),
+            Some("clip.quantize_audio"),
+            "{platform:?}"
+        );
+        let settings = keymap
+            .resolve(platform, Key::U, shift_u_mods, &contexts)
+            .map(|hit| hit.command.id.clone());
+        assert_eq!(
+            settings.as_deref(),
+            Some("clip_view.quantize_settings"),
+            "{platform:?}"
+        );
+    }
+    let entry_001 = keymap.entry_for("S-SAMPLE-001").unwrap();
+    assert_eq!(entry_001.status, Status::Bound);
+    let entry_002 = keymap.entry_for("S-SAMPLE-002").unwrap();
+    assert_eq!(entry_002.status, Status::Bound);
+}

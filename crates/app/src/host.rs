@@ -427,7 +427,14 @@ pub fn run(args: Args) -> Result<(), String> {
             .set_peak_source(Box::new(scene.peaks), None);
         bl_ui::arrangement::benchmark::shell_with(scene.editor)
     } else {
-        Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()))
+        let keep_tokens = config_dir.is_some();
+        let mut shell = Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()));
+        // The agent server's tokens live in the OS keychain, beside the
+        // preferences they go with; without a config folder nothing is kept.
+        if keep_tokens {
+            shell.use_agent_keychain(bl_shell::agent::os_keychain());
+        }
+        shell
     };
     // A headless run (`--null-audio`) opens no MIDI device either.
     if !args.null_audio {

@@ -134,6 +134,8 @@ impl HttpServer {
             settings
                 .clients
                 .iter()
+                // An agent without a token yet has no rights of its own.
+                .filter(|client| !client.token.is_empty())
                 .map(|client| (client.name.clone(), client.token.expose().to_owned())),
         );
     }

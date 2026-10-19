@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-487 commands in 37 areas.
+488 commands in 37 areas.
 
 ## Permission classes
 
@@ -167,6 +167,7 @@ Each command has:
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
+| [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
@@ -202,7 +203,7 @@ Each command has:
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | Warp as Loop | `edit` |  |  |
 | [`clip.warp_from_here`](#clipwarp_from_here) | Warp From Here | `edit` |  |  |
 | [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
-| [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
+| [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` | `Cmd+Shift+U` | `Ctrl+Shift+U` |
 | [`clip_view.sample_editor`](#clip_viewsample_editor) | Sample Editor State | `read` |  |  |
 | [`clip_view.sample_view`](#clip_viewsample_view) | Zoom Sample Editor | `read` | `Z`; `X`; `W`; `H` | `Z`; `X`; `W`; `H` |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -2975,6 +2976,31 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.quantize_audio`
+
+**Quantize**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
+
+Quantises a warped audio clip: for each line of the quantise grid inside the time selection (`from` to `to` in ticks from 1.1.1, or the whole clip with none), the clip's transient nearest that line, if one lies within half a grid step of it, gets a warp marker at its time in the file (made if there is none) and moves `amount` percent of the way to the line, keeping its time in the file. Transients nearest no line get no marker. `grid` is the spacing between grid lines in ticks; left out, it uses the Clip View's Quantize settings (`clip_view.quantize_settings`), which follow the editing grid until a grid is set. `amount` is from 0 to 100 percent (left out, the settings' amount). 100 percent lands each on its line; 0 changes nothing and is no undo step; otherwise it is one undo step. Refuses an unwarped clip.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-001 | `Cmd+U` | `Ctrl+U` | `sample-editor` | Quantise the selection | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `amount` | integer or null | no | How far each warp marker moves toward its grid line, from 0 to 100 percent. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+| `from` | [`Ticks`](#ticks) or null | no | The start of the time selection, in ticks from the clip's 1.1.1. Left out, the clip's start. |
+| `grid` | [`Ticks`](#ticks) or null | no | The grid line spacing in ticks, over the Quantize settings. |
+| `to` | [`Ticks`](#ticks) or null | no | The end of the time selection, in ticks from the clip's 1.1.1. Left out, the clip's end. |
+| `transients` | array or null | no | The transient times in the file in seconds to use over the clip's analysis. |
+
+Result: nothing (`null`).
+
 #### `clip.rename`
 
 **Rename Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -3615,11 +3641,15 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip_view.quantize_settings`
 
-**Quantize Settings**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`.
+**Quantize Settings**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `note-selection`, `sample-editor`.
 
-Reads or changes the Clip View's Quantize settings, the values `note.quantize and Cmd-U use when their arguments leave them out: `grid`, the spacing between the quantise grid's lines in ticks (positive; left unset, it follows the note editor's editing grid), `target`, whether quantise moves note starts or note ends, and `amount`, how far each note moves toward its grid line as a percentage from 0 to 100. Fields left out keep their values, and the result reports all of them. The settings belong to the view, like Draw Mode: changing them changes nothing in the set and is no undo step.
+Reads or changes the Clip View's Quantize settings, the values `note.quantize`, `clip.quantize_audio` and Cmd-U use when their arguments leave them out: `grid`, the spacing between the quantise grid's lines in ticks (positive; left unset, it follows the note or sample editor's editing grid), `target`, whether quantise moves note starts or note ends, and `amount`, how far each note moves toward its grid line as a percentage from 0 to 100. Fields left out keep their values, and the result reports all of them. The settings belong to the view, like Draw Mode: changing them changes nothing in the set and is no undo step.
 
-Default keys: none.
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SAMPLE-002 | `Cmd+Shift+U` | `Ctrl+Shift+U` | `sample-editor` | Open the quantise settings | runs it |
 
 Arguments:
 
@@ -9172,6 +9202,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
 | [`clip.move_transient`](#clipmove_transient) | `clip.transients` | `transients` |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.quantize_audio`](#clipquantize_audio) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |

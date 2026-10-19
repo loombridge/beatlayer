@@ -447,3 +447,129 @@ fn a_replaced_sample_keeps_its_markers_only_at_the_same_length() {
     // The Start marker keeps its place in the audio, now in seconds.
     assert_eq!(shorter.start, 0.0);
 }
+
+// Spec: warping R49, R50
+#[test]
+fn quantising_audio_moves_each_lines_nearest_transient() {
+    let scratch = Scratch::new("quantise-audio");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let steps = |shell: &Shell| shell.editor().undo_history().len();
+    let initial_markers = audio(&shell, clip).warp_markers;
+    let initial_steps = steps(&shell);
+
+    // 100% quantise: moves nearest transient to each grid line.
+    shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 100, "grid": Ticks::QUARTER.get() / 4 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), initial_steps + 1, "one undo step");
+    let quantised_100 = audio(&shell, clip).warp_markers;
+    assert_ne!(initial_markers, quantised_100);
+    for m in &quantised_100 {
+        assert_eq!(
+            m.beat.get() % (Ticks::QUARTER.get() / 4),
+            0,
+            "marker at beat {} landed on grid",
+            m.beat.get()
+        );
+    }
+
+    // Undo restores the initial markers
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(audio(&shell, clip).warp_markers, initial_markers);
+
+    // Redo restores quantised markers
+    shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(audio(&shell, clip).warp_markers, quantised_100);
+
+    // Undo back to start
+    shell.run("edit.undo", json!({})).unwrap();
+
+    // 50% quantise: moves halfway toward grid lines
+    shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 50, "grid": Ticks::QUARTER.get() / 4 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), initial_steps + 1);
+    let quantised_50 = audio(&shell, clip).warp_markers;
+    assert_ne!(initial_markers, quantised_50);
+    assert_ne!(quantised_100, quantised_50);
+
+    // An unwarped clip is refused
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": false }))
+        .unwrap();
+    let err = shell.run("clip.quantize_audio", json!({ "clip": clip }));
+    assert!(err.is_err(), "unwarped clip is refused");
+}
+
+// Spec: warping R49
+#[test]
+fn quantising_at_zero_changes_nothing() {
+    let scratch = Scratch::new("quantise-zero");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let steps = |shell: &Shell| shell.editor().undo_history().len();
+    let initial_markers = audio(&shell, clip).warp_markers;
+    let initial_steps = steps(&shell);
+
+    let res = shell
+        .run(
+            "clip.quantize_audio",
+            json!({ "clip": clip, "amount": 0, "grid": Ticks::QUARTER.get() / 4 }),
+        )
+        .unwrap();
+    assert_eq!(res, serde_json::Value::Null);
+    assert_eq!(audio(&shell, clip).warp_markers, initial_markers);
+    assert_eq!(steps(&shell), initial_steps, "0% is no undo step");
+}
+
+// Spec: warping R49. Late hits at 120 BPM: 100 percent lands each marker on
+// its sixteenth, 50 percent halfway; at 100 percent a late first hit, whose
+// line holds the marker at 1.1.1 already, stays where it is rather than
+// refusing the rest.
+#[test]
+fn quantising_late_hits_moves_their_markers_onto_and_halfway_to_the_grid() {
+    let scratch = Scratch::new("quantise-late-hits");
+    let (mut shell, clip) = drum_clip(&scratch);
+    let quarter = Ticks::QUARTER.get();
+    let hits = [0.01, 0.52, 1.03];
+    let late = |time: f64| Ticks((time * 2.0 * quarter as f64).round() as i64);
+    let quantise = |shell: &mut Shell, amount: u8| {
+        shell
+            .run(
+                "clip.quantize_audio",
+                json!({ "clip": clip, "amount": amount, "grid": quarter / 4, "transients": hits }),
+            )
+            .unwrap();
+        audio(shell, clip)
+            .warp_markers
+            .iter()
+            .map(|m| (m.time, m.beat))
+            .collect::<Vec<_>>()
+    };
+    let start = audio(&shell, clip).warp_markers[0];
+    assert_eq!((start.time, start.beat), (0.0, Ticks::ZERO));
+    assert_eq!(
+        quantise(&mut shell, 100),
+        [
+            (0.0, Ticks::ZERO),
+            (0.52, Ticks(quarter)),
+            (1.03, Ticks(2 * quarter))
+        ]
+    );
+    shell.run("edit.undo", json!({})).unwrap();
+    let halfway = |time: f64, line: i64| Ticks((late(time).get() + line + 1).div_euclid(2));
+    assert_eq!(
+        quantise(&mut shell, 50),
+        [
+            (0.0, Ticks::ZERO),
+            (0.01, halfway(0.01, 0)),
+            (0.52, halfway(0.52, quarter)),
+            (1.03, halfway(1.03, 2 * quarter))
+        ]
+    );
+}

@@ -1427,7 +1427,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+U"]
 win = ["Ctrl+U"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.quantize_audio", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-002"
@@ -1438,7 +1441,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+U"]
 win = ["Ctrl+Shift+U"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.quantize_settings", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-SAMPLE-003"

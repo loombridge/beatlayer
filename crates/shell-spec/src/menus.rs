@@ -17,6 +17,7 @@
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
+use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
@@ -408,7 +409,7 @@ const CREATE: &[Row] = &[
     (
         "M-CREATE-007",
         "Consolidate Time to New Scene",
-        Pending(None),
+        Cmd(CONSOLIDATE_TO_SCENE),
     ),
     SEPARATOR,
     (

@@ -1747,6 +1747,21 @@ impl SampleEditorUi {
         }
         let contexts = [Context::ClipView, Context::SampleEditor];
         let selection = frame.selection.is_some();
+        // The editor's selection, as the span of song time the crop keeps.
+        let crop_selection = frame.selection.map(|(from, to)| {
+            let tempo = &frame.doc.settings().tempo;
+            let at = |value: f64| {
+                if g.warped {
+                    frame.clip.start
+                        + bl_core::time::Ticks((value - frame.audio.start).round() as i64)
+                } else {
+                    tempo.seconds_to_ticks(
+                        tempo.ticks_to_seconds(frame.clip.start) + (value - frame.audio.start),
+                    )
+                }
+            };
+            json!({ "clip": clip, "start": at(from), "end": at(to) })
+        });
         let build = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
             let pending = |ui: &mut Ui, label: &str, package: &str| {
                 ui.add_enabled(false, egui::Button::new(label))
@@ -1822,17 +1837,11 @@ impl SampleEditorUi {
             ui.separator();
             run(ui, "Quantize", "clip.quantize_audio", json!({}));
             ui.separator();
-            pending(
-                ui,
-                "Crop Clip Sample",
-                "WP-4.13 (Crop Clip and Crop Sample)",
-            );
-            if selection {
-                pending(
-                    ui,
-                    "Crop Clip Sample to Time Selection",
-                    "WP-4.13 (Crop Clip and Crop Sample)",
-                );
+            // Spec: audio-clip-editing R14, R16. The Sample Editor's own
+            // names for Crop Clip.
+            run(ui, "Crop Clip Sample", "clip.crop", json!({ "clip": clip }));
+            if let Some(span) = crop_selection.clone() {
+                run(ui, "Crop Clip Sample to Time Selection", "clip.crop", span);
             }
             ui.separator();
             run(

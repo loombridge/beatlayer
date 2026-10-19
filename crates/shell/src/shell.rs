@@ -61,6 +61,7 @@ use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -87,6 +88,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+pub(crate) mod audio_editing;
 mod capture;
 mod multisampler;
 mod processed_files;
@@ -3618,6 +3620,7 @@ impl Shell {
     ) -> Result<Value, ShellError> {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -3657,6 +3660,9 @@ impl Shell {
             .get(id)
             .and_then(|spec| spec.permission)
             .unwrap_or(bl_commands::Permission::External);
+        let shown = self
+            .clip_view
+            .shown_any_clip(self.editor.document(), &self.arrangement);
         crate::permission::assess(
             id,
             args,
@@ -3664,6 +3670,7 @@ impl Shell {
             crate::permission::Scene {
                 insert_marker: self.arrangement.insert_marker(),
                 selected_track: self.arrangement.selected_tracks().first().copied(),
+                shown_clip: shown,
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
@@ -4834,6 +4841,19 @@ impl Shell {
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
+        if audio_ids::handles(id) {
+            // Spec: audio-clip-editing R28. The menus' enabled states.
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.can_audio_edit(id, &args);
+        }
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
@@ -5699,6 +5719,7 @@ impl Shell {
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -5715,6 +5736,9 @@ impl Shell {
                 reason: "a drag that edits the set is under way; it ends when it's released"
                     .to_owned(),
             });
+        }
+        if audio_ids::handles(id) {
+            return self.run_audio_editing(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();

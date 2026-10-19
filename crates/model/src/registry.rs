@@ -1057,6 +1057,38 @@ const ENTRIES: &[Entry] = &[
             changing it doesn't touch a clip that is playing.",
     },
     Entry {
+        id: "clip.crop_region",
+        action: Action::Apply("crop_clip"),
+        label: "Crop Clip to Region",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Crops a clip to a region of its contents: an audio clip plays the file \
+            `media` names, whose frames are the region of its old file's audio, and a MIDI clip \
+            loses the notes that start outside the region, writing no file. The clip's Start and \
+            End markers, loop brace, and warp markers move back by the region's start, so it \
+            plays exactly what it played, and the clip stays where it is in the Arrangement. \
+            `from` and `to` are in the form the clip shows: seconds into an unwarped audio \
+            clip's file, or whole ticks of a warped audio clip's or a MIDI clip's contents. \
+            `clip.crop` is the command a person and an agent run: it works the region out, \
+            writes the new file through the processed-file writer, and applies this one. Used \
+            directly, it changes the clip and names a file the caller has already written.",
+    },
+    Entry {
+        id: "clip.crop_span",
+        action: Action::Apply("crop_clip_to_range"),
+        label: "Crop Clip to Span",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Crops a clip to a span of song time: its edges move to the span, and it \
+            plays the part of itself the span covered, at the same moments. An audio clip plays \
+            the file `media` names, whose frames are the span's part of its old file's audio; a \
+            MIDI clip loses the notes the span didn't hold, writing no file. `clip.crop` is the \
+            command a person and an agent run: it works the span out, writes the new file \
+            through the processed-file writer, and applies this one.",
+    },
+    Entry {
         id: "clip.set_data",
         action: Action::Apply("set_clip_data"),
         label: "Replace Clip Contents",

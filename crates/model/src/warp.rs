@@ -537,6 +537,150 @@ impl AudioData {
         }
         Ok(())
     }
+
+    /// How far two positions in the clip's contents may be apart and still
+    /// name the same point: half a tick.
+    const CROP_SLACK: f64 = 0.5;
+
+    /// The region a crop keeps, in the form the clip shows (the audio clip
+    /// editing spec, R14): from its Start marker, or, with the loop on, from
+    /// the earlier of its Start marker and its loop's start, to its End
+    /// marker or its brace's end, or, where the clip sets neither, to the
+    /// end of its file, which is `file_seconds` long. A warped clip's values
+    /// are ticks of its contents and an unwarped clip's seconds in its file.
+    #[must_use]
+    pub fn crop_region(&self, file_seconds: f64) -> (f64, f64) {
+        let file_end = self.in_clip_form(file_seconds);
+        if self.looping {
+            (
+                self.start.min(self.loop_start),
+                self.loop_end.unwrap_or(file_end),
+            )
+        } else {
+            (self.start, self.end.unwrap_or(file_end))
+        }
+    }
+
+    /// A time in the file, in the form the clip shows: ticks of a warped
+    /// clip's contents, or seconds in an unwarped clip's file.
+    #[must_use]
+    pub fn in_clip_form(&self, seconds: f64) -> f64 {
+        match self.warp.then(|| self.warp_map().ok()).flatten() {
+            Some(map) => map.time_to_beat(seconds),
+            None => seconds,
+        }
+    }
+
+    /// A time in the form the clip shows, in seconds into its file: the
+    /// other way round from [`AudioData::in_clip_form`].
+    #[must_use]
+    pub fn in_file_seconds(&self, value: f64) -> f64 {
+        match self.warp.then(|| self.warp_map().ok()).flatten() {
+            Some(map) => map.beat_to_time(value),
+            None => value,
+        }
+    }
+
+    /// The clip's data cropped to `from`..`to` of its contents, in the form
+    /// the clip shows (R15): it plays, at every frame, exactly what it
+    /// played, so its Start and End markers, loop brace, and warp markers
+    /// move back by the region's start, and the warp markers outside the
+    /// region are dropped, one being added at each end of the new file where
+    /// the map needs it to hold the timing. The file it names isn't changed
+    /// and its edits to its file's transients go: it belongs to the old file
+    /// (the warping spec, R27).
+    ///
+    /// # Errors
+    ///
+    /// If `from` and `to` don't make a region of the clip, or a warped
+    /// clip's map is damaged.
+    pub fn cropped(&self, from: f64, to: f64) -> Result<Self, ModelError> {
+        if !(from.is_finite() && to.is_finite()) || to - from < Self::CROP_SLACK {
+            return Err(ModelError::InvalidValue {
+                what: "crop region length",
+                value: to - from,
+            });
+        }
+        let mut next = if self.warp {
+            self.cropped_warped(from, to)?
+        } else {
+            Self {
+                start: (self.start - from).max(0.0),
+                end: shift_end(self.end, from, to),
+                loop_start: (self.loop_start - from).max(0.0),
+                loop_end: shift_end(self.loop_end, from, to),
+                ..self.clone()
+            }
+        };
+        next.transient_edits = TransientEdits::default();
+        Ok(next)
+    }
+
+    /// [`AudioData::cropped`] for a warped clip: the region is in ticks of
+    /// its contents, and its warp map moves back with it.
+    fn cropped_warped(&self, from: f64, to: f64) -> Result<Self, ModelError> {
+        let map = self.warp_map()?;
+        let (first, last) = (map.beat_to_time(from), map.beat_to_time(to));
+        if !(first.is_finite() && last.is_finite()) || last <= first {
+            return Err(ModelError::InvalidValue {
+                what: "crop region length",
+                value: last - first,
+            });
+        }
+        let shift = |beat: i64| Ticks(beat - from.round() as i64);
+        let mut markers: Vec<WarpMarker> = self
+            .warp_markers
+            .iter()
+            .filter(|m| {
+                let beat = m.beat.get() as f64;
+                beat >= from - Self::CROP_SLACK && beat <= to + Self::CROP_SLACK
+            })
+            .map(|m| WarpMarker {
+                time: (m.time - first).max(0.0),
+                beat: shift(m.beat.get()),
+            })
+            .collect();
+        // The map holds the timing only with a marker at each end of the new
+        // file (R15): what the old map placed there, or the file's own ends.
+        let ends = [
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: last - first,
+                beat: shift(to.round() as i64),
+            },
+        ];
+        for end in ends {
+            let near = |m: &WarpMarker| {
+                (m.beat.get() as f64 - end.beat.get() as f64).abs() < Self::CROP_SLACK
+                    || (m.time - end.time).abs() < MARKER_SLACK
+            };
+            if !markers.iter().any(near) {
+                let at = markers.partition_point(|m| m.beat < end.beat);
+                markers.insert(at, end);
+            }
+        }
+        let tempo = self.tempo.unwrap_or(120.0);
+        let next = self.with_map(markers, tempo)?;
+        Ok(Self {
+            start: (self.start - from).max(0.0),
+            end: shift_end(self.end, from, to),
+            loop_start: (self.loop_start - from).max(0.0),
+            loop_end: shift_end(self.loop_end, from, to),
+            ..next
+        })
+    }
+}
+
+/// A marker's position after a crop, or `None` where the crop's end cuts it
+/// off and the file's end stands in for it.
+fn shift_end(marker: Option<f64>, from: f64, to: f64) -> Option<f64> {
+    match marker {
+        Some(at) if at > from && at < to => Some(at - from),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

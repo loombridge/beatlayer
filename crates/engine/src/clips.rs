@@ -46,6 +46,7 @@ use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segm
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
     BeatsMedia, CUE_BACK, Histories, History, Past, Playing, Positions, WarpScratch, Warped,
+    WindowBuf, window_of,
 };
 
 /// A clip's source, as a [`MediaLibrary`] opens it.
@@ -737,6 +738,10 @@ pub(crate) struct ClipList {
     /// (WP-4.4, R15): made here, off the audio thread, and moved between
     /// lists the same way.
     histories: Handoff<Histories>,
+    /// The room the player reads the track's clips' files into, as wide as
+    /// the widest window they need (WP-4.5, R5, R18, R19): made here, off the
+    /// audio thread, and moved between lists the same way.
+    window: Handoff<WindowBuf>,
 }
 
 /// What `clip` was playing in the set's last document, where its warp mode or
@@ -761,12 +766,11 @@ fn past_of(
     let playing = Playing {
         mode: before.warp_mode,
         high_quality: before.high_quality,
+        tones: before.warp_settings.tones,
+        texture: before.warp_settings.texture,
+        clip_id: clip.id.0.get(),
     };
-    let now = Playing {
-        mode: audio.warp_mode,
-        high_quality: audio.high_quality,
-    };
-    if playing == now || !before.warp {
+    if before.warp_mode == audio.warp_mode || !before.warp {
         return None;
     }
     let warped = Geometry::of(old, before, tempo, rate, length, arrangement, media).warped?;
@@ -778,6 +782,36 @@ fn past_of(
 fn history_of(geometry: &Geometry, channels: usize) -> Option<Box<History>> {
     let frames = geometry.warped.as_ref()?.history_frames();
     (frames > 0).then(|| Box::new(History::new(channels, frames)))
+}
+
+/// How wide the room a track's clips are read through must be: the widest
+/// window any of them needs, the mode a clip changed from included, since the
+/// block of the change renders both (R8, R18, R19).
+fn window_width(track: &Track, previous: Option<&Track>, rate: SampleRate) -> usize {
+    let width_of = |clip: &Clip, audio: &AudioData| {
+        let was = previous
+            .and_then(|last| last.clip(clip.id))
+            .and_then(|old| match &old.data {
+                ClipData::Audio(before) => Some(before.warp_mode),
+                _ => None,
+            });
+        [Some(audio.warp_mode), was]
+            .into_iter()
+            .flatten()
+            .map(|mode| window_of(mode, rate.as_f64()))
+            .max()
+            .unwrap_or(0)
+    };
+    let audio = |clip: &Clip| match &clip.data {
+        ClipData::Audio(audio) => Some(width_of(clip, audio)),
+        _ => None,
+    };
+    track
+        .clips()
+        .filter_map(&audio)
+        .chain(track.slots().filter_map(|(_, clip)| audio(clip)))
+        .max()
+        .unwrap_or(0)
 }
 
 /// What [`ClipList::build`] made: the list, and the media it couldn't find.
@@ -873,6 +907,9 @@ impl ClipList {
                     playing: Playing {
                         mode: audio.warp_mode,
                         high_quality: audio.high_quality,
+                        tones: audio.warp_settings.tones,
+                        texture: audio.warp_settings.texture,
+                        clip_id: clip.id.0.get(),
                     },
                     past,
                 },
@@ -947,6 +984,9 @@ impl ClipList {
                     playing: Playing {
                         mode: audio.warp_mode,
                         high_quality: audio.high_quality,
+                        tones: audio.warp_settings.tones,
+                        texture: audio.warp_settings.texture,
+                        clip_id: clip.id.0.get(),
                     },
                     past,
                 },
@@ -978,6 +1018,7 @@ impl ClipList {
         ids.sort_unstable();
         missing.sort_unstable();
         missing.dedup();
+        let window = WindowBuf::new(channels, window_width(track, previous, rate));
         Built {
             list: Self {
                 track: track.id(),
@@ -986,6 +1027,7 @@ impl ClipList {
                 ids,
                 bank: Handoff::new(Box::new(bank.into_boxed_slice())),
                 histories: Handoff::new(Box::new(histories.into_boxed_slice())),
+                window: Handoff::new(Box::new(window)),
             },
             missing,
         }
@@ -1018,6 +1060,9 @@ pub struct ClipPlayer {
     bank: Option<Box<Bank>>,
     /// Each clip's loop read-back room, one slot per clip (WP-4.4, R15).
     histories: Option<Box<Histories>>,
+    /// The room the clips' files are read through (WP-4.5, R5): as wide as
+    /// the list's clips need, and taken from the list like their sources.
+    window: Option<Box<WindowBuf>>,
     /// Planar scratch for one source read: `channels` channels of
     /// `max_frames` frames.
     scratch: Vec<f32>,
@@ -1058,6 +1103,7 @@ impl ClipPlayer {
             clips: None,
             bank: None,
             histories: None,
+            window: None,
             scratch: vec![0.0; config.channels * config.max_frames],
             max_frames: config.max_frames,
             warp: WarpScratch::new(config.channels, config.max_frames, config.sample_rate),
@@ -1222,6 +1268,7 @@ fn render_warped(
     positions: &Positions<'_>,
     launched: Option<i64>,
     source: &mut dyn AudioSource,
+    window: &mut WindowBuf,
     block: &mut Block<'_>,
     range: core::ops::Range<usize>,
     (elapsed, frame): (u64, i64),
@@ -1245,6 +1292,7 @@ fn render_warped(
         let (n, sound) = warp.render(
             clip.id,
             source,
+            window,
             positions,
             launched,
             frame,
@@ -1289,12 +1337,13 @@ impl Node for ClipPlayer {
         // Spec: launch-quantisation R9. The launched slot clip plays from
         // its launch frame. Spec: session-view R20. While
         // the track is taken over, the Arrangement's clips below stay silent.
-        if let (Some(list), Some(bank), Some(histories)) = (
+        if let (Some(list), Some(bank), Some(histories), Some(window)) = (
             self.clips
                 .as_ref()
                 .and_then(|d| d.downcast_ref::<ClipList>()),
             self.bank.as_mut(),
             self.histories.as_mut(),
+            self.window.as_mut(),
         ) && let Some(entry) = block
             .session()
             .iter()
@@ -1319,6 +1368,7 @@ impl Node for ClipPlayer {
                     &positions,
                     Some(launch),
                     source.as_mut(),
+                    window,
                     block,
                     0..frames,
                     (elapsed, from),
@@ -1343,15 +1393,17 @@ impl Node for ClipPlayer {
             clips,
             bank,
             histories,
+            window,
             scratch,
             max_frames,
             warp,
             ..
         } = self;
-        let (Some(list), Some(bank), Some(histories)) = (
+        let (Some(list), Some(bank), Some(histories), Some(window)) = (
             clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()),
             bank.as_mut(),
             histories.as_mut(),
+            window.as_mut(),
         ) else {
             self.playing_clip = false;
             self.apply_gate(block);
@@ -1402,6 +1454,7 @@ impl Node for ClipPlayer {
                     &warped.positions(),
                     None,
                     source.as_mut(),
+                    window,
                     block,
                     range,
                     (elapsed, start),
@@ -1436,6 +1489,7 @@ impl Node for ClipPlayer {
         };
         let mut bank = list.bank.take();
         let mut histories = list.histories.take();
+        let window = list.window.take();
         // Spec: warp-modes R8. The list says which clips changed their mode:
         // each crossfades from what it was playing, from this list's first
         // frame.
@@ -1523,6 +1577,22 @@ impl Node for ClipPlayer {
                 None => std::mem::forget(old_bank),
             }
         }
+        if let Some(old_window) = self.window.take() {
+            match self
+                .clips
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<ClipList>())
+            {
+                Some(old) => {
+                    if let Err(old_window) = old.window.put(old_window) {
+                        // Can't happen: the player took the window out. Better
+                        // a leak than a free here.
+                        std::mem::forget(old_window);
+                    }
+                }
+                None => std::mem::forget(old_window),
+            }
+        }
         if list.is_empty() {
             if let Some(bank) = bank
                 && let Err(bank) = list.bank.put(bank)
@@ -1534,6 +1604,11 @@ impl Node for ClipPlayer {
             {
                 std::mem::forget(histories);
             }
+            if let Some(window) = window
+                && let Err(window) = list.window.put(window)
+            {
+                std::mem::forget(window);
+            }
             // Dropping the data, the old list's or the empty new one, only
             // lets go of it: the drop thread frees it, with its sources.
             drop(self.clips.take());
@@ -1542,6 +1617,7 @@ impl Node for ClipPlayer {
         }
         self.bank = bank;
         self.histories = histories;
+        self.window = window;
         drop(self.clips.replace(data));
     }
 
@@ -1583,6 +1659,9 @@ mod tests {
             playing: Playing {
                 mode: bl_model::WarpMode::RePitch,
                 high_quality: true,
+                tones: Default::default(),
+                texture: Default::default(),
+                clip_id: 1,
             },
             past: None,
         }

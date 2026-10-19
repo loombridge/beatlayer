@@ -48,10 +48,10 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 
 ### From the port to the engine
 
-- **R13.** A message is stamped on the MIDI system's thread with the time it arrived, on the same monotonic clock the engine reads. Where the platform stamps messages itself (Core MIDI, ALSA), its stamps are mapped onto that clock, which keeps the spacing of messages that arrive together. (Beatlayer's design)
+- **R13.** A message is stamped on the MIDI system's thread with the time it arrived, on the same monotonic clock the engine reads. Where the platform stamps messages itself (Core MIDI, ALSA), its stamps are mapped onto that clock, which keeps the spacing of messages that arrive together. In tests the clock is a test clock, which the null device's manual pacing advances by each block's length, so a message a test plays a musical time after another lands on that frame however busy the machine is. (Beatlayer's design)
 - **R14.** Messages cross from the MIDI threads (and the computer keyboard) to the audio thread on a lock-free queue. The audio thread takes them without allocating, locking, or blocking, and a sender never makes it wait. When the queue or a block is full, what doesn't fit is dropped and counted. (The architecture's real-time rules)
 - **R15.** The engine places a message in the block after the one during which it arrived, at the sample offset its time gives, counted from when the previous block started. Messages therefore keep their spacing to the sample, at a fixed latency of one block. A message stamped before the previous block started lands on the block's first frame and is counted as late; one stamped after the current block started waits for the next block. (Beatlayer's design)
-- **R16.** The engine estimates when each block starts with a delay-locked loop over the audio callback's times and its frame count, so jitter in when the callback runs doesn't move the messages it places. It locks again after a gap, such as the device stopping. (S8)
+- **R16.** The engine estimates when each block starts with a delay-locked loop over the audio callback's times and its frame count, so jitter in when the callback runs doesn't move the messages it places. It locks again after a gap, such as the device stopping. Under the null device's manual pacing the callback times are the test clock's, which advances exactly one block a block, so the loop sees no jitter and no gap. (S8)
 
 ### The computer MIDI keyboard
 

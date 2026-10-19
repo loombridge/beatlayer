@@ -14,6 +14,7 @@ mod dashboard;
 mod keymap;
 mod private_terms;
 mod progress;
+mod test_clock;
 mod ui_parity;
 mod wiki;
 
@@ -44,6 +45,8 @@ Tasks:
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   private-terms  Fail if a tracked file contains a word listed in .git/info/private-terms
                  (maintainers' checkouts only; skipped without it)
+  test-clock     Fail if a test waits on the wall clock (thread::sleep or
+                 Instant::now) outside xtask/test-clock-allowlist.txt
   golden         Render the golden fixtures and null-test them against their references
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
@@ -144,6 +147,7 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
         },
         Some("deny-selftest") => deny_selftest(root).map(|()| ExitCode::SUCCESS),
         Some("private-terms") => private_terms::check(root).map(|()| ExitCode::SUCCESS),
+        Some("test-clock") => test_clock::check(root).map(|()| ExitCode::SUCCESS),
         Some("golden") => golden(root, options).map(|()| ExitCode::SUCCESS),
         Some("progress") => dashboard::print(root, options).map(|()| ExitCode::SUCCESS),
         Some("dashboard") => dashboard::serve(root, options).map(|()| ExitCode::SUCCESS),
@@ -306,6 +310,7 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
                 )
             }),
         ),
+        ("test clock", Box::new(|| test_clock::check(root))),
         ("tests", Box::new(|| run_tests(root, tested, depth))),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),

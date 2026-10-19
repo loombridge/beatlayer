@@ -521,7 +521,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.33 | todo |  | Waits on IMP-24's acceptance |
 | 5.34 | done | 18 October 2026 | [#170](https://github.com/loombridge/beatlayer/pull/170); a track's MIDI To sends to hardware ports, each message stamped for the moment its frame reaches the output (Core MIDI, ALSA and a Windows timer), with note-offs on stop and reroute, and the External Instrument routes to a port and brings the sound back on the interface's inputs after its Hardware Latency; switching Delay Compensation off is T175's, and the ranges and layout are Beatlayer's own until Live is observed; [the spec](specs/external-devices.md) |
 | 5.35 | todo |  |  |
-| 5.36 | todo |  |  |
+| 5.36 | done | 19 October 2026 | [#235](https://github.com/loombridge/beatlayer/pull/235); every track's Track Delay in milliseconds or samples and its Keep Monitoring Latency switch, Split Stereo Pan Mode with a control per input channel, and the Options' Delay Compensation and Reduced Latency When Monitoring switches, each a registered command ([mixer](specs/mixer.md) R28 to R30, [delay compensation](specs/delay-compensation.md) R7 to R9); the ranges, the defaults and the split controls' travel are Beatlayer's own until Live is observed |
 | 5.37 | done | 18 October 2026 | [#152](https://github.com/loombridge/beatlayer/pull/152); a pool of real-time workers, started with the stream and joined to its workgroup, runs tracks and a rack's chains beside the audio thread, bit-identical to one thread; 128 tracks with an EQ and a compressor played ten minutes on an M1 Pro without a dropout; exports still render on one thread |
 | 5.38 | todo |  | IMP-15 waits on its acceptance |
 | 5.39 | todo |  |  |

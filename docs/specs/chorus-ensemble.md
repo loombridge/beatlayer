@@ -3,7 +3,7 @@
 - **Status:** implemented
 - **Work packages:** WP-5.20b
 - **Parity-matrix row:** Audio effects: Chorus-Ensemble, to Live's current version (the 12.4 Chorus-Ensemble, with its ensemble mode)
-- **Checked against:** Live 12's reference manual, chapter 29 "Live Audio Effect Reference", section 29.8 "Chorus-Ensemble" and 29.8.1, read on 18 October 2026; Live 12.4 release notes
+- **Checked against:** Live 12's reference manual, chapter 29 "Live Audio Effect Reference", section 29.8 "Chorus-Ensemble" and 29.8.1, read on 18 October 2026; the Live 12.4 release notes (5 May 2026); the ranges, defaults and algorithms the manual does not give are Beatlayer's own
 
 ## The behaviour
 
@@ -21,15 +21,16 @@ In Chorus and Ensemble modes, Width adjusts the stereo image balance from mono (
 | S2 | Manual | Live 12.4 release notes | Classic mode renamed Chorus; added Time (Auto, 7, 10, 20, 35, 50 ms) and Taps (1 or 2 taps) |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rules G1 and G2 | Every gain reaches −∞ dB; every parameter is automatable and modulatable |
 | S4 | Beatlayer | [Device framework](device-framework.md) and [device chains](device-chains.md) | Headless control, parameters, real-time safety |
+| S5 | Beatlayer | Beatlayer's own | The manual gives no ranges, defaults, depth, delay times or algorithms for this device; every rule that gives one gives Beatlayer's own |
 
 ## Rules
 
 - **R1.** Beatlayer ships Chorus-Ensemble, a native audio effect device type (`beatlayer.chorus_ensemble`, display name "Chorus-Ensemble", `DeviceRole::AudioEffect`). (S1, S2)
-- **R2.** In all modes, a high-pass filter is available with cutoff from 20.0 Hz to 2000.0 Hz (default 20.0 Hz), attenuating modulation of content below the cutoff. Output is a gain reaching −∞ dB (default 0 dB / gain 1.0). Warmth (0% to 100%, default 0%) adds soft saturation and gentle filtering. (S1, S3)
-- **R3.** In Chorus and Ensemble modes, controls include Rate (0.01 Hz to 20.0 Hz, default 1.0 Hz), Amount (0% to 100%, default 50%), Feedback (0% to 100%, default 0%), Feedback Invert (toggle Ø, default off), Dry/Wet (0% to 100%, default 50%), and Width (0% to 200%, default 100%). Width sets the balance between mid and side channels: at 0% wet is mono, at 100% equal, and at 200% side channel gain is 6 dB higher than mid gain within 0.1 dB. (S1)
-- **R4.** In Chorus mode, two delay lines per channel are modulated. The Time parameter selects Auto (delay time scales dynamically with modulation amount) or a fixed delay time (7 ms, 10 ms, 20 ms, 35 ms, or 50 ms), maintaining a constant base delay independent of Amount. The Taps parameter selects 1 Tap (single delay line per channel) or 2 Taps (two delay lines per channel). (S1, S2)
-- **R5.** In Ensemble mode, three delay lines per channel are modulated with their LFO phases split evenly a third of a cycle apart (120° apart within 1°). The lines' base delay is 10 ms and Amount scales the modulation's depth to 3.5 ms at 100 % (Beatlayer's own: the manual gives neither). (S1)
-- **R6.** In Vibrato mode, pitch modulation is applied with no dry signal passing (wet only). Feedback, Feedback Invert, and Dry/Wet are disabled and ignored. Offset (0° to 180°, default 180°) controls the stereo channel phase offset. Shape (0% to 100%, default 0%) morphs the modulation waveform seamlessly from Sine (at 0%) to Triangle (at 100%). (S1)
+- **R2.** In all modes, a high-pass filter is available with cutoff from 20.0 Hz to 2000.0 Hz (default 20.0 Hz), attenuating modulation of content below the cutoff. Output is a gain reaching −∞ dB (default 0 dB / gain 1.0). Warmth (0% to 100%, default 0%) adds soft saturation and gentle filtering. (S1, S3, S5)
+- **R3.** In Chorus and Ensemble modes, controls include Rate (0.01 Hz to 20.0 Hz, default 1.0 Hz), Amount (0% to 100%, default 50%), Feedback (0% to 100%, default 0%), Feedback Invert (toggle Ø, default off), Dry/Wet (0% to 100%, default 50%), and Width (0% to 200%, default 100%). Width sets the balance between mid and side channels: at 0% wet is mono, at 100% equal, and at 200% side channel gain is 6 dB higher than mid gain within 0.1 dB. (S1, S5)
+- **R4.** In Chorus mode, two delay lines per channel are modulated. The Time parameter selects Auto (delay time scales dynamically with modulation amount) or a fixed delay time (7 ms, 10 ms, 20 ms, 35 ms, or 50 ms), maintaining a constant base delay independent of Amount. The Taps parameter selects 1 Tap (single delay line per channel) or 2 Taps (two delay lines per channel). (S1, S2, S5)
+- **R5.** In Ensemble mode, three delay lines per channel are modulated with their LFO phases split evenly a third of a cycle apart (120° apart within 1°). The lines' base delay is 10 ms and Amount scales the modulation's depth to 3.5 ms at 100 % (Beatlayer's own: the manual gives neither). (S1, S5)
+- **R6.** In Vibrato mode, pitch modulation is applied with no dry signal passing (wet only). Feedback, Feedback Invert, and Dry/Wet are disabled and ignored. Offset (0° to 180°, default 180°) controls the stereo channel phase offset. Shape (0% to 100%, default 0%) morphs the modulation waveform seamlessly from Sine (at 0%) to Triangle (at 100%). (S1, S5)
 - **R7.** The device reports 0 latency through `Node::latency`. (S1)
 - **R8.** Renders are bit-identical at block sizes 1, 64, 512, and 4096. No memory allocation, locking, or blocking calls occur on the audio thread. (S3, S4)
 - **R9.** An agent can add, configure parameters by ID, read parameters and display headlessly, and save/reopen sets containing the device. (S3, S4)

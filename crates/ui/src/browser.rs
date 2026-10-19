@@ -70,6 +70,12 @@ pub fn preview_toggle_id() -> Id {
     Id::new("browser-preview-toggle")
 }
 
+/// The Raw switch in the preview strip (WP-4.18; spec: browser R18).
+#[must_use]
+pub fn raw_toggle_id() -> Id {
+    Id::new("browser-raw-toggle")
+}
+
 /// The preview strip.
 #[must_use]
 pub fn preview_strip_id() -> Id {
@@ -982,7 +988,13 @@ impl BrowserUi {
         // The file previewed: its waveform and how far it has played.
         let wave = layout.preview_wave;
         let id = preview_strip_id();
-        let _ = ui.interact(wave, id, Sense::hover());
+        let wave_response = ui.interact(wave, id, Sense::click());
+        if wave_response.clicked()
+            && let Some(pos) = wave_response.interact_pointer_pos()
+        {
+            let fraction = ((pos.x - wave.left()) / wave.width()).clamp(0.0, 1.0) as f64;
+            invoke(events, ids::SCRUB_PREVIEW, json!({ "fraction": fraction }));
+        }
         let view = shell.browser_view();
         let shown = preview
             .playing
@@ -1057,6 +1069,41 @@ impl BrowserUi {
                 format!("{name}, stopped")
             };
             node.set_value(value);
+        });
+
+        // The Raw switch at the strip's right (WP-4.18; spec: browser R18).
+        let raw_toggle = layout.raw_toggle;
+        let raw_id = raw_toggle_id();
+        let raw_response = ui.interact(raw_toggle, raw_id, Sense::click());
+        let fill = if preview.raw {
+            theme.colors.accent.0
+        } else if raw_response.hovered() {
+            theme.colors.control_hover.0
+        } else {
+            theme.colors.control.0
+        };
+        painter.rect_filled(raw_toggle, theme.sizes.corner, fill);
+        let ink = if preview.raw {
+            theme.colors.accent_text.0
+        } else {
+            theme.colors.text_dim.0
+        };
+        painter.text(
+            raw_toggle.center(),
+            Align2::CENTER_CENTER,
+            "Raw",
+            theme.small_font(),
+            ink,
+        );
+        if raw_response.clicked() {
+            invoke(events, ids::SET_RAW, json!({}));
+        }
+        raw_response
+            .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, preview.raw, "Raw"));
+        ui.ctx().accesskit_node_builder(raw_id, |node| {
+            node.set_role(Role::CheckBox);
+            node.set_label("Raw".to_owned());
+            node.set_selected(preview.raw);
         });
     }
 

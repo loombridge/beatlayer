@@ -717,6 +717,8 @@ pub struct BrowserLayout {
     pub strip: Rect,
     /// The Preview switch, at the strip's left (L-BRW-011).
     pub preview_toggle: Rect,
+    /// The Raw switch, at the strip's right (WP-4.18; spec: browser R18).
+    pub raw_toggle: Rect,
     /// The waveform of the file previewed, beside the switch.
     pub preview_wave: Rect,
 }
@@ -748,9 +750,11 @@ impl BrowserLayout {
             pos2(content.left() + 4.0, strip.top() + 4.0),
             vec2(14.0, 14.0),
         );
+        let raw_toggle =
+            Rect::from_min_size(pos2(right - 30.0, strip.top() + 4.0), vec2(26.0, 14.0));
         let preview_wave = Rect::from_min_max(
             pos2(preview_toggle.right() + 4.0, strip.top() + 2.0),
-            pos2(right - 2.0, strip.bottom() - 2.0),
+            pos2(raw_toggle.left() - 4.0, strip.bottom() - 2.0),
         );
         Self {
             column,
@@ -767,6 +771,7 @@ impl BrowserLayout {
             list,
             strip,
             preview_toggle,
+            raw_toggle,
             preview_wave,
         }
     }
@@ -1149,9 +1154,10 @@ mod tests {
         );
         assert_eq!(browser.sidebar.top(), 84.0);
         // L-BRW-010 and 011: the list to y 744, the Preview switch at x 114,
-        // y 748.
+        // y 748, the Raw switch at x 281, y 748.
         assert_eq!(browser.list.bottom(), 744.0);
         assert_eq!(browser.preview_toggle.min, pos2(114.0, 748.0));
+        assert_eq!(browser.raw_toggle.min, pos2(281.0, 748.0));
     }
 
     #[test]

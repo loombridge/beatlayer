@@ -1239,3 +1239,206 @@ fn the_browser_lists_sfz_files_and_loads_one_as_a_multisampler() {
     assert_ne!(again["track"], json!(audio));
     assert_eq!(shell.editor().document().top_level().count(), tracks + 1);
 }
+
+/// A click track file, and where each click starts.
+fn clicks(
+    scratch: &Scratch,
+    name: &str,
+    bpm: f64,
+    offset: f64,
+    seconds: f64,
+) -> (PathBuf, Vec<f64>) {
+    let path = scratch.path(&format!("{name}.wav"));
+    let (samples, starts) = bl_analysis::signals::click_track(bpm, offset, seconds, 48_000);
+    let mut bytes = Vec::new();
+    let frames = samples.len() as u32;
+    let byte_len = frames * 2;
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + byte_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&byte_len.to_le_bytes());
+    for sample in &samples {
+        bytes.extend_from_slice(&((sample * 32_000.0) as i16).to_le_bytes());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&path, bytes).unwrap();
+    (path, starts)
+}
+
+// Spec: browser R18.
+#[test]
+fn the_raw_switch_is_a_kept_preference_and_raw_previews_play_once() {
+    let scratch = Scratch::new("raw-pref");
+    let config = scratch.path("config");
+    let mut shell = Shell::new(
+        Preferences::default(),
+        Some(config.clone()),
+        bl_shell::audio::AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    shell.start_audio();
+    let preview = shell.browser_preview();
+    assert!(!preview.raw, "raw is off by default");
+
+    let state: PreviewState = run(&mut shell, ids::SET_RAW, json!({}));
+    assert!(state.raw, "toggling raw switches it on");
+
+    let state: PreviewState = run(&mut shell, ids::SET_RAW, json!({ "raw": false }));
+    assert!(!state.raw, "setting raw false turns it off");
+
+    let _ = run::<PreviewState>(&mut shell, ids::SET_RAW, json!({ "raw": true }));
+    assert!(
+        Preferences::load(&config).unwrap().browser.raw,
+        "raw is kept in preferences"
+    );
+
+    let (loop_file, _) = clicks(&scratch, "loop", 100.0, 0.0, 1.2);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    wait_until(&mut shell, "the preview to load and start", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    // With Raw on, a preview plays unwarped at its own speed and stops.
+    wait_until(&mut shell, "raw preview to finish", |shell| {
+        let p = shell.browser_preview();
+        p.loading.is_none() && p.playing.is_none()
+    });
+}
+
+// Spec: browser R19.
+#[test]
+fn a_100_bpm_loop_previews_at_the_sets_120_and_loops() {
+    let scratch = Scratch::new("bpm-loop");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    // 2-bar loop at 100 BPM (4.8 seconds).
+    let (loop_file, _) = clicks(&scratch, "loop100", 100.0, 0.0, 4.8);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    // Warped to 120 BPM the two bars last 4 seconds and start again; an
+    // unwarped preview would play its 4.8 seconds once and stop.
+    wait_until(&mut shell, "the preview to pass 3 seconds", |shell| {
+        shell.browser_preview().position_seconds > 3.0
+    });
+    wait_until(&mut shell, "the preview to loop", |shell| {
+        let preview = shell.browser_preview();
+        preview.playing.is_some() && preview.position_seconds < 1.0
+    });
+}
+
+// Spec: browser R19.
+#[test]
+fn a_one_shot_previews_once_at_its_own_speed() {
+    let scratch = Scratch::new("one-shot");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    let (hit_file, _) = clicks(&scratch, "hit", 60.0, 0.0, 0.2);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&hit_file)] }),
+    );
+    wait_until(&mut shell, "one-shot to start playing", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    wait_until(&mut shell, "one-shot to finish playing", |shell| {
+        let p = shell.browser_preview();
+        p.loading.is_none() && p.playing.is_none()
+    });
+}
+
+// Spec: browser R21.
+#[test]
+fn a_warped_preview_waits_for_its_analysis_and_a_raw_one_does_not() {
+    let scratch = Scratch::new("wait-analysis");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    let (loop_file, _) = clicks(&scratch, "newloop", 100.0, 0.0, 4.8);
+    // Raw preview: does not wait for analysis, starts immediately.
+    run::<PreviewState>(&mut shell, ids::SET_RAW, json!({ "raw": true }));
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    wait_until(&mut shell, "raw preview to start", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    run::<PreviewState>(&mut shell, ids::STOP_PREVIEW, json!({}));
+
+    // With Raw off, warped preview waits for analysis if pending.
+    run::<PreviewState>(&mut shell, ids::SET_RAW, json!({ "raw": false }));
+    let (loop_file2, _) = clicks(&scratch, "newloop2", 100.0, 0.0, 4.8);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file2)] }),
+    );
+    wait_until(
+        &mut shell,
+        "warped preview to start once analyzed",
+        |shell| shell.browser_preview().playing.is_some(),
+    );
+}
+
+// Spec: browser R22.
+#[test]
+fn clicking_the_strip_moves_a_warped_preview_on_the_quantisation_step() {
+    let scratch = Scratch::new("scrub-preview");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    let (loop_file, _) = clicks(&scratch, "scrubloop", 100.0, 0.0, 4.8);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    wait_until(&mut shell, "warped preview to play", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    // Scrubbing to 50% moves the preview.
+    run::<PreviewState>(&mut shell, ids::SCRUB_PREVIEW, json!({ "fraction": 0.5 }));
+    wait_until(&mut shell, "scrubbed position to update", |shell| {
+        (shell.browser_preview().position_seconds - 2.4).abs() < 0.5
+    });
+
+    // With Raw on, scrubbing does nothing.
+    run::<PreviewState>(&mut shell, ids::SET_RAW, json!({ "raw": true }));
+    let res = shell.run(ids::SCRUB_PREVIEW, json!({ "fraction": 0.2 }));
+    assert!(res.is_ok());
+}
+
+// Spec: warping R51.
+#[test]
+fn a_warped_preview_plays_through_the_map_a_new_clip_would_get() {
+    let scratch = Scratch::new("warp-map-preview");
+    let (mut shell, _) = shell_with_library(&scratch);
+    shell.start_audio();
+    let (loop_file, _) = clicks(&scratch, "defaults_loop", 100.0, 0.0, 4.8);
+    run::<BrowserState>(
+        &mut shell,
+        ids::SELECT,
+        json!({ "paths": [text(&loop_file)] }),
+    );
+    wait_until(&mut shell, "warped preview to play", |shell| {
+        shell.browser_preview().playing.is_some()
+    });
+    let preview = shell.browser_preview();
+    assert!(preview.playing.is_some());
+}

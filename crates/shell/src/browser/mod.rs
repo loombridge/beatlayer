@@ -32,7 +32,8 @@ pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
     self as ids, AddToArrangementArgs, BrowserState, FocusArgs, FolderArgs, IndexState, Item,
     ItemKind, Label, LabelInfo, MAX_PREVIEW_VOLUME, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
-    PreviewState, SearchArgs, Section, SelectArgs, SetPreviewArgs, ShowFileArgs, StateArgs,
+    PreviewState, ScrubPreviewArgs, SearchArgs, Section, SelectArgs, SetPreviewArgs, SetRawArgs,
+    ShowFileArgs, StateArgs,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -89,6 +90,8 @@ pub struct BrowserPrefs {
     pub preview: bool,
     /// The preview volume, a linear gain.
     pub preview_volume: f64,
+    /// The Raw switch in the preview strip (WP-4.18; spec: browser R18).
+    pub raw: bool,
 }
 
 impl Default for BrowserPrefs {
@@ -98,6 +101,7 @@ impl Default for BrowserPrefs {
             folders: Vec::new(),
             preview: true,
             preview_volume: 1.0,
+            raw: false,
         }
     }
 }
@@ -159,6 +163,15 @@ pub struct Polled {
     pub error: Option<String>,
 }
 
+/// A decoded preview waiting for analysis (WP-4.18; spec: browser R21).
+#[derive(Clone, Debug)]
+struct PendingPreview {
+    path: PathBuf,
+    hash: bl_media::ContentHash,
+    data: bl_media::SampleData,
+    seconds: f64,
+}
+
 /// A preview the audio thread was given.
 #[derive(Clone, Debug)]
 struct Playing {
@@ -166,6 +179,8 @@ struct Playing {
     path: PathBuf,
     /// Whether the audio thread has reported playing it.
     started: bool,
+    warp_map: Option<bl_model::WarpMap>,
+    length_seconds: f64,
 }
 
 /// The content pane's rows.
@@ -198,8 +213,10 @@ pub struct BrowserView {
     indexing: bool,
     loader: Loader,
     preview_on: bool,
+    raw: bool,
     preview_volume: f64,
     loading: Option<(u64, PathBuf)>,
+    pending_warp: Option<PendingPreview>,
     playing: Option<Playing>,
     preview_rate: u32,
     /// The waveform overview of the file previewed last, for the preview
@@ -368,8 +385,10 @@ impl BrowserView {
             indexing: false,
             loader: Loader::new(waker.clone()),
             preview_on: prefs.preview,
+            raw: prefs.raw,
             preview_volume: prefs.preview_volume.clamp(0.0, MAX_PREVIEW_VOLUME),
             loading: None,
+            pending_warp: None,
             playing: None,
             preview_rate: 48_000,
             overview: None,
@@ -407,6 +426,7 @@ impl BrowserView {
             folders: self.folders.clone(),
             preview: self.preview_on,
             preview_volume: self.preview_volume,
+            raw: self.raw,
         }
     }
 
@@ -968,11 +988,17 @@ impl BrowserView {
         };
         PreviewState {
             on: self.preview_on,
+            raw: self.raw,
             volume: self.preview_volume,
             loading: self
                 .loading
                 .as_ref()
-                .map(|(_, path)| path.to_string_lossy().into_owned()),
+                .map(|(_, path)| path.to_string_lossy().into_owned())
+                .or_else(|| {
+                    self.pending_warp
+                        .as_ref()
+                        .map(|p| p.path.to_string_lossy().into_owned())
+                }),
             playing: playing.map(|p| p.path.to_string_lossy().into_owned()),
             position_seconds: position as f64 / rate,
             length_seconds: length as f64 / rate,
@@ -1005,7 +1031,13 @@ impl BrowserView {
 
     /// Takes background work's news: a newer index, a decoded preview, a
     /// preview that finished. The host calls it every frame and when woken.
-    pub fn poll(&mut self, audio: &mut AudioHost) -> Polled {
+    pub fn poll(
+        &mut self,
+        audio: &mut AudioHost,
+        media: &bl_media::MediaStore,
+        warping: crate::auto_warp::Warping<'_>,
+        set_bpm: f64,
+    ) -> Polled {
         let mut polled = Polled::default();
         if self.index.poll() {
             if matches!(self.rows, Rows::Hits { .. }) {
@@ -1030,21 +1062,113 @@ impl BrowserView {
                 self.overview = Some((loaded.path.clone(), loaded.overview.into()));
             }
             match loaded.result {
-                Ok(data) => match audio.play_preview(Box::new(MediaSamples(data))) {
-                    Ok(generation) => {
-                        self.playing = Some(Playing {
-                            generation,
-                            path: loaded.path,
-                            started: false,
-                        });
+                Ok(data) => {
+                    let seconds = data.frames() as f64 / f64::from(data.sample_rate().max(1));
+                    if self.raw {
+                        match audio.play_preview(Box::new(MediaSamples(data))) {
+                            Ok(generation) => {
+                                self.playing = Some(Playing {
+                                    generation,
+                                    path: loaded.path,
+                                    started: false,
+                                    warp_map: None,
+                                    length_seconds: seconds,
+                                });
+                            }
+                            Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
+                        }
+                    } else {
+                        // The analysis cache reads files through the media
+                        // store, so a browsed file joins it first.
+                        let hash = media.import(&loaded.path);
+                        let warp =
+                            hash.as_ref()
+                                .map_or(crate::auto_warp::PreviewWarp::Unwarped, |hash| {
+                                    crate::auto_warp::preview_warp(
+                                        *hash,
+                                        &loaded.path,
+                                        seconds,
+                                        set_bpm,
+                                        warping,
+                                    )
+                                });
+                        match (warp, hash) {
+                            (crate::auto_warp::PreviewWarp::Pending, Ok(hash)) => {
+                                self.pending_warp = Some(PendingPreview {
+                                    path: loaded.path,
+                                    hash,
+                                    data,
+                                    seconds,
+                                });
+                            }
+                            (crate::auto_warp::PreviewWarp::Warped(audio_data), Ok(hash)) => {
+                                self.start_warped_preview(
+                                    audio,
+                                    PendingPreview {
+                                        path: loaded.path,
+                                        hash,
+                                        data,
+                                        seconds,
+                                    },
+                                    audio_data,
+                                    set_bpm,
+                                    &mut polled,
+                                );
+                            }
+                            _ => match audio.play_preview(Box::new(MediaSamples(data))) {
+                                Ok(generation) => {
+                                    self.playing = Some(Playing {
+                                        generation,
+                                        path: loaded.path,
+                                        started: false,
+                                        warp_map: None,
+                                        length_seconds: seconds,
+                                    });
+                                }
+                                Err(error) => {
+                                    polled.error = Some(format!("Couldn't preview: {error}"))
+                                }
+                            },
+                        }
                     }
-                    Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
-                },
+                }
                 Err(error) => {
                     polled.error = Some(format!(
                         "Couldn't preview {}: {error}",
                         loaded.path.to_string_lossy()
                     ));
+                }
+            }
+        }
+        if let Some(pending) = self.pending_warp.take() {
+            match crate::auto_warp::preview_warp(
+                pending.hash,
+                &pending.path,
+                pending.seconds,
+                set_bpm,
+                warping,
+            ) {
+                crate::auto_warp::PreviewWarp::Pending => {
+                    self.pending_warp = Some(pending);
+                }
+                crate::auto_warp::PreviewWarp::Warped(audio_data) => {
+                    polled.changed = true;
+                    self.start_warped_preview(audio, pending, audio_data, set_bpm, &mut polled);
+                }
+                crate::auto_warp::PreviewWarp::Unwarped => {
+                    polled.changed = true;
+                    match audio.play_preview(Box::new(MediaSamples(pending.data))) {
+                        Ok(generation) => {
+                            self.playing = Some(Playing {
+                                generation,
+                                path: pending.path,
+                                started: false,
+                                warp_map: None,
+                                length_seconds: pending.seconds,
+                            });
+                        }
+                        Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
+                    }
                 }
             }
         }
@@ -1064,6 +1188,58 @@ impl BrowserView {
         polled
     }
 
+    fn start_warped_preview(
+        &mut self,
+        audio: &mut AudioHost,
+        pending: PendingPreview,
+        audio_data: Box<bl_model::AudioData>,
+        set_bpm: f64,
+        polled: &mut Polled,
+    ) {
+        let map = match audio_data.warp_map() {
+            Ok(m) => m,
+            Err(e) => {
+                polled.error = Some(format!("Couldn't warp preview: {e}"));
+                return;
+            }
+        };
+        let start = audio_data.start;
+        let end = audio_data
+            .end
+            .unwrap_or_else(|| map.time_to_beat(pending.seconds));
+        let mut loop_start = audio_data.loop_start;
+        let mut loop_end = audio_data.loop_end.unwrap_or(end);
+        if loop_end <= loop_start {
+            loop_start = start;
+            loop_end = end;
+        }
+        let sample_rate = pending.data.sample_rate() as f64;
+        let seconds = pending.seconds;
+        let path = pending.path;
+        let warped = bl_engine::preview::WarpedPreview {
+            samples: Box::new(MediaSamples(pending.data)),
+            map: map.clone(),
+            start,
+            end,
+            loop_start,
+            loop_end,
+            sample_rate,
+            tempo: set_bpm,
+        };
+        match audio.play_warped_preview(Box::new(warped)) {
+            Ok(generation) => {
+                self.playing = Some(Playing {
+                    generation,
+                    path,
+                    started: false,
+                    warp_map: Some(map),
+                    length_seconds: seconds,
+                });
+            }
+            Err(error) => polled.error = Some(format!("Couldn't preview: {error}")),
+        }
+    }
+
     /// The file previewed last and its waveform overview, for the preview
     /// strip: the lowest and highest sample of equal stretches of it.
     #[must_use]
@@ -1077,7 +1253,7 @@ impl BrowserView {
     /// progress.
     #[must_use]
     pub fn preview_active(&self) -> bool {
-        self.loading.is_some() || self.playing.is_some()
+        self.loading.is_some() || self.pending_warp.is_some() || self.playing.is_some()
     }
 
     fn start_preview(&mut self, path: &Path, audio: &mut AudioHost) -> Result<(), BrowserError> {
@@ -1095,6 +1271,7 @@ impl BrowserView {
         })?;
         audio.stop_preview();
         self.playing = None;
+        self.pending_warp = None;
         let id = self
             .loader
             .request(path, rate)
@@ -1107,6 +1284,7 @@ impl BrowserView {
     fn stop_preview(&mut self, audio: &AudioHost) {
         audio.stop_preview();
         self.loading = None;
+        self.pending_warp = None;
         self.playing = None;
     }
 
@@ -1468,6 +1646,35 @@ impl BrowserView {
                 }
                 self.preview_on = on;
                 outcome.prefs_changed = true;
+                outcome.value = to_value(&self.preview_state(ctx.audio));
+            }
+            ids::SET_RAW => {
+                let SetRawArgs { raw } = parse(args)?;
+                let raw = raw.unwrap_or(!self.raw);
+                self.raw = raw;
+                outcome.prefs_changed = true;
+                outcome.value = to_value(&self.preview_state(ctx.audio));
+            }
+            ids::SCRUB_PREVIEW => {
+                let ScrubPreviewArgs { position, fraction } = parse(args)?;
+                if !self.raw
+                    && let Some(playing) = &self.playing
+                    && let Some(map) = &playing.warp_map
+                {
+                    let seconds = match (position, fraction) {
+                        (Some(p), _) => p,
+                        (None, Some(f)) => f.clamp(0.0, 1.0) * playing.length_seconds,
+                        (None, None) => {
+                            return Err(BrowserError::InvalidArgs(
+                                "scrub needs position or fraction".to_owned(),
+                            ));
+                        }
+                    };
+                    let beat = map.time_to_beat(seconds.max(0.0));
+                    ctx.audio
+                        .scrub_preview(beat)
+                        .map_err(BrowserError::Failed)?;
+                }
                 outcome.value = to_value(&self.preview_state(ctx.audio));
             }
             ids::LOAD_SELECTED => {

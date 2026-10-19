@@ -132,3 +132,86 @@ fn a_loop_warped_at_90_plays_on_the_bar_lines_at_120_and_140() {
         }
     }
 }
+
+// Spec: browser R20.
+#[test]
+fn a_preview_against_a_running_song_lands_on_its_bar_lines() {
+    let collector = bl_engine::Collector::new();
+    let shared = std::sync::Arc::new(bl_engine::preview::PreviewShared::default());
+    let (mut control, mut voice) = bl_engine::preview::preview_channel(collector.handle(), shared);
+
+    let rate = 48_000.0;
+    let frames = 115_200;
+    let channel = vec![0.5f32; frames];
+    let buffer = bl_engine::preview::PreviewBuffer::new(vec![channel]).expect("buffer");
+    let map = bl_engine::preview::WarpMap::new(
+        vec![
+            bl_engine::preview::Marker { time: 0.0, beat: 0 },
+            bl_engine::preview::Marker {
+                time: 2.4,
+                beat: bl_core::time::Ticks::WHOLE.get(),
+            },
+        ],
+        100.0,
+    )
+    .expect("valid warp map");
+
+    let warped = bl_engine::preview::WarpedPreview {
+        samples: Box::new(buffer),
+        map,
+        start: 0.0,
+        end: bl_core::time::Ticks::WHOLE.get() as f64,
+        loop_start: 0.0,
+        loop_end: bl_core::time::Ticks::WHOLE.get() as f64,
+        sample_rate: rate,
+        tempo: 120.0,
+    };
+    control.play_warped(Box::new(warped)).expect("queued");
+
+    let tempo_map = bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(120.0).unwrap());
+    let signatures = bl_core::time::TimeSignatureMap::default();
+    let launch = bl_model::LaunchSettings::default();
+
+    let mut left = vec![0.0f32; 1000];
+    let mut right = vec![0.0f32; 1000];
+
+    // Block 1: frame 48,000 (middle of first bar, before 96,000 next bar line).
+    let transport = bl_engine::preview::PreviewTransport {
+        playing: true,
+        song_position: bl_core::time::Frames(48_000),
+        tempo_map: &tempo_map,
+        time_signatures: &signatures,
+        loop_frames: None,
+        sample_rate: bl_core::time::SampleRate::new(48_000).unwrap(),
+        launch,
+    };
+    voice.render_with_transport(
+        1000,
+        [&mut left[..], &mut right[..]].into_iter(),
+        Some(transport),
+    );
+    assert!(
+        left.iter().all(|&s| s == 0.0),
+        "preview waits for next bar line"
+    );
+
+    // Block 2: frame 96,000 (next bar line).
+    let transport2 = bl_engine::preview::PreviewTransport {
+        playing: true,
+        song_position: bl_core::time::Frames(96_000),
+        tempo_map: &tempo_map,
+        time_signatures: &signatures,
+        loop_frames: None,
+        sample_rate: bl_core::time::SampleRate::new(48_000).unwrap(),
+        launch,
+    };
+    voice.render_with_transport(
+        1000,
+        [&mut left[..], &mut right[..]].into_iter(),
+        Some(transport2),
+    );
+    assert!(
+        left.iter().any(|&s| s > 0.0),
+        "preview starts playing on bar line"
+    );
+}

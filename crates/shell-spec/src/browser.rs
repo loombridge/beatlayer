@@ -41,6 +41,10 @@ pub const PREVIEW: &str = "browser.preview";
 pub const STOP_PREVIEW: &str = "browser.stop_preview";
 /// `browser.set_preview`: the Preview switch and the preview volume.
 pub const SET_PREVIEW: &str = "browser.set_preview";
+/// `browser.set_raw`: the Raw switch in the preview strip.
+pub const SET_RAW: &str = "browser.set_raw";
+/// `browser.scrub_preview`: move the preview to a position.
+pub const SCRUB_PREVIEW: &str = "browser.scrub_preview";
 /// `browser.load_selected`: load the selected files onto the selected track
 /// (Enter).
 pub const LOAD_SELECTED: &str = "browser.load_selected";
@@ -64,6 +68,8 @@ pub const IDS: &[&str] = &[
     PREVIEW,
     STOP_PREVIEW,
     SET_PREVIEW,
+    SET_RAW,
+    SCRUB_PREVIEW,
     LOAD_SELECTED,
     ADD_TO_ARRANGEMENT,
     FOCUS_BROWSER,
@@ -283,6 +289,8 @@ pub struct PreviewState {
     /// Whether the Preview switch is on: selecting an audio file previews
     /// it.
     pub on: bool,
+    /// Whether the Raw switch is on: previews play once at their original speed.
+    pub raw: bool,
     /// The preview volume as a linear gain: 0 is silence, 1 unity (0 dB),
     /// 2 about +6 dB.
     pub volume: f64,
@@ -471,6 +479,29 @@ pub struct SetPreviewArgs {
     /// +6 dB); values outside are brought within it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub volume: Option<f64>,
+}
+
+/// Arguments of `browser.set_raw`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRawArgs {
+    /// The Raw switch. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<bool>,
+}
+
+/// Arguments of `browser.scrub_preview`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrubPreviewArgs {
+    /// Where in the preview to scrub to, in seconds from its start. Give
+    /// this or `fraction`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<f64>,
+    /// Where in the preview to scrub to, as a fraction from 0 (the start)
+    /// to 1 (the end). Give this or `position`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fraction: Option<f64>,
 }
 
 /// Arguments of `browser.add_to_arrangement`.
@@ -676,6 +707,28 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Browser])
             .args::<SetPreviewArgs>()
             .result::<PreviewState>(),
+        CommandSpec::new(SET_RAW, "Raw Preview")
+            .description(
+                "Sets the browser's Raw switch (`raw`): with Raw on, previews play once from \
+                 the start at the file's original tempo; with Raw off, audio files preview at \
+                 the set's tempo and loop. With no arguments it toggles the switch. Kept for the \
+                 next start.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetRawArgs>()
+            .result::<PreviewState>(),
+        CommandSpec::new(SCRUB_PREVIEW, "Scrub Preview")
+            .description(
+                "Moves a playing warped preview to `position` (in seconds) or `fraction` (0 to 1). \
+                 While the transport runs it moves on the next step of the global launch \
+                 quantisation; while stopped it moves at once. With Raw on or on an unwarped \
+                 preview, does nothing.",
+            )
+            .permission(Permission::External)
+            .context(Browser)
+            .args::<ScrubPreviewArgs>()
+            .result::<PreviewState>(),
         CommandSpec::new(LOAD_SELECTED, "Load Selected Item")
             .description(
                 "Loads the browser's selected audio files into the Arrangement, as Enter or a \
@@ -764,12 +817,13 @@ mod tests {
             SHOW_FILE,
             ADD_FOLDER,
             PREVIEW,
+            SCRUB_PREVIEW,
             LOAD_SELECTED,
             ADD_TO_ARRANGEMENT,
         ] {
             assert_eq!(class(id), Permission::External, "{id} reads outside");
         }
-        for id in [SET_PREVIEW, REMOVE_FOLDER] {
+        for id in [SET_PREVIEW, SET_RAW, REMOVE_FOLDER] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
         for id in [FOCUS_SEARCH, STOP_PREVIEW, FOCUS_BROWSER] {

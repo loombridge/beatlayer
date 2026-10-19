@@ -205,3 +205,82 @@ pub fn warp_recorded(
             ..warped
         })
 }
+
+/// The warp decision for a preview (WP-4.18; spec: browser R19, R21).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PreviewWarp {
+    /// Plays unwarped at its own tempo and doesn't loop.
+    Unwarped,
+    /// Warped audio settings to preview through, looping to the set's tempo.
+    Warped(Box<AudioData>),
+    /// Waiting for background analysis to finish.
+    Pending,
+}
+
+/// What warp settings a preview of `path`, whose content is `media_hash`,
+/// gets: saved defaults if present, otherwise the auto-warp settings for
+/// short or long samples, or unwarped. Returns `Pending` if analysis is
+/// needed and still running in the background. The file must be in the
+/// analysis cache's media store, or its analysis fails.
+#[must_use]
+pub fn preview_warp(
+    media_hash: MediaHash,
+    path: &std::path::Path,
+    seconds: f64,
+    set_bpm: f64,
+    warping: Warping<'_>,
+) -> PreviewWarp {
+    let media = ContentHash(*media_hash.as_bytes());
+    if let Some(audio) = clip_defaults::load(path, media)
+        .and_then(|defaults| AudioData::new(media).with_defaults(&defaults).ok())
+    {
+        if audio.warp && audio.warp_map().is_ok() {
+            return PreviewWarp::Warped(Box::new(audio));
+        }
+        return PreviewWarp::Unwarped;
+    }
+    let short = seconds < SHORT_SAMPLE_SECONDS;
+    let wanted = if short {
+        warping.prefs.loop_warp_short_samples != LoopWarpShortSamples::UnwarpedOneShot
+    } else {
+        warping.prefs.auto_warp_long_samples
+    };
+    if !wanted {
+        return PreviewWarp::Unwarped;
+    }
+    let Some(cache) = warping.analysis else {
+        return PreviewWarp::Unwarped;
+    };
+    let analysis = match cache.request(media_hash) {
+        bl_analysis::cache::AnalysisStatus::Pending => return PreviewWarp::Pending,
+        bl_analysis::cache::AnalysisStatus::Ready(analysis) => analysis,
+        bl_analysis::cache::AnalysisStatus::Failed(_) => return PreviewWarp::Unwarped,
+    };
+    let warped = if short {
+        warp_short(
+            media,
+            seconds,
+            set_bpm,
+            warping.prefs.loop_warp_short_samples,
+            &analysis,
+        )
+    } else {
+        AudioData::new(media)
+            .auto_warped(&FileBeats {
+                seconds,
+                bpm: analysis.tempo.map(|tempo| tempo.bpm),
+                beats: analysis.beats.clone(),
+            })
+            .ok()
+    };
+    match warped {
+        Some(audio) => {
+            let audio = AudioData {
+                warp_mode: warp_mode(warping.prefs.default_warp_mode),
+                ..audio
+            };
+            PreviewWarp::Warped(Box::new(audio))
+        }
+        None => PreviewWarp::Unwarped,
+    }
+}

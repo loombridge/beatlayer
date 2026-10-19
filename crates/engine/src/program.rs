@@ -799,6 +799,12 @@ impl EngineProgram {
         &self.tempo
     }
 
+    /// The time-signature map the program reads bar lines from.
+    #[must_use]
+    pub fn time_signatures(&self) -> &TimeSignatureMap {
+        &self.time_signatures
+    }
+
     /// The slots of `scene` that hold a clip, as `(scene, track, launch
     /// mode)` triples in track order: what a scene launch queues.
     pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId, LaunchMode)] {

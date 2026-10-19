@@ -2152,6 +2152,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "browser.scrub_preview",
+            Exception(Live(
+                "clicking in the browser's preview waveform is the pointer's way; Live has no \
+                 keyboard shortcut for scrubbing a preview",
+            )),
+        ),
+        (
+            "browser.set_raw",
+            Exception(Live(
+                "clicking the Raw button in the browser's preview strip; Live has no keyboard \
+                 shortcut for the Raw switch",
+            )),
+        ),
+        (
             "set.discard_changes",
             Exception(Equivalent(
                 "the save-changes dialog's Don't Save, the system's dialog",

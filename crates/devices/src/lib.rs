@@ -28,6 +28,7 @@ pub mod auto_filter;
 pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
+pub mod chorus_ensemble;
 pub mod compressor;
 pub mod crusher;
 pub mod degrade;
@@ -55,6 +56,7 @@ pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
 pub mod overdrive;
+pub mod phaser_flanger;
 pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
@@ -78,6 +80,7 @@ pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
+pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use degrade::{DEGRADE, degrade_type};
@@ -99,6 +102,7 @@ pub use limiter::{Brickwall, limiter_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
+pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
@@ -153,6 +157,8 @@ pub fn display(
             values,
             data,
         )),
+        PHASER_FLANGER => Some(phaser_flanger::display(device, description, values, data)),
+        CHORUS_ENSEMBLE => Some(chorus_ensemble::display(device, description, values, data)),
         _ => None,
     }
 }
@@ -199,6 +205,8 @@ pub fn register(registry: &mut Registry) {
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     shifter::register(registry);
+    phaser_flanger::register(registry);
+    chorus_ensemble::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

@@ -1026,3 +1026,37 @@ fn triband_passes_under_rtsan() {
         state.cpu_load_max * 100.0
     );
 }
+
+// Spec: phaser-flanger R13, chorus-ensemble R8
+#[test]
+fn the_modulation_devices_pass_under_rtsan() {
+    use bl_devices::{chorus_ensemble as chorus, phaser_flanger as pf};
+    run_lo_fi_device(
+        pf::PHASER_FLANGER,
+        &[
+            (pf::MODE, &[0.0, 1.0, 2.0]),
+            (pf::AMOUNT, &[0.0, 50.0, 100.0]),
+            (pf::FEEDBACK, &[0.0, 50.0, 80.0]),
+            (pf::FEEDBACK_INVERT, &[0.0, 1.0]),
+            (pf::WARMTH, &[0.0, 80.0]),
+            (pf::NOTCHES, &[2.0, 4.0, 8.0]),
+            (pf::FLANGER_TIME, &[0.5, 2.0, 10.0]),
+            (pf::DOUBLER_TIME, &[10.0, 30.0]),
+            (pf::SAFE_BASS, &[20.0, 200.0]),
+        ],
+    );
+    run_lo_fi_device(
+        chorus::CHORUS_ENSEMBLE,
+        &[
+            (chorus::MODE, &[0.0, 1.0, 2.0]),
+            (chorus::RATE, &[0.5, 2.0, 10.0]),
+            (chorus::AMOUNT, &[10.0, 70.0]),
+            (chorus::FEEDBACK, &[0.0, 60.0]),
+            (chorus::WIDTH, &[0.0, 100.0, 200.0]),
+            (chorus::HP_FREQ, &[20.0, 300.0]),
+            (chorus::CHORUS_TIME, &[0.0, 2.0, 4.0]),
+            (chorus::CHORUS_TAPS, &[0.0, 1.0]),
+            (chorus::VIBRATO_SHAPE, &[0.0, 100.0]),
+        ],
+    );
+}

@@ -2545,7 +2545,10 @@ trigger = "held"
 milestone = "M2"
 mac = ["Shift+Option+drag"]
 win = ["Shift+Alt+drag"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.slide_contents", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-006"
@@ -2556,7 +2559,10 @@ trigger = "held"
 milestone = "M4"
 mac = ["Shift+drag the clip title bar"]
 win = ["Shift+drag the clip title bar"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.stretch", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-007"

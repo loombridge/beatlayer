@@ -230,11 +230,44 @@ impl AudioData {
         } else {
             let map = self.warp_map()?;
             next = self.converted(|beat| map.beat_to_time(beat).max(0.0), false);
-            // Spec: warping R14. Only a warped clip loops.
+            // Spec: warping R14. Only a warped clip loops; R43: only a warped
+            // clip leads.
             next.looping = false;
+            next.tempo_leader = false;
         }
         next.warp = on;
         Ok(next)
+    }
+
+    /// The clip with the Lead/Follow switch set (R43): a warped Arrangement
+    /// clip can lead the set's tempo. Whether it sits in the Arrangement is
+    /// the caller's to check, since the data doesn't know.
+    pub(crate) fn with_tempo_leader(&self, leader: bool) -> Result<Self, ModelError> {
+        self.require_warp()?;
+        Ok(Self {
+            tempo_leader: leader,
+            ..self.clone()
+        })
+    }
+
+    /// The tempo of the warp segment playing at `beat`, a beat of the clip's
+    /// contents (R2): the segment that starts at the last marker at or before
+    /// it, the first segment's before the first marker, and the clip's tempo
+    /// after the last one. `None` for an unwarped clip or a damaged map.
+    #[must_use]
+    pub fn segment_bpm_at(&self, beat: f64) -> Option<Bpm> {
+        if !self.warp {
+            return None;
+        }
+        let map = self.warp_map().ok()?;
+        let markers = &self.warp_markers;
+        let bpm = match markers.iter().rposition(|m| (m.beat.get() as f64) <= beat) {
+            None if markers.len() > 1 => map.first_bpm(),
+            None => map.bpm(),
+            Some(index) if index == markers.len() - 1 => map.bpm(),
+            Some(index) => map.segment_bpm(index),
+        };
+        Bpm::new(bpm).ok()
     }
 
     /// The clip with a marker added (R6). Inserting where a marker already
@@ -378,14 +411,24 @@ impl AudioData {
     /// audio.
     pub(crate) fn with_tempo_scaled(&self, factor: f64) -> Result<Self, ModelError> {
         self.require_warp()?;
+        self.with_beats_scaled(self.warp_markers[0].beat.get() as f64, factor)
+    }
+
+    /// The clip with every beat of its contents scaled about `anchor`, a beat
+    /// of its contents, by `factor`, and every tempo multiplied by it: the
+    /// warp markers, the Start and End markers and the loop brace move, so
+    /// the same audio fills the new span and each segment runs at `factor`
+    /// times its tempo (R47). Sweeping every beat about the anchor is
+    /// Beatlayer's own, as R10's scaling about the first marker is.
+    pub(crate) fn with_beats_scaled(&self, anchor: f64, factor: f64) -> Result<Self, ModelError> {
+        self.require_warp()?;
         if !(factor.is_finite() && factor > 0.0) {
             return Err(ModelError::InvalidValue {
                 what: "tempo factor",
                 value: factor,
             });
         }
-        let first = self.warp_markers[0].beat.get() as f64;
-        let scale = |beat: f64| first + ((beat - first) * factor).round();
+        let scale = |beat: f64| anchor + ((beat - anchor) * factor).round();
         let markers = self
             .warp_markers
             .iter()
@@ -541,7 +584,9 @@ impl AudioData {
 
 #[cfg(test)]
 mod tests {
-    use bl_core::time::Bpm;
+    use bl_core::time::{Bpm, TempoMap};
+
+    use crate::ClipEdge;
     use serde_json::json;
 
     use super::*;
@@ -1075,6 +1120,375 @@ mod tests {
         let seconds = on.in_seconds();
         assert!(near(seconds.start, 1.0) && near(seconds.end.unwrap(), 1.5));
         assert_eq!(on.in_seconds().warp_markers, on.warp_markers);
+    }
+
+    // Spec: warping R43
+    #[test]
+    fn only_warped_arrangement_clips_lead() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks(4 * Q),
+                    ClipData::Audio(AudioData::new(ContentHash([1; 32]))),
+                ),
+            })
+            .unwrap();
+        let lead = |editor: &mut Editor, leader: bool| {
+            editor.apply(Command::SetTempoLeader { clip, leader })
+        };
+        // An unwarped clip can't lead.
+        assert!(lead(&mut editor, true).is_err());
+        editor
+            .apply(Command::SetClipWarp { clip, warp: true })
+            .unwrap();
+        let audio = |editor: &Editor| match &editor.document().clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        lead(&mut editor, true).unwrap();
+        assert!(audio(&editor).tempo_leader);
+        assert!(editor.document().any_tempo_leader());
+        // It is saved with the set, and it is one undo step.
+        assert_eq!(
+            serde_json::to_value(audio(&editor)).unwrap()["tempo_leader"],
+            json!(true)
+        );
+        editor.undo().unwrap();
+        assert!(!audio(&editor).tempo_leader);
+        editor.redo().unwrap();
+        assert!(audio(&editor).tempo_leader);
+        // Switching a leader's Warp off makes it a follower in the same step.
+        editor
+            .apply(Command::SetClipWarp { clip, warp: false })
+            .unwrap();
+        assert!(!audio(&editor).tempo_leader);
+        editor.undo().unwrap();
+        assert!(audio(&editor).tempo_leader, "one step");
+        // A Session clip follows.
+        let scene = editor.document().scenes().next().unwrap().id;
+        let slot = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    slot,
+                    Ticks::ZERO,
+                    Ticks(4 * Q),
+                    ClipData::Audio(AudioData::new(ContentHash([1; 32]))),
+                ),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetClipWarp {
+                clip: slot,
+                warp: true,
+            })
+            .unwrap();
+        assert!(
+            editor
+                .apply(Command::SetTempoLeader {
+                    clip: slot,
+                    leader: true,
+                })
+                .is_err()
+        );
+    }
+
+    // Spec: warping R44, R45, R46
+    #[test]
+    fn the_leaders_tempo_is_worked_out_from_the_clips() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        // A one-bar clip whose two segments are 120 and 60 BPM.
+        let clip = editor.new_id();
+        let data = AudioData {
+            tempo: Some(60.0),
+            ..warped(&[(0.0, 0), (1.0, 2 * Q), (3.0, 4 * Q)], 60.0)
+        };
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(clip, Ticks::ZERO, Ticks(4 * Q), ClipData::Audio(data)),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetTempoLeader { clip, leader: true })
+            .unwrap();
+        let map = editor.document().tempo_map();
+        // The clip's own tempo over its span, the Song Tempo envelope's 120
+        // outside it.
+        assert_eq!(map.bpm_at(Ticks::ZERO).get(), 120.0);
+        assert_eq!(map.bpm_at(Ticks(Q)).get(), 120.0);
+        assert_eq!(map.bpm_at(Ticks(2 * Q + 1)).get(), 60.0);
+        assert_eq!(map.bpm_at(Ticks(4 * Q)).get(), 120.0);
+        assert!(editor.document().tempo_leader_covers(Ticks(Q)));
+        assert!(!editor.document().tempo_leader_covers(Ticks(4 * Q)));
+        // The tempo commands refuse inside the leader's span, and so does
+        // `song.set_tempo` while any clip leads.
+        assert!(
+            editor
+                .apply(Command::SetTempoBreakpoint {
+                    at: Ticks(Q),
+                    bpm: bpm(140.0),
+                })
+                .is_err()
+        );
+        assert!(
+            editor
+                .apply(Command::SetTempo {
+                    tempo: TempoMap::constant(bpm(90.0)),
+                })
+                .is_err()
+        );
+        editor
+            .apply(Command::SetTempoBreakpoint {
+                at: Ticks(8 * Q),
+                bpm: bpm(140.0),
+            })
+            .unwrap();
+        // Unfollow writes the tempo the leaders set into the envelope and
+        // makes every clip a follower, in one undo step, so it plays the
+        // same.
+        let before = editor.document().tempo_map();
+        editor.apply(Command::UnfollowTempoAutomation {}).unwrap();
+        assert!(!editor.document().any_tempo_leader());
+        let after = editor.document().tempo_map();
+        for tick in [0, Q / 2, Q, 3 * Q / 2, 3 * Q, 5 * Q, 8 * Q] {
+            assert_eq!(after.bpm_at(Ticks(tick)), before.bpm_at(Ticks(tick)));
+        }
+        editor.undo().unwrap();
+        assert!(editor.document().any_tempo_leader());
+        assert_eq!(editor.document().tempo_map(), before, "one step");
+    }
+
+    // Spec: warping R47
+    #[test]
+    fn stretching_scales_every_beat_about_the_fixed_edge() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        // One bar, from bar 2: a quarter note a second (60 BPM), then 120.
+        let data = AudioData {
+            start: Q as f64,
+            end: Some(3.0 * Q as f64),
+            looping: true,
+            loop_start: Q as f64 / 2.0,
+            loop_end: Some(2.5 * Q as f64),
+            ..warped(&[(0.0, 0), (1.0, Q), (2.0, 3 * Q)], 120.0)
+        };
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(clip, Ticks(2 * Q), Ticks(4 * Q), ClipData::Audio(data)),
+            })
+            .unwrap();
+        let audio = |editor: &Editor| match &editor.document().clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let before = audio(&editor);
+        let old_map = before.warp_map().unwrap();
+        // Double the length from the right edge: every beat doubles about the
+        // beat at the fixed left edge, its Start marker's beat, and every
+        // tempo follows it.
+        editor
+            .apply(Command::Stretch {
+                clip,
+                edge: ClipEdge::Right,
+                at: Ticks(10 * Q),
+            })
+            .unwrap();
+        let clip_now = editor.document().clip(clip).unwrap();
+        assert_eq!(
+            (clip_now.start, clip_now.length),
+            (Ticks(2 * Q), Ticks(8 * Q))
+        );
+        let after = audio(&editor);
+        // b' = Q + 2(b - Q).
+        assert_eq!(beats(&after), [-Q, Q, 5 * Q]);
+        assert_eq!(after.tempo, Some(240.0));
+        // The audio at the fixed edge doesn't move.
+        assert!(near(
+            after.warp_map().unwrap().beat_to_time(before.start),
+            old_map.beat_to_time(before.start)
+        ));
+        // Halving comes back, and the whole thing is one undo step.
+        editor
+            .apply(Command::Stretch {
+                clip,
+                edge: ClipEdge::Right,
+                at: Ticks(6 * Q),
+            })
+            .unwrap();
+        assert_eq!(editor.document().clip(clip).unwrap().length, Ticks(4 * Q));
+        editor.undo().unwrap();
+        assert_eq!(editor.document().clip(clip).unwrap().length, Ticks(8 * Q));
+        editor.undo().unwrap();
+        assert_eq!(audio(&editor), before, "one step");
+        // The left edge stretches about the clip's end, which stays put.
+        editor
+            .apply(Command::Stretch {
+                clip,
+                edge: ClipEdge::Left,
+                at: Ticks::ZERO,
+            })
+            .unwrap();
+        let clip_now = editor.document().clip(clip).unwrap();
+        assert_eq!(
+            (clip_now.start, clip_now.length),
+            (Ticks::ZERO, Ticks(6 * Q))
+        );
+        // Every beat scales by 1.5 about the beat at the fixed right edge.
+        let after = audio(&editor);
+        assert_eq!(beats(&after), [-5 * Q / 2, -Q, 2 * Q]);
+        let fixed = before.start + 4.0 * Q as f64;
+        assert!(near(
+            after.warp_map().unwrap().beat_to_time(fixed),
+            old_map.beat_to_time(fixed)
+        ));
+        // An unwarped clip resizes as a plain drag does.
+        let plain = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    plain,
+                    Ticks::ZERO,
+                    Ticks(4 * Q),
+                    ClipData::Audio(AudioData::new(ContentHash([2; 32]))),
+                ),
+            })
+            .unwrap();
+        editor
+            .apply(Command::Stretch {
+                clip: plain,
+                edge: ClipEdge::Right,
+                at: Ticks(2 * Q),
+            })
+            .unwrap();
+        assert_eq!(editor.document().clip(plain).unwrap().length, Ticks(2 * Q));
+    }
+
+    // Spec: warping R54
+    #[test]
+    fn sliding_moves_the_audio_under_a_clip_that_stays_put() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let data = AudioData {
+            start: Q as f64,
+            end: Some(3.0 * Q as f64),
+            looping: true,
+            loop_start: 2.0 * Q as f64,
+            loop_end: Some(3.0 * Q as f64),
+            ..warped(&[(0.0, 0), (2.0, 2 * Q)], 120.0)
+        };
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(clip, Ticks::ZERO, Ticks(4 * Q), ClipData::Audio(data)),
+            })
+            .unwrap();
+        let audio = |editor: &Editor| match &editor.document().clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let before = audio(&editor);
+        editor
+            .apply(Command::SlideContents { clip, by: Ticks(Q) })
+            .unwrap();
+        let clip_now = editor.document().clip(clip).unwrap();
+        assert_eq!(
+            (clip_now.start, clip_now.length),
+            (Ticks::ZERO, Ticks(4 * Q)),
+            "the clip stays put"
+        );
+        let after = audio(&editor);
+        assert_eq!(
+            (after.start, after.end, after.loop_start, after.loop_end),
+            (0.0, Some(2.0 * Q as f64), Q as f64, Some(2.0 * Q as f64))
+        );
+        assert_eq!(after.warp_markers, before.warp_markers, "the map holds");
+        // The audio moves with the drag: its Start marker is a quarter note
+        // earlier in the file.
+        assert!(near(after.start - before.start, -(Q as f64)));
+        editor.undo().unwrap();
+        assert_eq!(audio(&editor), before, "one step");
+        // An unwarped clip's contents don't slide, and a slide out of the
+        // file is refused.
+        let off = AudioData {
+            warp: false,
+            ..before.clone()
+        };
+        editor
+            .apply(Command::SetClipData {
+                clip,
+                data: ClipData::Audio(off.clone()),
+            })
+            .unwrap();
+        assert!(
+            editor
+                .apply(Command::SlideContents { clip, by: Ticks(Q) })
+                .is_err()
+        );
+        editor
+            .apply(Command::SetClipData {
+                clip,
+                data: ClipData::Audio(before.clone()),
+            })
+            .unwrap();
+        // A warped clip's Start marker is a beat, so it may sit before the
+        // clip's 1.1.1: that slide is allowed and moves the audio earlier.
+        editor
+            .apply(Command::SlideContents {
+                clip,
+                by: Ticks(2 * Q),
+            })
+            .unwrap();
+        assert!(near(audio(&editor).start, -(Q as f64)));
     }
 
     // Spec: warping R25

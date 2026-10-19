@@ -492,6 +492,11 @@ pub struct AudioData {
     /// Every mode's controls (R2): each at the table's default unless given.
     #[serde(default, skip_serializing_if = "is_default")]
     pub warp_settings: WarpSettings,
+    /// The Lead/Follow switch (the warping spec, R43): whether this
+    /// Arrangement clip leads the set's tempo instead of following it. Off
+    /// unless given, a follower. Only a warped Arrangement clip can lead.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub tempo_leader: bool,
     /// The RAM switch (R11): off unless given. On, the clip's whole file is
     /// held in memory instead of streamed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -529,6 +534,7 @@ impl AudioData {
             signature: None,
             warp_mode: WarpMode::Beats,
             warp_settings: WarpSettings::default(),
+            tempo_leader: false,
             ram: false,
             high_quality: true,
             transient_edits: TransientEdits::default(),

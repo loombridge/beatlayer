@@ -2012,6 +2012,31 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "clip.stretch",
+            Exception(Equivalent(
+                "a Shift-drag on a warped clip's edge (S-ARR-006); its length \
+                 is reached from the keyboard by `arrangement.resize_clips` \
+                 after the Clip View's BPM field has set the clip's tempo \
+                 (`clip.set_segment_bpm`)",
+            )),
+        ),
+        (
+            "clip.slide_contents",
+            Exception(Equivalent(
+                "a Shift+Option-drag on a clip's contents (S-ARR-005); the \
+                 same contents are reached from the keyboard by the Clip \
+                 View's Start and loop fields (`clip.set_region`, \
+                 `clip.set_loop`)",
+            )),
+        ),
+        (
+            "song.unfollow_tempo_automation",
+            Exception(Equivalent(
+                "the tempo field's context menu (the Context Menu key or \
+                 Shift-F10 with the field focused)",
+            )),
+        ),
+        (
             "arrangement.select_clips",
             Exception(Equivalent(
                 "a click; the keyboard selects with Shift and the arrows \
@@ -2237,6 +2262,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_warp_mode", Exception(audio_panel)),
         ("clip.set_warp_settings", Exception(audio_panel)),
         ("clip.set_ram_mode", Exception(audio_panel)),
+        ("clip.set_tempo_leader", Exception(audio_panel)),
         ("clip.set_high_quality", Exception(audio_panel)),
         (
             "clip.insert_warp_markers",

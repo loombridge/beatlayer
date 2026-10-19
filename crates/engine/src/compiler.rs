@@ -292,21 +292,20 @@ impl Compiler {
     }
 
     /// The document as a program plays it: `document` with the tempo and
-    /// signature a launched scene put in place (WP-3.5). Remembers
-    /// `document` for [`Compiler::set_override`].
+    /// signature a launched scene put in place (WP-3.5), and, with no scene
+    /// override, its leading clips' tempo laid over their spans (the warping
+    /// spec, R44). Remembers `document` for [`Compiler::set_override`].
     fn effective(&mut self, document: &Document) -> Document {
         self.original = Some(document.clone());
-        if self.scene_override.is_none() {
-            return document.clone();
-        }
-        document.with_maps(
-            self.scene_override
-                .tempo
-                .map(|(_, bpm)| TempoMap::constant(bpm)),
-            self.scene_override
-                .signature
-                .map(|(_, signature)| TimeSignatureMap::constant(signature)),
-        )
+        let tempo = match self.scene_override.tempo {
+            Some((_, bpm)) => TempoMap::constant(bpm),
+            None => document.tempo_map(),
+        };
+        let signature = self
+            .scene_override
+            .signature
+            .map(|(_, signature)| TimeSignatureMap::constant(signature));
+        document.with_maps(Some(tempo), signature)
     }
 
     /// What the audio thread has put in place from a launched scene,
@@ -856,7 +855,10 @@ impl Compiler {
         // nothing to switch to them), and the ones the program plays under
         // now.
         let own = self.original.as_ref().unwrap_or(document);
-        let base_tempo = own.settings().tempo.clone();
+        // The set's own tempo map is the leading clips' tempo laid over the
+        // Song Tempo envelope (the warping spec, R44, R48), which is what the
+        // program plays under when no scene override is in place.
+        let base_tempo = own.tempo_map();
         let base_signatures = own.settings().time_signatures.clone();
         let scene_maps: Vec<SceneMaps> = document
             .scenes()

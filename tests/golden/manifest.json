@@ -225,6 +225,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:c17524eb7b7ac83d"
     },
+    "leader-tempo": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 240000,
+      "bits": 24,
+      "render_hash": "fnv1a64:2f56772c81370ee9"
+    },
     "loop-wraps": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

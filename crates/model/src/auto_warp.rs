@@ -101,6 +101,18 @@ pub enum WarpFrom {
     Bpm,
 }
 
+/// Which edge of a clip a stretch drag holds (the warping spec, R47): the
+/// dragged edge moves and the other stays put, and every beat of the clip's
+/// contents scales about the beat at the fixed edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipEdge {
+    /// The left edge, so the right edge stays put.
+    Left,
+    /// The right edge, so the left edge stays put.
+    Right,
+}
+
 /// The bar count of `counts` whose tempo, for a file of `seconds` taken as
 /// that many bars of 4/4, is nearest `bpm`.
 #[must_use]

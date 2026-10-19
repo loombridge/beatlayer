@@ -638,6 +638,14 @@ fn clip_marker_command(id: &str) -> bool {
     )
 }
 
+/// Whether `id` is one of the Arrangement's own clip drags, which the
+/// document runs per frame as gestures: stretching a warped clip's edge (the
+/// warping spec, R47) and sliding a clip's contents (R54), each one undo step
+/// however far the drag goes.
+fn arrangement_clip_command(id: &str) -> bool {
+    matches!(id, "clip.stretch" | "clip.slide_contents")
+}
+
 /// Whether `id` is an edit the Sample Editor makes to an audio clip's
 /// markers, transients or region.
 fn sample_edit_command(id: &str) -> bool {
@@ -655,6 +663,8 @@ fn sample_edit_command(id: &str) -> bool {
 /// The name of the undo step a marker-strip or Sample Editor gesture makes.
 fn marker_label(id: &str) -> &'static str {
     match id {
+        "clip.stretch" => "Stretch clip",
+        "clip.slide_contents" => "Slide clip contents",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -3948,6 +3958,7 @@ impl Shell {
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !clip_marker_command(&invocation.id)
+                && !arrangement_clip_command(&invocation.id)
             {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
@@ -3974,7 +3985,7 @@ impl Shell {
             clip_view::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
-        } else if clip_marker_command(&invocation.id) {
+        } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
             marker_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
@@ -4011,7 +4022,7 @@ impl Shell {
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
                    invocation: &Invocation| {
-            if clip_marker_command(&invocation.id) {
+            if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
                 // The document's own clip commands, run per frame like the
                 // Clip View's note commands.
                 model::run(editor, &invocation.id, invocation.args.clone())
@@ -4105,7 +4116,7 @@ impl Shell {
             let Ok(step) = self.prepare_gesture_step(step) else {
                 break;
             };
-            let outcome = if clip_marker_command(&step.id) {
+            let outcome = if clip_marker_command(&step.id) || arrangement_clip_command(&step.id) {
                 model::run(&mut self.editor, &step.id, step.args.clone())
                     .map(|_| ())
                     .map_err(|error| EditFailure::Refused(error.to_string()))

@@ -180,6 +180,11 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
     let settings = shell.editor().document().settings();
     match group {
         Group::Tempo => {
+            // Spec: warping R45. While a clip leads the tempo the field is
+            // off: the clips set the tempo, and the commands refuse it.
+            if shell.editor().document().any_tempo_leader() {
+                return false;
+            }
             let mut segments = settings.tempo.segments();
             segments.len() == 1
                 && segments

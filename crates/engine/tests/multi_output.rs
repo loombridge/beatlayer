@@ -271,3 +271,31 @@ fn an_instrument_output_route_is_an_edge_of_the_graph() {
         "the route is in the graph"
     );
 }
+
+// Spec: routing R16. An output index past the ones the instrument's type
+// declares carries nothing, never another device's buffer: the track hears
+// the instrument's own output alone.
+#[test]
+fn an_output_past_the_ones_the_instrument_declares_carries_nothing() {
+    let mut rig = Rig::new(256);
+    let (source, multi) = source(&mut rig, 5.0);
+    let tapper = tap_output(&mut rig, source, multi, 0);
+    assert_eq!(settled(&mut rig, 64), 5.0 + 7.0);
+    // The instrument declares two extra outputs; a third is nothing.
+    {
+        let ed = &mut rig.editor;
+        run(
+            ed,
+            "routing.set_input",
+            json!({ "track": tapper, "input":
+                    { "type": "track", "track": source,
+                      "output": { "device": multi, "output": 2 } } }),
+        );
+    }
+    rig.sync();
+    assert_eq!(
+        settled(&mut rig, 64),
+        5.0,
+        "Main keeps the instrument's own output, with nothing from the route"
+    );
+}

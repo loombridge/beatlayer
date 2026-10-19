@@ -398,11 +398,19 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
         (
             TrackKind::Midi,
             Input::Track {
-                track: from, chain, ..
+                track: from,
+                chain,
+                output,
+                ..
             },
         ) => {
             if chain.is_some() {
                 return Err(ModelError::InvalidInput("only an audio track taps a chain"));
+            }
+            if output.is_some() {
+                return Err(ModelError::InvalidInput(
+                    "only an audio track takes an instrument output",
+                ));
             }
             doc.check_target(track, *from, |kind| kind == TrackKind::Midi)
         }
@@ -743,6 +751,25 @@ mod tests {
                     chain: None,
                     output: None
                 }
+            )
+            .is_err()
+        );
+        // An instrument output goes to an audio track's input, never a MIDI
+        // track's (WP-5.45).
+        let elsewhere = editor.new_id();
+        assert!(
+            input(
+                &mut editor,
+                m,
+                Input::Track {
+                    track: n,
+                    tap,
+                    chain: None,
+                    output: Some(crate::DeviceOutput {
+                        device: elsewhere,
+                        output: 0,
+                    }),
+                },
             )
             .is_err()
         );

@@ -241,6 +241,12 @@ fn silence(block: &mut Block<'_>) {
     for channel in block.channels_mut() {
         channel.fill(0.0);
     }
+    // A device's extra outputs are silent too while it isn't running: a
+    // route from one carries nothing, not the last block it ran
+    // (WP-5.45).
+    if let Some(outputs) = block.outputs_mut() {
+        outputs.fill(0.0);
+    }
 }
 
 /// The block's transport for the plug-in, as of its first frame.

@@ -24,8 +24,8 @@ use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
     ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
-    Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_SLOT, NO_TASK,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_OUTPUT_BUFFER,
+    NO_SLOT, NO_TASK, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -708,7 +708,10 @@ impl Compiler {
                 continue;
             };
             let route = self.route(&mut build, document, &solo, edge, to);
-            if edge.tap != Tap::PostMixer && edge.chain.is_none() {
+            // A route that takes a device's extra output carries it whatever
+            // tap it names, so its tap needs no copy of the track's own
+            // signal (the routing spec, R12).
+            if edge.tap != Tap::PostMixer && edge.chain.is_none() && edge.output.is_none() {
                 taps.insert((edge.from, edge.tap));
             }
             let input = Input {
@@ -833,7 +836,7 @@ impl Compiler {
         // declares into a buffer of its own, so another track can read one
         // (WP-5.45). The buffers sit one after another, the device's output
         // `n` at its base plus `n`.
-        let mut output_bases: BTreeMap<DeviceId, u32> = BTreeMap::new();
+        let mut output_bases: BTreeMap<DeviceId, (u32, u32)> = BTreeMap::new();
         for (_, _, output) in &output_taps {
             if output_bases.contains_key(&output.device) {
                 continue;
@@ -855,17 +858,25 @@ impl Compiler {
                 start: kept,
                 end: kept + ports,
             };
-            output_bases.insert(output.device, kept);
+            output_bases.insert(output.device, (kept, ports));
             kept += ports;
         }
         for (to, at, output) in output_taps {
             let task = build.tasks[task_of[&to] as usize];
-            let Some(&base) = output_bases.get(&output.device) else {
-                continue;
-            };
+            let slot = build.device_slots.get(&output.device).copied();
+            let buffers = output_bases.get(&output.device).copied();
             let input = &mut build.inputs[task.inputs.start as usize + at];
-            input.device = build.device_slots[&output.device];
-            input.output = base + output.output;
+            // The output's buffer, where the compiler has one for it. A
+            // device it has no node for, a type that declares no extra
+            // outputs, and an index past those it declares all carry
+            // nothing ([`NO_OUTPUT_BUFFER`]) — never another buffer.
+            match (slot, buffers) {
+                (Some(slot), Some((base, ports))) if output.output < ports => {
+                    input.device = slot;
+                    input.output = base + output.output;
+                }
+                _ => input.output = NO_OUTPUT_BUFFER,
+            }
         }
 
         let generation = self.generation + 1;
@@ -1940,7 +1951,11 @@ fn tap_latency(arrival: &[u32], chain: &[u32], from: usize, tap: Tap) -> u32 {
 /// chain's length too (the racks spec, R40).
 fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], input: &Input) -> u32 {
     // A device's extra output is there where the device is in its chain, as
-    // a Post FX tap is (WP-5.45).
+    // a Post FX tap is (WP-5.45); one the program has no buffer for carries
+    // nothing, so the track waits for none of it.
+    if input.output == NO_OUTPUT_BUFFER {
+        return arrival[input.from as usize];
+    }
     if input.output != NO_OUTPUT {
         return arrival[input.from as usize] + input.before;
     }
@@ -2066,14 +2081,21 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                 }
             }
         }
-        // Where in its track's chain a tapped device's extra output is, for
-        // the routes that take one (WP-5.45).
+    }
+    // Where in its source track's chain a tapped device's extra output is: a
+    // route that takes one carries the signal where the device sits, as a
+    // Post FX tap of that point would (WP-5.45).
+    for t in 0..tasks {
+        let task = build.tasks[t];
         for i in task.inputs.range() {
-            let device = build.inputs[i].device;
+            let (device, from) = (build.inputs[i].device, build.inputs[i].from);
             if device == NO_TASK {
                 continue;
             }
-            if let Some(&(_, before)) = offsets[t].iter().find(|&&(slot, _)| slot == device) {
+            if let Some(&(_, before)) = offsets[from as usize]
+                .iter()
+                .find(|&&(slot, _)| slot == device)
+            {
                 build.inputs[i].before = before;
             }
         }

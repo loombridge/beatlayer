@@ -504,7 +504,9 @@ pub(crate) struct Input {
     /// The device, in `slots`, whose extra output it carries, or
     /// [`NO_TASK`].
     pub(crate) device: u32,
-    /// The device's output's buffer in `tap_pool`, or [`NO_OUTPUT`].
+    /// The device's output's buffer in `tap_pool`, [`NO_OUTPUT`] for an
+    /// input that carries the task's own signal, or [`NO_OUTPUT_BUFFER`] for
+    /// an extra output the program has no buffer for.
     pub(crate) output: u32,
     /// The frames into the source task's chain at which the device's output
     /// is, for delay compensation, with an output.
@@ -519,6 +521,12 @@ pub(crate) const NO_CHAIN: u32 = u32::MAX;
 
 /// An input that carries a task's own signal, not a device's extra output.
 pub(crate) const NO_OUTPUT: u32 = u32::MAX;
+
+/// An input that carries a device's extra output the program has no buffer
+/// for: the device has no node in this program, its type declares no extra
+/// outputs, or the output index is past those it declares. The route carries
+/// nothing.
+pub(crate) const NO_OUTPUT_BUFFER: u32 = u32::MAX - 1;
 
 /// A task's own input taken from the audio interface, Ext. In (WP-2.13):
 /// the device channels it hears, through a route whose Monitor gate opens
@@ -1248,10 +1256,10 @@ impl EngineProgram {
             };
             route.set_playing_clip(playing_clip);
             let source = input.from as usize;
-            // A device's extra output the program has no buffers for, because
-            // its type isn't in the registry this program was compiled with:
-            // the route carries nothing.
-            if input.device != NO_TASK && input.output == NO_OUTPUT {
+            // An extra output the program has no buffer for — its device has
+            // no node here, or the output isn't one its type declares —
+            // carries nothing.
+            if input.output == NO_OUTPUT_BUFFER {
                 continue;
             }
             // The task's own Post Mixer is its buffer in `pool`; a

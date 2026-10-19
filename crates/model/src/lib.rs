@@ -144,9 +144,8 @@ pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
-    Channel, CrossfadeAssign, DeviceOutput, Input, MidiTo, Mixer, Monitor, Output, PanMode,
-    Routing, SendTap, Tap, Track, TrackDelay, TrackKind, MAX_TRACK_DELAY_MS,
-    MAX_TRACK_DELAY_SAMPLES,
+    Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
+    MidiTo, Mixer, Monitor, Output, PanMode, Routing, SendTap, Tap, Track, TrackDelay, TrackKind,
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{

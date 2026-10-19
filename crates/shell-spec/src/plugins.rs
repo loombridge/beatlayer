@@ -29,6 +29,17 @@ pub const SET_WINDOW: &str = "plugin.set_window";
 /// `plugin.set_panel_param`: which parameter a plug-in device's panel knob
 /// shows (WP-2.10, D19).
 pub const SET_PANEL_PARAM: &str = "plugin.set_panel_param";
+/// `plugin.configure`: the Configure switch on a plug-in device, which opens
+/// and closes Plug-In Configure Mode (WP-5.40, manual 24.1.2).
+pub const CONFIGURE: &str = "plugin.configure";
+/// `plugin.configure_param`: adds a parameter to a plug-in device's
+/// configured list (WP-5.40, manual 24.1.2).
+pub const CONFIGURE_PARAM: &str = "plugin.configure_param";
+/// `plugin.unconfigure_param`: removes one from the configured list, warning
+/// first when it has automation, clip envelopes, or mappings (WP-5.40).
+pub const UNCONFIGURE_PARAM: &str = "plugin.unconfigure_param";
+/// `plugin.move_configured_param`: reorders the configured list (WP-5.40).
+pub const MOVE_CONFIGURED_PARAM: &str = "plugin.move_configured_param";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -48,6 +59,10 @@ pub const IDS: &[&str] = &[
     INFO,
     SET_WINDOW,
     SET_PANEL_PARAM,
+    CONFIGURE,
+    CONFIGURE_PARAM,
+    UNCONFIGURE_PARAM,
+    MOVE_CONFIGURED_PARAM,
     SCAN,
     RESCAN,
     LIST,
@@ -217,6 +232,75 @@ pub struct SetPanelParamArgs {
 /// What `plugin.set_panel_param` returns: the device's panel, as
 /// `device_view.state` reports it.
 pub type SetPanelParamResult = crate::devices::DeviceViewState;
+
+/// Arguments of `plugin.configure`: the Configure switch (WP-5.40, manual
+/// 24.1.2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigureArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Turn configure mode on (true) or off (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// What `plugin.configure` returns: the Device View's state, whose device's
+/// `configure` says whether the switch is on.
+pub type ConfigureResult = crate::devices::DeviceViewState;
+
+/// Arguments of `plugin.configure_param`: adds one of the plug-in's
+/// parameters to the device's configured list (WP-5.40, manual 24.1.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigureParamArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The parameter to add.
+    pub param: ParamId,
+    /// Where it goes in the list; at the end if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `plugin.unconfigure_param`: removes one parameter from the
+/// device's configured list (WP-5.40, manual 24.1.2). One that has
+/// automation, a clip envelope, or a mapping is refused unless `force` says
+/// to remove it anyway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnconfigureParamArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The parameter to remove.
+    pub param: ParamId,
+    /// Remove it even when it has automation, a clip envelope, or a mapping
+    /// (the warning accepted).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Arguments of `plugin.move_configured_param`: moves one entry of the
+/// device's configured list to another place in it (WP-5.40, manual 24.1.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveConfiguredParamArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Where the parameter is now, 0 for the first.
+    pub from: usize,
+    /// Where it goes, 0 for the first.
+    pub to: usize,
+}
+
+/// What `plugin.configure_param`, `plugin.unconfigure_param` and
+/// `plugin.move_configured_param` return: the device's parameters, as
+/// `device.parameters` reports them, each marked configured or not.
+pub type ConfiguredParamsResult = crate::devices::DeviceParameters;
 
 /// Arguments of `plugin.scan` and `plugin.rescan`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -469,6 +553,62 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<SetPanelParamArgs>()
             .result::<SetPanelParamResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CONFIGURE, "Configure Plug-In")
+            .description(
+                "Opens or closes a plug-in device's Plug-In Configure Mode (manual 24.1.2): \
+                 while it is on, a parameter moved in the plug-in's own window joins the \
+                 device's list of configured parameters, the ones its panel knobs and the \
+                 automation and clip-envelope choosers show. `on` sets it, or switches it if \
+                 left out. Configure mode itself is view state: it isn't an undo step and \
+                 isn't saved with the set (the list is). Returns the Device View's state.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ConfigureArgs>()
+            .result::<ConfigureResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CONFIGURE_PARAM, "Configure Plug-In Parameter")
+            .description(
+                "Adds one of a plug-in's parameters to the device's list of configured \
+                 parameters, the ones its panel knobs and the automation and clip-envelope \
+                 choosers show (manual 24.1.2). `index` places it in the list, or the end if \
+                 left out; one already in the list moves there. One undo step, and the list is \
+                 saved with the set. Returns `device.parameters`, each marked configured or \
+                 not.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ConfigureParamArgs>()
+            .result::<ConfiguredParamsResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(UNCONFIGURE_PARAM, "Unconfigure Plug-In Parameter")
+            .description(
+                "Removes one parameter from a plug-in device's configured list (manual \
+                 24.1.2). A parameter that has automation, a clip envelope, or a MIDI, key or \
+                 Macro mapping is refused, naming what it has, as Live warns before deleting \
+                 one; `force` removes it anyway. One undo step. Returns `device.parameters`, \
+                 each marked configured or not.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<UnconfigureParamArgs>()
+            .result::<ConfiguredParamsResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(MOVE_CONFIGURED_PARAM, "Move Plug-In Parameter")
+            .description(
+                "Moves one entry of a plug-in device's configured list from `from` to `to` \
+                 (manual 24.1.2), the order its panel knobs and the choosers show. One undo \
+                 step. Returns `device.parameters`, each marked configured or not.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<MoveConfiguredParamArgs>()
+            .result::<ConfiguredParamsResult>(),
     )?;
     registry.register(
         CommandSpec::new(SCAN, "Scan Plug-Ins")

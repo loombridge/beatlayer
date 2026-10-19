@@ -4406,3 +4406,162 @@ fn an_agent_builds_a_kit_and_reads_it_back() {
     let history = call(&mut client, "query", json!({ "path": "history" }));
     assert_eq!(history["undo"]["items"][0], "kit: Drop on Pad");
 }
+
+// Spec: phaser-flanger R14, chorus-ensemble R9
+#[test]
+fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() {
+    use bl_devices::{chorus_ensemble, phaser_flanger};
+
+    let dir = TempDir::new("modulation");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("modulation-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let mut added = Vec::new();
+    for device_type in [
+        phaser_flanger::phaser_flanger_type(),
+        chorus_ensemble::chorus_ensemble_type(),
+    ] {
+        let reply = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": {
+                    "track": track,
+                    "device": {
+                        "kind": device_type.kind,
+                        "name": device_type.name,
+                        "role": device_type.role,
+                    },
+                },
+            }] }),
+        );
+        added.push(reply["results"][0]["result"]["device"].clone());
+    }
+    let [pf, chorus] = [&added[0], &added[1]];
+
+    let parameters = |client: &mut Client<InProcess>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let value_of = |params: &Value, name: &str| {
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))["value"]
+            .clone()
+    };
+
+    assert_eq!(parameters(&mut client, pf).as_array().unwrap().len(), 30);
+    assert_eq!(
+        parameters(&mut client, chorus).as_array().unwrap().len(),
+        14
+    );
+
+    let set = |client: &mut Client<InProcess>, device: &Value, param: u32, value: f64| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value },
+            }] }),
+        );
+    };
+    set(&mut client, pf, phaser_flanger::MODE.0, 1.0);
+    set(&mut client, pf, phaser_flanger::FLANGER_TIME.0, 2.5);
+    set(&mut client, chorus, chorus_ensemble::MODE.0, 2.0);
+    set(&mut client, chorus, chorus_ensemble::VIBRATO_OFFSET.0, 90.0);
+
+    let pf_params = parameters(&mut client, pf);
+    assert_eq!(value_of(&pf_params, "Mode"), json!(1.0));
+    assert_eq!(value_of(&pf_params, "Flanger Time"), json!(2.5));
+
+    let chorus_params = parameters(&mut client, chorus);
+    assert_eq!(value_of(&chorus_params, "Mode"), json!(2.0));
+    assert_eq!(value_of(&chorus_params, "Offset"), json!(90.0));
+
+    // Phaser-Flanger has an expanded part.
+    let expand = |client: &mut Client<InProcess>, device: &Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.expand", "args": { "device": device } }] }),
+        )
+    };
+    let shown = expand(&mut client, pf);
+    assert_eq!(
+        shown["results"][0]["result"]["devices"][0]["expanded"],
+        json!(true)
+    );
+
+    // Each display returns its series.
+    for (device, name) in [(pf, "Flanger Delay"), (chorus, "Vibrato LFO")] {
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        );
+        let display = &read["results"][0]["result"];
+        assert_eq!(display["live"], json!(false));
+        let series = display["series"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {display}"));
+        assert_eq!(series["name"], json!(name));
+    }
+
+    // Save and reopen.
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Modulation.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let devices: Vec<_> = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .collect();
+    let find = |kind: &str| {
+        devices
+            .iter()
+            .find(|d| {
+                matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == kind)
+            })
+            .unwrap_or_else(|| panic!("no {kind} in the reopened set"))
+    };
+    assert_eq!(
+        find(phaser_flanger::PHASER_FLANGER).params[&phaser_flanger::MODE],
+        1.0
+    );
+    assert_eq!(
+        find(phaser_flanger::PHASER_FLANGER).params[&phaser_flanger::FLANGER_TIME],
+        2.5
+    );
+    assert_eq!(
+        find(chorus_ensemble::CHORUS_ENSEMBLE).params[&chorus_ensemble::MODE],
+        2.0
+    );
+    assert_eq!(
+        find(chorus_ensemble::CHORUS_ENSEMBLE).params[&chorus_ensemble::VIBRATO_OFFSET],
+        90.0
+    );
+}

@@ -52,7 +52,7 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 | R3 | `crates/devices/tests/auto_pan_tremolo.rs`, `every_waveform_plays_and_random_shapes_are_repeatable` | unit, real-time trap |
 | R4 | `crates/devices/tests/auto_pan_tremolo.rs`, `hz_and_time_periods_are_accurate_within_0_1_percent`, `each_synced_mode_starts_cycle_on_beat_across_tempos` | unit, real-time trap |
 | R5 | `crates/devices/tests/auto_pan_tremolo.rs`, `phase_offsets_channels_and_spin_detunes` | unit, real-time trap |
-| R6 | `crates/devices/tests/auto_pan_tremolo.rs`, `phase_offset_moves_synced_cycle_by_its_fraction`, `phase_offset_acts_as_width_on_random_shapes` | unit, real-time trap |
+| R6 | `crates/devices/tests/auto_pan_tremolo.rs`, `each_synced_mode_starts_cycle_on_beat_across_tempos`, `phase_offset_acts_as_width_on_random_shapes` | unit, real-time trap |
 | R7 | `crates/devices/tests/auto_pan_tremolo.rs`, `invert_flips_the_shape` | unit, real-time trap |
 | R8 | `crates/devices/tests/auto_pan_tremolo.rs`, `harmonic_bands_sum_flat_at_amount_zero_and_move_in_antiphase` | unit, real-time trap |
 | R9 | `crates/devices/tests/auto_pan_tremolo.rs`, `vintage_adds_warmth_with_nonlinear_shaping` | unit, real-time trap |

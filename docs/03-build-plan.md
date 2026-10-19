@@ -476,7 +476,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.15 | todo |  |  |
 | 4.16 | todo |  |  |
 | 4.17 | done | 17 October 2026 | [#112](https://github.com/loombridge/beatlayer/pull/112); `render_as_loop` on `export.audio` and `bl-cli export` renders the tail past the range's end and adds it onto the file's start, after conversion and before Normalize and dither; [the spec](specs/export.md) |
-| 4.18 | todo |  |  |
+| 4.18 | done | 19 October 2026 | [#222](https://github.com/loombridge/beatlayer/pull/222); tempo-synced browser preview: Raw-off previews warped through the map a new clip would get, looping on the song's beats and starting on the next bar while the transport runs, the kept Raw switch (`browser.set_raw`), scrubbing on launch quantisation (`browser.scrub_preview`), a heap-free warped preview voice; [the spec](specs/browser.md) |
 | 4.19 | todo |  |  |
 | 4.20 | done | 17 October 2026 | [#99](https://github.com/loombridge/beatlayer/pull/99); one writer for processed audio files into `Samples/Processed/<kind>/`, and the Temporary Folder setting for a set never saved, whose files the first save moves into the project; [the spec](specs/audio-clip-editing.md) |
 | 4.21 | done | 17 October 2026 | [#104](https://github.com/loombridge/beatlayer/pull/104); the VST3 and Audio Unit hosts lend their instances to exports, previews and analysis as the CLAP host does, with one loan across the three formats; [the spec](specs/offline-plugin-renders.md) |

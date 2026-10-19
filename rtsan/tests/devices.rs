@@ -1060,3 +1060,31 @@ fn the_modulation_devices_pass_under_rtsan() {
         ],
     );
 }
+
+// Spec: auto-pan-tremolo R15
+#[test]
+fn auto_pan_tremolo_passes_under_rtsan() {
+    use bl_devices::auto_pan_tremolo::*;
+    run_lo_fi_device(
+        AUTO_PAN_TREMOLO,
+        &[
+            (MODE, &[0.0, 1.0]),
+            (WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            (TIME_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+            (RATE_HZ, &[0.1, 1.0, 10.0]),
+            (TIME_SECS, &[0.1, 1.0, 10.0]),
+            (SYNCED_DIVISION, &[0.0, 3.0, 5.0]),
+            (STEREO_MODE, &[0.0, 1.0]),
+            (PHASE, &[0.0, 90.0, 180.0]),
+            (SPIN, &[-50.0, 0.0, 50.0]),
+            (PHASE_OFFSET, &[-180.0, 0.0, 180.0]),
+            (INVERT, &[0.0, 1.0]),
+            (HARMONIC, &[0.0, 1.0]),
+            (VINTAGE, &[0.0, 1.0]),
+            (AMOUNT, &[0.0, 50.0, 100.0]),
+            (SHAPE, &[-100.0, 0.0, 100.0]),
+            (ATTACK_TIME, &[0.0, 50.0, 200.0]),
+            (DYNAMIC_FM, &[-100.0, 0.0, 100.0]),
+        ],
+    );
+}

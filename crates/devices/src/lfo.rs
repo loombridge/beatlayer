@@ -345,6 +345,18 @@ impl Lfo {
     /// and right values of `shape`. `tempo` is the song's tempo map
     /// ([`Audio::tempo`]).
     pub fn step(&mut self, tempo: &TempoMap, frame: usize, shape: Shape) -> [f64; 2] {
+        self.step_with_multiplier(tempo, frame, shape, 1.0)
+    }
+
+    /// Moves on one frame with an instantaneous rate multiplier, for dynamic
+    /// frequency modulation.
+    pub fn step_with_multiplier(
+        &mut self,
+        tempo: &TempoMap,
+        frame: usize,
+        shape: Shape,
+        multiplier: f64,
+    ) -> [f64; 2] {
         let spin = match self.stereo {
             Stereo::Spin(percent) => 1.0 + percent / 100.0,
             Stereo::Phase(_) => 1.0,
@@ -359,13 +371,27 @@ impl Lfo {
             let at = Frames(self.start + frame as i64);
             let quarters = tempo.frames_to_ticks(at, self.sample_rate).as_quarters();
             let cycles = quarters / beats;
-            self.free = [cycles.rem_euclid(1.0), (cycles * spin).rem_euclid(1.0)];
-            [cycles + self.offset, cycles * spin + self.offset]
+            if (multiplier - 1.0).abs() < 1e-9 {
+                self.free = [cycles.rem_euclid(1.0), (cycles * spin).rem_euclid(1.0)];
+                [cycles + self.offset, cycles * spin + self.offset]
+            } else {
+                let bpm = tempo
+                    .bpm_at(tempo.frames_to_ticks(at, self.sample_rate))
+                    .get();
+                let step = (bpm / 60.0 / beats.max(1e-9) / self.sample_rate.as_f64()) * multiplier;
+                let now = self.free;
+                self.free = [
+                    (now[0] + step).rem_euclid(1.0),
+                    (now[1] + step * spin).rem_euclid(1.0),
+                ];
+                [now[0] + self.offset, now[1] + self.offset]
+            }
         } else {
+            let step = self.step * multiplier;
             let now = self.free;
             self.free = [
-                (now[0] + self.step).rem_euclid(1.0),
-                (now[1] + self.step * spin).rem_euclid(1.0),
+                (now[0] + step).rem_euclid(1.0),
+                (now[1] + step * spin).rem_euclid(1.0),
             ];
             [now[0], now[1]]
         };
@@ -376,7 +402,7 @@ impl Lfo {
         for ((value, voice), phase) in out.iter_mut().zip(&mut self.voices).zip(phases) {
             let phase = phase.rem_euclid(1.0);
             voice.advance(phase);
-            *value = voice.value(shape, phase, self.hz, self.analog);
+            *value = voice.value(shape, phase, self.hz * multiplier, self.analog);
         }
         out
     }

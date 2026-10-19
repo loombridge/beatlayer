@@ -25,6 +25,21 @@ pub const MIN_TEXTURE_FLUX: f64 = 0.0;
 /// Maximum Flux: 100 %.
 pub const MAX_TEXTURE_FLUX: f64 = 100.0;
 
+/// The most a Texture read reaches each way at `rate`, at Grain Size's and
+/// Flux's maxima (R19): what a window around a run must hold, and what a
+/// clip's source must keep ready. Kept in step with [`Texture::reach`], which
+/// no setting's read may exceed.
+#[must_use]
+pub fn max_reach(rate: f64) -> usize {
+    let g = (MAX_TEXTURE_GRAIN_MS / 1000.0 * rate).ceil() as usize;
+    // Flux moves a grain's place in the file, and lengthens it, by up to its
+    // share of Grain Size each way, so at Flux's maximum a read reaches this
+    // far: twice the grain beyond the place the warp map reads.
+    let jitter = g;
+    let interp = Interpolation::of(true).reach(f64::INFINITY).1;
+    2 * g + 2 * jitter + interp + 64
+}
+
 /// Texture warp mode (R19).
 #[derive(Clone, Debug)]
 pub struct Texture {

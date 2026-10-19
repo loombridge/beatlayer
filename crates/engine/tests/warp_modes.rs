@@ -346,6 +346,24 @@ fn tones_and_texture_are_neutral_at_their_own_tempo_at_any_block_size() {
     }
 }
 
+// Spec: warp-modes R5, R19. Texture at its largest Grain Size and at Flux's
+// maximum still plays at a speed other than 1: the window a track's clips are
+// read through holds the widest reach their settings ask for, so a mode never
+// falls back to silence.
+#[test]
+fn texture_at_its_largest_grain_size_still_plays() {
+    for (grain_ms, flux) in [(500.0, 0.0), (500.0, 25.0), (500.0, 100.0)] {
+        let editor = grain_song(180.0, WarpMode::Texture, grain_ms, flux);
+        let out = play(&editor, 48_000, 512);
+        let sounding = out.iter().filter(|s| s.abs() > 1e-4).count();
+        assert!(
+            sounding > out.len() / 4,
+            "Texture at {grain_ms} ms, Flux {flux}: {sounding} of {} frames hold sound",
+            out.len()
+        );
+    }
+}
+
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from
 // what was playing, in a straight line over 20 ms.
 #[test]

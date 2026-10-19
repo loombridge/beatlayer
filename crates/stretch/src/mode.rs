@@ -67,15 +67,13 @@ pub struct Request<'a> {
 const RUN_FRAMES: usize = 8_192;
 
 /// The most file frames any mode reads around a run at `rate` (R18, R19):
-/// Texture's largest Grain Size reaches each way, through the widest
+/// Texture's largest Grain Size and Flux reach each way, through the widest
 /// interpolator, with the run's own frames. The player reads a clip through a
 /// window this wide, and a clip's source keeps this much ready. A mode whose
 /// reach can exceed it must widen it here.
 #[must_use]
 pub fn window_frames(rate: f64) -> usize {
-    let grain = (crate::texture::MAX_TEXTURE_GRAIN_MS / 1000.0 * rate).ceil() as usize;
-    let interp = Interpolation::of(true).reach(f64::INFINITY).1;
-    RUN_FRAMES + 2 * (2 * grain + interp + 64)
+    RUN_FRAMES + 2 * crate::texture::max_reach(rate)
 }
 
 /// A warp mode.

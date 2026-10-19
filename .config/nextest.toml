@@ -51,3 +51,12 @@ priority = 50
 [profile.ci]
 failure-output = "immediate-final"
 fail-fast = false
+# A test that fails runs up to twice more. One that passes on a retry is
+# flaky: the run passes, and the workflow's "Report flaky tests" step names
+# it on the run's summary and as a warning, so it's fixed rather than
+# rerun. A test that fails all three times fails the run, as before.
+retries = 2
+
+# The report reads this: target/nextest/ci/junit.xml.
+[profile.ci.junit]
+path = "junit.xml"

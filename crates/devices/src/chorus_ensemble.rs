@@ -217,6 +217,10 @@ impl ChorusEnsemble {
 }
 
 impl NativeDevice for ChorusEnsemble {
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "the frame and the channel index several arrays at once, the input and output and the per-channel filters, not one slice"
+    )]
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);

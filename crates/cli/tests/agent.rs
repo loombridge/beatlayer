@@ -4482,18 +4482,50 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
             }] }),
         );
     };
+    // Every parameter of both devices moved off its default, to its range's
+    // other end, and then the two modes set so the displays below are the
+    // ones named. What `device.parameters` reads back is what the reopened
+    // set has to hold.
+    let mut wanted: Vec<(&str, Vec<(bl_model::ParamId, f64)>)> = Vec::new();
+    for (device_type, device, kind) in [
+        (
+            phaser_flanger::phaser_flanger_type(),
+            pf,
+            phaser_flanger::PHASER_FLANGER,
+        ),
+        (
+            chorus_ensemble::chorus_ensemble_type(),
+            chorus,
+            chorus_ensemble::CHORUS_ENSEMBLE,
+        ),
+    ] {
+        for param in &device_type.description.params {
+            let to = if param.default == param.max() {
+                param.min()
+            } else {
+                param.max()
+            };
+            set(&mut client, device, param.id.0, to);
+        }
+        wanted.push((kind, Vec::new()));
+    }
     set(&mut client, pf, phaser_flanger::MODE.0, 1.0);
-    set(&mut client, pf, phaser_flanger::FLANGER_TIME.0, 2.5);
     set(&mut client, chorus, chorus_ensemble::MODE.0, 2.0);
-    set(&mut client, chorus, chorus_ensemble::VIBRATO_OFFSET.0, 90.0);
-
-    let pf_params = parameters(&mut client, pf);
-    assert_eq!(value_of(&pf_params, "Mode"), json!(1.0));
-    assert_eq!(value_of(&pf_params, "Flanger Time"), json!(2.5));
-
-    let chorus_params = parameters(&mut client, chorus);
-    assert_eq!(value_of(&chorus_params, "Mode"), json!(2.0));
-    assert_eq!(value_of(&chorus_params, "Offset"), json!(90.0));
+    for ((_, values), (device_type, device)) in wanted.iter_mut().zip([
+        (phaser_flanger::phaser_flanger_type(), pf),
+        (chorus_ensemble::chorus_ensemble_type(), chorus),
+    ]) {
+        let read = parameters(&mut client, device);
+        *values = device_type
+            .description
+            .params
+            .iter()
+            .map(|param| {
+                let value = value_of(&read, &param.name).as_f64().expect("a number");
+                (param.id, value)
+            })
+            .collect();
+    }
 
     // Phaser-Flanger has an expanded part.
     let expand = |client: &mut Client<InProcess>, device: &Value| {
@@ -4548,20 +4580,13 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
             })
             .unwrap_or_else(|| panic!("no {kind} in the reopened set"))
     };
-    assert_eq!(
-        find(phaser_flanger::PHASER_FLANGER).params[&phaser_flanger::MODE],
-        1.0
-    );
-    assert_eq!(
-        find(phaser_flanger::PHASER_FLANGER).params[&phaser_flanger::FLANGER_TIME],
-        2.5
-    );
-    assert_eq!(
-        find(chorus_ensemble::CHORUS_ENSEMBLE).params[&chorus_ensemble::MODE],
-        2.0
-    );
-    assert_eq!(
-        find(chorus_ensemble::CHORUS_ENSEMBLE).params[&chorus_ensemble::VIBRATO_OFFSET],
-        90.0
-    );
+    for (kind, values) in &wanted {
+        let device = find(kind);
+        for (param, value) in values {
+            assert_eq!(
+                device.params[param], *value,
+                "{kind}: parameter {param:?} reopened"
+            );
+        }
+    }
 }

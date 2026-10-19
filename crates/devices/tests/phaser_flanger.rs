@@ -8,7 +8,6 @@ use bl_devices::phaser_flanger::{
     AMOUNT, BLEND, CENTER, DOUBLER_TIME, DRY_WET, ENV_AMOUNT, ENV_ATTACK, ENV_ON, ENV_RELEASE,
     FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO_WAVE, LFO2_HZ, LFO2_MIX, MODE,
     NOTCHES, OUTPUT, PHASER_FLANGER, SAFE_BASS, SPREAD, WARMTH, WAVES, phaser_flanger_type,
-    phaser_notch_freq,
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::{DeviceKind, ParamId, ParamKind};
@@ -86,7 +85,11 @@ fn phaser_notches_fall_at_mapped_frequencies() {
     let ir = impulse_response(&mut *pf, 8192);
 
     for k in 0..notches_count {
-        let expected_notch = phaser_notch_freq(center_freq, notches_count, spread_pct, k);
+        // The spec's mapping, worked out here rather than read from the
+        // device, so a mapping that left the spec behind fails the test.
+        let spacing = 0.5 * (0.2 + 1.8 * spread_pct / 100.0);
+        let expected_notch =
+            center_freq * 2.0_f64.powf((k as f64 - (notches_count - 1) as f64 / 2.0) * spacing);
         // Find minimum response in a window around expected_notch
         let mut min_db = f64::INFINITY;
         let mut min_freq = expected_notch;

@@ -1494,26 +1494,46 @@ impl Shell {
         before != self.midi.ports()
     }
 
-    /// Spec: midi-chord R15. While a Chord device's Learn is on, the keys
-    /// played set its shifts: the first key down is the root and the other
-    /// keys held become Shift 1 to 6 in order, one undo step each time the
-    /// chord changes. Returns whether the set changed.
-    fn learn_chords(&mut self) -> bool {
-        use bl_devices::stack::{LEARN, STACK, shift};
-        use bl_model::{Command, DeviceKind};
-        let learning: Vec<_> = self
+    /// Spec: midi-chord R15 and midi-cc-sender R7. While a Chord device's
+    /// Learn is on, the keys played set its shifts; while a CC Control
+    /// device's Learn is on, an incoming controller is handed to its next
+    /// Custom dial without one. Each change is one undo step. Returns
+    /// whether the set changed.
+    fn learn_midi(&mut self) -> bool {
+        use bl_devices::midi_cc::{
+            CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_type_for, dial_cc, dial_value,
+        };
+        use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
+        use bl_model::{Command, DeviceId, DeviceKind, ParamId};
+        let devices: Vec<(DeviceId, String)> = self
             .editor
             .document()
             .tracks()
             .flat_map(|track| track.devices_deep())
-            .filter(|device| {
-                matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
-                    && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
+            .filter_map(|device| match &device.kind {
+                DeviceKind::Native { device_type } => Some((device.id, device_type.clone())),
+                _ => None,
             })
-            .map(|device| device.id)
             .collect();
+        let learning = |device_type: &str, param: ParamId| -> Vec<DeviceId> {
+            devices
+                .iter()
+                .filter(|(id, kind)| {
+                    kind == device_type
+                        && self
+                            .editor
+                            .document()
+                            .device(*id)
+                            .and_then(|device| device.params.get(&param).copied())
+                            .is_some_and(|on| on >= 0.5)
+                })
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let chords = learning(STACK, CHORD_LEARN);
+        let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if learning.is_empty() {
+        if chords.is_empty() && senders.is_empty() {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -1525,27 +1545,79 @@ impl Shell {
             sender.set_tap(true);
             self.chord_learn.tapping = true;
         }
-        sender.take_notes(&mut self.chord_learn.heard);
-        let Some(shifts) = self.chord_learn.listen() else {
-            return false;
-        };
-        self.edit(|editor| {
-            editor.begin("Learn Chord");
-            for device in learning {
-                for (n, value) in shifts.iter().enumerate() {
-                    let command = Command::SetDeviceParam {
-                        device,
-                        param: shift(n as u32),
-                        value: f64::from(*value),
-                    };
-                    editor
-                        .apply(command)
-                        .expect("a shift takes any whole number in range");
+        let mut heard = Vec::new();
+        sender.take_notes(&mut heard);
+        let mut changed = false;
+        if !chords.is_empty()
+            && let Some(shifts) = self.chord_learn.listen_from(&heard)
+        {
+            self.edit(|editor| {
+                editor.begin("Learn Chord");
+                for device in &chords {
+                    for (n, value) in shifts.iter().enumerate() {
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device: *device,
+                                param: shift(n as u32),
+                                value: f64::from(*value),
+                            })
+                            .expect("a shift takes any whole number in range");
+                    }
                 }
-            }
-            editor.commit().expect("the learned shifts commit");
-        });
-        true
+                editor.commit().expect("the learned shifts commit");
+            });
+            changed = true;
+        }
+        let learned: Vec<(u8, f64)> = heard
+            .iter()
+            .filter(|message| message.status() & 0xF0 == 0xB0)
+            .map(|message| (message.data1(), f64::from(message.data2())))
+            .collect();
+        if !senders.is_empty() && !learned.is_empty() {
+            let free: Vec<(DeviceId, Vec<u32>)> = senders
+                .iter()
+                .map(|device| {
+                    let params = &self
+                        .editor
+                        .document()
+                        .device(*device)
+                        .expect("the device is in the set")
+                        .params;
+                    let free = (0..DIALS)
+                        .filter(|k| params.get(&dial_cc(*k)).is_none_or(|cc| *cc == 0.0))
+                        .collect();
+                    (*device, free)
+                })
+                .collect();
+            self.edit(|editor| {
+                editor.begin("Learn CC Control");
+                for (device, mut free) in free.clone() {
+                    for &(controller, value) in &learned {
+                        let Some(k) = free.first().copied() else {
+                            break;
+                        };
+                        free.remove(0);
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_cc(k),
+                                value: cc_type_for(controller),
+                            })
+                            .expect("a controller is in the CC Type list");
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_value(k),
+                                value,
+                            })
+                            .expect("a controller value is in range");
+                    }
+                }
+                editor.commit().expect("the learned controllers commit");
+            });
+            changed = true;
+        }
+        changed
     }
 
     /// The preferences.
@@ -3609,7 +3681,7 @@ impl Shell {
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
-        changed |= self.learn_chords();
+        changed |= self.learn_midi();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.

@@ -52,7 +52,10 @@ pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
+pub mod midi_cc;
 mod midi_fx;
+pub mod midi_monitor;
+pub mod midi_mpe;
 pub mod modulator;
 pub mod multiband_dynamics;
 pub mod multisampler;
@@ -104,6 +107,9 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use midi_cc::{CC_CONTROL, cc_control_type};
+pub use midi_monitor::{MIDI_MONITOR, midi_monitor_type};
+pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
@@ -166,6 +172,7 @@ pub fn display(
         )),
         PHASER_FLANGER => Some(phaser_flanger::display(device, description, values, data)),
         CHORUS_ENSEMBLE => Some(chorus_ensemble::display(device, description, values, data)),
+        MIDI_MONITOR => Some(midi_monitor::display(device, values, data)),
         _ => None,
     }
 }
@@ -203,6 +210,9 @@ pub fn register(registry: &mut Registry) {
     hold::register(registry);
     arpeggiator::register(registry);
     note_echo::register(registry);
+    midi_cc::register(registry);
+    midi_mpe::register(registry);
+    midi_monitor::register(registry);
     hardware::register(registry);
     degrade::register(registry);
     crusher::register(registry);

@@ -806,6 +806,68 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     assert_eq!(shifts(&rig), fixed);
 }
 
+// Spec: midi-cc-sender R7
+#[test]
+fn learn_assigns_an_incoming_controller_to_a_dial() {
+    use bl_devices::midi_cc::{CC_CONTROL, DIALS, LEARN, dial_cc, dial_value};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: CC_CONTROL.to_owned() },
+            "name": "CC Control",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    let dial = |rig: &Rig, k: u32| -> (Option<f64>, Option<f64>) {
+        let params = &rig.shell.editor().document().device(device).unwrap().params;
+        (
+            params.get(&dial_cc(k)).copied().filter(|cc| *cc != 0.0),
+            params.get(&dial_value(k)).copied(),
+        )
+    };
+
+    // Learn off: an incoming controller changes nothing.
+    rig.play("Keys A", [0xB0, 74, 100]);
+    rig.shell.poll();
+    assert_eq!(dial(&rig, 0), (None, None));
+    assert_eq!(DIALS, 12);
+
+    // Learn on: the controller is handed to Custom B with its value.
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 1.0 }),
+    );
+    rig.shell.poll();
+    rig.play("Keys A", [0xB0, 74, 100]);
+    rig.shell.poll();
+    assert_eq!(dial(&rig, 0), (Some(74.0), Some(100.0)));
+    // The next controller goes to Custom C.
+    rig.play("Keys A", [0xB0, 7, 50]);
+    rig.shell.poll();
+    assert_eq!(dial(&rig, 1), (Some(7.0), Some(50.0)));
+    // One undo step for the last assignment.
+    let steps = rig.shell.editor().undo_history().count();
+    rig.run("edit.undo", json!({}));
+    assert_eq!(rig.shell.editor().undo_history().count(), steps - 1);
+    assert_eq!(dial(&rig, 1), (None, None));
+
+    // Switching Learn off stops it.
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 0.0 }),
+    );
+    rig.shell.poll();
+    rig.play("Keys A", [0xB0, 10, 20]);
+    rig.shell.poll();
+    assert_eq!(dial(&rig, 2), (None, None));
+}
+
 /// Waits until `done` holds, for up to two seconds: the MIDI output thread
 /// hands messages on a thread of its own.
 fn wait_for(mut done: impl FnMut() -> bool) -> bool {

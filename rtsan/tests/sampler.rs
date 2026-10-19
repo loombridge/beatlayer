@@ -92,7 +92,7 @@ fn a_warped_snapshot_passes_under_rtsan() {
                 60 + n,
                 Ticks(i64::from(n) * Ticks::QUARTER.0 / 2),
                 Ticks(Ticks::QUARTER.0 * 2),
-                40 + (n * 9) as u8,
+                40 + n * 9,
             )
         })
         .collect();

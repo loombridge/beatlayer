@@ -2144,6 +2144,89 @@ const ENTRIES: &[Entry] = &[
             person does, use `device.load_sample`.",
     },
     Entry {
+        id: "device.set_warp",
+        action: Action::Apply("set_device_warp"),
+        label: "Device Warp On/Off",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a device's Warp on or off (WP-5.15b). On, the sample plays \
+            through its warp map at the set's tempo; off, it plays at its own speed.",
+    },
+    Entry {
+        id: "device.set_warp_mode",
+        action: Action::Apply("set_device_warp_mode"),
+        label: "Set Device Warp Mode",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets how a warped device's audio is fitted to the speed its warp map \
+            sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` (WP-5.15b). \
+            Until the other modes are built, they play as `re_pitch` does.",
+    },
+    Entry {
+        id: "device.set_warp_settings",
+        action: Action::Apply("set_device_warp_settings"),
+        label: "Set Device Warp Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets controls of a device's warp modes, named by mode, any of them in \
+            one undo step (WP-5.15b). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, \
+            `eighth`, `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, \
+            `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: \
+            `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, \
+            default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 \
+            %, default 100), `envelope` (8 to 512, default 128).",
+    },
+    Entry {
+        id: "device.set_sample_bpm",
+        action: Action::Apply("set_device_sample_bpm"),
+        label: "Set Device Sample BPM",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets a device's sample tempo in BPM, from 1 to 1,000 (WP-5.15b).",
+    },
+    Entry {
+        id: "device.scale_tempo",
+        action: Action::Apply("scale_device_tempo"),
+        label: "Scale Device Sample Tempo",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Multiplies a device's sample tempo by a factor, Live's ×2 and ÷2 (WP-5.15b): \
+            2 doubles the tempo, 0.5 halves it.",
+    },
+    Entry {
+        id: "device.add_slice",
+        action: Action::Apply("add_slice"),
+        label: "Add Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds a manual slice at a frame into the sample (WP-5.15b). In Slice mode, \
+            slices play chromatically from C3.",
+    },
+    Entry {
+        id: "device.move_slice",
+        action: Action::Apply("move_slice"),
+        label: "Move Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves a manual slice from `from` frame to `to` frame into the sample (WP-5.15b).",
+    },
+    Entry {
+        id: "device.delete_slice",
+        action: Action::Apply("delete_slice"),
+        label: "Delete Slice",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Deletes a manual slice at `frame` into the sample (WP-5.15b).",
+    },
+    Entry {
         id: "device.insert_layers",
         action: Action::Apply("insert_layers"),
         label: "Add Samples",

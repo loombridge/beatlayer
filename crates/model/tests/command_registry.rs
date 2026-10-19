@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        175,
+        183,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -68,7 +68,8 @@ fn every_document_command_is_registered() {
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
-         three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
+         three for a sample's edits, WP-5.15b eight for the sampler's warp controls and manual \
+         slices, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
 WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
@@ -1149,6 +1150,41 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_layer_options",
         json!({ "device": eq, "ram_mode": true, "snap": true, "linear_loop_fades": null }),
+    );
+    // WP-5.15b: the sampler's warp controls and manual slices.
+    agent.run("device.set_warp", json!({ "device": eq, "warp": true }));
+    agent.run(
+        "device.set_warp_mode",
+        json!({ "device": eq, "mode": "beats" }),
+    );
+    agent.run(
+        "device.set_warp_settings",
+        json!({ "device": eq, "beats": { "preserve": "quarter", "transient_envelope": 50 } }),
+    );
+    agent.run(
+        "device.set_sample_bpm",
+        json!({ "device": eq, "bpm": 95.0 }),
+    );
+    agent.run("device.scale_tempo", json!({ "device": eq, "factor": 2.0 }));
+    agent.run("device.add_slice", json!({ "device": eq, "frame": 30_000 }));
+    agent.run(
+        "device.move_slice",
+        json!({ "device": eq, "from": 30_000, "to": 35_000 }),
+    );
+    agent.run(
+        "device.delete_slice",
+        json!({ "device": eq, "frame": 35_000 }),
+    );
+    let warp = &agent.editor.document().device(eq).unwrap().warp;
+    assert!(warp.warp && warp.mode == WarpMode::Beats && warp.bpm == Some(190.0));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .slices
+            .is_empty()
     );
     let layers = &agent.editor.document().device(eq).unwrap().layers;
     assert_eq!(layers.list.len(), 3);
@@ -2708,6 +2744,70 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 layer: Some(bl_model::LayerId(1)),
                 length: 1000,
+            },
+        ),
+        // WP-5.15b: the sampler's warp controls and manual slices.
+        (
+            "device.set_warp",
+            Command::SetDeviceWarp { device, warp: true },
+        ),
+        (
+            "device.set_warp_mode",
+            Command::SetDeviceWarpMode {
+                device,
+                mode: WarpMode::Beats,
+            },
+        ),
+        (
+            "device.set_warp_settings",
+            Command::SetDeviceWarpSettings {
+                device,
+                beats: Some(BeatsUpdate {
+                    preserve: Some(Preserve::Quarter),
+                    transient_loop_mode: None,
+                    transient_envelope: Some(50),
+                }),
+                tones: Some(TonesUpdate {
+                    grain_size: Some(40.0),
+                }),
+                texture: None,
+                complex_pro: Some(ComplexProUpdate {
+                    formants: Some(50.0),
+                    envelope: Some(64),
+                }),
+            },
+        ),
+        (
+            "device.set_sample_bpm",
+            Command::SetDeviceSampleBpm { device, bpm: 95.0 },
+        ),
+        (
+            "device.scale_tempo",
+            Command::ScaleDeviceTempo {
+                device,
+                factor: 2.0,
+            },
+        ),
+        (
+            "device.add_slice",
+            Command::AddSlice {
+                device,
+                frame: 30_000,
+            },
+        ),
+        (
+            "device.move_slice",
+            Command::MoveSlice {
+                device,
+                from: 30_000,
+                to: 35_000,
+            },
+        ),
+        (
+            "device.delete_slice",
+            Command::DeleteSlice {
+                device,
+                frame: 35_000,
             },
         ),
         (

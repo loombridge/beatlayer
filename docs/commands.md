@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-506 commands in 37 areas.
+514 commands in 37 areas.
 
 ## Permission classes
 
@@ -220,6 +220,7 @@ Each command has:
 | [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.add_preset`](#deviceadd_preset) | Add Preset | `external` |  |  |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
+| [`device.add_slice`](#deviceadd_slice) | Add Slice | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
@@ -229,6 +230,7 @@ Each command has:
 | [`device.crop_sample`](#devicecrop_sample) | Crop Sample | `edit` |  |  |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.delete_layers`](#devicedelete_layers) | Delete Samples | `edit` |  |  |
+| [`device.delete_slice`](#devicedelete_slice) | Delete Slice | `edit` |  |  |
 | [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.distribute_layers`](#devicedistribute_layers) | Distribute Ranges | `edit` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
@@ -248,6 +250,7 @@ Each command has:
 | [`device.load_sample`](#deviceload_sample) | Load Sample | `external` |  |  |
 | [`device.move`](#devicemove) | Move Device | `edit` |  |  |
 | [`device.move_layers`](#devicemove_layers) | Move Samples | `edit` |  |  |
+| [`device.move_slice`](#devicemove_slice) | Move Slice | `edit` |  |  |
 | [`device.move_to_chain`](#devicemove_to_chain) | Move Device to Chain | `edit` |  |  |
 | [`device.normalize_layers`](#devicenormalize_layers) | Normalize | `edit` |  |  |
 | [`device.parameters`](#deviceparameters) | Device Parameters | `read` |  |  |
@@ -259,6 +262,7 @@ Each command has:
 | [`device.reverse_sample`](#devicereverse_sample) | Reverse Sample | `edit` |  |  |
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
+| [`device.scale_tempo`](#devicescale_tempo) | Scale Device Sample Tempo | `edit` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
 | [`device.select_layers`](#deviceselect_layers) | Select Samples | `read` |  |  |
 | [`device.select_slot`](#deviceselect_slot) | Select Sample Slot | `read` |  |  |
@@ -278,6 +282,7 @@ Each command has:
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
+| [`device.set_sample_bpm`](#deviceset_sample_bpm) | Set Device Sample BPM | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | External Sidechain On/Off | `edit` |  |  |
 | [`device.set_sidechain_gain`](#deviceset_sidechain_gain) | Set SC Gain | `edit` |  |  |
@@ -285,6 +290,9 @@ Each command has:
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | Sidechain Listen | `edit` |  |  |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | Set Sidechain Mix | `edit` |  |  |
 | [`device.set_state`](#deviceset_state) | Set Device State | `edit` |  |  |
+| [`device.set_warp`](#deviceset_warp) | Device Warp On/Off | `edit` |  |  |
+| [`device.set_warp_mode`](#deviceset_warp_mode) | Set Device Warp Mode | `edit` |  |  |
+| [`device.set_warp_settings`](#deviceset_warp_settings) | Set Device Warp Settings | `edit` |  |  |
 | [`device.set_window`](#deviceset_window) | Move Device Window | `read` |  |  |
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
@@ -3991,6 +3999,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.add_slice`
+
+**Add Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Adds a manual slice at a frame into the sample (WP-5.15b). In Slice mode, slices play chromatically from C3.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `frame` | integer, at least 0 | yes | Frame into the sample. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.audition_sample`
 
 **Audition Sample**. Permission: `read`. Contexts: `device-view`.
@@ -4152,6 +4177,23 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `layers` | array of [`LayerId`](#layerid) | yes | The layers to remove. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.delete_slice`
+
+**Delete Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Deletes a manual slice at `frame` into the sample (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `frame` | integer, at least 0 | yes | Frame of the slice to delete. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4505,6 +4547,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.move_slice`
+
+**Move Slice**. Permission: `edit`. Contexts: `device-view`.
+
+Moves a manual slice from `from` frame to `to` frame into the sample (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `from` | integer, at least 0 | yes | The existing slice's frame. |
+| `to` | integer, at least 0 | yes | The new frame. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.move_to_chain`
 
 **Move Device to Chain**. Permission: `edit`. Contexts: `device-view`.
@@ -4706,6 +4766,23 @@ Arguments:
 | `path` | string or null | no | The file to write, ending `.blpreset`; a new file in the User Library's folder for the device's presets, named after its title, if left out. |
 
 Result: [`PresetResult`](#presetresult).
+
+#### `device.scale_tempo`
+
+**Scale Device Sample Tempo**. Permission: `edit`. Contexts: `device-view`.
+
+Multiplies a device's sample tempo by a factor, Live's ×2 and ÷2 (WP-5.15b): 2 doubles the tempo, 0.5 halves it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.select`
 
@@ -5059,6 +5136,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_sample_bpm`
+
+**Set Device Sample BPM**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a device's sample tempo in BPM, from 1 to 1,000 (WP-5.15b).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `bpm` | number | yes | The tempo in BPM: positive, from 1 to 1,000. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_show_preset_name`
 
 **Show Preset Name**. Permission: `edit`. Contexts: `device-view`.
@@ -5177,6 +5271,60 @@ Arguments:
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp`
+
+**Device Warp On/Off**. Permission: `edit`. Contexts: `device-view`.
+
+Switches a device's Warp on or off (WP-5.15b). On, the sample plays through its warp map at the set's tempo; off, it plays at its own speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `warp` | boolean | yes | Whether Warp is on. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp_mode`
+
+**Set Device Warp Mode**. Permission: `edit`. Contexts: `device-view`.
+
+Sets how a warped device's audio is fitted to the speed its warp map sets: `beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro` (WP-5.15b). Until the other modes are built, they play as `re_pitch` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `mode` | [`WarpMode`](#warpmode) | yes | The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_warp_settings`
+
+**Set Device Warp Settings**. Permission: `edit`. Contexts: `device-view`.
+
+Sets controls of a device's warp modes, named by mode, any of them in one undo step (WP-5.15b). `beats`: `preserve` (`transients`, `1_bar`, `half`, `quarter`, `eighth`, `sixteenth`, `thirty_second`), `transient_loop_mode` (`loop_off`, `loop_forward`, `loop_back_and_forth`), `transient_envelope` (0 to 100, default 100). `tones`: `grain_size` (10 to 100 ms, default 30). `texture`: `grain_size` (10 to 500 ms, default 65), `flux` (0 to 100 %, default 25). `complex_pro`: `formants` (0 to 100 %, default 100), `envelope` (8 to 512, default 128).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `beats` | [`BeatsUpdate`](#beatsupdate) or null | no | Beats' controls to change. |
+| `complex_pro` | [`ComplexProUpdate`](#complexproupdate) or null | no | Complex Pro's controls to change. |
+| `texture` | [`TextureUpdate`](#textureupdate) or null | no | Texture's controls to change. |
+| `tones` | [`TonesUpdate`](#tonesupdate) or null | no | Tones' controls to change. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9588,6 +9736,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
+| [`device.add_slice`](#deviceadd_slice) | the query tool's `device` | `slices` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
@@ -9595,6 +9744,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.crop_sample`](#devicecrop_sample) | the query tool's `device` | `media` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
 | [`device.delete_layers`](#devicedelete_layers) | the query tool's `device` | `layers` |
+| [`device.delete_slice`](#devicedelete_slice) | the query tool's `device` | `slices` |
 | [`device.distribute_layers`](#devicedistribute_layers) | the query tool's `device` | `layers` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
 | [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
@@ -9609,6 +9759,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.load_sample`](#deviceload_sample) | the query tool's `device` | `media` |
 | [`device.move`](#devicemove) | the query tool's `track` | `devices` |
 | [`device.move_layers`](#devicemove_layers) | the query tool's `device` | `layers` |
+| [`device.move_slice`](#devicemove_slice) | the query tool's `device` | `slices` |
 | [`device.move_to_chain`](#devicemove_to_chain) | the query tool's `device` | `chains` |
 | [`device.normalize_layers`](#devicenormalize_layers) | the query tool's `device` | `layers` |
 | [`device.paste`](#devicepaste) | the query tool's `track` | `devices` |
@@ -9617,6 +9768,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.rename_layer`](#devicerename_layer) | the query tool's `device` | `layers` |
 | [`device.replace`](#devicereplace) | the query tool's `track` | `devices` |
 | [`device.reverse_sample`](#devicereverse_sample) | the query tool's `device` | `media` |
+| [`device.scale_tempo`](#devicescale_tempo) | the query tool's `device` | `warp.bpm` |
 | [`device.set_configured_params`](#deviceset_configured_params) | `device.parameters` | `params` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | the query tool's `device` | `chains` |
@@ -9631,6 +9783,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
+| [`device.set_sample_bpm`](#deviceset_sample_bpm) | the query tool's `device` | `warp.bpm` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
 | [`device.set_sidechain_enabled`](#deviceset_sidechain_enabled) | the query tool's `device` | `sidechain.enabled` |
 | [`device.set_sidechain_gain`](#deviceset_sidechain_gain) | the query tool's `device` | `sidechain.gain` |
@@ -9638,6 +9791,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | the query tool's `device` | `sidechain.listen` |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | the query tool's `device` | `sidechain.mix` |
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
+| [`device.set_warp`](#deviceset_warp) | the query tool's `device` | `warp.warp` |
+| [`device.set_warp_mode`](#deviceset_warp_mode) | the query tool's `device` | `warp.mode` |
+| [`device.set_warp_settings`](#deviceset_warp_settings) | the query tool's `device` | `warp.settings` |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | the query tool's `device` | `layers` |
 | [`device.sort_layers`](#devicesort_layers) | the query tool's `device` | `layers` |
 | [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | the query tool's `track` | `devices` |
@@ -13748,6 +13904,8 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
+| `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
+| `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13932,6 +14090,19 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one."
+    },
+    "slices": {
+      "description": "Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty.",
+      "items": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "warp": {
+      "$ref": "#/$defs/DeviceWarp",
+      "description": "Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default."
     }
   },
   "required": [
@@ -14986,6 +15157,52 @@ What `device_view.state` returns.
     "can_paste_chain",
     "device_list"
   ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceWarp`
+
+Warp settings for a device that plays media (WP-5.15b, Simpler).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `bpm` | number or null | no | The sample's tempo in BPM (from 1 to 1,000). None uses the default. |
+| `mode` | [`WarpMode`](#warpmode) | no | The warp mode. |
+| `settings` | [`WarpSettings`](#warpsettings) | no | Mode-specific controls. |
+| `warp` | boolean | no | Whether warping is enabled. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Warp settings for a device that plays media (WP-5.15b, Simpler).",
+  "properties": {
+    "bpm": {
+      "description": "The sample's tempo in BPM (from 1 to 1,000). None uses the default.",
+      "format": "double",
+      "maximum": 1000.0,
+      "minimum": 1.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode."
+    },
+    "settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Mode-specific controls."
+    },
+    "warp": {
+      "description": "Whether warping is enabled.",
+      "type": "boolean"
+    }
+  },
   "type": "object"
 }
 ```

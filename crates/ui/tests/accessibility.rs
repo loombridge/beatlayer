@@ -1541,6 +1541,33 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// A Simpler on the first MIDI track, that track selected, no device selected
+/// (WP-5.15b): the Warp controls show in the Device View.
+fn a_snapshot(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let midi = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let t = bl_devices::sampler_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
@@ -2874,6 +2901,50 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "`device.crop_sample` and `device.reverse_sample`, which write the copy",
             )),
         ),
+        // Manual slicing in the sample display, and the Warp controls
+        // (WP-5.15b): the slicing gestures have no keyboard form yet, and
+        // the Warp controls are in the Device View's Tab order.
+        (
+            "device.add_slice",
+            Exception(Gap(
+                "a double-click on the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.move_slice",
+            Exception(Gap(
+                "dragging a slice in the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.delete_slice",
+            Exception(Gap(
+                "a double-click on a slice in the sample display, which has no keyboard form yet \
+                 (sampler R20)",
+            )),
+        ),
+        (
+            "device.set_warp",
+            main(a_snapshot, device_view, "Warp", Key::Enter),
+        ),
+        (
+            "device.set_warp_mode",
+            main(a_snapshot, device_view, "Warp Mode", Key::Enter),
+        ),
+        (
+            "device.set_warp_settings",
+            main(a_snapshot, device_view, "Preserve", Key::Enter),
+        ),
+        (
+            "device.set_sample_bpm",
+            main(a_snapshot, device_view, "Sample BPM", Key::ArrowUp),
+        ),
+        (
+            "device.scale_tempo",
+            main(a_snapshot, device_view, "Double Tempo", Key::Enter),
+        ),
         (
             "device.snap_layer_markers",
             Exception(Gap(
@@ -3459,15 +3530,18 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
         [
             "chain.save_preset",
             "device.add_layers",
+            "device.add_slice",
             "device.audition_sample",
             "device.convert",
             "device.crop_sample",
             "device.delete_layers",
+            "device.delete_slice",
             "device.distribute_layers",
             "device.duplicate_layers",
             "device.edit_sample",
             "device.load_sample",
             "device.move_layers",
+            "device.move_slice",
             "device.normalize_layers",
             "device.rename_layer",
             "device.reverse_sample",

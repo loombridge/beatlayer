@@ -16,7 +16,8 @@ use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
     ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
     FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
-    LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, MODE, PAN, RELEASE, SAMPLER,
+    LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, MODE, PAN, PITCH_ENV_AMOUNT,
+    PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN, RELEASE, SAMPLER,
     SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN, TRIGGER, VELOCITY,
     VOICES, VOLUME, sampler_type,
 };
@@ -26,8 +27,8 @@ use bl_engine::{
 };
 use bl_model::param::db_to_gain;
 use bl_model::{
-    Clip, ClipData, Command, Device, DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId,
-    TrackId, TrackKind,
+    AudioData, Clip, ClipData, Command, Device, DeviceKind, DeviceRole, DeviceWarp, Editor,
+    MidiData, Note, ParamId, TrackId, TrackKind, WarpMarker, WarpMode, WarpSettings,
 };
 use common::{CHANNELS, RATE, device, node};
 
@@ -51,10 +52,11 @@ fn sample(frames: usize, value: impl Fn(usize) -> f32) -> Arc<bl_media::SampleDa
 
 /// Gives `node` the sample, through the collector the engine would.
 fn give(node: &mut dyn Node, collector: &Collector, data: &Arc<bl_media::SampleData>) {
-    node.receive_data(collector.handle().data(SlotSample {
-        slot: 0,
-        sample: Arc::clone(data),
-    }));
+    node.receive_data(
+        collector
+            .handle()
+            .data(SlotSample::new(0, Arc::clone(data))),
+    );
 }
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -1146,7 +1148,7 @@ fn slice_boundaries_are_what_the_device_cuts() {
         SLICE_REGIONS => 4.0,
         _ => 0.0,
     };
-    let bounds = slice_boundaries(&clicks, &value, 6_000.0);
+    let bounds = slice_boundaries(&clicks, &value, 6_000.0, &[]);
     assert_eq!(bounds.first(), Some(&0));
     assert_eq!(bounds, [0, 4_800, 9_600, 14_400, 19_200]);
     // Region slicing cuts four equal parts; Manual places none.
@@ -1155,8 +1157,457 @@ fn slice_boundaries_are_what_the_device_cuts() {
             &clicks,
             &|id| if id == SLICE_BY { by } else { value(id) },
             6_000.0,
+            &[],
         )
     };
     assert_eq!(regions(2.0), [0, 4_800, 9_600, 14_400, 19_200]);
     assert!(regions(3.0).is_empty());
+    // Manual slicing with manual slices provided.
+    let manual = slice_boundaries(
+        &clicks,
+        &|id| if id == SLICE_BY { 3.0 } else { value(id) },
+        6_000.0,
+        &[5_000, 10_000],
+    );
+    assert_eq!(manual, [0, 5_000, 10_000, 19_200]);
+}
+
+// Spec: sampler R18
+#[test]
+fn warped_sample_plays_at_tempo_matching_warped_clip_golden_render() {
+    let hash = bl_model::ContentHash([9u8; 32]);
+    const STEP: f32 = 1.0 / 65_536.0;
+    // 4 seconds of ramp at 48 kHz.
+    let ramp = Arc::new(
+        bl_media::SampleData::new(
+            48_000,
+            vec![
+                (0..192_000).map(|i| (i + 1) as f32 * STEP).collect(),
+                (0..192_000).map(|i| -((i + 1) as f32 * STEP)).collect(),
+            ],
+        )
+        .unwrap(),
+    );
+    let mut media = MediaMap::new();
+    media.insert(hash, Arc::clone(&ramp));
+    let media: Arc<dyn bl_engine::MediaLibrary> = Arc::new(media);
+    let make_registry = || registry().with_media(Arc::clone(&media));
+
+    // Audio clip song: 1 bar at 120 BPM, playing ramp warped at 90 BPM.
+    let song_audio = {
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let clip_id = editor.new_id();
+        let audio = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(90.0),
+            warp_mode: WarpMode::RePitch,
+            high_quality: false,
+            ..AudioData::new(hash)
+        };
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip_id,
+                    Ticks::ZERO,
+                    Ticks(TICKS_PER_QUARTER * 4),
+                    ClipData::Audio(audio),
+                ),
+            })
+            .unwrap();
+        editor
+    };
+
+    // Simpler song: 1 bar at 120 BPM, playing ramp warped at 90 BPM via held C3.
+    let song_simpler = {
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let device_id = editor.new_id();
+        let mut device = Device::new(
+            device_id,
+            "Simpler",
+            DeviceKind::Native {
+                device_type: SAMPLER.to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        device.set_media(0, Some(hash));
+        device.warp = DeviceWarp {
+            warp: true,
+            mode: WarpMode::RePitch,
+            settings: WarpSettings::default(),
+            bpm: Some(90.0),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        let clip_id = editor.new_id();
+        let note = Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 4), 100);
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip_id,
+                    Ticks::ZERO,
+                    Ticks(TICKS_PER_QUARTER * 4),
+                    ClipData::Midi(MidiData::new([note])),
+                ),
+            })
+            .unwrap();
+        editor
+    };
+
+    // 1 bar at 120 BPM is 2 seconds = 96,000 frames.
+    for block in [1, 100, 512, 4_096] {
+        let mut offline_clip = Offline::new(EngineConfig::new(RATE, block), make_registry());
+        offline_clip.sync(song_audio.document());
+        offline_clip.sender().transport(TransportCommand::Play);
+        let mut clip_out = Vec::new();
+        offline_clip.render(96_000, |b| clip_out.extend_from_slice(b.channel(0)));
+        assert_eq!(
+            offline_clip.heap_operations(),
+            0,
+            "no clip allocs at block {block}"
+        );
+
+        let mut offline_simpler = Offline::new(EngineConfig::new(RATE, block), make_registry());
+        offline_simpler.sync(song_simpler.document());
+        offline_simpler.sender().transport(TransportCommand::Play);
+        let mut simpler_out = Vec::new();
+        offline_simpler.render(96_000, |b| simpler_out.extend_from_slice(b.channel(0)));
+        assert_eq!(
+            offline_simpler.heap_operations(),
+            0,
+            "no simpler allocs at block {block}"
+        );
+
+        assert_eq!(clip_out.len(), simpler_out.len());
+        for frame in 1..96_000 {
+            assert!(
+                (clip_out[frame] - simpler_out[frame]).abs() < 1e-4,
+                "block {block} frame {frame}: clip {} vs simpler {}",
+                clip_out[frame],
+                simpler_out[frame]
+            );
+        }
+    }
+}
+
+// Spec: sampler R18
+#[test]
+fn held_warped_note_follows_tempo_change() {
+    let hash = bl_model::ContentHash([10u8; 32]);
+    const STEP: f32 = 1.0 / 65_536.0;
+    let ramp = Arc::new(
+        bl_media::SampleData::new(
+            48_000,
+            vec![
+                (0..192_000).map(|i| (i + 1) as f32 * STEP).collect(),
+                (0..192_000).map(|i| -((i + 1) as f32 * STEP)).collect(),
+            ],
+        )
+        .unwrap(),
+    );
+    let mut media = MediaMap::new();
+    media.insert(hash, Arc::clone(&ramp));
+    let registry = registry().with_media(Arc::new(media));
+
+    let mut editor = Editor::new();
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, Bpm::new(120.0).unwrap()),
+        (Ticks(TICKS_PER_QUARTER * 4), Bpm::new(120.0).unwrap()),
+        (Ticks(TICKS_PER_QUARTER * 4), Bpm::new(60.0).unwrap()),
+    ])
+    .unwrap();
+    editor.apply(Command::SetTempo { tempo }).unwrap();
+
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let device_id = editor.new_id();
+    let mut device = Device::new(
+        device_id,
+        "Simpler",
+        DeviceKind::Native {
+            device_type: SAMPLER.to_owned(),
+        },
+    )
+    .with_role(DeviceRole::Instrument);
+    device.set_media(0, Some(hash));
+    device.warp = DeviceWarp {
+        warp: true,
+        mode: WarpMode::RePitch,
+        settings: WarpSettings::default(),
+        bpm: Some(90.0),
+    };
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let clip_id = editor.new_id();
+    // 2 bars of C3: 1 bar at 120 BPM (96,000 frames) then 1 bar at 60 BPM (192,000 frames).
+    let note = Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 8), 100);
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip_id,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 8),
+                ClipData::Midi(MidiData::new([note])),
+            ),
+        })
+        .unwrap();
+
+    let mut offline = Offline::new(EngineConfig::new(RATE, 512), registry);
+    offline.sync(editor.document());
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(96_000 + 192_000, |b| out.extend_from_slice(b.channel(0)));
+    assert_eq!(offline.heap_operations(), 0);
+
+    // In the first bar (120 BPM): rate = 120 / 90 = 4/3 sample frames per song frame.
+    // In the second bar (60 BPM): rate = 60 / 90 = 2/3 sample frames per song frame.
+    let pos = |sample_val: f32| (f64::from(sample_val) / f64::from(STEP)) - 1.0;
+    let pos_48k = pos(out[48_000]);
+    let pos_96k = pos(out[96_000]);
+    let pos_192k = pos(out[96_000 + 96_000]);
+
+    // Advance in first bar (48k frames at 120 BPM): 48000 * 4/3 = 64000 frames
+    assert!((pos_48k - 64_000.0).abs() < 2.0, "pos at 48k: {pos_48k}");
+    // Advance at end of first bar (96k frames at 120 BPM): 96000 * 4/3 = 128000 frames
+    assert!((pos_96k - 128_000.0).abs() < 2.0, "pos at 96k: {pos_96k}");
+    // Advance in second bar (96k frames at 60 BPM): 128000 + 96000 * 2/3 = 192000 frames
+    assert!(
+        (pos_192k - 192_000.0).abs() < 2.0,
+        "pos at 192k: {pos_192k}"
+    );
+}
+
+// Spec: sampler R14
+#[test]
+fn slice_by_beat_follows_the_warp_map() {
+    let ramp = sample(96_000, |i| i as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(
+        &[(MODE, 2.0), (SLICE_BY, 1.0), (SLICE_DIVISION, 4.0)],
+        48_000,
+    );
+    let mut slot = SlotSample::new(0, ramp);
+    slot.warp.warp = true;
+    slot.warp.bpm = Some(90.0);
+    node.receive_data(collector.handle().data(slot));
+
+    // Song tempo is 120 BPM.
+    // Unwarped at 120 BPM, 1 beat (division 4) is 24,000 frames.
+    // Warped at 90 BPM, 1 beat is 32,000 frames.
+    let at_120 = TempoMap::constant(Bpm::new(120.0).expect("120 BPM"));
+    let out = run_notes_at(
+        node.as_mut(),
+        48_000,
+        &[note(0, NoteKind::On, 61, 1.0)],
+        &at_120,
+    );
+    // Slice 1 (key 61) starts at 32,000 frames:
+    let wanted = (32_000.0 + 10.0) / 96_000.0;
+    assert!(
+        (out[0][10] as f64 - wanted).abs() < 1e-4,
+        "the second slice followed 90 BPM warp map: got {}, wanted {wanted}",
+        out[0][10]
+    );
+}
+
+// Spec: sampler R13, R20
+#[test]
+fn manual_slices_play_chromatically_from_c3() {
+    let ramp = sample(96_000, |i| i as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[(MODE, 2.0), (SLICE_BY, 3.0)], 48_000);
+    let mut slot = SlotSample::new(0, ramp);
+    slot.slices = Arc::from([10_000u64, 25_000, 50_000]);
+    node.receive_data(collector.handle().data(slot));
+
+    // Key 60 (C3) -> Slice 0 (0..10_000)
+    let out0 = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let want0 = 10.0 / 96_000.0;
+    assert!(
+        (out0[0][10] as f64 - want0).abs() < 1e-4,
+        "slice 0: {}",
+        out0[0][10]
+    );
+
+    // Key 61 (C#3) -> Slice 1 (10_000..25_000)
+    let out1 = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 61, 1.0)]);
+    let want1 = (10_000.0 + 10.0) / 96_000.0;
+    assert!(
+        (out1[0][10] as f64 - want1).abs() < 1e-4,
+        "slice 1: {}",
+        out1[0][10]
+    );
+
+    // Key 62 (D3) -> Slice 2 (25_000..50_000)
+    let out2 = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 62, 1.0)]);
+    let want2 = (25_000.0 + 10.0) / 96_000.0;
+    assert!(
+        (out2[0][10] as f64 - want2).abs() < 1e-4,
+        "slice 2: {}",
+        out2[0][10]
+    );
+
+    // Key 63 (D#3) -> Slice 3 (50_000..96_000)
+    let out3 = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 63, 1.0)]);
+    let want3 = (50_000.0 + 10.0) / 96_000.0;
+    assert!(
+        (out3[0][10] as f64 - want3).abs() < 1e-4,
+        "slice 3: {}",
+        out3[0][10]
+    );
+
+    // Key 64 (E3) -> Past slices, plays silence
+    let out4 = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 64, 1.0)]);
+    assert!(out4.iter().flatten().all(|s| *s == 0.0), "key 64 is silent");
+}
+
+// Spec: sampler R19
+#[test]
+fn pitch_envelope_moves_pitch_by_amount_rule_by_rule() {
+    let ramp = sample(96_000, |i| i as f32 / 96_000.0);
+    let collector = Collector::new();
+
+    // 1. Amount +12 semitones, 0 attack, 100% sustain: plays 2x speed.
+    let mut node = sampler(
+        &[
+            (PITCH_ENV_ATTACK, 0.0),
+            (PITCH_ENV_SUSTAIN, 100.0),
+            (PITCH_ENV_AMOUNT, 12.0),
+        ],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let want = 2000.0 / 96_000.0;
+    assert!(
+        (out[0][1000] as f64 - want).abs() < 1e-3,
+        "+12 st plays at 2x: got {}, wanted {want}",
+        out[0][1000]
+    );
+
+    // 2. Amount -12 semitones, 0 attack, 100% sustain: plays 0.5x speed.
+    let mut node = sampler(
+        &[
+            (PITCH_ENV_ATTACK, 0.0),
+            (PITCH_ENV_SUSTAIN, 100.0),
+            (PITCH_ENV_AMOUNT, -12.0),
+        ],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let want = 500.0 / 96_000.0;
+    assert!(
+        (out[0][1000] as f64 - want).abs() < 1e-3,
+        "-12 st plays at 0.5x: got {}, wanted {want}",
+        out[0][1000]
+    );
+
+    // 3. Attack ramp: 10 ms (480 frames) attack, +12 semitones.
+    let mut node = sampler(
+        &[
+            (PITCH_ENV_ATTACK, 10.0),
+            (PITCH_ENV_SUSTAIN, 100.0),
+            (PITCH_ENV_AMOUNT, 12.0),
+        ],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let early_diff = (out[0][2] - out[0][1]) as f64 * 96_000.0;
+    assert!((early_diff - 1.0).abs() < 0.1, "starts at 1x: {early_diff}");
+    let late_diff = (out[0][1002] - out[0][1001]) as f64 * 96_000.0;
+    assert!((late_diff - 2.0).abs() < 0.1, "reaches 2x: {late_diff}");
+
+    // 4. Decay to 0 sustain: attack 0, decay 10 ms (480 frames), sustain 0%, +12 st.
+    let mut node = sampler(
+        &[
+            (PITCH_ENV_ATTACK, 0.0),
+            (PITCH_ENV_DECAY, 10.0),
+            (PITCH_ENV_SUSTAIN, 0.0),
+            (PITCH_ENV_AMOUNT, 12.0),
+        ],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let start_diff = (out[0][2] - out[0][1]) as f64 * 96_000.0;
+    assert!((start_diff - 2.0).abs() < 0.1, "starts at 2x: {start_diff}");
+    let settled_diff = (out[0][2002] - out[0][2001]) as f64 * 96_000.0;
+    assert!(
+        (settled_diff - 1.0).abs() < 0.1,
+        "decays back to 1x: {settled_diff}"
+    );
+
+    // 5. Release: note-off releases over pitch release time back to 0 amount.
+    let mut node = sampler(
+        &[
+            (PITCH_ENV_ATTACK, 0.0),
+            (PITCH_ENV_SUSTAIN, 100.0),
+            (PITCH_ENV_RELEASE, 10.0),
+            (PITCH_ENV_AMOUNT, 12.0),
+            (RELEASE, 60_000.0),
+        ],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(
+        node.as_mut(),
+        48_000,
+        &[
+            note(0, NoteKind::On, 60, 1.0),
+            note(1000, NoteKind::Off, 60, 1.0),
+        ],
+    );
+    let mid_diff = (out[0][502] - out[0][501]) as f64 * 96_000.0;
+    assert!((mid_diff - 2.0).abs() < 0.1, "held at 2x: {mid_diff}");
+    let rel_diff = (out[0][2502] - out[0][2501]) as f64 * 96_000.0;
+    assert!(
+        (rel_diff - 1.0).abs() < 0.1,
+        "released back to 1x: {rel_diff}"
+    );
 }

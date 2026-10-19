@@ -231,18 +231,19 @@ fn cropping(args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermi
         return unchanged;
     };
     let doc = scene.editor.document();
-    let Some(clip) = args.clip.or(scene.shown_clip).and_then(|id| doc.clip(id)) else {
+    // The span and the clip are resolved as the shell resolves them (R16):
+    // the call's, or the Arrangement's time selection and the clip it
+    // covers. A span that can't be read, or no clip at all, leaves the
+    // registered class as it is.
+    let Ok(span) = crate::shell::audio_editing::crop_span(doc, scene.view, scene.shown_clip, &args)
+    else {
         return unchanged;
     };
-    let signatures = &doc.settings().time_signatures;
-    let span = match (
-        args.start.as_ref().map(|at| at.resolve(signatures)),
-        args.end.as_ref().map(|at| at.resolve(signatures)),
-    ) {
-        (Some(Ok(start)), Some(Ok(end))) if end > start => Some((start, end)),
-        // A crop that names no span, or one that can't be read, is decided
-        // on the region the clip's own markers hold.
-        _ => None,
+    let Some(clip) =
+        crate::shell::audio_editing::crop_clip(doc, scene.view, scene.shown_clip, span, &args)
+            .and_then(|id| doc.clip(id))
+    else {
+        return unchanged;
     };
     let removes = crate::shell::audio_editing::crop_removes(clip, span);
     match (&clip.data, removes) {

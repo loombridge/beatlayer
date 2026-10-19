@@ -7,7 +7,7 @@
 //! check them and list them in the command reference; `bl-shell` runs them by
 //! ID, writing the new files through WP-4.20's processed-file writer.
 
-use bl_commands::Context::{Arrangement, Session};
+use bl_commands::Context::{Arrangement, ClipView, Session};
 use bl_commands::{Binding, CommandSpec, Permission, RegisterError, Registry};
 use bl_model::{ClipId, ContentHash, SceneId, TrackId};
 use schemars::JsonSchema;
@@ -144,7 +144,7 @@ fn specs() -> Vec<CommandSpec> {
                  audio outside the region, or notes.",
             )
             .permission(Permission::Edit)
-            .contexts([Arrangement, Session])
+            .contexts([Arrangement, Session, ClipView])
             .binding("S-ARR-003")
             .binding("S-SES-028")
             .args::<CropArgs>()

@@ -2740,7 +2740,7 @@ Result: [`ChangeSet`](#changeset).
 
 #### `clip.crop`
 
-**Crop Clip**. Permission: `edit`. Contexts: `arrangement`, `session`.
+**Crop Clip**. Permission: `edit`. Contexts: `arrangement`, `session`, `clip-view`.
 
 Crops a clip to the part of it that plays, or to a span of song time: an audio clip's region is written as a new, shorter file and the clip plays it, with its Start and End markers, loop brace, and warp markers moved back so it plays exactly what it played before; a MIDI clip loses the notes that start outside the region, and writes no file. `clip` names the clip (left out, the selected one); `start` and `end` give the span to keep as song positions (left out, the region the clip's own markers hold). A span the clip goes round its loop over isn't one stretch of its file, and is refused, with a message naming Consolidate, which writes such a stretch out. An audio clip's new file goes through the processed-file writer, and the edit is one undo step when it is whole. It's an edit, and destructive as well when it removes anything: audio outside the region, or notes.
 

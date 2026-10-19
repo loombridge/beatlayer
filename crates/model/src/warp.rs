@@ -595,7 +595,13 @@ impl AudioData {
     /// If `from` and `to` don't make a region of the clip, or a warped
     /// clip's map is damaged.
     pub fn cropped(&self, from: f64, to: f64) -> Result<Self, ModelError> {
-        if !(from.is_finite() && to.is_finite()) || to - from < Self::CROP_SLACK {
+        // A warped clip's positions are whole ticks, and its map needs its
+        // two ends to round to different ones, so a warped region is at
+        // least half a tick long. An unwarped clip's are seconds, and any
+        // region that holds a frame is a region: the writer's own frame
+        // count refuses one that holds none.
+        let shortest = if self.warp { Self::CROP_SLACK } else { 0.0 };
+        if !(from.is_finite() && to.is_finite()) || to - from <= shortest {
             return Err(ModelError::InvalidValue {
                 what: "crop region length",
                 value: to - from,
@@ -1326,5 +1332,28 @@ mod tests {
             saved(&edited)["transient_edits"],
             json!({ "added": [0.3], "removed": [0.5] })
         );
+    }
+
+    // Spec: audio-clip-editing R14, R15. The region the clip's own markers
+    // hold and a time selection are regions however short they are: a fifth
+    // of a second of an unwarped clip crops, since its frames are what the
+    // file holds, while a warped clip's positions are whole ticks.
+    #[test]
+    fn a_short_region_crops_an_unwarped_clip_but_not_a_warped_one() {
+        let audio = AudioData {
+            start: 1.0,
+            ..AudioData::new(ContentHash([2; 32]))
+        };
+        assert_eq!(
+            audio.cropped(1.0, 1.2).unwrap().start,
+            0.0,
+            "a fifth of a second is a region"
+        );
+        let warped = warped(&[(0.0, 0), (2.0, Q)], 120.0);
+        assert!(
+            warped.cropped(0.0, 0.25).is_err(),
+            "a warped clip's map needs its two ends on different ticks"
+        );
+        assert!(warped.cropped(0.0, Q as f64).is_ok());
     }
 }

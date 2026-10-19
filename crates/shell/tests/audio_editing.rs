@@ -718,3 +718,82 @@ fn a_cropped_clip_plays_exactly_what_it_did() {
         );
     }
 }
+
+// Spec: audio-clip-editing R16. The Arrangement's time selection is the span
+// a crop keeps: the clip and time selection menus and Cmd-Shift-J run
+// `clip.crop` with no clip named, and the clip the selection covers is the
+// one it crops.
+#[test]
+fn a_crop_from_the_arrangements_time_selection_crops_to_it() {
+    let scratch = Scratch::new("time-selection");
+    let mut shell = new_shell(&scratch);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 2.0, 1, 0.3);
+    let clip = place(&mut shell, track, &source, 0);
+    let quarter = Ticks::QUARTER;
+    shell
+        .run(
+            "arrangement.select_time",
+            json!({ "tracks": [track], "start": quarter.get(), "end": (quarter * 3).get() }),
+        )
+        .unwrap();
+    // Nothing is named and no clip is selected: the selection is the span,
+    // and the menu item is enabled for it (R28).
+    assert!(
+        shell.can_invoke(ids::CROP, &json!({})),
+        "Crop Clip is offered"
+    );
+    let call = shell.call_permission(ids::CROP, &json!({}));
+    assert!(
+        call.is_destructive(),
+        "the selection takes the rest of the file away: {call:?}"
+    );
+    let made = crop(&mut shell, json!({})).unwrap();
+    let cropped = decode_file(PathBuf::from(made.path.unwrap())).unwrap();
+    assert_eq!(cropped.frames(), 48_000, "the selection's part of the file");
+    let value = shell.editor().document().clip(clip).unwrap().clone();
+    assert_eq!(
+        (value.start, value.length),
+        (quarter, quarter * 2),
+        "the clip's edges move to the selection"
+    );
+    assert!(made.removed, "the rest of the file went");
+}
+
+// Spec: audio-clip-editing R20. A track in a group renders alone: the group
+// goes before the track does, and the render still has the track's clips.
+#[test]
+fn consolidate_on_a_grouped_track_keeps_its_clips() {
+    let scratch = Scratch::new("grouped");
+    let mut shell = new_shell(&scratch);
+    let song = saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 1.0, 1, 0.5);
+    place(&mut shell, track, &source, 0);
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [track], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.group", json!({})).unwrap();
+    assert!(
+        shell.editor().document().parent(track).is_some(),
+        "the track is in a group"
+    );
+
+    let made = consolidate(&mut shell, track, 0, 705_600);
+    assert_eq!(made.created.len(), 1, "the track's clip became one");
+    assert_eq!(made.files.len(), 1, "and its file was written");
+    let file = PathBuf::from(&made.files[0]);
+    assert!(file.starts_with(song.parent().unwrap().join("Samples/Processed/Consolidate")));
+    assert_eq!(decode_file(&file).unwrap().frames(), 24_000);
+    let doc = shell.editor().document();
+    let created = doc
+        .clip(made.created[0])
+        .expect("the consolidated clip is on the track");
+    assert_eq!(created.start, Ticks::ZERO);
+    assert!(matches!(created.data, ClipData::Audio(_)));
+}

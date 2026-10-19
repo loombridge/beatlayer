@@ -67,21 +67,12 @@ impl Shell {
     /// file and it plays that; a MIDI clip loses the notes outside its region.
     fn crop(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let args: CropArgs = Self::args(id, args)?;
-        let span_of_args = (args.start.clone(), args.end.clone());
-        let clip = self.crop_target_value(id, &args)?;
-        let span = match span_of_args {
-            (Some(start), Some(end)) => {
-                let signatures = &self.editor.document().settings().time_signatures;
-                let start = start.resolve(signatures).map_err(|why| invalid(id, why))?;
-                let end = end.resolve(signatures).map_err(|why| invalid(id, why))?;
-                if end <= start {
-                    return Err(invalid(id, "the span's `end` must be after its `start`"));
-                }
-                Some((start, end))
-            }
-            (None, None) => None,
-            _ => return Err(invalid(id, "give `start` and `end` together")),
-        };
+        let doc = self.editor.document();
+        let shown = self.clip_view.shown_any_clip(doc, &self.arrangement);
+        let span =
+            crop_span(doc, &self.arrangement, shown, &args).map_err(|why| invalid(id, why))?;
+        let clip = crop_clip(doc, &self.arrangement, shown, span, &args)
+            .ok_or_else(|| unavailable(id, "no clip is selected"))?;
         let value = self.clip_of(id, clip)?;
         if let Some((start, end)) = span {
             self.check_span(id, &value, start, end)?;
@@ -585,45 +576,17 @@ impl Shell {
         Ok((material, start, end))
     }
 
-    /// The clip a `clip.crop` acts on: the one it names, or the selected one.
+    /// The clip a `clip.crop` acts on: the one it names, the one the Clip
+    /// View shows, or the clip the span covers. The menus' enabled states
+    /// read this (R28).
     fn crop_target(&self, args: &Value) -> Result<ClipId, ShellError> {
         let args: CropArgs = Self::args(ids::CROP, args.clone())?;
-        self.crop_target_value(ids::CROP, &args)
-    }
-
-    fn crop_target_value(&self, id: &str, args: &CropArgs) -> Result<ClipId, ShellError> {
         let doc = self.editor.document();
-        if let Some(clip) = args.clip {
-            return doc
-                .clip(clip)
-                .map(|_| clip)
-                .ok_or_else(|| self.no_clip(id, clip));
-        }
-        if let Some(clip) = self.clip_view.shown_any_clip(doc, &self.arrangement) {
-            return Ok(clip);
-        }
-        // Spec: R16. A time selection over a track's clip crops that clip
-        // (C-TRACK-020): with no clip named or shown, the first clip the
-        // span covers on the selected tracks.
-        if let (Some(start), Some(end)) = (&args.start, &args.end) {
-            let signatures = &doc.settings().time_signatures;
-            if let (Ok(start), Ok(end)) = (start.resolve(signatures), end.resolve(signatures)) {
-                let selected = self.arrangement.selected_tracks();
-                for track in doc.track_order() {
-                    if !selected.is_empty() && !selected.contains(&track) {
-                        continue;
-                    }
-                    if let Some(track) = doc.track(track)
-                        && let Some(clip) = track
-                            .clips()
-                            .find(|clip| clip.start < end && clip.end() > start)
-                    {
-                        return Ok(clip.id);
-                    }
-                }
-            }
-        }
-        Err(unavailable(id, "no clip is selected"))
+        let shown = self.clip_view.shown_any_clip(doc, &self.arrangement);
+        let span = crop_span(doc, &self.arrangement, shown, &args)
+            .map_err(|why| invalid(ids::CROP, why))?;
+        crop_clip(doc, &self.arrangement, shown, span, &args)
+            .ok_or_else(|| unavailable(ids::CROP, "no clip is selected"))
     }
 
     /// Refuses a span that isn't one stretch of what the clip plays: one the
@@ -759,6 +722,68 @@ fn place(
     editor.apply(Command::CreateClip { track, clip }).map(drop)
 }
 
+/// The span a crop keeps (R16): the call's `start` and `end`, or, when it
+/// names neither a clip nor a span, the Arrangement's time selection, which
+/// the clip and time selection menus and Cmd-Shift-J run with. `shown` is
+/// the clip the Clip View shows, which a selection-less call crops instead.
+/// The permission assessment resolves the span here too, so the two agree on
+/// what a call would touch.
+///
+/// # Errors
+///
+/// The message an unresolvable span fails with: one of `start` and `end`
+/// without the other, or an `end` not after its `start`.
+pub(crate) fn crop_span(
+    doc: &Document,
+    view: &ArrangementView,
+    shown: Option<ClipId>,
+    args: &CropArgs,
+) -> Result<Option<(Ticks, Ticks)>, String> {
+    match (&args.start, &args.end) {
+        (Some(start), Some(end)) => {
+            let signatures = &doc.settings().time_signatures;
+            let start = start.resolve(signatures).map_err(|why| why.to_string())?;
+            let end = end.resolve(signatures).map_err(|why| why.to_string())?;
+            if end <= start {
+                return Err("the span's `end` must be after its `start`".to_owned());
+            }
+            Ok(Some((start, end)))
+        }
+        (None, None) if args.clip.is_none() && shown.is_none() => Ok(view.time_selection()),
+        (None, None) => Ok(None),
+        _ => Err("give `start` and `end` together".to_owned()),
+    }
+}
+
+/// The clip a crop acts on (R16): the one the call names, the clip the Clip
+/// View shows, or the first clip the span covers on the selected tracks.
+#[must_use]
+pub(crate) fn crop_clip(
+    doc: &Document,
+    view: &ArrangementView,
+    shown: Option<ClipId>,
+    span: Option<(Ticks, Ticks)>,
+    args: &CropArgs,
+) -> Option<ClipId> {
+    if let Some(clip) = args.clip {
+        return doc.clip(clip).map(|_| clip);
+    }
+    if let Some(clip) = shown.filter(|id| doc.clip(*id).is_some()) {
+        return Some(clip);
+    }
+    let (start, end) = span?;
+    let selected = view.selected_tracks();
+    doc.track_order().into_iter().find_map(|track| {
+        if !selected.is_empty() && !selected.contains(&track) {
+            return None;
+        }
+        doc.track(track)?
+            .clips()
+            .find(|clip| clip.start < end && clip.end() > start)
+            .map(|clip| clip.id)
+    })
+}
+
 /// Whether cropping `clip` to `span`, or to the region its own markers hold,
 /// would remove anything (R18): audio outside the region, or notes. The
 /// shell's permission assessment is decided from this.
@@ -881,6 +906,17 @@ fn beat_markers(document: &Document, start: Ticks, end: Ticks) -> Vec<WarpMarker
 fn consolidate_document(document: &Document, track: TrackId) -> Result<Document, String> {
     let mut doc = document.clone();
     let main = doc.main_id();
+    // Spec: R20. The track's clips reach Main alone: a track in a group
+    // comes out of it before the group goes, or deleting the group would
+    // take the track along with it.
+    if doc.parent(track).is_some() {
+        doc.apply(&Command::MoveTrack {
+            track,
+            parent: None,
+            index: 0,
+        })
+        .map_err(|error| error.to_string())?;
+    }
     let others: Vec<TrackId> = doc
         .track_order()
         .into_iter()
@@ -889,13 +925,6 @@ fn consolidate_document(document: &Document, track: TrackId) -> Result<Document,
     for other in others {
         doc.apply(&Command::DeleteTrack { track: other })
             .map_err(|error| error.to_string())?;
-    }
-    if doc.parent(track).is_some() {
-        doc.apply(&Command::SetOutput {
-            track,
-            output: bl_model::Output::Main,
-        })
-        .map_err(|error| error.to_string())?;
     }
     let devices: Vec<bl_model::DeviceId> = doc
         .track(track)

@@ -1626,6 +1626,7 @@ fn the_in_out_choosers_and_monitor_route_the_track() {
             track: t[3],
             tap: bl_model::Tap::PostMixer,
             chain: None,
+            output: None,
         }
     );
     assert_eq!(h.shell.editor().undo_history().len(), before + 1);

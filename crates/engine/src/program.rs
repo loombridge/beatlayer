@@ -448,6 +448,11 @@ pub(crate) struct NodeSlot {
     /// For an external instrument (WP-5.34): the interface inputs its sound
     /// comes back on, which the program maps into the block it is given.
     pub(crate) external: Option<Channel>,
+    /// For a device with extra audio outputs (WP-5.45): its buffers in
+    /// `tap_pool`, one per output in the order the device declares them,
+    /// which the program hands it to render into. Empty for a device with
+    /// none, or one no route reads.
+    pub(crate) outputs: Span,
 }
 
 /// How a modulator node works its rows out.
@@ -496,6 +501,14 @@ pub(crate) struct Input {
     /// The rack chain, in `rack_chains`, whose signal at `tap` it carries
     /// instead of the task's own, or [`NO_CHAIN`].
     pub(crate) chain: u32,
+    /// The device, in `slots`, whose extra output it carries, or
+    /// [`NO_TASK`].
+    pub(crate) device: u32,
+    /// The device's output's buffer in `tap_pool`, or [`NO_OUTPUT`].
+    pub(crate) output: u32,
+    /// The frames into the source task's chain at which the device's output
+    /// is, for delay compensation, with an output.
+    pub(crate) before: u32,
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
@@ -503,6 +516,9 @@ pub(crate) struct Input {
 
 /// An input that carries a task's own signal, not a rack chain's.
 pub(crate) const NO_CHAIN: u32 = u32::MAX;
+
+/// An input that carries a task's own signal, not a device's extra output.
+pub(crate) const NO_OUTPUT: u32 = u32::MAX;
 
 /// A task's own input taken from the audio interface, Ext. In (WP-2.13):
 /// the device channels it hears, through a route whose Monitor gate opens
@@ -1157,6 +1173,7 @@ impl EngineProgram {
                     tempo: &self.tempo,
                     sidechain: None,
                     external: None,
+                    outputs: None,
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
                     session,
@@ -1231,9 +1248,17 @@ impl EngineProgram {
             };
             route.set_playing_clip(playing_clip);
             let source = input.from as usize;
-            // The task's own Post Mixer is its buffer in `pool`; every other
-            // tap, a rack chain's included, a copy in `tap_pool`.
+            // A device's extra output the program has no buffers for, because
+            // its type isn't in the registry this program was compiled with:
+            // the route carries nothing.
+            if input.device != NO_TASK && input.output == NO_OUTPUT {
+                continue;
+            }
+            // The task's own Post Mixer is its buffer in `pool`; a
+            // device's extra output, and a rack chain's tap, are copies in
+            // `tap_pool`.
             let kept = match (input.chain, input.tap) {
+                _ if input.output != NO_OUTPUT => Some(input.output),
                 (NO_CHAIN, Tap::PostMixer) => None,
                 (NO_CHAIN, Tap::PreFx) => self.tasks[source].pre_fx,
                 (NO_CHAIN, Tap::PostFx) => self.tasks[source].post_fx,
@@ -1310,6 +1335,7 @@ impl EngineProgram {
                 tempo: &self.tempo,
                 sidechain: None,
                 external: None,
+                outputs: None,
                 notes: &[],
                 notes_out: None,
                 session,
@@ -1686,6 +1712,17 @@ impl<'p> Turn<'p> {
         unsafe { self.program.tap_pool.view(at..at + size) }
     }
 
+    /// A device's extra output buffers, one tap buffer each, to write
+    /// (WP-5.45): only the device's own task writes them.
+    fn outputs(&self, span: Span) -> &'p mut [f32] {
+        let size = self.size();
+        let at = span.start as usize * size;
+        let end = span.end as usize * size;
+        // SAFETY: only the task whose chain holds the device writes them,
+        // and the routes that read them run after it.
+        unsafe { self.program.tap_pool.elements(at..end) }
+    }
+
     /// Sidechain buffer `index`, to write what the detector hears.
     fn sidechain_mut(&self, index: usize) -> &'p mut [f32] {
         let size = self.size();
@@ -1923,7 +1960,14 @@ impl EngineProgram {
                 );
                 returned = Some(&pass.device[..channels * stride]);
             }
+            let outputs = turn.slot(slot).outputs;
+            let output_tapped = outputs.start != outputs.end;
             if bypass {
+                // A switched-off device renders nothing: its extra outputs
+                // carry silence (WP-5.45).
+                if output_tapped {
+                    turn.outputs(outputs).fill(0.0);
+                }
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
                 // the notes it started, on this block's first frame.
@@ -1950,6 +1994,7 @@ impl EngineProgram {
                 tempo: &self.tempo,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
                 external: returned,
+                outputs: output_tapped.then(|| turn.outputs(outputs)),
                 notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
                 session: block.session,
@@ -2193,6 +2238,7 @@ impl EngineProgram {
             modulation: turn.bus(frames),
             rows: None,
             external: None,
+            outputs: None,
         });
         turn.selects_mut(rack)[..frames].copy_from_slice(selector.values(frames));
         selector.filters_ctrl()
@@ -2379,6 +2425,7 @@ impl EngineProgram {
                     tempo: &self.tempo,
                     sidechain: None,
                     external: None,
+                    outputs: None,
                     notes: &[],
                     notes_out: None,
                     session: block.session,

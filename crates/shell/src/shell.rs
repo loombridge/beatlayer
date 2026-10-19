@@ -1423,11 +1423,23 @@ impl Shell {
     #[must_use]
     pub fn interface(&self) -> crate::routing::Interface {
         let (inputs, outputs) = self.audio.channels();
+        // The extra audio outputs the set's devices offer past their main
+        // one, which another track's Audio From lists (WP-5.45).
+        let mut device_outputs = std::collections::BTreeMap::new();
+        for track in self.editor.document().tracks() {
+            for device in track.devices_deep() {
+                let outputs = self.devices.outputs(&device.kind);
+                if !outputs.is_empty() {
+                    device_outputs.insert(device.id, outputs.to_vec());
+                }
+            }
+        }
         crate::routing::Interface {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
             midi_outputs: self.midi.output_names(),
+            device_outputs,
         }
     }
 

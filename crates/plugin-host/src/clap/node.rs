@@ -91,18 +91,27 @@ pub struct ClapNode {
     outs: Vec<f32>,
     in_ports: AudioPorts,
     out_ports: AudioPorts,
+    /// The output ports the node feeds: the plug-in's main one, then one
+    /// per extra output (WP-5.45).
+    ports: usize,
     max_frames: usize,
     steady: u64,
 }
 
 impl ClapNode {
-    /// A node for `config`, with the main thread's ends of its queues.
-    pub(crate) fn new(config: &NodeConfig) -> (Self, HostEnds) {
+    /// A node for `config`, with the main thread's ends of its queues, and
+    /// `extra_outputs` the plug-in's audio output ports past its main one
+    /// (WP-5.45).
+    pub(crate) fn new(config: &NodeConfig, extra_outputs: usize) -> (Self, HostEnds) {
         let (to_node, from_host) = RingBuffer::new(1);
         let (to_host, from_node) = RingBuffer::new(2);
         let (params_out, params) = RingBuffer::new(PARAMS_OUT_CAPACITY);
         let status = Arc::new(Status::default());
         let max_frames = config.max_frames.max(1);
+        // The output ports the node feeds: the main one, then one per extra
+        // output. Their buffers are made with the node, so nothing the
+        // audio thread does allocates (the real-time rules).
+        let port_count = 1 + extra_outputs;
         let node = Self {
             processor: None,
             from_host,
@@ -116,8 +125,9 @@ impl ClapNode {
             output: OutputList::new(),
             ins: vec![0.0; MAX_CHANNELS * max_frames],
             outs: vec![0.0; MAX_CHANNELS * max_frames],
-            in_ports: AudioPorts::with_capacity(MAX_CHANNELS, 1),
-            out_ports: AudioPorts::with_capacity(MAX_CHANNELS, 1),
+            in_ports: AudioPorts::with_capacity(MAX_CHANNELS, port_count),
+            out_ports: AudioPorts::with_capacity(MAX_CHANNELS * port_count, port_count),
+            ports: port_count,
             max_frames,
             steady: 0,
         };
@@ -210,6 +220,21 @@ impl ClapNode {
         self.status.failed.store(true, Relaxed);
         silence(block);
     }
+}
+
+/// The lanes of one output port: `channels` lanes `stride` apart, `frames`
+/// long. A shared shape, so the main port and the plug-in's extra outputs
+/// make the same iterator type and go to the plug-in as one port list
+/// (WP-5.45).
+fn port_channels(
+    data: &mut [f32],
+    channels: usize,
+    stride: usize,
+    frames: usize,
+) -> impl ExactSizeIterator<Item = &mut [f32]> {
+    data.chunks_exact_mut(stride.max(1))
+        .take(channels)
+        .map(move |c| &mut c[..frames])
 }
 
 fn silence(block: &mut Block<'_>) {
@@ -338,18 +363,38 @@ impl Node for ClapNode {
                 ),
             }
         }));
-        let mut outs = self.out_ports.with_output_buffers((outputs > 0).then(|| {
-            AudioPortBuffer {
-                latency: 0,
-                channels: AudioPortBufferType::f32_output_only(
-                    self.outs
-                        .chunks_exact_mut(stride)
-                        .take(outputs)
-                        .map(|c| &mut c[..frames]),
-                ),
-            }
-        }));
+        // The plug-in's output ports: its main one into the node's own
+        // scratch, and each output past it into the block's buffer for that
+        // output (WP-5.45), which another track reads as a routing source.
         let transport = transport(block);
+        let port_size = (channels * stride).max(1);
+        let extra = self.ports - 1;
+        let region: &mut [f32] = block
+            .outputs_mut()
+            .map_or([].as_mut_slice(), |data| &mut data[..extra * port_size]);
+        // The main port takes the node's own scratch; each of the plug-in's
+        // extra outputs takes its buffer in the block, one after another.
+        let mut main: Option<&mut [f32]> = (outputs > 0).then(|| &mut self.outs[..]);
+        let mut rest = region;
+        let mut outs = self
+            .out_ports
+            .with_output_buffers((0..self.ports).map(|port| {
+                let (data, lanes) = if port == 0 {
+                    (main.take().unwrap_or_default(), outputs)
+                } else {
+                    let all = core::mem::take(&mut rest);
+                    let take = all.len().min(port_size);
+                    let (head, tail) = all.split_at_mut(take);
+                    rest = tail;
+                    (head, channels.min(MAX_CHANNELS))
+                };
+                AudioPortBuffer {
+                    latency: 0,
+                    channels: AudioPortBufferType::f32_output_only(port_channels(
+                        data, lanes, stride, frames,
+                    )),
+                }
+            }));
         let result = started.process(
             &ins,
             &mut outs,

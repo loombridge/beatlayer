@@ -414,6 +414,7 @@ fn the_eqs_and_dynamics_pass(device_type: &str, moves: &[(ParamId, [f64; 2])]) {
                     track: key,
                     tap: bl_model::Tap::PostFx,
                     chain: None,
+                    output: None,
                 },
             })
             .unwrap();

@@ -36,6 +36,15 @@ pub trait NodeFactory: Send + Sync {
     fn device_types(&self) -> Vec<DeviceType> {
         Vec::new()
     }
+
+    /// The extra audio outputs the devices of `kind` offer past their main
+    /// one (WP-5.45), by their names, in the order they declare them: a
+    /// CLAP plug-in's audio output ports, a native instrument's individual
+    /// outputs. The default offers none.
+    fn outputs(&self, kind: &DeviceKind) -> Vec<String> {
+        let _ = kind;
+        Vec::new()
+    }
 }
 
 /// A kind of device a factory offers: what the browser lists and a new
@@ -65,6 +74,13 @@ pub struct DeviceType {
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
+    /// The extra audio outputs its devices offer past their main one, by the
+    /// names the device gives them (WP-5.45): another track can take one as
+    /// its input ([`Input::Track`](bl_model::Input::Track)), and the node
+    /// renders each into a buffer of the block it is given
+    /// ([`Block::outputs_mut`](crate::Block::outputs_mut)). Empty for a
+    /// device that offers none.
+    pub outputs: Vec<String>,
 }
 
 impl DeviceType {
@@ -81,6 +97,7 @@ impl DeviceType {
             sidechain: false,
             external: false,
             midi_sidechain: false,
+            outputs: Vec::new(),
         }
     }
 
@@ -112,6 +129,14 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, its devices' extra audio outputs past the main
+    /// one, named as the device names them (WP-5.45).
+    #[must_use]
+    pub fn with_outputs(mut self, outputs: impl IntoIterator<Item = String>) -> Self {
+        self.outputs = outputs.into_iter().collect();
+        self
+    }
+
     /// A new, switched-on device of this type with default parameters, and
     /// a new sidechain input, MIDI sidechain input or routing to hardware
     /// if the type declares them.
@@ -135,6 +160,7 @@ impl DeviceType {
 struct Native<F> {
     device_type: String,
     offered: Option<DeviceType>,
+    outputs: Vec<String>,
     make: F,
 }
 
@@ -153,6 +179,15 @@ where
 
     fn device_types(&self) -> Vec<DeviceType> {
         self.offered.iter().cloned().collect()
+    }
+
+    fn outputs(&self, kind: &DeviceKind) -> Vec<String> {
+        match kind {
+            DeviceKind::Native { device_type } if *device_type == self.device_type => {
+                self.outputs.clone()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -205,6 +240,26 @@ impl Registry {
         self.add(Native {
             device_type: device_type.to_owned(),
             offered: None,
+            outputs: Vec::new(),
+            make,
+        });
+    }
+
+    /// Adds a native device type the browser doesn't offer that declares the
+    /// extra audio outputs `outputs` past its main one (WP-5.45), made by
+    /// `make`. For tests of a multi-output instrument.
+    ///
+    /// # Panics
+    ///
+    /// If `device_type` isn't a native device type.
+    pub fn add_native_with_outputs<F>(&mut self, device_type: &str, outputs: &[&str], make: F)
+    where
+        F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
+    {
+        self.add(Native {
+            device_type: device_type.to_owned(),
+            offered: None,
+            outputs: outputs.iter().map(|name| (*name).to_owned()).collect(),
             make,
         });
     }
@@ -221,9 +276,11 @@ impl Registry {
         let DeviceKind::Native { device_type: id } = &device_type.kind else {
             panic!("add_device takes native device types");
         };
+        let outputs = device_type.outputs.clone();
         self.add(Native {
             device_type: id.clone(),
             offered: Some(device_type),
+            outputs,
             make,
         });
     }
@@ -241,6 +298,18 @@ impl Registry {
     #[must_use]
     pub fn device_type(&self, kind: &DeviceKind) -> Option<DeviceType> {
         self.device_types().into_iter().find(|t| t.kind == *kind)
+    }
+
+    /// The extra audio outputs the devices of `kind` offer past their main
+    /// one (WP-5.45), by their names, in the order they declare them; empty
+    /// for a device whose factory declares none.
+    #[must_use]
+    pub fn device_outputs(&self, kind: &DeviceKind) -> Vec<String> {
+        self.factories
+            .iter()
+            .map(|factory| factory.outputs(kind))
+            .find(|outputs| !outputs.is_empty())
+            .unwrap_or_default()
     }
 
     /// Sets where clips' audio comes from: the project's media, streamed

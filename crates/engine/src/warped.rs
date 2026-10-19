@@ -30,14 +30,47 @@ use bl_model::WarpMode as ClipWarpMode;
 use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
 use bl_stretch::{
-    Beats, Interpolation, Piece, RePitch, Request, WarpMap, WarpMode, WarpTable, Window,
+    Beats, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode, WarpTable,
+    Window, window_frames,
 };
 
-use crate::clip_source::WINDOW_FRAMES;
+use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 
 /// How many file frames before a position a warped clip may read: the widest
 /// interpolator's reach, so a point a jump lands on is cued that far early.
 pub(crate) const CUE_BACK: u64 = 264;
+
+/// The file frames a mode's reads need at `rate`: the widest any mode's
+/// window reaches for a grain mode (Tones and Texture, R18 and R19), the
+/// narrow one for the rest.
+pub(crate) fn window_of(mode: ClipWarpMode, rate: f64) -> usize {
+    match mode {
+        ClipWarpMode::Tones | ClipWarpMode::Texture => window_frames(rate),
+        _ => NARROW_WINDOW,
+    }
+}
+
+/// The room a player reads a clip's file into, and hands its mode as a
+/// [`Window`]: made with the track's clip list, off the audio thread, and
+/// carried to the player like its clips' sources (R5). Its width follows the
+/// widest window the list's clips and their mode changes need.
+#[derive(Debug)]
+pub(crate) struct WindowBuf {
+    /// How many frames each channel holds.
+    pub(crate) frames: usize,
+    /// The frames, channel after channel, `frames` apart.
+    pub(crate) data: Vec<f32>,
+}
+
+impl WindowBuf {
+    /// A window `channels` channels wide, of `frames` frames each.
+    pub(crate) fn new(channels: usize, frames: usize) -> Self {
+        Self {
+            frames,
+            data: vec![0.0; channels * frames],
+        }
+    }
+}
 
 /// The most passes round a loop a table holds (a clip looped over a tick
 /// would otherwise be a table without end): past it the clip is silent.
@@ -61,11 +94,14 @@ const PITCH: f64 = 1.0;
 /// (R8, Beatlayer's own).
 const CHANGE_SECONDS: f64 = 0.020;
 
-/// How a warped clip is played: its mode, its HiQ switch and its pitch.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// How a warped clip is played: its mode, its HiQ switch, settings and clip ID.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Playing {
     pub(crate) mode: ClipWarpMode,
     pub(crate) high_quality: bool,
+    pub(crate) tones: bl_model::TonesSettings,
+    pub(crate) texture: bl_model::TextureSettings,
+    pub(crate) clip_id: u64,
 }
 
 /// A warped clip's contents, in beats of the clip: where it starts, ends and
@@ -116,6 +152,9 @@ impl Contents {
 #[derive(Debug)]
 pub(crate) struct Warped {
     contents: Contents,
+    /// The clip's warp mode, which says how wide a window its reads need
+    /// (R18, R19).
+    mode: ClipWarpMode,
     /// The Arrangement clip's table; empty for a Session slot clip, and for
     /// a clip placed before its file's length is known.
     table: WarpTable,
@@ -170,6 +209,7 @@ impl Warped {
         };
         let mut warped = Self {
             contents,
+            mode: audio.warp_mode,
             table: WarpTable::new(Vec::new()),
             plan,
         };
@@ -235,12 +275,23 @@ impl Warped {
             .max(0.0) as u64
     }
 
-    /// How many file frames a Beats clip's loop reads back into, at most: the
-    /// longest stretch from a segment's turn to its end (R15), or a window
-    /// where it holds none, so a read that overlaps is always served.
+    /// How wide a window the clip's mode reads through: its reads, and the
+    /// room its source keeps, are this wide (R5, R18, R19).
+    pub(crate) fn window_frames(&self) -> usize {
+        window_of(self.mode, self.contents.rate)
+    }
+
+    /// How many file frames the clip's reads reach back into, at most: the
+    /// longest stretch from a Beats segment's turn to its end (R15), a grain
+    /// mode's window (its reads overlap the last one by nearly that much, and
+    /// the room serves them), or nothing where a mode's reads only go
+    /// forwards.
     pub(crate) fn history_frames(&self) -> usize {
         if self.plan.is_empty() {
-            return 0;
+            return match self.mode {
+                ClipWarpMode::Tones | ClipWarpMode::Texture => self.window_frames(),
+                _ => 0,
+            };
         }
         let longest = self
             .plan
@@ -249,7 +300,7 @@ impl Warped {
             .filter(|segment| segment.end > segment.turn)
             .map(|segment| segment.end - segment.turn)
             .fold(0.0_f64, f64::max);
-        (longest.ceil() as usize).max(WINDOW_FRAMES)
+        (longest.ceil() as usize).max(self.window_frames())
     }
 
     /// The table of a Beats clip: its plan's stretches (R14 to R17).
@@ -853,14 +904,14 @@ pub(crate) struct Changing {
     pub(crate) fade: crate::mixer::Ramp,
 }
 
-/// The player's room for warped playback: the positions of a run, the window
-/// of the file around them, and what the mode rendered, all planar and made
-/// when the player was.
+/// The player's room for warped playback: the positions of a run and what the
+/// mode rendered, both planar and made when the player was. The window of the
+/// file around the run comes with the clip list ([`WindowBuf`]), since how
+/// wide it must be is the clips' business.
 pub(crate) struct WarpScratch {
     channels: usize,
     max_frames: usize,
     positions: Vec<f64>,
-    window: Vec<f32>,
     rendered: Vec<f32>,
     /// The mode that was playing before a change, crossfaded in (R8).
     previous: Option<Changing>,
@@ -873,6 +924,8 @@ pub(crate) struct WarpScratch {
     /// is WP-4.4's.
     repitch: RePitch,
     beats: Beats,
+    tones: Tones,
+    texture: Texture,
 }
 
 impl WarpScratch {
@@ -882,13 +935,14 @@ impl WarpScratch {
             channels,
             max_frames,
             positions: vec![0.0; max_frames],
-            window: vec![0.0; channels * WINDOW_FRAMES],
             rendered: vec![0.0; channels * max_frames],
             previous: None,
             change_frames: (CHANGE_SECONDS * rate.as_f64()).round() as u32,
             rendered_previous: vec![0.0; channels * max_frames],
             repitch: RePitch,
             beats: Beats,
+            tones: Tones::new(channels, rate.as_f64()),
+            texture: Texture::new(channels, rate.as_f64(), 0),
         }
     }
 
@@ -921,6 +975,7 @@ impl WarpScratch {
         &mut self,
         clip: bl_model::ClipId,
         source: &mut dyn AudioSource,
+        window: &mut WindowBuf,
         positions: &Positions<'_>,
         launched: Option<i64>,
         first: i64,
@@ -947,6 +1002,7 @@ impl WarpScratch {
             .map(|previous| previous.fade);
         let (n, sound) = self.paint(
             source,
+            window,
             positions,
             first,
             want,
@@ -969,6 +1025,7 @@ impl WarpScratch {
         };
         let (old_n, old_sound) = self.paint(
             source,
+            window,
             &old_positions,
             first,
             n,
@@ -1010,6 +1067,7 @@ impl WarpScratch {
     fn paint(
         &mut self,
         source: &mut dyn AudioSource,
+        window: &mut WindowBuf,
         positions: &Positions<'_>,
         first: i64,
         want: usize,
@@ -1023,15 +1081,17 @@ impl WarpScratch {
         if !fill.sound {
             return (fill.frames, false);
         }
+        let width = window.frames;
         let Self {
             channels,
             max_frames,
             positions: all,
-            window,
             rendered,
             rendered_previous,
             repitch,
             beats,
+            tones,
+            texture,
             ..
         } = self;
         let rendered = match out {
@@ -1041,6 +1101,16 @@ impl WarpScratch {
         let mut n = fill.frames;
         let mode: &mut dyn WarpMode = match playing.mode {
             ClipWarpMode::Beats => beats,
+            ClipWarpMode::Tones => {
+                tones.set_grain_size(playing.tones.grain_size);
+                tones
+            }
+            ClipWarpMode::Texture => {
+                texture.set_clip_id(playing.clip_id);
+                texture.set_grain_size(playing.texture.grain_size);
+                texture.set_flux(playing.texture.flux);
+                texture
+            }
             _ => repitch,
         };
         let plan = plan.unwrap_or(&EMPTY_PLAN);
@@ -1053,6 +1123,7 @@ impl WarpScratch {
                 neutral: fill.neutral,
                 high_quality: playing.high_quality,
                 beats: plan,
+                pitch: PITCH,
             };
             let (before, after) = mode.reach(&request);
             // The window holds every position the run reads, whichever way it
@@ -1071,7 +1142,7 @@ impl WarpScratch {
                 }
             }
             let len = usize::try_from(hi - lo).unwrap_or(usize::MAX);
-            if len <= WINDOW_FRAMES {
+            if len <= width {
                 break (request, lo, len);
             }
             if n == 1 {
@@ -1083,8 +1154,8 @@ impl WarpScratch {
         };
         load(window, *channels, source, lo, len, history);
         let view = Window {
-            data: window,
-            stride: WINDOW_FRAMES,
+            data: &window.data,
+            stride: width,
             channels: *channels,
             frames: len,
             first: lo,
@@ -1123,38 +1194,35 @@ impl Positions<'_> {
 /// they fall before the file; a mono file plays on every channel. A `history`
 /// serves what it holds and keeps what it reads (R15).
 fn load(
-    window: &mut [f32],
+    window: &mut WindowBuf,
     channels: usize,
     source: &mut dyn AudioSource,
     lo: i64,
     len: usize,
     history: Option<&mut History>,
 ) {
+    let width = window.frames;
+    let data = &mut window.data;
     let skip = usize::try_from(-lo).map_or(0, |before| before.min(len));
     for c in 0..channels {
-        window[c * WINDOW_FRAMES..c * WINDOW_FRAMES + skip].fill(0.0);
+        data[c * width..c * width + skip].fill(0.0);
     }
     let read = len - skip;
     if read > 0 {
         match history {
-            Some(history) => history.read(
-                source,
-                lo.max(0),
-                read,
-                channels,
-                WINDOW_FRAMES,
-                &mut window[skip..],
-            ),
+            Some(history) => {
+                history.read(source, lo.max(0), read, channels, width, &mut data[skip..])
+            }
             None => {
-                let mut view = PlanarMut::new(&mut window[skip..], channels, read, WINDOW_FRAMES);
+                let mut view = PlanarMut::new(&mut data[skip..], channels, read, width);
                 source.read(lo.max(0) as u64, &mut view, Transition::Cut);
             }
         }
     }
     let source_channels = source.channels().clamp(1, channels);
     for c in source_channels..channels {
-        let (from, to) = window.split_at_mut(c * WINDOW_FRAMES);
-        let last = (source_channels - 1) * WINDOW_FRAMES;
+        let (from, to) = data.split_at_mut(c * width);
+        let last = (source_channels - 1) * width;
         to[skip..len].copy_from_slice(&from[last + skip..last + len]);
     }
 }

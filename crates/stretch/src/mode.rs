@@ -58,6 +58,24 @@ pub struct Request<'a> {
     /// A Beats clip's segments and envelope (R14 to R17); empty in every
     /// other mode.
     pub beats: &'a Plan,
+    /// The pitch ratio (R20). 1.0 where untransposed.
+    pub pitch: f64,
+}
+
+/// The frames of the run a window must hold besides what the mode reaches
+/// for: a block, with room.
+const RUN_FRAMES: usize = 8_192;
+
+/// The most file frames any mode reads around a run at `rate` (R18, R19):
+/// Texture's largest Grain Size reaches each way, through the widest
+/// interpolator, with the run's own frames. The player reads a clip through a
+/// window this wide, and a clip's source keeps this much ready. A mode whose
+/// reach can exceed it must widen it here.
+#[must_use]
+pub fn window_frames(rate: f64) -> usize {
+    let grain = (crate::texture::MAX_TEXTURE_GRAIN_MS / 1000.0 * rate).ceil() as usize;
+    let interp = Interpolation::of(true).reach(f64::INFINITY).1;
+    RUN_FRAMES + 2 * (2 * grain + interp + 64)
 }
 
 /// A warp mode.
@@ -151,7 +169,7 @@ impl WarpMode for Beats {
 
 /// Reads the run's positions from the window, into `out`: the nearest file
 /// frame where the run is neutral, the interpolator's value otherwise.
-fn read(request: &Request<'_>, window: &Window<'_>, out: &mut [f32], stride: usize) {
+pub(crate) fn read(request: &Request<'_>, window: &Window<'_>, out: &mut [f32], stride: usize) {
     let interpolation = Interpolation::of(request.high_quality);
     for c in 0..window.channels {
         let source = window.channel(c);
@@ -197,6 +215,7 @@ mod tests {
             neutral: false,
             high_quality: false,
             beats: &Plan::default(),
+            pitch: 1.0,
         };
         let mut out = vec![0.0; 20];
         RePitch.render(&request, &window, &mut out, 20);
@@ -212,6 +231,7 @@ mod tests {
                 neutral: false,
                 high_quality,
                 beats: &Plan::default(),
+                pitch: 1.0,
             };
             RePitch.render(&request, &window, &mut out, 20);
             for (got, p) in out.iter().zip(&positions) {
@@ -239,6 +259,7 @@ mod tests {
             neutral: true,
             high_quality: true,
             beats: &Plan::default(),
+            pitch: 1.0,
         };
         assert_eq!(RePitch.reach(&request), (0, 0));
         let mut out = vec![0.0; 10];

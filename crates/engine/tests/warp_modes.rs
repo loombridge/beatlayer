@@ -15,8 +15,8 @@ use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, BeatsSettings, Clip, ClipData, Command, ContentHash, Editor, Preserve, TrackKind,
-    TransientLoopMode, WarpMarker, WarpMode,
+    AudioData, BeatsSettings, Clip, ClipData, Command, ContentHash, Editor, Preserve,
+    TextureSettings, TonesSettings, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 use common::{RATE, track};
 
@@ -247,6 +247,103 @@ fn beats_keeps_every_hit_within_1_ms_of_its_beat() {
 /// The whole note's length in seconds at `tempo`.
 fn length_seconds(tempo: f64) -> f64 {
     4.0 * 60.0 / tempo
+}
+
+/// A song of `MEDIA` warped at 120 BPM in `mode`, with `grain_ms`'s Grain
+/// Size and (in Texture) `flux`, in a song at `tempo` (T125).
+fn grain_song(tempo: f64, mode: WarpMode, grain_ms: f64, flux: f64) -> Editor {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(tempo).unwrap()),
+        })
+        .unwrap();
+    let audio_track = track(&mut editor, TrackKind::Audio, None);
+    let mut audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(MEDIA)
+    };
+    match mode {
+        WarpMode::Tones => {
+            audio.warp_settings.tones = TonesSettings {
+                grain_size: grain_ms,
+            };
+        }
+        WarpMode::Texture => {
+            audio.warp_settings.texture = TextureSettings {
+                grain_size: grain_ms,
+                flux,
+            };
+        }
+        _ => {}
+    }
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        ClipData::Audio(audio),
+    );
+    editor
+        .apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        })
+        .unwrap();
+    editor
+}
+
+// Spec: warp-modes R4, R6. Tones and Texture at the clip's own tempo (speed 1)
+// play the file's frames unchanged, to the bit, at any Grain Size and Flux and
+// at any block size, each block a real-time section under the allocation trap.
+#[test]
+fn tones_and_texture_are_neutral_at_their_own_tempo_at_any_block_size() {
+    let length = Ticks::WHOLE;
+    let unwarped = {
+        let mut editor = Editor::new();
+        editor
+            .apply(Command::SetTempo {
+                tempo: TempoMap::constant(Bpm::new(120.0).unwrap()),
+            })
+            .unwrap();
+        let audio_track = track(&mut editor, TrackKind::Audio, None);
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::ZERO,
+            length,
+            ClipData::Audio(AudioData::new(MEDIA)),
+        );
+        editor
+            .apply(Command::CreateClip {
+                track: audio_track,
+                clip,
+            })
+            .unwrap();
+        editor
+    };
+    let want = play(&unwarped, 96_000, 512);
+    for (mode, grain_ms, flux) in [
+        (WarpMode::Tones, 10.0, 0.0),
+        (WarpMode::Tones, 30.0, 0.0),
+        (WarpMode::Tones, 100.0, 0.0),
+        (WarpMode::Texture, 10.0, 0.0),
+        (WarpMode::Texture, 65.0, 25.0),
+        (WarpMode::Texture, 500.0, 100.0),
+    ] {
+        let editor = grain_song(120.0, mode, grain_ms, flux);
+        for block in [1, 61, 512, 4_096] {
+            assert_eq!(
+                play(&editor, 96_000, block),
+                want,
+                "{mode:?} at {grain_ms} ms, Flux {flux}, blocks of {block}"
+            );
+        }
+    }
 }
 
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from

@@ -53,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        165,
+        166,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -70,7 +70,8 @@ fn every_document_command_is_registered() {
          three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-         WP-3.18 the two for Cue mode and the Cue Volume, and WP-5.3 set_chain_zone"
+         WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, and WP-5.40 \
+         set_configured_params"
     );
 
     for op in &ops {
@@ -961,6 +962,26 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_sample",
         json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+    );
+    // Spec: clap-hosting R5; WP-5.40. Replaces a plug-in device's
+    // configured parameter list, in order.
+    agent.run(
+        "device.set_configured_params",
+        json!({ "device": synth, "params": [3, 1] }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(synth)
+            .unwrap()
+            .configured
+            .as_deref(),
+        Some([ParamId(3), ParamId(1)].as_slice())
+    );
+    assert_eq!(
+        agent.editor.undo_history().next(),
+        Some("Configure Plug-In")
     );
     let device = agent.editor.document().device(eq).unwrap();
     assert_eq!(agent.editor.document().device_track(eq), Some(reverb));
@@ -2425,6 +2446,13 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 param: ParamId(u32::MAX),
                 value: -1e9,
+            },
+        ),
+        (
+            "device.set_configured_params",
+            Command::SetConfiguredParams {
+                device,
+                params: vec![ParamId(7), ParamId(3)],
             },
         ),
         (

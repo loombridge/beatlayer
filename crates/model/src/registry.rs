@@ -1905,6 +1905,21 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "device.set_configured_params",
+        action: Action::Apply("set_configured_params"),
+        label: "Configure Plug-In",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a plug-in device's list of configured parameters (clap-hosting \
+            R5, WP-5.40): the parameters its panel knobs and the automation and clip-envelope \
+            choosers show, in order. `params` holds them in their new order. One undo step. \
+            The list is saved with the set; `device.parameters` marks each parameter \
+            configured or not. The higher-level `plugin.configure_param`, \
+            `plugin.unconfigure_param` and `plugin.move_configured_param` edit one entry at a \
+            time and are what a person or an agent usually runs.",
+    },
+    Entry {
         id: "modulator.map",
         action: Action::Apply("map_modulator"),
         label: "Map Modulator",

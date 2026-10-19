@@ -14,9 +14,12 @@ use std::time::{Duration, Instant};
 
 use bl_model::{DeviceId, TrackId};
 use bl_shell::plugin_commands::{self as ids, PluginInfo, PluginLoaded};
-use bl_ui::device_view::{PLUGIN_WINDOW_BUTTON, activator_rect, layout, plugin_window_rect};
+use bl_ui::device_view::{
+    PLUGIN_CONFIGURE, PLUGIN_WINDOW_BUTTON, activator_rect, layout, plugin_configure_rect,
+    plugin_window_rect,
+};
 use common::{Harness, Window};
-use egui::{Rect, pos2};
+use egui::{Event, Modifiers, PointerButton, Pos2, Rect, pos2};
 use serde_json::json;
 
 /// The main window with the test plug-in on the third track, the selected
@@ -156,5 +159,136 @@ fn the_panel_shows_the_plugins_parameters_as_knobs() {
     assert!(
         !info(&mut h, device).window_open,
         "only the wrench opens the editor"
+    );
+}
+
+/// A right-click at a point: the context menu's opening gesture.
+fn right_click(h: &mut Harness, at: Pos2) {
+    h.frame(vec![Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+}
+
+/// Whether the plug-in device is in Configure Mode.
+fn configuring(h: &mut Harness, device: DeviceId) -> bool {
+    h.shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .configure
+}
+
+// Spec: clap-hosting R5 (WP-5.40, manual 24.1.2). L-DEV-010. The Configure
+// switch sits in the plug-in device's title bar, after the window button;
+// clicking it opens and closes Plug-In Configure Mode, and neither is an
+// undo step.
+#[test]
+fn clicking_the_configure_switch_opens_and_closes_configure_mode() {
+    let (mut h, device) = harness();
+    let frame = frame_of(&mut h, device);
+    let expandable = h
+        .shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .expandable;
+    let configure = plugin_configure_rect(frame, expandable);
+    let wrench = plugin_window_rect(frame, expandable);
+    assert!(configure.left() > wrench.right(), "after the window button");
+    let nodes = Harness::nodes(&h.settle());
+    let button = Harness::node(&nodes, PLUGIN_CONFIGURE);
+    let b = button.bounds.unwrap();
+    assert!(
+        (b.x0 as f32 - configure.left()).abs() < 3.0,
+        "drawn where its rect says"
+    );
+    assert_eq!(button.value, "off");
+    assert!(!configuring(&mut h, device));
+
+    let steps = h.shell.editor().undo_history().len();
+    h.click(configure.center());
+    assert!(configuring(&mut h, device), "the click opened it");
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, PLUGIN_CONFIGURE).value, "on");
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps,
+        "configure mode is view state"
+    );
+
+    h.click(configure.center());
+    assert!(!configuring(&mut h, device), "a second click closes it");
+    assert_eq!(
+        Harness::node(&Harness::nodes(&h.settle()), PLUGIN_CONFIGURE).value,
+        "off"
+    );
+}
+
+// Spec: clap-hosting R5 (WP-5.40, manual 24.1.2). Right-clicking a panel
+// knob offers the device's configured parameters and a way back to
+// following the list, which remaps that knob through `plugin.set_panel_param`.
+#[test]
+fn right_clicking_a_knob_offers_the_configured_parameters() {
+    let (mut h, device) = harness();
+    // Take Last Note off the panel, then remap the first knob to it, so the
+    // knob reads a name no other panel knob does and its menu offers the way
+    // back to the list.
+    h.shell
+        .run(
+            ids::UNCONFIGURE_PARAM,
+            json!({ "device": device, "param": bl_test_clap::LAST_NOTE }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            ids::SET_PANEL_PARAM,
+            json!({ "device": device, "index": 0, "param": bl_test_clap::LAST_NOTE }),
+        )
+        .unwrap();
+    let knob = {
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "Last Note").bounds.unwrap()
+    };
+    let at = pos2(
+        ((knob.x0 + knob.x1) / 2.0) as f32,
+        ((knob.y0 + knob.y1) / 2.0) as f32,
+    );
+    right_click(&mut h, at);
+    assert!(
+        Harness::nodes(&h.settle())
+            .iter()
+            .any(|n| n.label == "Follow the List"),
+        "a remapped knob offers the way back to the list"
+    );
+    let follow = Harness::node(&Harness::nodes(&h.settle()), "Follow the List")
+        .bounds
+        .unwrap();
+    h.click(pos2(
+        ((follow.x0 + follow.x1) / 2.0) as f32,
+        ((follow.y0 + follow.y1) / 2.0) as f32,
+    ));
+    let panel = h
+        .shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(
+        panel.description.params[0].name, "Gain",
+        "the knob follows the list again"
     );
 }

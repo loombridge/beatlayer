@@ -13,7 +13,9 @@
 //! A plug-in device (WP-2.10, L-DEV-010) adds the window button, a
 //! wrench named Show/Hide Plug-In Window, after the activator and before
 //! the name, lit while the plug-in's editor window is open; its panel is
-//! eight knobs mapped to the plug-in's first parameters (D19, IMP-03).
+//! eight knobs mapped to the configured parameters' first eight entries
+//! (D19, IMP-03). Next to the wrench sits the Configure switch (WP-5.40,
+//! manual 24.1.2), lit while Plug-In Configure Mode is on.
 //!
 //! A floating device (WP-2.5b, IMP-14) keeps its place in the chain as a
 //! strip like a folded device's, outlined in the accent, so the signal
@@ -49,6 +51,13 @@ pub const PLUGIN_WINDOW_BUTTON: &str = "Show/Hide Plug-In Window";
 
 /// `plugin.show_window`, which the window button runs.
 const PLUGIN_SHOW_WINDOW: &str = bl_shell::plugin_commands::SHOW_WINDOW;
+
+/// The Configure switch's name (L-DEV-010, manual 24.1.2): it opens and
+/// closes Plug-In Configure Mode while lit.
+pub const PLUGIN_CONFIGURE: &str = "Configure";
+
+/// `plugin.configure`, which the Configure switch runs (WP-5.40).
+const PLUGIN_CONFIGURE_COMMAND: &str = bl_shell::plugin_commands::CONFIGURE;
 
 /// What an empty chain's Device View says (L-DEV-001, observed).
 pub const EMPTY_TEXT: &str = "Drop an Instrument or Sample Here";
@@ -610,6 +619,9 @@ impl DeviceViewUi {
                 if let Some(wrench) = controls.wrench {
                     self.wrench(ui, shell, theme, frame, wrench, events);
                 }
+                if let Some(configure) = controls.configure {
+                    self.configure_switch(ui, theme, frame, configure, events);
+                }
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
                 let options =
@@ -870,6 +882,59 @@ impl DeviceViewUi {
 
     /// Hot-Swap Presets, Save Preset, or Show Options: round buttons at the
     /// title bar's right end.
+    /// The Configure switch (WP-5.40, L-DEV-010, manual 24.1.2): a round
+    /// button lit while the device is in Plug-In Configure Mode; clicking it
+    /// runs `plugin.configure`.
+    fn configure_switch(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let id = control_id(frame.id, "configure");
+        let response = ui.interact(rect, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+            invoke(
+                events,
+                PLUGIN_CONFIGURE_COMMAND,
+                json!({ "device": frame.id }),
+            );
+        }
+        let on = frame.configure;
+        let c = &theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let centre = rect.center();
+        let r = rect.width() / 2.0;
+        let face = if on {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.window.0
+        };
+        painter.circle_filled(centre, r, face);
+        let ink = if on { c.accent_text.0 } else { c.text_dim.0 };
+        let stroke = Stroke::new(1.0, ink);
+        // A knob: an arc with a pointer, standing for the panel's parameters.
+        painter.circle_stroke(centre, r * 0.55, stroke);
+        painter.line_segment([centre, centre + vec2(0.0, -r * 0.55)], stroke);
+        focus_ring(ui, theme, rect, &response);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, PLUGIN_CONFIGURE));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(PLUGIN_CONFIGURE.to_owned());
+            node.set_value(if on { "on" } else { "off" }.to_owned());
+            node.set_description(
+                "Opens Plug-In Configure Mode: while it is on, a parameter moved in the \
+                 plug-in's own window joins the device's panel"
+                    .to_owned(),
+            );
+        });
+    }
+
     fn round_button(
         &self,
         ui: &mut Ui,
@@ -1429,6 +1494,9 @@ struct Controls {
     /// A plug-in device's window button, after the activator and the
     /// expand toggle, before the name (L-DEV-010).
     wrench: Option<Rect>,
+    /// A plug-in device's Configure switch, after the window button and
+    /// before the name (L-DEV-010, manual 24.1.2; WP-5.40).
+    configure: Option<Rect>,
     title: Rect,
     hot_swap: Rect,
     save: Rect,
@@ -1455,9 +1523,11 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Control
     let activator = button(bar.left() + 2.0 + BUTTON / 2.0);
     let expand = expandable.then(|| button(activator.right() + 3.0 + BUTTON / 2.0));
     let wrench = plugin.then(|| button(expand.unwrap_or(activator).right() + 3.0 + BUTTON / 2.0));
+    let configure =
+        plugin.then(|| button(wrench.unwrap_or(activator).right() + 3.0 + BUTTON / 2.0));
     let title = Rect::from_min_max(
         pos2(
-            wrench.or(expand).unwrap_or(activator).right() + 4.0,
+            configure.or(wrench).or(expand).unwrap_or(activator).right() + 4.0,
             bar.top(),
         ),
         pos2(hot_swap.left() - 4.0, bar.bottom()),
@@ -1468,6 +1538,7 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool) -> (Rect, Control
             activator,
             expand,
             wrench,
+            configure,
             title,
             hot_swap,
             save,
@@ -1512,6 +1583,7 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
             activator,
             expand: None,
             wrench: None,
+            configure: None,
             title,
             hot_swap,
             save,
@@ -1682,6 +1754,16 @@ pub fn plugin_window_rect(frame: Rect, expandable: bool) -> Rect {
         .1
         .wrench
         .expect("a plug-in's title bar has the window button")
+}
+
+/// The Configure switch's rect in a plug-in device's title bar (WP-5.40,
+/// L-DEV-010, manual 24.1.2).
+#[must_use]
+pub fn plugin_configure_rect(frame: Rect, expandable: bool) -> Rect {
+    unfolded_layout(frame, expandable, true)
+        .1
+        .configure
+        .expect("a plug-in's title bar has the Configure switch")
 }
 
 /// Whether a frame is a plug-in device's, whose title bar has the window

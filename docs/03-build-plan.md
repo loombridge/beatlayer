@@ -471,7 +471,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.10b | todo |  |  |
 | 4.11 | todo |  |  |
 | 4.12 | done | 19 October 2026 | [#221](https://github.com/loombridge/beatlayer/pull/221); audio quantise: `clip.quantize_audio` moves each grid line's nearest transient's warp marker `amount` percent of the way to the line, one undo step, refusing unwarped clips, run by Cmd+U, the Sample Editor's context menu and Edit ▸ Quantize, with the quantise settings shared with the note editor (Cmd+Shift+U); [the spec](specs/warping.md) |
-| 4.13 | todo |  |  |
+| 4.13 | done | 19 October 2026 | [#233](https://github.com/loombridge/beatlayer/pull/233); Crop Clip writes an audio clip's region as a new file, rounded to whole frames so the clip plays to the bit, moving its markers, loop and warp map back, while a MIDI clip loses the notes outside its region and writes no file; Consolidate renders one clip per track before the track's devices and mixer, normalised with the clip gain making up for it, mono when its channels are equal, and warped to the beats it was rendered at; Consolidate Time to New Scene fills a new scene after the selected one, leaving the Arrangement as it was; [the spec](specs/audio-clip-editing.md) |
 | 4.14 | todo |  |  |
 | 4.15 | todo |  |  |
 | 4.16 | todo |  |  |

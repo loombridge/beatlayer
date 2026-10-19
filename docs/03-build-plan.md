@@ -461,7 +461,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
 | 4.2 | done | 18 October 2026 | [#178](https://github.com/loombridge/beatlayer/pull/178); warped clips play through a table from song frames to file positions under the tempo map, sent as node data, with Re-Pitch on a warp-mode interface, the HiQ and RAM switches, loops only on warped clips, and four commands for the mode, its settings and the switches; [the spec](specs/warp-modes.md) |
 | 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
-| 4.4 | todo |  |  |
+| 4.4 | done | 19 October 2026 | [#220](https://github.com/loombridge/beatlayer/pull/220); Arrangement clips play Beats as segments at transients, warp markers or a grid, filled by Transient Loop Mode and shaped by Transient Envelope, neutral to the bit at the clip's tempo, with a 20 ms crossfade on a mode change; [the spec](specs/warp-modes.md) |
 | 4.5 | todo |  |  |
 | 4.6 | todo |  |  |
 | 4.7 | todo |  |  |

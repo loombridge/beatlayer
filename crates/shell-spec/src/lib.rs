@@ -48,6 +48,8 @@
 //!   WP-1.16): audio previews, analysis, and view captures.
 //! - [`warping`]: a clip's transients (`clip.transients`, WP-4.3).
 //! - [`sample_editor`]: the Sample Editor's selections and view (WP-4.10).
+//! - [`audio_editing`]: Crop, Consolidate, and Consolidate Time to New Scene
+//!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -58,6 +60,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+pub mod audio_editing;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
@@ -118,5 +121,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     perception::register(registry)?;
     stems::register(registry)?;
     sample_editor::register(registry)?;
+    audio_editing::register(registry)?;
     warping::register(registry)
 }

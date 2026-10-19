@@ -102,6 +102,14 @@ pub struct DeviceView {
     /// (WP-2.10, D19), by `format/plugin_id`: absent entries keep the
     /// plug-in's own parameter at that place. Synced from the preferences.
     plugin_panels: std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    /// The devices in Plug-In Configure Mode (WP-5.40, clap-hosting R5):
+    /// their Configure switch is lit, and a parameter moved in their editor
+    /// joins their configured list. View state, never saved with the set.
+    configuring: BTreeSet<DeviceId>,
+    /// The parameter each plug-in device's editor moved last without it being
+    /// configured (manual 24.1.2): a temporary entry the automation and
+    /// clip-envelope choosers list, dropped when another parameter moves.
+    pending_params: std::collections::BTreeMap<DeviceId, ParamId>,
     /// What each multisampler's views show (WP-5.13): saved with the set,
     /// never an undo step.
     multisamplers: MultisamplerViews,
@@ -318,7 +326,7 @@ impl DeviceView {
         }
         let description = self.description(&device.kind)?;
         if let Some(key) = Self::plugin_key(&device.kind) {
-            return Some(self.plugin_panel(description, &device.params, &key));
+            return Some(self.plugin_panel(device, description, &device.params, &key));
         }
         let mut shown = description.clone();
         if Self::is_multisampler(device) {
@@ -336,6 +344,8 @@ impl DeviceView {
                 .collect(),
             description: shown,
             plugin: false,
+            configured: Vec::new(),
+            knobs: Vec::new(),
             selected_slot: self.slot_of(device),
             loaded_slots: device.media.iter().map(Option::is_some).collect(),
             // shortcut: every device with slots plays them on the keys the
@@ -368,24 +378,42 @@ impl DeviceView {
             .min(count.saturating_sub(1))
     }
 
-    /// A plug-in device's panel (WP-2.10, D19): the plug-in's first
-    /// parameters as knobs, in the preferences' remap where one is set.
+    /// A plug-in device's panel (WP-2.10, D19): the first parameters of the
+    /// device's configured list as knobs (WP-5.40, clap-hosting R5), each a
+    /// per-plug-in remap where the preferences set one.
     fn plugin_panel(
         &self,
+        device: &Device,
         description: &DeviceDescription,
         values: &bl_model::OrdMap<ParamId, f64>,
         key: &str,
     ) -> DevicePanel {
+        let all: Vec<ParamId> = description.params.iter().map(|p| p.id).collect();
+        let configured = device.configured(&all);
         let remap = self.plugin_panels.get(key);
         let mapped = |index: usize| -> Option<&bl_model::ParamDescriptor> {
             remap
                 .and_then(|m| m.get(&index))
                 .and_then(|id| description.param(*id))
-                .or_else(|| description.params.get(index))
+                .or_else(|| configured.get(index).and_then(|id| description.param(*id)))
         };
         let selected: Vec<bl_model::ParamDescriptor> = (0..bl_shell_spec::plugins::PANEL_KNOBS)
             .filter_map(mapped)
             .cloned()
+            .collect();
+        // The knob each drawn parameter sits on, 0 to 7 (WP-5.40): a knob
+        // past the configured list's end keeps its own index, so its
+        // context menu remaps that knob and not a neighbour.
+        let knobs: Vec<usize> = (0..bl_shell_spec::plugins::PANEL_KNOBS)
+            .filter(|index| mapped(*index).is_some())
+            .collect();
+        let knob_params: Vec<bl_shell_spec::devices::ConfiguredParam> = configured
+            .iter()
+            .filter_map(|id| description.param(*id))
+            .map(|p| bl_shell_spec::devices::ConfiguredParam {
+                param: p.id,
+                name: p.name.clone(),
+            })
             .collect();
         let controls: Vec<(ParamId, Widget)> =
             selected.iter().map(|p| (p.id, Widget::Knob)).collect();
@@ -405,14 +433,89 @@ impl DeviceView {
                 menu_options: Vec::new(),
             },
             plugin: true,
+            configured: knob_params,
+            knobs,
             selected_slot: 0,
             loaded_slots: Vec::new(),
             slot_keys: Vec::new(),
         }
     }
 
+    /// The parameters a plug-in device's panel and the automation and
+    /// clip-envelope choosers show (WP-5.40, clap-hosting R5): its configured
+    /// list, in order, then the parameter its editor moved last if the device
+    /// hasn't configured it (the temporary entry, manual 24.1.2). A device
+    /// that isn't a plug-in gives every parameter.
+    #[must_use]
+    pub fn plugin_configured(
+        &self,
+        device: &Device,
+        description: &DeviceDescription,
+    ) -> Vec<ParamId> {
+        let all: Vec<ParamId> = description.params.iter().map(|p| p.id).collect();
+        if !matches!(device.kind, DeviceKind::Plugin { .. }) {
+            return all;
+        }
+        let mut list: Vec<ParamId> = device.configured(&all).into_owned();
+        if let Some(pending) = self.pending_params.get(&device.id)
+            && all.contains(pending)
+            && !list.contains(pending)
+        {
+            list.push(*pending);
+        }
+        list
+    }
+
+    /// Whether `device` is in Plug-In Configure Mode (WP-5.40).
+    #[must_use]
+    pub fn configuring(&self, device: DeviceId) -> bool {
+        self.configuring.contains(&device)
+    }
+
+    /// Turns Plug-In Configure Mode on or off for `device`.
+    pub fn set_configuring(&mut self, device: DeviceId, on: bool) {
+        if on {
+            self.configuring.insert(device);
+        } else {
+            self.configuring.remove(&device);
+        }
+    }
+
+    /// Notes that a plug-in device's editor moved `param` without it being
+    /// configured: its temporary chooser entry (manual 24.1.2), which
+    /// replaces the one that parameter moved before it made.
+    pub fn note_pending_param(&mut self, device: DeviceId, param: ParamId) {
+        self.pending_params.insert(device, param);
+    }
+
+    /// Drops a plug-in device's temporary chooser entry, once its parameter
+    /// is configured or the choosers stop offering it.
+    pub fn clear_pending_param(&mut self, device: DeviceId) {
+        self.pending_params.remove(&device);
+    }
+
+    /// `device`'s parameters as `device.parameters` reports them, if the set
+    /// has that device.
+    #[must_use]
+    pub fn parameters_of(&self, doc: &Document, device: DeviceId) -> Option<DeviceParameters> {
+        doc.device(device).map(|d| self.parameters(d))
+    }
+
     /// `device`'s parameters as `device.parameters` reports them.
     fn parameters(&self, device: &Device) -> DeviceParameters {
+        // A plug-in's panel shows its configured parameters (WP-5.40); any
+        // other device's panel shows them all.
+        let configured: BTreeSet<ParamId> = self
+            .description(&device.kind)
+            .map(|description| {
+                let all: Vec<ParamId> = description.params.iter().map(|p| p.id).collect();
+                if matches!(device.kind, DeviceKind::Plugin { .. }) {
+                    device.configured(&all).iter().copied().collect()
+                } else {
+                    all.into_iter().collect()
+                }
+            })
+            .unwrap_or_default();
         let params = self
             .description(&device.kind)
             .map(|description| {
@@ -426,6 +529,7 @@ impl DeviceView {
                             value,
                             text: p.format(value),
                             menu_option: description.menu_options.contains(&p.id),
+                            configured: configured.contains(&p.id),
                             other: device.can_compare().then(|| {
                                 description
                                     .value(device.other_params(), p.id)
@@ -466,6 +570,8 @@ impl DeviceView {
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
         self.expanded.retain(exists);
+        self.configuring.retain(exists);
+        self.pending_params.retain(|device, _| exists(device));
         let chain_exists = |c: &ChainId| doc.chain(*c).is_some();
         self.chains_selected.retain(chain_exists);
         self.chain_anchor = self.chain_anchor.filter(chain_exists);
@@ -583,6 +689,8 @@ impl DeviceView {
                     MixerParam::Volume => "Volume",
                     MixerParam::Pan => "Pan",
                     MixerParam::Mute => "Track Activator",
+                    MixerParam::SplitLeft => "Split Pan Left",
+                    MixerParam::SplitRight => "Split Pan Right",
                 }
             ),
             ModTarget::Send { track, to } => format!(
@@ -1066,6 +1174,7 @@ impl DeviceView {
             expanded: self.expandable(d) && self.expanded.contains(&d.id),
             floating: d.floating,
             b_active: d.b_active,
+            configure: self.configuring.contains(&d.id),
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),

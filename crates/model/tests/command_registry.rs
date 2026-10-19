@@ -14,8 +14,9 @@ use bl_model::{
     CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
     FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
     LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
-    Monitor, Note, Output, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip,
-    TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
+    Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap,
+    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
+    WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -53,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        173,
+        183,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -71,7 +72,9 @@ fn every_document_command_is_registered() {
          slices, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-         WP-3.18 the two for Cue mode and the Cue Volume, and WP-5.3 set_chain_zone"
+WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
+         set_configured_params, WP-4.13 the two for Crop Clip, and WP-5.36 seven for track \
+         delay, the pan mode, each split side, and the two latency switches"
     );
 
     for op in &ops {
@@ -205,6 +208,40 @@ fn every_command_runs_by_id() {
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
     );
+    agent.run(
+        "mixer.set_pan_mode",
+        json!({ "track": drums, "mode": "split" }),
+    );
+    agent.run(
+        "mixer.set_split_pan_left",
+        json!({ "track": drums, "pan": -1.0 }),
+    );
+    agent.run(
+        "mixer.set_split_pan_right",
+        json!({ "track": drums, "pan": 1.0 }),
+    );
+    agent.run(
+        "mixer.set_track_delay",
+        json!({ "track": drums, "delay": { "unit": "samples", "value": 480 } }),
+    );
+    agent.run(
+        "mixer.set_reduced_latency_monitoring",
+        json!({ "enabled": true }),
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": false }));
+    agent.run(
+        "mixer.set_keep_monitoring_latency",
+        json!({ "track": drums, "enabled": false }),
+    );
+    let document = agent.editor.document();
+    assert!(!document.settings().delay_compensation);
+    assert!(document.settings().reduced_latency_monitoring);
+    assert!(!document.track(drums).unwrap().keep_monitoring_latency());
+    assert_eq!(
+        document.track(drums).unwrap().delay(),
+        TrackDelay::Samples { value: 480 }
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": true }));
     assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
     let document = agent.editor.document();
     let mixer = *document.track(drums).unwrap().mixer();
@@ -962,6 +999,26 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_sample",
         json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+    );
+    // Spec: clap-hosting R5; WP-5.40. Replaces a plug-in device's
+    // configured parameter list, in order.
+    agent.run(
+        "device.set_configured_params",
+        json!({ "device": synth, "params": [3, 1] }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(synth)
+            .unwrap()
+            .configured
+            .as_deref(),
+        Some([ParamId(3), ParamId(1)].as_slice())
+    );
+    assert_eq!(
+        agent.editor.undo_history().next(),
+        Some("Configure Plug-In")
     );
     let device = agent.editor.document().device(eq).unwrap();
     assert_eq!(agent.editor.document().device_track(eq), Some(reverb));
@@ -1726,6 +1783,31 @@ fn every_command_runs_by_id() {
             .only_while_recording
     );
 
+    // Crop Clip: the region the clip's markers hold, and a span of song
+    // time (WP-4.13).
+    let song: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": drums, "clip": {
+            "id": song, "name": "Song", "start": bar * 4, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32), "start": 0.5, "end": 1.5 } },
+        } }),
+    );
+    agent.run(
+        "clip.crop_region",
+        json!({ "clip": song, "media": "ef".repeat(32), "from": 0.5, "to": 1.5 }),
+    );
+    agent.run(
+        "clip.crop_span",
+        json!({ "clip": song, "media": "ef".repeat(32), "start": bar * 4, "end": bar * 4 + quarter }),
+    );
+    let clip = agent.editor.document().clip(song).unwrap();
+    assert_eq!((clip.start.0, clip.length.0), (bar * 4, quarter));
+    let ClipData::Audio(audio) = &clip.data else {
+        panic!("{clip:?}");
+    };
+    assert_eq!(audio.start, 0.0, "the markers begin at the region's start");
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -1906,6 +1988,43 @@ fn schemas_match_what_commands_serialise() {
             Command::SetCrossfadeAssign {
                 track,
                 assign: CrossfadeAssign::B,
+            },
+        ),
+        (
+            "mixer.set_track_delay",
+            Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::Samples { value: 480 },
+            },
+        ),
+        (
+            "mixer.set_pan_mode",
+            Command::SetPanMode {
+                track,
+                mode: PanMode::Split,
+            },
+        ),
+        (
+            "mixer.set_split_pan_left",
+            Command::SetSplitPanLeft { track, pan: -1.0 },
+        ),
+        (
+            "mixer.set_split_pan_right",
+            Command::SetSplitPanRight { track, pan: 1.0 },
+        ),
+        (
+            "mixer.set_delay_compensation",
+            Command::SetDelayCompensation { enabled: false },
+        ),
+        (
+            "mixer.set_reduced_latency_monitoring",
+            Command::SetReducedLatencyMonitoring { enabled: true },
+        ),
+        (
+            "mixer.set_keep_monitoring_latency",
+            Command::SetKeepMonitoringLatency {
+                track,
+                enabled: false,
             },
         ),
         (
@@ -2149,6 +2268,24 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLaunchMode {
                 clip,
                 mode: LaunchMode::Gate,
+            },
+        ),
+        (
+            "clip.crop_region",
+            Command::CropClip {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                from: 0.5,
+                to: 1.5,
+            },
+        ),
+        (
+            "clip.crop_span",
+            Command::CropClipToRange {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                start: Ticks::QUARTER,
+                end: Ticks::QUARTER * 3,
             },
         ),
         (
@@ -2461,6 +2598,13 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 param: ParamId(u32::MAX),
                 value: -1e9,
+            },
+        ),
+        (
+            "device.set_configured_params",
+            Command::SetConfiguredParams {
+                device,
+                params: vec![ParamId(7), ParamId(3)],
             },
         ),
         (

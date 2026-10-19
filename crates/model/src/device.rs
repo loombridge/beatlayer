@@ -6,6 +6,8 @@
 //! Each kind of device describes its parameters ([`crate::param`], WP-2.5),
 //! which give each value its range.
 
+use std::borrow::Cow;
+
 use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,10 @@ use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The most sample slots a device's media can fill.
 pub const MAX_MEDIA_SLOTS: usize = 16;
+
+/// The most modifiable parameters a plug-in may have and still start with
+/// them all configured (manual 24.1); one with more starts with none.
+pub const CONFIGURE_THRESHOLD: usize = 64;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -99,6 +105,13 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
+    /// The plug-in parameters the device's panel holds, in order (clap-hosting
+    /// R5, configure mode): the list Configure Mode edits, saved with the set.
+    /// Left out until it's set: until then all of a plug-in's parameters are
+    /// configured when it has no more than [`CONFIGURE_THRESHOLD`], and none
+    /// when it has more (manual 24.1). Native devices never set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configured: Option<Vec<ParamId>>,
     /// The media the device plays, by content hash, one entry per sample
     /// slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the
     /// eight-slot drum sampler's slots are 0 to 7. The media store holds
@@ -399,6 +412,7 @@ impl Device {
             midi_sidechain: None,
             floating: false,
             plugin: None,
+            configured: None,
             media: Vec::new(),
             sample_edits: Vec::new(),
             layers: Layers::default(),
@@ -454,6 +468,25 @@ impl Device {
     #[must_use]
     pub fn other_params(&self) -> &OrdMap<ParamId, f64> {
         self.other_params.as_ref().unwrap_or(&self.params)
+    }
+
+    /// The parameters the device's panel holds, given all of its modifiable
+    /// parameters in order: the configured list itself, or, until one is set,
+    /// all of them when the plug-in has no more than
+    /// [`CONFIGURE_THRESHOLD`], none when it has more (manual 24.1).
+    #[must_use]
+    pub fn configured<'a>(&'a self, all: &'a [ParamId]) -> Cow<'a, [ParamId]> {
+        match &self.configured {
+            Some(list) => Cow::Borrowed(list),
+            None if all.len() > CONFIGURE_THRESHOLD => Cow::Borrowed(&[]),
+            None => Cow::Borrowed(all),
+        }
+    }
+
+    /// Replaces the device's configured parameter list (clap-hosting R5,
+    /// configure mode).
+    pub(crate) fn set_configured(&mut self, params: Vec<ParamId>) {
+        self.configured = Some(params);
     }
 
     /// Sets one parameter in the active state only (device compare R2).
@@ -749,5 +782,47 @@ pub(crate) mod param_pairs {
             }
             Ok(params)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bl_core::id::Id;
+
+    use super::*;
+
+    fn plugin() -> Device {
+        Device::new(
+            DeviceId::from(Id::new(1).unwrap()),
+            "Test",
+            DeviceKind::Plugin {
+                format: PluginFormat::Clap,
+                plugin_id: "com.example.test".to_owned(),
+            },
+        )
+    }
+
+    // Spec: clap-hosting R5 (WP-5.40, manual 24.1). A plug-in with up to 64
+    // modifiable parameters starts with them all configured; one with more
+    // starts with none.
+    #[test]
+    fn a_plugin_starts_configured_at_the_threshold_and_empty_above_it() {
+        let device = plugin();
+        let at_threshold: Vec<ParamId> = (0..CONFIGURE_THRESHOLD as u32).map(ParamId).collect();
+        assert_eq!(&*device.configured(&at_threshold), &at_threshold[..]);
+        let above: Vec<ParamId> = (0..=CONFIGURE_THRESHOLD as u32).map(ParamId).collect();
+        assert!(device.configured(&above).is_empty());
+    }
+
+    // Spec: clap-hosting R5. Once a list is set it is the panel's, even when
+    // it is empty.
+    #[test]
+    fn a_set_configured_list_is_the_panels_whatever_its_length() {
+        let mut device = plugin();
+        let all: Vec<ParamId> = (0..4).map(ParamId).collect();
+        device.set_configured(vec![ParamId(2)]);
+        assert_eq!(&*device.configured(&all), &[ParamId(2)]);
+        device.set_configured(Vec::new());
+        assert!(device.configured(&all).is_empty());
     }
 }

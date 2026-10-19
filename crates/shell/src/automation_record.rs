@@ -143,6 +143,8 @@ pub fn moved(document: &Document, command: &Command) -> Option<(TrackId, Automat
     Some(match *command {
         Command::SetVolume { track, volume } => (track, mixer(MixerParam::Volume), volume),
         Command::SetPan { track, pan } => (track, mixer(MixerParam::Pan), pan),
+        Command::SetSplitPanLeft { track, pan } => (track, mixer(MixerParam::SplitLeft), pan),
+        Command::SetSplitPanRight { track, pan } => (track, mixer(MixerParam::SplitRight), pan),
         Command::SetMute { track, mute } => (track, mixer(MixerParam::Mute), f64::from(mute)),
         Command::SetSend { track, to, level } => (track, AutomationTarget::Send { to }, level),
         Command::SetDeviceParam {

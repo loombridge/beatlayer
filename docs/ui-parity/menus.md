@@ -241,7 +241,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-032b | Sends | ⌥⌘S | S-VIEW-013 | ticked | |
 | M-VIEW-032c | Volume | | | ticked | |
 | | — | | | | |
-| M-VIEW-032d | Track Options | | | | |
+| M-VIEW-032d | Track Options | | | | Beatlayer's Track Options section; live since WP-5.36 ([mixer](../specs/mixer.md) R28, R30) |
 | M-VIEW-032e | Crossfader | | | | |
 | M-VIEW-032f | Performance Impact | | | | |
 | | — | | | | |
@@ -249,7 +249,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-033 | Arrangement Track Controls ▸ | | | disabled | Submenu, rows M-VIEW-033a to 033d; observed in 12.4.6, 11 October 2026: disabled while the Session View is in front, no keys |
 | M-VIEW-033a | In/Out | | | ticked | |
 | M-VIEW-033b | Volume | | | ticked | |
-| M-VIEW-033c | Track Options | | | | |
+| M-VIEW-033c | Track Options | | | | As M-VIEW-032d; live since WP-5.36 |
 | | — | | | | |
 | M-VIEW-033d | Return Tracks | | | ticked | |
 | | — | | | | |
@@ -314,8 +314,8 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-006 | Browser File Preview | | | | Same as the browser's preview switch |
 | | — | | | | |
 | M-OPT-007 | External Sync | | | disabled | |
-| M-OPT-008 | Delay Compensation | | | | |
-| M-OPT-009 | Reduced Latency When Monitoring | | | | |
+| M-OPT-008 | Delay Compensation | | | ticked | On in a new set; Beatlayer's switch ([delay compensation](../specs/delay-compensation.md) R7), live since WP-5.36 |
+| M-OPT-009 | Reduced Latency When Monitoring | | | | Enabled only while Delay Compensation is on; Beatlayer's switch ([delay compensation](../specs/delay-compensation.md) R8), live since WP-5.36 |
 | | — | | | | |
 | M-OPT-010 | Time Ruler Format ▸ | | | | Submenu, rows M-OPT-010a to 010f |
 | M-OPT-010a | Time | | | | |
@@ -739,3 +739,12 @@ Opened on the crossfader in the Main track's strip (shown by View > Mixer Contro
 | C-XFADE-007 | Transition | | | | |
 | C-XFADE-008 | Show Automation | | | | |
 | C-XFADE-009 | Show Automation In New Lane | | | | |
+
+### Pan control (C-PAN)
+
+Opened on a track's pan control (the strip's or the Arrangement header's). Source: manual 18.1; the item order wasn't observed. The two are one choice per track, whichever mode is in force ticked.
+
+| ID | Item | Keys shown | Shortcut | In a new set | Notes |
+|---|---|---|---|---|---|
+| C-PAN-001 | Stereo Pan Mode | | | ticked | One control balances both channels; the default ([mixer](../specs/mixer.md) R29) |
+| C-PAN-002 | Split Stereo Pan Mode | | | | A control places each input channel on its own ([mixer](../specs/mixer.md) R29) |

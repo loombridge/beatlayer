@@ -844,7 +844,7 @@ impl Compiler {
             build.tasks[to as usize].dependencies += 1;
         }
         let (order, dependents) = run_order(&build, &wait_tasks);
-        compensate(&mut build, &order);
+        compensate(&mut build, &order, document, self.config.sample_rate.hz());
         // Spec: external-devices R4. A track's MIDI to a port waits as long
         // as its audio would be held back on the way into Main.
         for track in document.tracks() {
@@ -1894,8 +1894,58 @@ fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], inp
 /// clips and each route are held back so every path into a track lines up,
 /// each sidechain's source lines up with its device's own input, and each
 /// node's parameter changes are held back with the audio they act on.
-fn compensate(build: &mut Build, order: &[u32]) {
+fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) {
     let tasks = build.tasks.len();
+    // Spec: delay-compensation R7. While delay compensation is off, nothing
+    // is held back and no node's latency counts, so every delay line stays as
+    // a new build left it (all [`NO_DELAY`]) and a track's own delay has no
+    // effect.
+    if !document.settings().delay_compensation {
+        return;
+    }
+    // Spec: mixer R28. Each track's own delay, in frames: positive delays the
+    // track, negative plays it early. It joins the compensation here by
+    // counting against the latency of the track's path into each summing
+    // point, so a positive delay makes the path later and a negative one
+    // makes the other paths wait (the mixer spec).
+    let delay_of: Vec<i64> = build
+        .tasks
+        .iter()
+        .map(|task| {
+            document
+                .track(task.track)
+                .map_or(0, |track| track.delay().frames(rate))
+        })
+        .collect();
+    // Spec: mixer R28. A track's delay is applied where its output lands, at
+    // each input it feeds; Main feeds nothing, so its own delay is applied
+    // where its sum is made instead, holding back every input into Main and
+    // Main's own parameter changes by it.
+    let main = document.main_id();
+    let main_delay = document.main().delay().frames(rate);
+    // Spec: delay-compensation R8 and R9. A track whose input is monitored,
+    // while Reduced Latency When Monitoring is on and it doesn't keep its
+    // monitoring latency, is given the lowest possible latency: its own input
+    // isn't held back and its path doesn't raise a summing point's target.
+    let low_latency: Vec<bool> = build
+        .tasks
+        .iter()
+        .map(|task| {
+            document.settings().reduced_latency_monitoring
+                && document.track(task.track).is_some_and(|track| {
+                    track.routing().monitoring(track.mixer().arm)
+                        && !track.keep_monitoring_latency()
+                })
+        })
+        .collect();
+    // The frames into the song an input's signal has, counting the source
+    // track's own delay. Negative counts make the other paths wait.
+    let input_arrival = |arrival: &[u32], chain: &[u32], rack_at: &[(u32, u32)], input: &Input| {
+        if low_latency[input.from as usize] {
+            return 0i64;
+        }
+        i64::from(input_latency(arrival, chain, rack_at, input)) - delay_of[input.from as usize]
+    };
     // A rack adds its slowest chain's latency and holds the others back to
     // it, so its chains reach the sum aligned (the racks spec, R16). A rack
     // comes after the racks in its chains, so each is worked out from
@@ -1963,32 +2013,37 @@ fn compensate(build: &mut Build, order: &[u32]) {
     let mut arrival = vec![0u32; tasks];
     for &t in order {
         let t = t as usize;
+        if low_latency[t] {
+            arrival[t] = 0;
+            continue;
+        }
         let task = build.tasks[t];
-        let mut arrived = 0u32;
+        let mut arrived = 0i64;
         for input in &build.inputs[task.inputs.range()] {
-            arrived = arrived.max(input_latency(&arrival, &chain, &rack_at, input));
+            arrived = arrived.max(input_arrival(&arrival, &chain, &rack_at, input));
         }
         for s in task.sidechains.range() {
             let sc = build.sidechains[s];
             for input in &build.sidechain_inputs[sc.inputs.range()] {
-                let need =
-                    input_latency(&arrival, &chain, &rack_at, input).saturating_sub(sc.before);
+                let need = input_arrival(&arrival, &chain, &rack_at, input) - i64::from(sc.before);
                 arrived = arrived.max(need);
             }
         }
-        arrival[t] = arrived;
+        arrival[t] = arrived.max(0) as u32;
     }
     // Hold each path back to what the longest one takes, and line each
     // node's parameter changes up with the audio they act on.
     for t in 0..tasks {
         let task = build.tasks[t];
-        let a = arrival[t];
+        let a = (i64::from(arrival[t]) + if task.track == main { main_delay } else { 0 }).max(0);
         for i in task.inputs.range() {
             let input = build.inputs[i];
-            let lat = input_latency(&arrival, &chain, &rack_at, &input);
-            let delay = a.saturating_sub(lat);
+            if low_latency[input.from as usize] {
+                continue;
+            }
+            let delay = a - input_arrival(&arrival, &chain, &rack_at, &input);
             if delay > 0 {
-                let index = line(build, delay);
+                let index = line(build, delay as u32);
                 build.inputs[i].delay = index;
             }
         }
@@ -1996,25 +2051,28 @@ fn compensate(build: &mut Build, order: &[u32]) {
             let sc = build.sidechains[s];
             for i in sc.inputs.range() {
                 let input = build.sidechain_inputs[i];
-                let lat = input_latency(&arrival, &chain, &rack_at, &input);
-                let delay = (a + sc.before).saturating_sub(lat);
+                if low_latency[input.from as usize] {
+                    continue;
+                }
+                let delay =
+                    (a + i64::from(sc.before)) - input_arrival(&arrival, &chain, &rack_at, &input);
                 if delay > 0 {
-                    let index = line(build, delay);
+                    let index = line(build, delay as u32);
                     build.sidechain_inputs[i].delay = index;
                 }
             }
         }
         if build.tasks[t].player.is_some() && a > 0 {
-            let index = line(build, a);
+            let index = line(build, a as u32);
             build.tasks[t].clip_delay = index;
         }
         if let Some(slot) = task.player {
-            build.slots[slot as usize].delay = a;
+            build.slots[slot as usize].delay = a as u32;
         }
         for &(slot, before) in &offsets[t] {
-            build.slots[slot as usize].delay = a + before;
+            build.slots[slot as usize].delay = a as u32 + before;
         }
-        build.slots[task.mixer as usize].delay = a + chain[t];
+        build.slots[task.mixer as usize].delay = a as u32 + chain[t];
     }
 }
 
@@ -2226,7 +2284,10 @@ fn needs_program(
     // loop edit is a transport command (see `Compiler::sync`).
     let (before, after) = (old.settings(), new.settings());
     let settings = changes.settings
-        && (before.tempo != after.tempo || before.time_signatures != after.time_signatures);
+        && (before.tempo != after.tempo
+            || before.time_signatures != after.time_signatures
+            || before.delay_compensation != after.delay_compensation
+            || before.reduced_latency_monitoring != after.reduced_latency_monitoring);
     // Every track's mixer node reads the crossfader, so a moved position
     // reaches every one of them as a parameter change (R22).
     if changes.settings && before.crossfader != after.crossfader {
@@ -2277,6 +2338,8 @@ fn needs_program(
                     || was.channel != is.channel
                     || was.output != is.output
                     || was.midi_output != is.midi_output
+                    || before.delay() != after.delay()
+                    || before.keep_monitoring_latency() != after.keep_monitoring_latency()
                 {
                     recompile = true;
                 }
@@ -2475,6 +2538,33 @@ fn mixer_events_for(key: NodeKey, before: &Mixer, after: &Mixer, params: &mut Ve
     }
     if before.mute != after.mute {
         params.push(ParamEvent::now(key, mixer::track::MUTE, switch(after.mute)));
+    }
+    // Spec: mixer R22, R29. The pan mode and each split side reach the mixer
+    // as parameters, with no new program.
+    if before.split_left != after.split_left {
+        params.push(ParamEvent::now(
+            key,
+            mixer::track::SPLIT_LEFT,
+            after.split_left,
+        ));
+    }
+    if before.split_right != after.split_right {
+        params.push(ParamEvent::now(
+            key,
+            mixer::track::SPLIT_RIGHT,
+            after.split_right,
+        ));
+    }
+    if before.pan_mode != after.pan_mode {
+        params.push(ParamEvent::now(
+            key,
+            mixer::track::PAN_MODE,
+            if after.pan_mode == bl_model::PanMode::Split {
+                1.0
+            } else {
+                0.0
+            },
+        ));
     }
 }
 

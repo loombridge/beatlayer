@@ -836,6 +836,18 @@ impl<'a> Block<'a> {
             .take(self.channels)
             .map(move |channel| &mut channel[..frames])
     }
+
+    /// The first two channels' samples, writable, when the block has two or
+    /// more: what a device that mixes the channels into each other, such as
+    /// Split Stereo Pan Mode, needs.
+    pub fn channels_pair_mut(&mut self) -> Option<(&mut [f32], &mut [f32])> {
+        if self.channels < 2 {
+            return None;
+        }
+        let frames = self.frames;
+        let (first, rest) = self.data.split_at_mut(self.stride.max(1));
+        Some((&mut first[..frames], &mut rest[..frames]))
+    }
 }
 
 /// A stretch of a block between parameter changes, with the changes that

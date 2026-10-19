@@ -38,6 +38,12 @@ fn travel_of<'a>(
         AutomationTarget::Mixer {
             param: MixerParam::Mute,
         } => (Travel::Switch, f64::from(u8::from(track.mixer().mute))),
+        AutomationTarget::Mixer {
+            param: MixerParam::SplitLeft,
+        } => (Travel::Pan, track.mixer().split_left),
+        AutomationTarget::Mixer {
+            param: MixerParam::SplitRight,
+        } => (Travel::Pan, track.mixer().split_right),
         AutomationTarget::Send { to } => (Travel::Send, track.send(to)),
         AutomationTarget::Chain { chain, param } => {
             let mixer = &track.find_chain(chain)?.mixer;
@@ -45,6 +51,8 @@ fn travel_of<'a>(
                 MixerParam::Volume => (Travel::Fader, mixer.volume),
                 MixerParam::Pan => (Travel::Pan, mixer.pan),
                 MixerParam::Mute => (Travel::Switch, f64::from(u8::from(!mixer.enabled))),
+                // A chain has no split pan; the model refuses such a target.
+                MixerParam::SplitLeft | MixerParam::SplitRight => return None,
             }
         }
         AutomationTarget::ChainSend { chain, to } => {

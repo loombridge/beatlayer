@@ -10,8 +10,9 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, DeviceWarp, Editor, External, HardwareLatency,
     Input, LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound,
-    MidiData, MidiTo, MixerParam, Monitor, Note, Output, ParamId, PressurePoint, SendTap,
-    Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackId, TrackKind, TransientEdits,
+    MidiData, MidiTo, MixerParam, Monitor, Note, Output, PanMode, ParamId, PressurePoint, SendTap,
+    Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackDelay, TrackId, TrackKind,
+    TransientEdits,
     WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
@@ -114,6 +115,7 @@ fn fixture() -> Project {
         },
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
+        Command::SetReducedLatencyMonitoring { enabled: true },
     ] {
         apply(&mut editor, command);
     }
@@ -144,6 +146,29 @@ fn fixture() -> Project {
             track: vox,
             assign: CrossfadeAssign::A,
         },
+        Command::SetPanMode {
+            track: vox,
+            mode: PanMode::Split,
+        },
+        Command::SetSplitPanLeft {
+            track: vox,
+            pan: -1.0,
+        },
+        Command::SetSplitPanRight {
+            track: vox,
+            pan: 1.0,
+        },
+        Command::SetTrackDelay {
+            track: vox,
+            delay: TrackDelay::Samples { value: 480 },
+        },
+        Command::SetKeepMonitoringLatency {
+            track: vox,
+            enabled: false,
+        },
+        // Switched off only now: a track's delay can't be set while delay
+        // compensation is off (the delay compensation spec, R7).
+        Command::SetDelayCompensation { enabled: false },
         Command::SetInput {
             track: vox,
             input: Input::External {

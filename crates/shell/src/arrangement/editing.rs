@@ -86,7 +86,7 @@ impl Clipboard {
 
 /// What an edit acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     /// Whole clips.
     Clips(Vec<ClipId>),
     /// The material in a span of time on tracks.
@@ -266,7 +266,11 @@ fn tracks_exist(doc: &Document, tracks: &[TrackId]) -> Result<(), EditFailure> {
 }
 
 /// What a command's target arguments, or the selection, name.
-fn target(doc: &Document, view: &ArrangementView, args: TargetArgs) -> Result<Target, EditFailure> {
+pub(crate) fn target(
+    doc: &Document,
+    view: &ArrangementView,
+    args: TargetArgs,
+) -> Result<Target, EditFailure> {
     let TargetArgs {
         clips,
         tracks,
@@ -311,7 +315,10 @@ fn target(doc: &Document, view: &ArrangementView, args: TargetArgs) -> Result<Ta
 
 /// The material a target names, by track in display order, with absolute
 /// positions, and the span it covers.
-fn material(doc: &Document, target: &Target) -> (Vec<(TrackId, Vec<Clip>)>, Ticks, Ticks) {
+pub(crate) fn material(
+    doc: &Document,
+    target: &Target,
+) -> (Vec<(TrackId, Vec<Clip>)>, Ticks, Ticks) {
     let lanes = lanes(doc);
     let order = |track: &TrackId| lane_index(&lanes, *track).unwrap_or(usize::MAX);
     match target {

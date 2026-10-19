@@ -8,9 +8,9 @@
 
 use bl_shell::Shell;
 use bl_shell::arrangement_commands::{self as view_ids, AdaptiveGrid, FixedGrid};
-use bl_shell::context_menus::{self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS};
+use bl_shell::context_menus::{self, ADAPTIVE_GRID_ROWS, FIXED_GRID_ROWS, SelectionMenu};
 use bl_shell::editing_commands as ids;
-use bl_shell::menus::{MenuItem, shown};
+use bl_shell::menus::shown;
 use egui::{Pos2, Ui};
 use serde_json::json;
 
@@ -33,11 +33,6 @@ pub enum MenuKind {
 pub(super) struct ContextMenus {
     keymap: Keymap,
     platform: Platform,
-    clip: Vec<MenuItem>,
-    /// An audio clip's, with the Convert and Separate Stems rows
-    /// (C-CLIP-ARR-027).
-    audio_clip: Vec<MenuItem>,
-    time: Vec<MenuItem>,
     kind: MenuKind,
 }
 
@@ -46,9 +41,6 @@ impl ContextMenus {
         Self {
             keymap: Keymap::live12(),
             platform: Platform::current(),
-            clip: context_menus::arrangement_clip(),
-            audio_clip: context_menus::arrangement_audio_clip(),
-            time: context_menus::arrangement_time(),
             kind: MenuKind::default(),
         }
     }
@@ -88,13 +80,19 @@ impl ContextMenus {
         };
     }
 
-    /// Draws the open menu's items.
+    /// Draws the open menu's items. A selection that holds clips brings the
+    /// rows menus.md records for those states (C-CLIP-ARR-025, C-CLIP-ARR-026,
+    /// C-TIME-019, C-TIME-020).
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let state = selection_menu(shell);
         let menu = match self.kind {
-            MenuKind::Clip if audio_selected(shell) => &self.audio_clip,
-            MenuKind::Clip => &self.clip,
-            MenuKind::Time => &self.time,
+            MenuKind::Clip if audio_selected(shell) => {
+                context_menus::arrangement_audio_clip_in(state)
+            }
+            MenuKind::Clip => context_menus::arrangement_clip_in(state),
+            MenuKind::Time => context_menus::arrangement_time_in(state),
         };
+        let menu = &menu;
         let grid = shell.arrangement().grid();
         for item in shown(menu) {
             if item.is_separator() {
@@ -130,6 +128,28 @@ impl ContextMenus {
             }
         }
     }
+}
+
+/// What the Arrangement's selection adds to the open menu: the clip rows
+/// when clips are selected, and the time rows when the time selection holds
+/// a clip.
+fn selection_menu(shell: &Shell) -> SelectionMenu {
+    let doc = shell.editor().document();
+    let view = shell.arrangement();
+    let clips = if view.time_selection().is_some() {
+        let (start, end) = view.time_selection().unwrap_or_default();
+        doc.track_order()
+            .into_iter()
+            .filter_map(|track| doc.track(track))
+            .any(|track| {
+                track
+                    .clips()
+                    .any(|clip| clip.start < end && clip.end() > start)
+            })
+    } else {
+        !view.selected_clips().is_empty()
+    };
+    SelectionMenu { clips }
 }
 
 /// Whether the selected clips are audio clips, whose menu adds the

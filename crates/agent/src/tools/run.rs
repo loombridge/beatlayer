@@ -257,7 +257,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                         Ok(changes) => {
                             let mut checked = json!({ "command": step.id, "changes": changes });
                             // Spec: agent-permissions R11. `clip.set_data`
-                            // says whether it would delete notes.
+                            // says whether it would delete notes, and
+                            // `clip.crop` which clip it would take audio
+                            // from (audio-clip-editing R18).
                             if raised_by_arguments(&step.id) {
                                 checked["permission"] = json!(class_names(&step.call.classes()));
                                 if let Some(fewer) = step.call.fewer_notes {
@@ -266,6 +268,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                                         "has": fewer.has,
                                         "leaves": fewer.leaves,
                                     });
+                                }
+                                if let Some(clip) = step.call.cropped {
+                                    checked["crop"] = json!({ "clip": clip });
                                 }
                             }
                             results.push(checked);
@@ -292,6 +297,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                     if raised_by_arguments(&step.id) {
                         checked["permission"] = json!(class_names(&step.call.classes()));
                         checked["replaces"] = json!(step.call.replaces);
+                        if let Some(clip) = step.call.cropped {
+                            checked["crop"] = json!({ "clip": clip });
+                        }
                         if step.call.may && !step.call.replaces.is_empty() {
                             checked["note"] = json!(
                                 "Its arguments fit its schema. It wasn't tried. It may replace \

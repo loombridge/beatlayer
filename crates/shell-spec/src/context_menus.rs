@@ -12,6 +12,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
+use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::stems::OPEN as SEPARATE_STEMS;
@@ -276,7 +277,7 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
                 rows.push(("C-TRACK-017c", "Bounce Group to New Track", Pending(None)));
             }
             if state.time_selection {
-                rows.push(("C-TRACK-020", "Crop Clip", Pending(Some("S-ARR-003"))));
+                rows.push(("C-TRACK-020", "Crop Clip", Key(&["S-ARR-003"])));
             }
         }
         "C-TRACK-012" => {
@@ -331,7 +332,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         }
         "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
         "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
-        "C-TRACK-020" => Some("WP-4.13 (Crop Clip)"),
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
             Some("Phase 6 (take lanes and comping)")
@@ -347,10 +347,52 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
     }
 }
 
-/// The menu a clip in the Arrangement opens (C-CLIP-ARR).
+/// What a clip's or a time selection's menu adds to its base rows
+/// (C-CLIP-ARR-025, C-CLIP-ARR-026, C-TIME-019, C-TIME-020): a selection
+/// that holds clips brings Split, Consolidate, and Crop Clip, and a time
+/// selection that holds clips also brings Consolidate Time to New Scene.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelectionMenu {
+    /// The selection holds clips.
+    pub clips: bool,
+}
+
+/// The rows a selection that holds clips adds to a clip's menu.
+const CLIP_SELECTION: &[Row] = &[
+    SEPARATOR,
+    ("C-CLIP-ARR-025", "Split", Key(&["S-ARR-001"])),
+    ("C-CLIP-ARR-026", "Consolidate", Key(&["S-ARR-002"])),
+];
+
+/// The rows a time selection that holds clips adds to its menu.
+const TIME_SELECTION: &[Row] = &[
+    SEPARATOR,
+    ("C-TIME-019a", "Split", Key(&["S-ARR-001"])),
+    ("C-TIME-019b", "Consolidate", Key(&["S-ARR-002"])),
+    ("C-TIME-019c", "Crop Clip", Key(&["S-ARR-003"])),
+    (
+        "C-TIME-020",
+        "Consolidate Time to New Scene",
+        Cmd(CONSOLIDATE_TO_SCENE),
+    ),
+];
+
+/// The menu a clip in the Arrangement opens (C-CLIP-ARR), without the rows a
+/// selection adds.
 #[must_use]
 pub fn arrangement_clip() -> Vec<MenuItem> {
-    items(CLIP)
+    arrangement_clip_in(SelectionMenu::default())
+}
+
+/// The menu a clip in the Arrangement opens, with the rows `state` adds.
+#[must_use]
+pub fn arrangement_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
+    items(&with_selection(
+        CLIP,
+        CLIP_SELECTION,
+        "C-CLIP-ARR-004",
+        state,
+    ))
 }
 
 /// The rows an audio clip's menu adds after Reverse Clip(s) (C-CLIP-ARR-027):
@@ -385,8 +427,16 @@ const AUDIO_CLIP: &[Row] = &[
 /// the rows only audio clips have (C-CLIP-ARR-027).
 #[must_use]
 pub fn arrangement_audio_clip() -> Vec<MenuItem> {
-    let mut rows = Vec::with_capacity(CLIP.len() + AUDIO_CLIP.len());
-    for &row in CLIP {
+    arrangement_audio_clip_in(SelectionMenu::default())
+}
+
+/// The menu an audio clip in the Arrangement opens, with the rows `state`
+/// adds.
+#[must_use]
+pub fn arrangement_audio_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(CLIP.len() + AUDIO_CLIP.len() + CLIP_SELECTION.len());
+    let selection = with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state);
+    for &row in &selection {
         rows.push(row);
         if row.0 == "C-CLIP-ARR-018" {
             rows.extend_from_slice(AUDIO_CLIP);
@@ -395,10 +445,34 @@ pub fn arrangement_audio_clip() -> Vec<MenuItem> {
     items(&rows)
 }
 
-/// The menu a time selection in the Arrangement opens (C-TIME).
+/// The menu a time selection in the Arrangement opens (C-TIME), without the
+/// rows a selection adds.
 #[must_use]
 pub fn arrangement_time() -> Vec<MenuItem> {
-    items(TIME)
+    arrangement_time_in(SelectionMenu::default())
+}
+
+/// The menu a time selection in the Arrangement opens, with the rows `state`
+/// adds.
+#[must_use]
+pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
+    items(&with_selection(TIME, TIME_SELECTION, "C-TIME-007", state))
+}
+
+/// `base` with `extra`, which a selection that holds clips brings, inserted
+/// after the row `after`.
+fn with_selection(base: &[Row], extra: &[Row], after: &str, state: SelectionMenu) -> Vec<Row> {
+    if !state.clips {
+        return base.to_vec();
+    }
+    let mut rows = Vec::with_capacity(base.len() + extra.len());
+    for &row in base {
+        rows.push(row);
+        if row.0 == after {
+            rows.extend_from_slice(extra);
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

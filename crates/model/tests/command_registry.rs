@@ -53,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        166,
+        168,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -70,8 +70,8 @@ fn every_document_command_is_registered() {
          three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-         WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, and WP-5.40 \
-         set_configured_params"
+         WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
+         set_configured_params, and WP-4.13 the two for Crop Clip"
     );
 
     for op in &ops {
@@ -1711,6 +1711,31 @@ fn every_command_runs_by_id() {
             .only_while_recording
     );
 
+    // Crop Clip: the region the clip's markers hold, and a span of song
+    // time (WP-4.13).
+    let song: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": drums, "clip": {
+            "id": song, "name": "Song", "start": bar * 4, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32), "start": 0.5, "end": 1.5 } },
+        } }),
+    );
+    agent.run(
+        "clip.crop_region",
+        json!({ "clip": song, "media": "ef".repeat(32), "from": 0.5, "to": 1.5 }),
+    );
+    agent.run(
+        "clip.crop_span",
+        json!({ "clip": song, "media": "ef".repeat(32), "start": bar * 4, "end": bar * 4 + quarter }),
+    );
+    let clip = agent.editor.document().clip(song).unwrap();
+    assert_eq!((clip.start.0, clip.length.0), (bar * 4, quarter));
+    let ClipData::Audio(audio) = &clip.data else {
+        panic!("{clip:?}");
+    };
+    assert_eq!(audio.start, 0.0, "the markers begin at the region's start");
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -2134,6 +2159,24 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLaunchMode {
                 clip,
                 mode: LaunchMode::Gate,
+            },
+        ),
+        (
+            "clip.crop_region",
+            Command::CropClip {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                from: 0.5,
+                to: 1.5,
+            },
+        ),
+        (
+            "clip.crop_span",
+            Command::CropClipToRange {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                start: Ticks::QUARTER,
+                end: Ticks::QUARTER * 3,
             },
         ),
         (

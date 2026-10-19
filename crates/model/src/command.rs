@@ -627,6 +627,44 @@ pub enum Command {
         /// The new data.
         data: ClipData,
     },
+    /// Crops a clip to a region of its contents (the audio clip editing spec,
+    /// R14, R15, R17): an audio clip plays `media`, the region's frames of
+    /// its file, and a MIDI clip loses the notes that start outside the
+    /// region. The clip's Start and End markers, loop brace, and warp markers
+    /// move back by the region's start, so it plays exactly what it played,
+    /// and the clip stays where it is in the Arrangement.
+    CropClip {
+        /// The clip.
+        clip: ClipId,
+        /// The new file: the region's frames, written through the
+        /// processed-file writer. `null` (or nothing) for a MIDI clip, which
+        /// writes no file; an audio clip's crop must name one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+        /// Where the region starts, in the form the clip shows: seconds into
+        /// an unwarped audio clip's file, or whole ticks of a warped audio
+        /// clip's or a MIDI clip's contents.
+        from: f64,
+        /// Where it ends, after `from`, in the same form.
+        to: f64,
+    },
+    /// Crops a clip to a span of song time (the audio clip editing spec,
+    /// R16): the clip's edges move to the span, and it plays the part of
+    /// itself the span covered, at the same moments. An audio clip plays
+    /// `media`, the span's frames of its file; a MIDI clip loses the notes
+    /// the span didn't hold.
+    CropClipToRange {
+        /// The clip.
+        clip: ClipId,
+        /// The new file: the span's frames. `null` (or nothing) for a MIDI
+        /// clip, which writes no file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+        /// Where the span starts in the song.
+        start: Ticks,
+        /// Where it ends, after `start`.
+        end: Ticks,
+    },
     /// Moves a clip's left edge to `start`, keeping its end and where its
     /// contents play: the clip shows more or less of its contents. An audio
     /// clip's Start marker moves by the time the edge moved, as Live's does,
@@ -1820,6 +1858,7 @@ impl Command {
             Self::SetClipMute { .. } => "Mute clip",
             Self::SetClipLaunchMode { .. } => "Change launch mode",
             Self::SetClipData { .. } => "Edit clip",
+            Self::CropClip { .. } | Self::CropClipToRange { .. } => "Crop clip",
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
@@ -2411,6 +2450,20 @@ impl Document {
                 }
                 Ok(())
             }
+            // Spec: audio-clip-editing R14, R15, R17.
+            Command::CropClip {
+                clip,
+                media,
+                from,
+                to,
+            } => self.crop_clip(*clip, *media, *from, *to, None),
+            // Spec: audio-clip-editing R16.
+            Command::CropClipToRange {
+                clip,
+                media,
+                start,
+                end,
+            } => self.crop_clip_to_range(*clip, *media, *start, *end),
             Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
             Command::SetClipRegion {
                 clip,
@@ -3756,6 +3809,99 @@ impl Document {
         check_clip(&moved)?;
         *self.clip_mut(id)? = moved;
         Ok(())
+    }
+
+    /// Crops `clip` (the audio clip editing spec, R14 to R17): its data to
+    /// `from`..`to` of its contents, in the form the clip shows, and, when
+    /// `span` is given, its edges to that span of the song. An audio clip's
+    /// crop names the new file it plays; a MIDI clip's writes none.
+    fn crop_clip(
+        &mut self,
+        id: ClipId,
+        media: Option<ContentHash>,
+        from: f64,
+        to: f64,
+        span: Option<(Ticks, Ticks)>,
+    ) -> Result<(), ModelError> {
+        let current = self.clip_ref(id)?.clone();
+        let mut next = current.clone();
+        match &current.data {
+            ClipData::Audio(audio) => {
+                let Some(media) = media else {
+                    return Err(ModelError::InvalidInput(
+                        "an audio clip's crop names the new file its region is written to",
+                    ));
+                };
+                let mut data = audio.cropped(from, to)?;
+                data.media = media;
+                next.data = ClipData::Audio(data);
+            }
+            ClipData::Midi(midi) => {
+                if media.is_some() {
+                    return Err(ModelError::InvalidInput(
+                        "a MIDI clip's crop writes no file",
+                    ));
+                }
+                let data = midi.cropped(whole_tick(from)?, whole_tick(to)?);
+                // The clip's contents begin at its Start marker (the clip
+                // module's own rule), which the crop moved back.
+                next.offset = data.start;
+                next.data = ClipData::Midi(data);
+            }
+        }
+        if let Some((start, end)) = span {
+            if end <= start {
+                return Err(ModelError::EmptyLength(end - start));
+            }
+            next.start = start;
+            next.length = end - start;
+        }
+        check_clip_data(&next.data)?;
+        check_clip_fits(self.track_ref(self.clip_owner(id)?)?, &next.data)?;
+        check_extent(next.start, next.length)?;
+        *self.clip_mut(id)? = next;
+        Ok(())
+    }
+
+    /// Crops `clip` to the span of song time `start`..`end` (R16): its edges
+    /// move to the span, and it plays the part of itself the span covered, at
+    /// the same moments.
+    fn crop_clip_to_range(
+        &mut self,
+        id: ClipId,
+        media: Option<ContentHash>,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
+        if end <= start {
+            return Err(ModelError::EmptyLength(end - start));
+        }
+        let clip = self.clip_ref(id)?.clone();
+        // The span in the form the clip shows: a warped audio clip's and a
+        // MIDI clip's contents advance a tick per tick of the song, and an
+        // unwarped audio clip's by the time between the ticks.
+        let (from, to) = match &clip.data {
+            ClipData::Audio(audio) if !audio.warp => {
+                let tempo = &self.settings.tempo;
+                let at = |ticks: Ticks| tempo.ticks_to_seconds(ticks);
+                (
+                    audio.start + (at(start) - at(clip.start)),
+                    audio.start + (at(end) - at(clip.start)),
+                )
+            }
+            ClipData::Audio(audio) => (
+                audio.start + (start - clip.start).get() as f64,
+                audio.start + (end - clip.start).get() as f64,
+            ),
+            ClipData::Midi(midi) => (
+                midi.start.get() as f64 + (start - clip.start).get() as f64,
+                midi.start.get() as f64 + (end - clip.start).get() as f64,
+            ),
+        };
+        self.crop_clip(id, media, from, to, Some((start, end)))
     }
 
     /// Sets an audio clip's markers or loop with `edit`, if the result is
@@ -5114,6 +5260,18 @@ pub(crate) fn check_offset(offset: Ticks) -> Result<(), ModelError> {
 
 /// Checks the notes in MIDI data, and an audio clip's markers, loop, gain,
 /// and fades.
+/// A position in a clip's contents as whole ticks, which is the form a MIDI
+/// clip's contents and a warped audio clip's take.
+fn whole_tick(value: f64) -> Result<Ticks, ModelError> {
+    if !value.is_finite() || value < 0.0 || value > i64::MAX as f64 {
+        return Err(ModelError::InvalidValue {
+            what: "crop position",
+            value,
+        });
+    }
+    Ok(Ticks(value.round() as i64))
+}
+
 pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
     match data {
         ClipData::Midi(midi) => {
@@ -9231,5 +9389,172 @@ mod tests {
         assert!(song.doc.device(device).unwrap().b_active);
         assert_eq!(param_of(&song, device, true), Some(5.0));
         assert_eq!(param_of(&song, device, false), Some(-3.0));
+    }
+
+    // Spec: audio-clip-editing R17.
+    #[test]
+    fn cropping_a_midi_clip_deletes_the_notes_outside_its_region() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 1);
+        let quarter = Ticks::QUARTER;
+        let notes = vec![
+            // Outside the region, before it.
+            Note::new(60, Ticks::ZERO, quarter, 100),
+            // Starts inside and runs past the region's end.
+            Note::new(62, quarter + quarter / 2, quarter * 2, 100),
+            // Wholly inside.
+            Note::new(64, quarter * 2, quarter / 2, 100),
+            // Outside the region, after it.
+            Note::new(65, quarter * 3 + quarter / 2, quarter, 100),
+        ];
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(MidiData::new(notes)),
+        })
+        .unwrap();
+        song.apply(Command::CropClip {
+            clip,
+            media: None,
+            from: quarter.get() as f64,
+            to: (quarter * 3).get() as f64,
+        })
+        .unwrap();
+
+        let ClipData::Midi(midi) = &song.doc.clip(clip).unwrap().data else {
+            panic!("a MIDI clip");
+        };
+        let kept: Vec<(i64, i64)> = midi
+            .notes
+            .iter()
+            .map(|note| (note.start.get(), note.length.get()))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                (quarter.get() / 2, quarter.get() * 3 / 2),
+                (quarter.get(), quarter.get() / 2)
+            ],
+            "the notes outside went, and the one running past the end is cut there"
+        );
+        assert_eq!(
+            midi.start,
+            Ticks::ZERO,
+            "the markers begin at the region's start"
+        );
+        assert_eq!(song.doc.clip(clip).unwrap().offset, Ticks::ZERO);
+    }
+
+    // Spec: audio-clip-editing R15.
+    #[test]
+    fn cropping_a_warped_clip_moves_its_warp_map_back_with_it() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let quarter = Ticks::QUARTER;
+        // Two bars of audio, a marker on every beat.
+        let markers: Vec<WarpMarker> = (0..8)
+            .map(|beat| WarpMarker {
+                time: beat as f64 * 0.5,
+                beat: quarter * beat,
+            })
+            .collect();
+        let audio = AudioData {
+            start: Ticks::ZERO.get() as f64,
+            tempo: Some(120.0),
+            warp: true,
+            warp_markers: markers,
+            ..AudioData::new(ContentHash([9; 32]))
+        };
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Audio(audio),
+        })
+        .unwrap();
+        // Crop the second half.
+        song.apply(Command::CropClip {
+            clip,
+            media: Some(ContentHash([8; 32])),
+            from: (quarter * 4).get() as f64,
+            to: (quarter * 8).get() as f64,
+        })
+        .unwrap();
+        let ClipData::Audio(audio) = &song.doc.clip(clip).unwrap().data else {
+            panic!("an audio clip");
+        };
+        assert_eq!(audio.media, ContentHash([8; 32]));
+        let first = audio.warp_markers.first().unwrap();
+        assert_eq!((first.time, first.beat), (0.0, Ticks::ZERO));
+        let last = audio.warp_markers.last().unwrap();
+        assert_eq!(
+            (last.time, last.beat),
+            (2.0, quarter * 4),
+            "the map moved back by the region's start and holds the file's end"
+        );
+    }
+
+    // Spec: audio-clip-editing R23.
+    #[test]
+    fn consolidating_midi_clips_writes_out_every_note_and_envelope_they_played() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 1);
+        let quarter = Ticks::QUARTER;
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(MidiData::new([Note::new(60, Ticks::ZERO, quarter, 100)])),
+        })
+        .unwrap();
+        // A one-quarter loop, on, so the clip plays the note four times over
+        // the whole.
+        song.apply(Command::SetMidiClipLoop {
+            clip,
+            start: Ticks::ZERO,
+            end: Some(quarter),
+        })
+        .unwrap();
+        song.apply(Command::SetClipLoopEnabled {
+            clip,
+            enabled: true,
+        })
+        .unwrap();
+        let target = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target,
+            kind: EnvelopeKind::Modulation,
+            at: Ticks::ZERO,
+            value: 0.25,
+        })
+        .unwrap();
+
+        let start = song.doc.clip(clip).unwrap().start;
+        let end = song.doc.clip(clip).unwrap().end();
+        let new_id: ClipId = song.fresh();
+        let source = song.doc.clip(clip).unwrap().clone();
+        let made =
+            crate::clip::consolidated_midi(new_id, "Merged".to_owned(), &[&source], start, end);
+
+        assert_eq!(made.id, new_id);
+        assert_eq!((made.start, made.length), (start, end - start));
+        assert_eq!(made.name, "Merged");
+        let ClipData::Midi(midi) = &made.data else {
+            panic!("a MIDI clip");
+        };
+        assert_eq!(
+            midi.notes.len(),
+            4,
+            "each repetition of the loop is written out"
+        );
+        assert_eq!(midi.notes[1].start, quarter);
+        assert!(midi.looping, "its loop is on over its whole length");
+        assert_eq!(midi.loop_start, Ticks::ZERO);
+        assert_eq!(midi.loop_end, None);
+        let envelope = made.envelopes.first().expect("the envelope came with it");
+        assert_eq!(envelope.target, target);
+        assert_eq!(envelope.kind, EnvelopeKind::Modulation);
+        assert_eq!(envelope.envelope.value_at(Ticks::ZERO), Some(0.25));
     }
 }

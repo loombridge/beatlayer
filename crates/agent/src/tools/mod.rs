@@ -149,7 +149,22 @@ pub(crate) fn question_line(
         line.push_str(". ");
         line.push_str(&replaced);
     }
+    if let Some(clip) = call.cropped {
+        line.push_str(". ");
+        line.push_str(&format!(
+            "It crops {}, dropping what the region doesn't keep.",
+            clip_name(shell, clip)
+        ));
+    }
     line
+}
+
+/// A clip as the question names it: its name, or its ID when it has none.
+fn clip_name(shell: &Shell, clip: bl_model::ClipId) -> String {
+    match shell.editor().document().clip(clip) {
+        Some(found) if !found.name.is_empty() => format!("clip \u{201c}{}\u{201d}", found.name),
+        _ => format!("clip {}", clip.0),
+    }
 }
 
 /// The clips a call would replace or shorten, named as the question names
@@ -158,16 +173,10 @@ fn replaced_clips(shell: &Shell, call: &CallPermission) -> String {
     if call.replaces.is_empty() {
         return String::new();
     }
-    let document = shell.editor().document();
     let names: Vec<String> = call
         .replaces
         .iter()
-        .map(|clip| match document.clip(*clip) {
-            Some(found) if !found.name.is_empty() => {
-                format!("clip \u{201c}{}\u{201d}", found.name)
-            }
-            _ => format!("clip {}", clip.0),
-        })
+        .map(|clip| clip_name(shell, *clip))
         .collect();
     let names = and_list(&names);
     if call.may {

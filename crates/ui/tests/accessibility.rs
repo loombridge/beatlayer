@@ -2204,6 +2204,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_loop", Exception(clip_view)),
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        // The crop's document-level commands (WP-4.13): `clip.crop` is the
+        // one a person and an agent run, from the menus and Cmd-Shift-J, and
+        // it applies these.
+        (
+            "clip.crop_region",
+            Exception(Equivalent(
+                "clip.crop, from the clip's and time selection's menus and Cmd-Shift-J (audio-clip-editing R14)",
+            )),
+        ),
+        (
+            "clip.crop_span",
+            Exception(Equivalent(
+                "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
+            )),
+        ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),

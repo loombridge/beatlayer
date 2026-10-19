@@ -10,7 +10,7 @@ use bl_model::modulator::{
     ModTarget, STRIKE_MOD, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
     with_point_moved, with_sustain, without_point,
 };
-use bl_model::{DeviceId, DeviceKind};
+use bl_model::{DeviceId, DeviceKind, ParamId};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{ArmedMap, DeviceFrame, MappingRow, ModulatorFrame};
 use egui::accesskit::Role;
@@ -117,6 +117,133 @@ pub fn overlay(
 #[must_use]
 pub fn map_button_id(device: DeviceId, slot: u8) -> Id {
     Id::new(("modulator-map", device, slot))
+}
+
+/// A rack's Map mode, as this frame's controls see it (macros spec, R3): the
+/// rack, and the devices inside it whose parameters can be mapped.
+#[derive(Clone, Debug)]
+pub struct MacroMap {
+    /// The rack whose Map mode is on.
+    pub rack: DeviceId,
+    /// The devices inside it, at any depth, whose parameters are mappable.
+    pub devices: std::collections::BTreeSet<DeviceId>,
+}
+
+fn macro_map_id() -> Id {
+    Id::new("macro-map-mode")
+}
+
+fn macro_target_id() -> Id {
+    Id::new("macro-map-target")
+}
+
+/// Tells the controls drawn this frame which rack's Map mode is on, if one
+/// is.
+pub fn set_macro_map(ctx: &Context, map: Option<MacroMap>) {
+    ctx.data_mut(|d| d.insert_temp(macro_map_id(), map));
+}
+
+/// The rack whose Map mode is on, if one is.
+#[must_use]
+pub fn macro_map(ctx: &Context) -> Option<MacroMap> {
+    ctx.data(|d| d.get_temp::<Option<MacroMap>>(macro_map_id()))
+        .flatten()
+}
+
+/// The parameter selected in Map mode, waiting for a macro's Map button
+/// (macros spec, R5).
+#[must_use]
+pub fn macro_target(ctx: &Context) -> Option<(DeviceId, ParamId)> {
+    ctx.data(|d| d.get_temp::<Option<(DeviceId, ParamId)>>(macro_target_id()))
+        .flatten()
+}
+
+/// The macros that hold parameters, by device and parameter (macros spec,
+/// R11).
+fn held_id() -> Id {
+    Id::new("macro-held-params")
+}
+
+/// Tells the controls drawn this frame which parameters a macro holds.
+pub fn set_held(ctx: &Context, held: std::collections::BTreeMap<(DeviceId, ParamId), String>) {
+    ctx.data_mut(|d| d.insert_temp(held_id(), held));
+}
+
+/// The macro that holds `device`'s `param`, by name, if one does.
+#[must_use]
+pub fn held(ctx: &Context, device: DeviceId, param: ParamId) -> Option<String> {
+    ctx.data(|d| d.get_temp::<std::collections::BTreeMap<(DeviceId, ParamId), String>>(held_id()))
+        .and_then(|held| held.get(&(device, param)).cloned())
+}
+
+fn hover_id() -> Id {
+    Id::new("macro-hover-hold")
+}
+
+/// Notes the macro named under the pointer, for the Status Bar.
+pub fn set_hover_hold(ctx: &Context, name: Option<String>) {
+    ctx.data_mut(|d| d.insert_temp(hover_id(), name));
+}
+
+/// The macro named under the pointer, if one is (macros spec, R11).
+#[must_use]
+pub fn hover_hold(ctx: &Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<Option<String>>(hover_id()))
+        .flatten()
+}
+
+/// Selects the parameter Map mode's next Map button maps, or none.
+pub fn set_macro_target(ctx: &Context, target: Option<(DeviceId, ParamId)>) {
+    ctx.data_mut(|d| d.insert_temp(macro_target_id(), target));
+}
+
+/// Tints a parameter that a rack's Map mode can map, and selects it when
+/// it's clicked (macros spec, R3 and R5). Returns whether the control is
+/// mappable now: the caller's own handling of the click still runs, so a
+/// click changes nothing.
+pub fn macro_overlay(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    device: DeviceId,
+    param: ParamId,
+) -> bool {
+    let Some(map) = macro_map(ui.ctx()) else {
+        return false;
+    };
+    if !map.devices.contains(&device) {
+        return false;
+    }
+    let colour = theme.colors.mapping.0;
+    ui.painter()
+        .rect_filled(rect, theme.sizes.corner, colour.gamma_multiply(0.3));
+    ui.painter().rect_stroke(
+        rect,
+        theme.sizes.corner,
+        Stroke::new(1.0, colour),
+        StrokeKind::Inside,
+    );
+    let selected = macro_target(ui.ctx()) == Some((device, param));
+    if selected {
+        ui.painter().rect_stroke(
+            rect.expand(1.0),
+            theme.sizes.corner,
+            Stroke::new(2.0, theme.colors.accent.0),
+            StrokeKind::Outside,
+        );
+    }
+    let response = ui.interact(
+        rect,
+        Id::new(("macro-target", device, param.0)),
+        Sense::click(),
+    );
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+    }
+    if response.clicked() {
+        set_macro_target(ui.ctx(), Some((device, param)));
+    }
+    true
 }
 
 /// The ID of a slot's Unmap button.

@@ -76,6 +76,8 @@ pub struct DeviceViewUi {
     sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
+    /// The macro being renamed in its Macro Controls slot (WP-5.4).
+    pub(crate) renaming_macro: Option<crate::rack_view::MacroRenaming>,
     /// A drag on a chain's zone bar in a rack's zone editor (WP-5.3).
     pub(crate) zone_drag: Option<crate::rack_view::RackZoneDrag>,
     scroll: f32,
@@ -262,6 +264,7 @@ impl DeviceViewUi {
             sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
             renaming_chain: None,
+            renaming_macro: None,
             zone_drag: None,
             scroll: 0.0,
             seen_selected: None,
@@ -277,7 +280,18 @@ impl DeviceViewUi {
     /// Whether a device's name is being typed, so keys go to it.
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.renaming.is_some() || self.renaming_chain.is_some()
+        self.renaming.is_some() || self.renaming_chain.is_some() || self.renaming_macro.is_some()
+    }
+
+    /// Starts typing a new name for macro `number` of `rack` in its slot
+    /// (Rename, S-EDIT-008), from the name it has now.
+    pub fn start_macro_rename(&mut self, rack: DeviceId, number: u8) {
+        self.renaming_macro = Some(crate::rack_view::MacroRenaming {
+            rack,
+            number,
+            text: None,
+            focused: false,
+        });
     }
 
     /// Starts typing a new name for `chain` in its row (Rename, S-EDIT-008),

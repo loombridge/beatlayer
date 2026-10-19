@@ -5,13 +5,14 @@
 //! mixer ([`ChainMixer`]), and the rack's output is their sum. A chain's
 //! devices may be racks too, so racks nest to any depth.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use bl_core::id::Id;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::automation::MixerParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::error::ModelError;
 use crate::ids::{ChainId, ContentHash, DeviceId, ParamId, TrackId};
@@ -29,12 +30,43 @@ pub const CHAIN_SELECTOR: ParamId = ParamId(0);
 /// (Chain Selector Filters MIDI Ctrl, racks spec, R31).
 pub const FILTER_MIDI_CTRL: ParamId = ParamId(1);
 
+/// How many macro controls every rack has (macros spec, R1).
+pub const MACROS: u8 = 16;
+
+/// How many macros a new rack shows (macros spec, R2).
+pub const SHOWN_MACROS: u8 = 8;
+
+/// Macro 1's parameter number. Macro N is `MACRO_BASE + N - 1`.
+pub const MACRO_BASE: u32 = 100;
+
+/// The parameter number of macro `number`, numbered from 1.
+#[must_use]
+pub fn macro_param(number: u8) -> ParamId {
+    ParamId(MACRO_BASE + u32::from(number.saturating_sub(1)))
+}
+
+/// Which macro a parameter number is, from 1, or `None` for another
+/// parameter.
+#[must_use]
+pub fn macro_number(param: ParamId) -> Option<u8> {
+    let offset = param.0.checked_sub(MACRO_BASE)?;
+    (offset < u32::from(MACROS)).then(|| u8::try_from(offset).expect("below 16") + 1)
+}
+
+/// The name a macro has before Rename and without one mapping: its number
+/// (macros spec, R10).
+#[must_use]
+pub fn default_macro_name(number: u8) -> String {
+    format!("Macro {number}")
+}
+
 /// What every kind of rack describes of its parameters (device framework
-/// R3): the chain selector and Chain Selector Filters MIDI Ctrl.
+/// R3): the chain selector, Chain Selector Filters MIDI Ctrl, and the 16
+/// macros (macros spec, R1).
 #[must_use]
 pub fn description() -> &'static DeviceDescription {
     static DESCRIPTION: LazyLock<DeviceDescription> = LazyLock::new(|| {
-        DeviceDescription::new(vec![
+        let mut params = vec![
             ParamDescriptor::integer(
                 CHAIN_SELECTOR,
                 "Chain Selector",
@@ -43,9 +75,151 @@ pub fn description() -> &'static DeviceDescription {
                 ParamUnit::None,
             ),
             ParamDescriptor::toggle(FILTER_MIDI_CTRL, "Chain Selector Filters MIDI Ctrl", false),
-        ])
+        ];
+        for number in 1..=MACROS {
+            params.push(ParamDescriptor::continuous(
+                macro_param(number),
+                &default_macro_name(number),
+                (0.0, 1.0),
+                0.0,
+                ParamUnit::None,
+            ));
+        }
+        DeviceDescription::new(params)
     });
     &DESCRIPTION
+}
+
+/// One macro's saved settings beside its value (macros spec, R10, R14 and
+/// R16). A macro's value is a parameter of its rack, in `Device::params`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Macro {
+    /// The name Rename gave it; empty for its default name (R10).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// A swatch of the palette of 5 rows of 14, from 0 to 69, or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<u8>,
+    /// The info text the user gave it (Edit Info Text).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub info: String,
+    /// Whether Randomize leaves it alone (R16).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub randomize_excluded: bool,
+}
+
+/// A parameter a macro drives: a device's parameter inside the rack, or a
+/// chain's mixer control (macros spec, R4).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(
+    description = "What a macro maps: `device` with the device and its `param`, or `chain` with \
+                   a rack's chain and its mixer `param` (volume, pan, or mute, the Chain \
+                   Activator)."
+)]
+pub enum MacroTarget {
+    /// A parameter of a device inside the rack, at any depth.
+    Device {
+        /// The device.
+        device: DeviceId,
+        /// Its parameter.
+        param: ParamId,
+    },
+    /// A control of a chain's mixer.
+    Chain {
+        /// The chain.
+        chain: ChainId,
+        /// The control.
+        param: MixerParam,
+    },
+}
+
+/// One mapping: a macro drives a parameter over a range (macros spec, R9).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MacroMapping {
+    /// The macro, numbered from 1.
+    pub macro_number: u8,
+    /// What it drives.
+    pub target: MacroTarget,
+    /// The bottom of the range, as a position on the target's travel from 0
+    /// to 1 (R7).
+    pub min: f64,
+    /// The top of the range, as a position on the target's travel.
+    pub max: f64,
+}
+
+impl MacroMapping {
+    /// The position on its target's travel that macro position `value` gives
+    /// (macros spec, R7): `min + value · (max − min)`.
+    #[must_use]
+    pub fn position(&self, value: f64) -> f64 {
+        self.min + value * (self.max - self.min)
+    }
+}
+
+/// A rack's macros' settings and mappings (macros spec, R17). The values
+/// themselves are the rack's parameters.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RackMacros {
+    /// Each macro's settings, in macro order; a macro left off keeps the
+    /// defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<Macro>,
+    /// The mappings, in the order they were made (R9).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<MacroMapping>,
+}
+
+impl RackMacros {
+    /// Whether the rack has no settings or mappings to save.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.settings.is_empty() && self.mappings.is_empty()
+    }
+
+    /// Macro `number`'s settings, as it starts if it has none.
+    #[must_use]
+    pub fn setting(&self, number: u8) -> &Macro {
+        static DEFAULT: Macro = Macro {
+            name: String::new(),
+            colour: None,
+            info: String::new(),
+            randomize_excluded: false,
+        };
+        self.settings
+            .get(usize::from(number.saturating_sub(1)))
+            .unwrap_or(&DEFAULT)
+    }
+
+    /// Macro `number`'s settings, to change, growing the list to reach it.
+    pub fn setting_mut(&mut self, number: u8) -> &mut Macro {
+        let at = usize::from(number.saturating_sub(1));
+        if self.settings.len() <= at {
+            self.settings.resize(at + 1, Macro::default());
+        }
+        &mut self.settings[at]
+    }
+
+    /// The mapping of `target`, if the rack has one.
+    #[must_use]
+    pub fn mapping(&self, target: MacroTarget) -> Option<&MacroMapping> {
+        self.mappings.iter().find(|m| m.target == target)
+    }
+
+    /// The mappings of macro `number`, in the order they were made.
+    pub fn mappings_of(&self, number: u8) -> impl Iterator<Item = &MacroMapping> {
+        self.mappings
+            .iter()
+            .filter(move |m| m.macro_number == number)
+    }
+
+    /// Whether macro `number` drives anything.
+    #[must_use]
+    pub fn has_mappings(&self, number: u8) -> bool {
+        self.mappings.iter().any(|m| m.macro_number == number)
+    }
 }
 
 /// The four kinds of rack. A rack has the role of what it holds
@@ -378,6 +552,10 @@ pub struct RackViews {
     /// A drum rack's Return switch.
     #[serde(default, skip_serializing_if = "is_off")]
     pub returns: bool,
+    /// How many macros the Macro Controls show, from 1 to 16 (macros spec,
+    /// R2): 8 in a new rack.
+    #[serde(default = "shown_macros", skip_serializing_if = "is_shown_macros")]
+    pub macro_count: u8,
 }
 
 /// The first note a new drum rack's pad view shows (drum racks spec, R11).
@@ -385,6 +563,18 @@ pub const FIRST_PAD: u8 = 36;
 
 fn first_pad() -> u8 {
     FIRST_PAD
+}
+
+fn shown_macros() -> u8 {
+    SHOWN_MACROS
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_shown_macros(value: &u8) -> bool {
+    *value == SHOWN_MACROS
 }
 
 #[expect(
@@ -408,6 +598,7 @@ impl Default for RackViews {
             send: false,
             returns: false,
             auto_select: false,
+            macro_count: SHOWN_MACROS,
         }
     }
 }
@@ -780,9 +971,23 @@ impl Chain {
 
     /// Gives the chain and everything in it new IDs from `next`.
     pub fn reassign_ids(&mut self, next: &mut impl FnMut() -> Id) {
+        self.reassign_ids_tracked(next, &mut BTreeMap::new(), &mut BTreeMap::new());
+    }
+
+    /// Gives the chain and everything in it new IDs, remembering each old
+    /// ID's new one so a rack's macro mappings follow their targets
+    /// (macros spec, R18).
+    fn reassign_ids_tracked(
+        &mut self,
+        next: &mut impl FnMut() -> Id,
+        devices: &mut BTreeMap<DeviceId, DeviceId>,
+        chains: &mut BTreeMap<ChainId, ChainId>,
+    ) {
+        let old = self.id;
         self.id = ChainId(next());
+        chains.insert(old, self.id);
         for device in &mut self.devices {
-            device.reassign_ids(next);
+            device.reassign_ids_tracked(next, devices, chains);
         }
     }
 
@@ -969,12 +1174,26 @@ impl Device {
     /// duplicated, which docks every device it holds and gives each the
     /// active state in both of its states (device compare R8).
     pub fn reassign_ids(&mut self, next: &mut impl FnMut() -> Id) {
+        self.reassign_ids_tracked(next, &mut BTreeMap::new(), &mut BTreeMap::new());
+    }
+
+    /// [`reassign_ids`](Self::reassign_ids), remembering each old ID's new
+    /// one so this rack's macro mappings follow the devices and chains they
+    /// map, as a copied rack's must (macros spec, R18).
+    fn reassign_ids_tracked(
+        &mut self,
+        next: &mut impl FnMut() -> Id,
+        devices: &mut BTreeMap<DeviceId, DeviceId>,
+        chains: &mut BTreeMap<ChainId, ChainId>,
+    ) {
+        let old_id = self.id;
         self.id = DeviceId(next());
+        devices.insert(old_id, self.id);
         self.floating = false;
         self.set_both(self.params.clone());
         let old: Vec<ChainId> = self.chains.iter().map(|c| c.id).collect();
         for chain in &mut self.chains {
-            chain.reassign_ids(next);
+            chain.reassign_ids_tracked(next, devices, chains);
         }
         // A drum chain's sends follow its rack's return chains to their new
         // IDs.
@@ -983,6 +1202,20 @@ impl Device {
             for send in &mut chain.sends {
                 if let Some(i) = old.iter().position(|&id| id == send.to) {
                     send.to = new[i];
+                }
+            }
+        }
+        for mapping in &mut self.macros.mappings {
+            match &mut mapping.target {
+                MacroTarget::Device { device, .. } => {
+                    if let Some(new) = devices.get(device) {
+                        *device = *new;
+                    }
+                }
+                MacroTarget::Chain { chain, .. } => {
+                    if let Some(new) = chains.get(chain) {
+                        *chain = *new;
+                    }
                 }
             }
         }
@@ -1044,6 +1277,7 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
     }
     check_order(device)?;
     check_drum_chains(device)?;
+    check_macros(device)?;
     let kind = device.rack_kind().expect("checked above to be a rack");
     for chain in &device.chains {
         let mixer = &chain.mixer;
@@ -1167,6 +1401,68 @@ pub(crate) fn check_order(rack: &Device) -> Result<(), ModelError> {
                 return Err(ModelError::ChainOrder { rack: rack.id });
             }
             last = Some(device.role);
+        }
+    }
+    Ok(())
+}
+
+/// Checks a rack's macros (macros spec, R17): each macro number is 1 to 16,
+/// each range is a position from 0 to 1, each colour is a swatch, each target
+/// is inside the rack, and no target is mapped twice.
+fn check_macros(rack: &Device) -> Result<(), ModelError> {
+    let macros = &rack.macros;
+    if macros.settings.len() > usize::from(MACROS) {
+        return Err(ModelError::InvalidInput("a rack has 16 macros"));
+    }
+    for macro_settings in &macros.settings {
+        if let Some(colour) = macro_settings.colour {
+            crate::command::check_value("macro colour", f64::from(colour), colour < CHAIN_COLOURS)?;
+        }
+    }
+    for (i, mapping) in macros.mappings.iter().enumerate() {
+        crate::command::check_value(
+            "macro number",
+            f64::from(mapping.macro_number),
+            (1..=MACROS).contains(&mapping.macro_number),
+        )?;
+        crate::command::check_value(
+            "mapping min",
+            mapping.min,
+            mapping.min.is_finite() && (0.0..=1.0).contains(&mapping.min),
+        )?;
+        crate::command::check_value(
+            "mapping max",
+            mapping.max,
+            mapping.max.is_finite() && (0.0..=1.0).contains(&mapping.max),
+        )?;
+        match mapping.target {
+            MacroTarget::Device { device, param } => {
+                if device == rack.id && macro_number(param).is_some() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can't map its own rack's macros",
+                    ));
+                }
+                if rack.find(device).is_none() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can only map a device inside its rack",
+                    ));
+                }
+            }
+            MacroTarget::Chain { chain, .. } => {
+                if rack.find_chain(chain).is_none() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can only map a chain inside its rack",
+                    ));
+                }
+            }
+        }
+        if macros.mappings[..i]
+            .iter()
+            .any(|other| other.target == mapping.target)
+        {
+            return Err(ModelError::InvalidInput(
+                "a parameter is mapped to one macro of its rack",
+            ));
         }
     }
     Ok(())

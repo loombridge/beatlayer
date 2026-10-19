@@ -16,7 +16,7 @@ use crate::external::External;
 use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
-use crate::rack::{Chain, RackKind};
+use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::SampleEdit;
 use crate::track::Input;
 
@@ -149,6 +149,10 @@ pub struct Device {
     /// before racks load unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chains: Vec<Chain>,
+    /// A rack's macros' settings and mappings (WP-5.4; the macros spec,
+    /// R17). Left out of the saved set while it has neither.
+    #[serde(default, skip_serializing_if = "RackMacros::is_default")]
+    pub macros: RackMacros,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -376,6 +380,7 @@ impl Device {
             mappings: Vec::new(),
             shape: None,
             chains: Vec::new(),
+            macros: RackMacros::default(),
         }
     }
 

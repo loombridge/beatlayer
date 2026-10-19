@@ -296,6 +296,30 @@ pub fn show(
             },
             events,
         );
+        // Spec: macros R3, R5. While a rack's Map mode is on, the parameters
+        // it can map are tinted, and a click selects one for a macro's Map
+        // button.
+        crate::mapping::macro_overlay(ui, theme, rect, frame.id, param);
+        // Spec: macros R11. A parameter a macro holds is drawn disabled, and
+        // the Status Bar names the macro while the pointer is over it.
+        if let Some(name) = crate::mapping::held(ui.ctx(), frame.id, param) {
+            let hovered = ui
+                .ctx()
+                .pointer_hover_pos()
+                .is_some_and(|at| rect.contains(at));
+            if hovered {
+                crate::mapping::set_hover_hold(ui.ctx(), Some(name.clone()));
+            }
+            ui.painter().rect_filled(
+                rect,
+                theme.sizes.corner,
+                theme.colors.window.0.gamma_multiply(0.55),
+            );
+            ui.ctx()
+                .accesskit_node_builder(param_control_id(frame.id, param), |node| {
+                    node.set_description(format!("Held by macro \"{name}\""));
+                });
+        }
     }
 }
 

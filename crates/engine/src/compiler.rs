@@ -333,8 +333,15 @@ impl Compiler {
         // Spec: modulation R28. A mapping of a modulator driven by audio,
         // notes or MIDI changes which track waits for which, and which rows
         // its target reads.
-        let recompile = needs_program(&changes, &old, document, &mut params)
-            || signal_mappings(&old) != signal_mappings(document);
+        let recompile = needs_program(&changes, &old, document, &mut params, &|kind, param| {
+            if matches!(kind, bl_model::DeviceKind::Rack { .. }) {
+                bl_model::rack_description().param(param).cloned()
+            } else {
+                self.registry
+                    .device_type(kind)
+                    .and_then(|device_type| device_type.description.param(param).cloned())
+            }
+        }) || signal_mappings(&old) != signal_mappings(document);
         route_events(&changes, &old, document, &mut params);
         // Tracks that held or hold a clip that changed: their players get
         // their clips again, and their nodes their envelopes again, since a
@@ -1055,6 +1062,15 @@ impl Compiler {
             rate,
             |key| i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay)),
             &self.modulator_rows,
+            |kind, param| {
+                if matches!(kind, bl_model::DeviceKind::Rack { .. }) {
+                    bl_model::rack_description().param(param).cloned()
+                } else {
+                    self.registry
+                        .device_type(kind)
+                        .and_then(|device_type| device_type.description.param(param).cloned())
+                }
+            },
         ) {
             if driving_only && list.is_empty() {
                 continue;
@@ -2202,6 +2218,61 @@ pub(crate) fn punch(document: &Document) -> Punch {
     }
 }
 
+/// Sends each parameter a rack's macro drives its new value when the macro
+/// moved without automation (macros spec, R7 and R8): the node holding the
+/// mapped parameter hears it, as a hand move on the macro reaches it.
+fn macro_events(
+    document: &Document,
+    before: &Device,
+    after: &Device,
+    params: &mut Vec<ParamEvent>,
+    descriptor: &impl Fn(&bl_model::DeviceKind, ParamId) -> Option<bl_model::ParamDescriptor>,
+) {
+    if after.rack_kind().is_none() {
+        return;
+    }
+    for mapping in &after.macros.mappings {
+        let macro_param = bl_model::macro_param(mapping.macro_number);
+        let was = before.params.get(&macro_param).copied();
+        let is = after.params.get(&macro_param).copied();
+        if was == is {
+            continue;
+        }
+        let position =
+            mapping.min + is.unwrap_or(0.0).clamp(0.0, 1.0) * (mapping.max - mapping.min);
+        match mapping.target {
+            bl_model::MacroTarget::Device { device, param } => {
+                let Some(kind) = document.device(device).map(|d| d.kind.clone()) else {
+                    continue;
+                };
+                let Some(descriptor) = descriptor(&kind, param) else {
+                    continue;
+                };
+                let value = bl_model::modulation::Travel::Param(&descriptor).value(position);
+                params.push(ParamEvent::now(NodeKey::Device(device), param, value));
+            }
+            bl_model::MacroTarget::Chain { chain, param } => {
+                let (id, travel) = match param {
+                    bl_model::MixerParam::Volume => {
+                        (mixer::track::VOLUME, bl_model::modulation::Travel::Fader)
+                    }
+                    bl_model::MixerParam::Pan => {
+                        (mixer::track::PAN, bl_model::modulation::Travel::Pan)
+                    }
+                    bl_model::MixerParam::Mute => {
+                        (mixer::track::MUTE, bl_model::modulation::Travel::Switch)
+                    }
+                };
+                params.push(ParamEvent::now(
+                    NodeKey::ChainMixer(chain),
+                    id,
+                    travel.value(position),
+                ));
+            }
+        }
+    }
+}
+
 /// Whether a change set needs a new program; collects parameter changes for
 /// the nodes that keep running either way.
 fn needs_program(
@@ -2209,6 +2280,7 @@ fn needs_program(
     old: &Document,
     new: &Document,
     params: &mut Vec<ParamEvent>,
+    descriptor: &impl Fn(&bl_model::DeviceKind, ParamId) -> Option<bl_model::ParamDescriptor>,
 ) -> bool {
     // The tempo map travels in the program. The Arrangement loop doesn't: a
     // loop edit is a transport command (see `Compiler::sync`).
@@ -2304,6 +2376,7 @@ fn needs_program(
                     }
                 }
                 param_events(NodeKey::Device(id), &before.params, &after.params, params);
+                macro_events(new, before, after, params, descriptor);
             }
             _ => recompile = true,
         }

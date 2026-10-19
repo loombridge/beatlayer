@@ -31,6 +31,7 @@ use crate::session::SessionPlayback;
 
 /// One parameter's envelope, placed in engine frames. Its values are
 /// read by the node whose parameter it drives.
+#[derive(Clone, Debug)]
 pub struct PlacedEnvelope {
     /// Its points, in frame order, none at one frame, each with the bend of
     /// the segment that starts at it.
@@ -421,6 +422,55 @@ pub struct AutomationList {
     /// of their two rows on the bus ([`crate::modbus::row`]), ordered by
     /// parameter.
     mapped: Vec<(ParamId, Vec<u32>)>,
+    /// The macros (WP-5.4) that drive each parameter from their envelopes,
+    /// ordered by parameter (macros spec, R8).
+    macros: Vec<(ParamId, MacroDrive)>,
+}
+
+/// A mapped parameter's base from its macro's envelope (macros spec, R7 and
+/// R8): the macro's position on its travel each frame, given to the
+/// parameter over the mapping's range.
+#[derive(Clone, Debug)]
+pub struct MacroDrive {
+    travel: MacroTravel,
+    min: f64,
+    max: f64,
+    envelope: PlacedEnvelope,
+}
+
+/// A mapping's target travel, owned so a drive can outlive the document
+/// borrow.
+#[derive(Clone, Debug)]
+enum MacroTravel {
+    /// A chain's Volume.
+    Fader,
+    /// A chain's Pan.
+    Pan,
+    /// A chain's Chain Activator.
+    Switch,
+    /// A device parameter on its own taper.
+    Param(bl_model::ParamDescriptor),
+}
+
+impl MacroTravel {
+    fn travel(&self) -> Travel<'_> {
+        match self {
+            Self::Fader => Travel::Fader,
+            Self::Pan => Travel::Pan,
+            Self::Switch => Travel::Switch,
+            Self::Param(descriptor) => Travel::Param(descriptor),
+        }
+    }
+}
+
+impl MacroDrive {
+    /// The value the macro gives at song `frame`.
+    fn value_at(&self, frame: i64) -> f64 {
+        let position = self.envelope.value_at(frame).clamp(0.0, 1.0);
+        self.travel
+            .travel()
+            .value(self.min + position * (self.max - self.min))
+    }
 }
 
 impl AutomationList {
@@ -467,11 +517,29 @@ impl AutomationList {
     }
 
     /// Whether anything sets `param` apart from its control: a track
-    /// envelope, or a Session clip's automation envelope, whether or not
-    /// that clip plays now.
+    /// envelope, a Session clip's automation envelope, or a macro mapping
+    /// it, whether or not that clip plays now.
     #[must_use]
     pub fn drives(&self, param: ParamId) -> bool {
-        self.envelope(param).is_some() || self.session.iter().any(|&(p, _)| p == param)
+        self.envelope(param).is_some()
+            || self.session.iter().any(|&(p, _)| p == param)
+            || self.macro_drive(param).is_some()
+    }
+
+    /// The value the macro driving `param` gives it at song `frame`
+    /// (macros spec, R8), if one does; the parameter's own envelopes wait
+    /// while it is mapped (R11).
+    #[must_use]
+    pub fn macro_value(&self, param: ParamId, frame: i64) -> Option<f64> {
+        self.macro_drive(param).map(|drive| drive.value_at(frame))
+    }
+
+    fn macro_drive(&self, param: ParamId) -> Option<&MacroDrive> {
+        let index = self
+            .macros
+            .binary_search_by_key(&param, |&(param, _)| param)
+            .ok()?;
+        Some(&self.macros[index].1)
     }
 
     /// The value that sets `param` at song `frame`, if something does: the
@@ -483,10 +551,12 @@ impl AutomationList {
     // Spec: session-automation R6, R7
     #[must_use]
     pub fn driven(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
-        self.session_value(param, frame, now).or_else(|| {
-            self.envelope(param)
-                .map(|envelope| envelope.value_at(frame))
-        })
+        self.macro_value(param, frame)
+            .or_else(|| self.session_value(param, frame, now))
+            .or_else(|| {
+                self.envelope(param)
+                    .map(|envelope| envelope.value_at(frame))
+            })
     }
 
     /// The value the Session clip in `now` gives `param` at `frame`.
@@ -594,9 +664,10 @@ impl AutomationList {
         mut visit: impl FnMut(ParamId, f64, f64),
     ) {
         let driven = self
-            .envelopes
+            .macros
             .iter()
             .map(|&(param, _)| param)
+            .chain(self.envelopes.iter().map(|&(param, _)| param))
             .chain(
                 self.session
                     .iter()
@@ -684,6 +755,7 @@ impl AutomationList {
             && self.modulation.is_empty()
             && self.session.is_empty()
             && self.mapped.is_empty()
+            && self.macros.is_empty()
     }
 }
 
@@ -699,11 +771,36 @@ pub(crate) fn lists(
     rate: SampleRate,
     delay: impl Fn(NodeKey) -> i64,
     rows: &modbus::ModRows,
+    descriptor: impl Fn(&bl_model::DeviceKind, ParamId) -> Option<bl_model::ParamDescriptor>,
 ) -> Vec<(NodeKey, AutomationList)> {
     let Some(track) = document.track(track) else {
         return Vec::new();
     };
     let tempo = &document.settings().tempo;
+    // The parameters a macro maps wait for it (macros spec, R11): their own
+    // automation envelopes are left out, and the macro's drive is added
+    // below.
+    let mut mapped_devices = std::collections::BTreeSet::new();
+    let mut mapped_chains = std::collections::BTreeSet::new();
+    let mut racks = Vec::new();
+    for rack in track.devices_deep().filter(|d| d.rack_kind().is_some()) {
+        racks.push(rack);
+        for mapping in &rack.macros.mappings {
+            match mapping.target {
+                bl_model::MacroTarget::Device { device, param } => {
+                    mapped_devices.insert((device, param));
+                }
+                bl_model::MacroTarget::Chain { chain, param } => {
+                    mapped_chains.insert((chain, param));
+                }
+            }
+        }
+    }
+    let mapped = |target: &AutomationTarget| match *target {
+        AutomationTarget::Device { device, param } => mapped_devices.contains(&(device, param)),
+        AutomationTarget::Chain { chain, param } => mapped_chains.contains(&(chain, param)),
+        _ => false,
+    };
     let mut lists: BTreeMap<NodeKey, Entries> = BTreeMap::new();
     lists.insert(NodeKey::Mixer(track.id()), Entries::default());
     if track.kind().has_sends() {
@@ -733,7 +830,7 @@ pub(crate) fn lists(
         }
     }
     for (target, automation) in track.automation() {
-        if !automation.enabled {
+        if !automation.enabled || mapped(target) {
             continue;
         }
         let Some((key, param)) = target_node(track.id(), target) else {
@@ -819,6 +916,7 @@ pub(crate) fn lists(
             envelope.kind == EnvelopeKind::Automation
                 && envelope.enabled
                 && !envelope.envelope.is_empty()
+                && !mapped(&envelope.target)
         }) {
             let Some((key, param)) = target_node(track.id(), &envelope.target) else {
                 continue;
@@ -835,6 +933,66 @@ pub(crate) fn lists(
             ));
         }
     }
+    // The macros that drive mapped parameters from their envelopes (macros
+    // spec, R8): the macro's envelope over the mapping's range, on the
+    // mapped node's own delay.
+    for rack in racks {
+        for mapping in &rack.macros.mappings {
+            let macro_target = AutomationTarget::Device {
+                device: rack.id,
+                param: bl_model::macro_param(mapping.macro_number),
+            };
+            let Some(automation) = track.automation_map().get(&macro_target) else {
+                continue;
+            };
+            if !automation.enabled {
+                continue;
+            }
+            let (key, param, travel) = match mapping.target {
+                bl_model::MacroTarget::Device { device, param } => {
+                    let Some(kind) = document.device(device).map(|d| d.kind.clone()) else {
+                        continue;
+                    };
+                    let Some(descriptor) = descriptor(&kind, param) else {
+                        continue;
+                    };
+                    (
+                        NodeKey::Device(device),
+                        param,
+                        MacroTravel::Param(descriptor),
+                    )
+                }
+                bl_model::MacroTarget::Chain { chain, param } => {
+                    let Some((key, id)) =
+                        target_node(track.id(), &AutomationTarget::Chain { chain, param })
+                    else {
+                        continue;
+                    };
+                    let travel = match param {
+                        MixerParam::Volume => MacroTravel::Fader,
+                        MixerParam::Pan => MacroTravel::Pan,
+                        MixerParam::Mute => MacroTravel::Switch,
+                    };
+                    (key, id, travel)
+                }
+            };
+            let envelope = PlacedEnvelope::placed(&automation.envelope, tempo, rate, delay(key));
+            if envelope.is_empty() {
+                continue;
+            }
+            if let Some(entries) = lists.get_mut(&key) {
+                entries.macros.push((
+                    param,
+                    MacroDrive {
+                        travel,
+                        min: mapping.min,
+                        max: mapping.max,
+                        envelope,
+                    },
+                ));
+            }
+        }
+    }
     let track = track.id();
     lists
         .into_iter()
@@ -842,6 +1000,7 @@ pub(crate) fn lists(
             entries.envelopes.sort_by_key(|&(param, _)| param);
             entries.modulation.sort_by_key(|&(param, _)| param);
             entries.session.sort_by_key(|&(param, _)| param);
+            entries.macros.sort_by_key(|&(param, _)| param);
             // However many clips modulate one parameter, the node reads
             // them together.
             let mut modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)> = Vec::new();
@@ -867,6 +1026,7 @@ pub(crate) fn lists(
                     modulation,
                     session: entries.session,
                     mapped,
+                    macros: entries.macros,
                 },
             )
         })
@@ -953,6 +1113,7 @@ struct Entries {
     modulation: Vec<(ParamId, PlacedClipEnvelope)>,
     session: Vec<(ParamId, SessionEnvelope)>,
     mapped: Vec<(ParamId, u32)>,
+    macros: Vec<(ParamId, MacroDrive)>,
 }
 
 #[cfg(test)]
@@ -1028,6 +1189,7 @@ mod tests {
             modulation: Vec::new(),
             session: Vec::new(),
             mapped: Vec::new(),
+            macros: Vec::new(),
         };
         let mut seen = Vec::new();
         let tempo = TempoMap::default();

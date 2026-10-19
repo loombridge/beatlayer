@@ -14,7 +14,7 @@ use bl_shell::{
 };
 use egui::accesskit::Role;
 use egui::{
-    Align2, CentralPanel, Context, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder,
+    Align2, CentralPanel, Context, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2,
 };
 use serde_json::json;
 
@@ -320,6 +320,11 @@ impl MainWindowUi {
                 let name = self.chain_name(*chain);
                 self.devices.start_chain_rename(*chain, &name);
             }
+            Effect::RenameMacro(rack, number) => {
+                // Spec: macros R14. Rename types the name in the macro's
+                // slot.
+                self.devices.start_macro_rename(*rack, *number);
+            }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
                 backwards,
@@ -357,6 +362,13 @@ impl MainWindowUi {
         // Spec: modulation R15. A lit Map button tints the parameters it can
         // map, and Esc puts it out.
         crate::mapping::set_armed(ctx, shell.armed_map());
+        // Spec: macros R3. A rack's Map mode tints the parameters it can
+        // map.
+        crate::mapping::set_macro_map(ctx, macro_map(shell));
+        // Spec: macros R11. A parameter a macro holds is drawn disabled, and
+        // the Status Bar names the macro under the pointer.
+        crate::mapping::set_held(ctx, held_params(shell));
+        crate::mapping::set_hover_hold(ctx, None);
         crate::mapping::escape(ctx, self.is_typing(), &mut events);
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
@@ -403,11 +415,17 @@ impl MainWindowUi {
             self.track_area_clicks(ctx, &layout, &mut events);
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
-                // Spec: device-chains R19. Hot-swapping's bar tops the
-                // browser.
-                let browser =
-                    crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
-                self.browser.show(ui, shell, theme, browser, &mut events);
+                // Spec: macros R3. A rack's Map mode puts the mappings list
+                // in the browser's place.
+                if shell.devices().map_mode().is_some() {
+                    crate::rack_view::mappings_list(ui, shell, theme, browser, &mut events);
+                } else {
+                    // Spec: device-chains R19. Hot-swapping's bar tops the
+                    // browser.
+                    let browser =
+                        crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
+                    self.browser.show(ui, shell, theme, browser, &mut events);
+                }
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
             // Files dragged from the browser, or from Finder or Explorer,
@@ -935,6 +953,20 @@ impl MainWindowUi {
                 .accessibility_parent(id),
             |ui| self.strip(ui, shell, theme, layout, Strip::StatusBar, events),
         );
+        // Spec: macros R11. The macro that holds the parameter under the
+        // pointer is named here.
+        if let Some(name) = crate::mapping::hover_hold(ui.ctx()) {
+            ui.painter().text(
+                pos2(
+                    layout.status_bar.right() - 8.0,
+                    layout.status_bar.center().y,
+                ),
+                Align2::RIGHT_CENTER,
+                format!("Held by macro \"{name}\""),
+                theme.small_font(),
+                theme.colors.text.0,
+            );
+        }
     }
 
     fn main_view(
@@ -1057,6 +1089,43 @@ impl MainWindowUi {
 /// (L-INFO-002): the control's name, the registered description of the
 /// command it runs (D17), or the note for a control a later package
 /// brings, and the command's key where the default keymap has one.
+/// The rack whose Map mode is on and the devices inside it, for the
+/// controls to tint (macros spec, R3).
+fn macro_map(shell: &Shell) -> Option<crate::mapping::MacroMap> {
+    let rack = shell.devices().map_mode()?;
+    let doc = shell.editor().document();
+    let device = doc.device(rack)?;
+    let devices = device.walk().map(|d| d.id).collect();
+    Some(crate::mapping::MacroMap { rack, devices })
+}
+
+/// Every parameter a rack's macro holds, with the macro's name (macros spec,
+/// R11).
+fn held_params(
+    shell: &Shell,
+) -> std::collections::BTreeMap<(bl_model::DeviceId, bl_model::ParamId), String> {
+    let doc = shell.editor().document();
+    let mut held = std::collections::BTreeMap::new();
+    for rack in doc
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| device.rack_kind().is_some())
+    {
+        let count = shell.devices().views_of(rack.id).macro_count;
+        let Some(state) = shell.devices().macros_of(doc, rack.id, count) else {
+            continue;
+        };
+        for info in state.macros {
+            for mapping in info.mappings {
+                if let bl_model::MacroTarget::Device { device, param } = mapping.target {
+                    held.insert((device, param), info.name.clone());
+                }
+            }
+        }
+    }
+    held
+}
+
 fn info_content(
     hovered: Option<Element>,
     shell: &Shell,

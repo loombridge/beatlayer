@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-498 commands in 37 areas.
+512 commands in 37 areas.
 
 ## Permission classes
 
@@ -381,11 +381,25 @@ Each command has:
 | [`plugin.settings`](#pluginsettings) | Plug-In Settings | `edit` |  |  |
 | [`plugin.show_window`](#pluginshow_window) | Show Plug-In Window | `read` |  |  |
 | [`plugin.unconfigure_param`](#pluginunconfigure_param) | Unconfigure Plug-In Parameter | `edit` |  |  |
+| [`rack.invert_mapping`](#rackinvert_mapping) | Invert Macro Mapping | `edit` |  |  |
+| [`rack.macros`](#rackmacros) | Rack Macros | `read` |  |  |
+| [`rack.map_macro`](#rackmap_macro) | Map to Macro | `edit` |  |  |
+| [`rack.map_mode`](#rackmap_mode) | Map Mode | `edit` |  |  |
 | [`rack.move_pads`](#rackmove_pads) | Move the Pads | `read` |  |  |
+| [`rack.randomize_macros`](#rackrandomize_macros) | Randomize Macros | `edit` |  |  |
+| [`rack.rename_macro`](#rackrename_macro) | Rename Macro | `edit` |  |  |
+| [`rack.select_macro`](#rackselect_macro) | Select Macro | `edit` |  |  |
 | [`rack.set_auto_select`](#rackset_auto_select) | Auto Select | `edit` |  |  |
+| [`rack.set_macro_colour`](#rackset_macro_colour) | Change Macro Color | `edit` |  |  |
+| [`rack.set_macro_count`](#rackset_macro_count) | Show More or Fewer Macros | `edit` |  |  |
+| [`rack.set_macro_info_text`](#rackset_macro_info_text) | Change Macro Info Text | `edit` |  |  |
+| [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | Exclude Macro from Randomization | `edit` |  |  |
+| [`rack.set_mapped_value`](#rackset_mapped_value) | Change parameter | `edit` |  |  |
+| [`rack.set_mapping_range`](#rackset_mapping_range) | Change Macro Mapping | `edit` |  |  |
 | [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`rack.set_zone_editor`](#rackset_zone_editor) | Show a Rack's Zone Editor | `edit` |  |  |
 | [`rack.switch_hot_swap_target`](#rackswitch_hot_swap_target) | Switch Hot-Swap Target | `read` | `D` | `D` |
+| [`rack.unmap_macro`](#rackunmap_macro) | Unmap Macro | `edit` |  |  |
 | [`routing.set_cue_out`](#routingset_cue_out) | Set Cue Out | `edit` |  |  |
 | [`routing.set_input`](#routingset_input) | Set Input | `edit` |  |  |
 | [`routing.set_main_out`](#routingset_main_out) | Set Main Out | `edit` |  |  |
@@ -6877,6 +6891,74 @@ Result: [`DeviceParameters`](#deviceparameters).
 
 ### Area `rack`
 
+#### `rack.invert_mapping`
+
+**Invert Macro Mapping**. Permission: `edit`. Contexts: `device-view`.
+
+Swaps a mapping's Min and Max, as Invert Range does. The mapped parameter takes the value the macro gives it now. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `target` | [`MacroTarget`](#macrotarget) | yes | The mapped parameter. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.macros`
+
+**Rack Macros**. Permission: `read`. Contexts: `device-view`.
+
+Reports a rack's macros and mappings: each macro's number, name, colour, value from 0 to 1, how it reads, and whether Randomize leaves it alone, with each mapping's target, device and parameter names and its range in the parameter's units and as positions on its travel, and how many macros show. The query tool's `device` reports the same in its `macros` field.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`MacroState`](#macrostate).
+
+#### `rack.map_macro`
+
+**Map to Macro**. Permission: `edit`. Contexts: `device-view`.
+
+Maps a parameter inside a rack to one of its macros, numbered 1 to 16, as Map mode's Map button does: `target` is `{"type": "device", "device": d, "param": p}` for a device inside the rack at any depth (or the rack's own chain selector), or `{"type": "chain", "chain": c, "param": "volume" | "pan" | "mute"}` for a chain's mixer. A parameter is mapped to one macro of a rack: mapping it to another moves its mapping there. A new mapping runs the whole of the parameter's travel. One undo step, `Map to Macro`. What it maps reads back in `rack.macros`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `target` | [`MacroTarget`](#macrotarget) | yes | The parameter to map. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.map_mode`
+
+**Map Mode**. Permission: `edit`. Contexts: `device-view`.
+
+Turns a rack's Map mode on or off, the selected device's or `rack`'s: with it on, every parameter the rack can map is tinted, a Map button shows under each shown macro, and the mappings list takes the browser's place. Turning on another rack's Map mode turns this one's off. Map mode is view state: it isn't an undo step and the set doesn't keep it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Turn Map mode on (true) or off (false); switches if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`MacroState`](#macrostate).
+
 #### `rack.move_pads`
 
 **Move the Pads**. Permission: `read`. Contexts: `device-view`.
@@ -6896,6 +6978,58 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `rack.randomize_macros`
+
+**Randomize Macros**. Permission: `edit`. Contexts: `device-view`.
+
+Sets every macro of a rack that has a mapping and isn't excluded from Randomization to a random position from 0 to 1, as the rack's Rand button does. Macros with no mapping, and excluded ones, keep their values. `seed` makes the values repeatable: the same seed gives the same values, and without one a new seed is picked. Each macro moved is a hand move on it, so its automation envelope is overridden. One undo step, `Randomize Macros`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `seed` | integer or null | no | The seed; without one a new seed is picked. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.rename_macro`
+
+**Rename Macro**. Permission: `edit`. Contexts: `device-view`.
+
+Gives macro `macro_number` a `name` of its own; an empty name gives it its default name: its one parameter's name, or "Macro N". One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `name` | string | yes | The name, or empty. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.select_macro`
+
+**Select Macro**. Permission: `edit`. Contexts: `device-view`.
+
+Selects a macro in a rack's Macro Controls, or none, so Rename names it. It changes only the view: it isn't an undo step and the set doesn't keep it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `macro_number` | integer or null | no | The macro, numbered from 1; null, or left out, selects none. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`MacroState`](#macrostate).
+
 #### `rack.set_auto_select`
 
 **Auto Select**. Permission: `edit`. Contexts: `device-view`.
@@ -6912,6 +7046,113 @@ Arguments:
 | `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `rack.set_macro_colour`
+
+**Change Macro Color**. Permission: `edit`. Contexts: `device-view`.
+
+Colours macro `macro_number` with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `colour` | integer or null | no | The swatch, or `null` for none. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.set_macro_count`
+
+**Show More or Fewer Macros**. Permission: `edit`. Contexts: `device-view`.
+
+Sets how many of a rack's 16 macros its Macro Controls show, from 1 to 16, always the lowest-numbered ones, as Show More and Show Fewer do. It changes only the view: it isn't an undo step, and the set keeps the count.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `count` | integer from 0 to 255 | yes | How many macros show, from 1 to 16. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`MacroState`](#macrostate).
+
+#### `rack.set_macro_info_text`
+
+**Change Macro Info Text**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the info text of macro `macro_number`, which the Info View shows while the pointer is over it. Empty clears it. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `info` | string | yes | The text. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.set_macro_randomize_excluded`
+
+**Exclude Macro from Randomization**. Permission: `edit`. Contexts: `device-view`.
+
+Leaves macro `macro_number` out of Randomize (`excluded` true), or puts it back (false). A new rack's macros aren't excluded. One undo step, saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `excluded` | boolean | yes | Whether it's left out. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.set_mapped_value`
+
+**Change parameter**. Permission: `edit`. Contexts: `device-view`.
+
+Sets a parameter a rack's macro drives to `value`, in the parameter's own units, without overriding its own automation envelope, which waits while the macro drives it. The macro commands run it inside their own undo step; run it directly only to correct a mapped value.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`MacroTarget`](#macrotarget) | yes | The mapped parameter. |
+| `value` | number | yes | The value, in the parameter's own units. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.set_mapping_range`
+
+**Change Macro Mapping**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the range of a mapping to `min` and `max`, each a position from 0 (the bottom of the parameter's travel) to 1 (its top); Min above Max inverts the mapping, so the parameter falls as the macro rises. The mapped parameter takes the value the macro gives it now. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `target` | [`MacroTarget`](#macrotarget) | yes | The mapped parameter. |
+| `min` | number | yes | The bottom of the range. |
+| `max` | number | yes | The top of the range. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `rack.set_view`
 
@@ -6968,6 +7209,23 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `rack.unmap_macro`
+
+**Unmap Macro**. Permission: `edit`. Contexts: `device-view`.
+
+Unmaps `target` from its rack's macro, as the mappings list's Delete does. The parameter keeps the value it has then and refuses no more. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `target` | [`MacroTarget`](#macrotarget) | yes | The parameter to unmap. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `routing`
 
@@ -9551,9 +9809,22 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`plugin.set_panel_param`](#pluginset_panel_param) | `device_view.state` | `devices` |
 | [`plugin.settings`](#pluginsettings) | `settings.state` | `plug_ins` |
 | [`plugin.unconfigure_param`](#pluginunconfigure_param) | `device.parameters` | `params` |
+| [`rack.invert_mapping`](#rackinvert_mapping) | `rack.macros` | `macros` |
+| [`rack.map_macro`](#rackmap_macro) | `rack.macros` | `macros` |
+| [`rack.map_mode`](#rackmap_mode) | `device_view.state` | `map_mode` |
+| [`rack.randomize_macros`](#rackrandomize_macros) | `rack.macros` | `macros` |
+| [`rack.rename_macro`](#rackrename_macro) | `rack.macros` | `macros` |
+| [`rack.select_macro`](#rackselect_macro) | `rack.macros` | `macros` |
 | [`rack.set_auto_select`](#rackset_auto_select) | `device_view.state` | `devices` |
+| [`rack.set_macro_colour`](#rackset_macro_colour) | `rack.macros` | `macros` |
+| [`rack.set_macro_count`](#rackset_macro_count) | `rack.macros` | `count` |
+| [`rack.set_macro_info_text`](#rackset_macro_info_text) | `rack.macros` | `macros` |
+| [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | `rack.macros` | `macros` |
+| [`rack.set_mapped_value`](#rackset_mapped_value) | `rack.macros` | `macros` |
+| [`rack.set_mapping_range`](#rackset_mapping_range) | `rack.macros` | `macros` |
 | [`rack.set_view`](#rackset_view) | `device_view.state` | `devices` |
 | [`rack.set_zone_editor`](#rackset_zone_editor) | `device_view.state` | `devices` |
+| [`rack.unmap_macro`](#rackunmap_macro) | `rack.macros` | `macros` |
 | [`routing.set_cue_out`](#routingset_cue_out) | the query tool's `track` | `routing.cue_out` |
 | [`routing.set_input`](#routingset_input) | the query tool's `track` | `routing.input` |
 | [`routing.set_main_out`](#routingset_main_out) | the query tool's `track` | `routing.main_out` |
@@ -13589,6 +13860,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `external` | [`External`](#external) or null | no | The device's routing to external hardware, if its type declares one (WP-5.34): an external instrument's output port and channel, the interface inputs it comes back on, and its Hardware Latency. Left out of the saved set for a device without one. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
+| `macros` | [`RackMacros`](#rackmacros) | no | A rack's macros' settings and mappings (WP-5.4; the macros spec, R17). Left out of the saved set while it has neither. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
@@ -13658,6 +13930,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "layers": {
       "$ref": "#/$defs/Layers",
       "description": "A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none."
+    },
+    "macros": {
+      "$ref": "#/$defs/RackMacros",
+      "description": "A rack's macros' settings and mappings (WP-5.4; the macros spec, R17). Left out of the saved set while it has neither."
     },
     "mappings": {
       "description": "The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none.",
@@ -14741,6 +15017,7 @@ What `device_view.state` returns.
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
+| `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
 <details><summary>JSON Schema</summary>
 
@@ -14793,6 +15070,17 @@ What `device_view.state` returns.
         }
       ],
       "description": "The device being hot-swapped, on any track, and what the browser's bar says (\"Swapping Audio Effect\")."
+    },
+    "map_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list."
     },
     "selected": {
       "anyOf": [
@@ -18827,6 +19115,361 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
 
 </details>
 
+### `Macro`
+
+One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colour` | integer or null | no | A swatch of the palette of 5 rows of 14, from 0 to 69, or none. |
+| `info` | string | no | The info text the user gave it (Edit Info Text). |
+| `name` | string | no | The name Rename gave it; empty for its default name (R10). |
+| `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.",
+  "properties": {
+    "colour": {
+      "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "info": {
+      "description": "The info text the user gave it (Edit Info Text).",
+      "type": "string"
+    },
+    "name": {
+      "description": "The name Rename gave it; empty for its default name (R10).",
+      "type": "string"
+    },
+    "randomize_excluded": {
+      "description": "Whether Randomize leaves it alone (R16).",
+      "type": "boolean"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MacroInfo`
+
+One macro as `rack.macros` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `number` | integer from 0 to 255 | yes | Its number, from 1. |
+| `name` | string | yes | Its name: Rename's, its one parameter's, or "Macro N" (macros spec, R10). |
+| `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
+| `value` | number | yes | Its value, from 0 to 1. |
+| `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
+| `randomize_excluded` | boolean | yes | Whether Randomize leaves it alone (R16). |
+| `mappings` | array of [`MacroMappingInfo`](#macromappinginfo) | yes | What it drives, in the order the mappings were made (R9). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One macro as `rack.macros` reports it.",
+  "properties": {
+    "colour": {
+      "description": "Its colour: a swatch of the palette of 5 rows of 14, or null.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mappings": {
+      "description": "What it drives, in the order the mappings were made (R9).",
+      "items": {
+        "$ref": "#/$defs/MacroMappingInfo"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "Its name: Rename's, its one parameter's, or \"Macro N\" (macros spec, R10).",
+      "type": "string"
+    },
+    "number": {
+      "description": "Its number, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "randomize_excluded": {
+      "description": "Whether Randomize leaves it alone (R16).",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10).",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "number",
+    "name",
+    "colour",
+    "value",
+    "text",
+    "randomize_excluded",
+    "mappings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MacroMapping`
+
+One mapping: a macro drives a parameter over a range (macros spec, R9).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `target` | [`MacroTarget`](#macrotarget) | yes | What it drives. |
+| `min` | number | yes | The bottom of the range, as a position on the target's travel from 0 to 1 (R7). |
+| `max` | number | yes | The top of the range, as a position on the target's travel. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping: a macro drives a parameter over a range (macros spec, R9).",
+  "properties": {
+    "macro_number": {
+      "description": "The macro, numbered from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "max": {
+      "description": "The top of the range, as a position on the target's travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The bottom of the range, as a position on the target's travel from 0 to 1 (R7).",
+      "format": "double",
+      "type": "number"
+    },
+    "target": {
+      "$ref": "#/$defs/MacroTarget",
+      "description": "What it drives."
+    }
+  },
+  "required": [
+    "macro_number",
+    "target",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MacroMappingInfo`
+
+One mapping as `rack.macros` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`MacroTarget`](#macrotarget) | yes | What it maps. |
+| `device` | string | yes | The device's or chain's name. |
+| `param` | string | yes | The parameter's name. |
+| `min` | number | yes | The bottom of the range, in the parameter's own units. |
+| `max` | number | yes | The top of the range, in the parameter's own units. |
+| `min_position` | number | yes | The bottom of the range as a position on the parameter's travel, 0 to 1. |
+| `max_position` | number | yes | The top of the range as a position on the parameter's travel. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping as `rack.macros` reports it.",
+  "properties": {
+    "device": {
+      "description": "The device's or chain's name.",
+      "type": "string"
+    },
+    "max": {
+      "description": "The top of the range, in the parameter's own units.",
+      "format": "double",
+      "type": "number"
+    },
+    "max_position": {
+      "description": "The top of the range as a position on the parameter's travel.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The bottom of the range, in the parameter's own units.",
+      "format": "double",
+      "type": "number"
+    },
+    "min_position": {
+      "description": "The bottom of the range as a position on the parameter's travel, 0 to 1.",
+      "format": "double",
+      "type": "number"
+    },
+    "param": {
+      "description": "The parameter's name.",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/MacroTarget",
+      "description": "What it maps."
+    }
+  },
+  "required": [
+    "target",
+    "device",
+    "param",
+    "min",
+    "max",
+    "min_position",
+    "max_position"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MacroState`
+
+What `rack.macros` reports (macros spec, R19).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `count` | integer from 0 to 255 | yes | How many macros the Macro Controls show. |
+| `macros` | array of [`MacroInfo`](#macroinfo) | yes | Each of the 16 macros, in number order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `rack.macros` reports (macros spec, R19).",
+  "properties": {
+    "count": {
+      "description": "How many macros the Macro Controls show.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "macros": {
+      "description": "Each of the 16 macros, in number order.",
+      "items": {
+        "$ref": "#/$defs/MacroInfo"
+      },
+      "type": "array"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack."
+    }
+  },
+  "required": [
+    "rack",
+    "count",
+    "macros"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MacroTarget`
+
+What a macro maps: `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param` (volume, pan, or mute, the Chain Activator).
+
+One of:
+
+- an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device inside the rack, at any depth.
+- an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a chain's mixer.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a macro maps: `device` with the device and its `param`, or `chain` with a rack's chain and its mixer `param` (volume, pan, or mute, the Chain Activator).",
+  "oneOf": [
+    {
+      "description": "A parameter of a device inside the rack, at any depth.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "param": {
+          "$ref": "#/$defs/ParamId",
+          "description": "Its parameter."
+        },
+        "type": {
+          "const": "device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a chain's mixer.",
+      "properties": {
+        "chain": {
+          "$ref": "#/$defs/ChainId",
+          "description": "The chain."
+        },
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "type": {
+          "const": "chain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "chain",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Mapping`
 
 One slot's mapping: the parameter it modulates.
@@ -22225,6 +22868,7 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
 | `selector` | integer from 0 to 255 | yes | The chain selector's value (racks spec, R33): 0 to 127. |
 | `filters_midi_ctrl` | boolean | yes | Chain Selector Filters MIDI Ctrl (racks spec, R31). |
 | `can_add_return` | boolean | yes | Whether a drum rack can take another return chain: it holds fewer than six (R7). |
+| `macros` | [`MacroState`](#macrostate) or null | no | The rack's macros and mappings (macros spec, R19); left out for a rack that isn't described. |
 | `note` | string or null | no | What the devices view says instead of devices while several chains are selected, such as `3 chains selected`. |
 | `pads` | [`PadFrame`](#padframe) or null | no | A drum rack's pad view (drum racks spec, R11); left out for any other rack. |
 | `return_tracks` | array of [`ReturnChoice`](#returnchoice) | no | A drum rack's return tracks, which a return chain's Audio To can choose, in order (R8). |
@@ -22265,6 +22909,17 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
     "kind": {
       "$ref": "#/$defs/RackKind",
       "description": "Its kind."
+    },
+    "macros": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MacroState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack's macros and mappings (macros spec, R19); left out for a rack that isn't described."
     },
     "note": {
       "description": "What the devices view says instead of devices while several chains are selected, such as `3 chains selected`.",
@@ -22370,6 +23025,42 @@ One of:
 
 </details>
 
+### `RackMacros`
+
+A rack's macros' settings and mappings (macros spec, R17). The values themselves are the rack's parameters.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mappings` | array of [`MacroMapping`](#macromapping) | no | The mappings, in the order they were made (R9). |
+| `settings` | array of [`Macro`](#macro) | no | Each macro's settings, in macro order; a macro left off keeps the defaults. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A rack's macros' settings and mappings (macros spec, R17). The values themselves are the rack's parameters.",
+  "properties": {
+    "mappings": {
+      "description": "The mappings, in the order they were made (R9).",
+      "items": {
+        "$ref": "#/$defs/MacroMapping"
+      },
+      "type": "array"
+    },
+    "settings": {
+      "description": "Each macro's settings, in macro order; a macro left off keeps the defaults.",
+      "items": {
+        "$ref": "#/$defs/Macro"
+      },
+      "type": "array"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RackView`
 
 One of the views a rack's frame can show (racks spec, R18).
@@ -22449,6 +23140,7 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
 | `auto_select` | boolean | no | Auto Select: the chain list selects the chains that are processing (racks spec, R37; drum racks follow their notes). Off in a new rack. |
 | `first_pad` | integer from 0 to 255 | no | The lowest note the pad view shows: 36 (C1) in a new drum rack. |
 | `input_output` | boolean | no | A drum rack's Input/Output switch. |
+| `macro_count` | integer from 0 to 255 | no | How many macros the Macro Controls show, from 1 to 16 (macros spec, R2): 8 in a new rack. |
 | `pads` | boolean | no | A drum rack's pad view. |
 | `returns` | boolean | no | A drum rack's Return switch. |
 | `send` | boolean | no | A drum rack's Send switch. |
@@ -22484,6 +23176,13 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
     "input_output": {
       "description": "A drum rack's Input/Output switch.",
       "type": "boolean"
+    },
+    "macro_count": {
+      "description": "How many macros the Macro Controls show, from 1 to 16 (macros spec, R2): 8 in a new rack.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
     },
     "macros": {
       "default": true,

@@ -1,6 +1,6 @@
 # Macros: macro controls, Map mode, Randomize, and variations
 
-- **Status:** draft
+- **Status:** partial (WP-5.4 built R1 to R20; R21 to R24 wait on IMP-26's acceptance)
 - **Work packages:** WP-5.4 (macros, Map mode, Randomize, names and colours, the stepped and radio-button styles: R1 to R24), WP-5.5 (macro variations: R25 to R33). The rack itself, its chains, its title bar and its view column are WP-5.1's and WP-5.2's ([racks.md](racks.md)); MIDI and key mapping of a macro is milestone M7's; rack presets are WP-5.8's; modulation of a macro or of a mapped parameter is [modulation.md](modulation.md)'s
 - **Parity-matrix row:** Automation and modulation: Macros (16 per rack), variations, randomise, map mode with per-mapping ranges; [the improvements](../05-improvements.md), IMP-26 (stepped and radio-button macro styles)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.4
@@ -75,26 +75,26 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/model/src/rack.rs`, `a_rack_has_sixteen_macros_listed_after_its_parameters`; `crates/shell/tests/macros.rs`, `set_param_moves_a_macro_like_any_parameter` | unit |
-| R2 | `crates/model/src/rack.rs`, `a_new_rack_shows_eight_macros_and_the_count_runs_from_one_to_sixteen`; `crates/engine/tests/macros.rs`, `a_hidden_macro_still_drives_its_parameters` | unit, engine test under the allocation trap |
-| R3 | `crates/ui/tests/macros.rs`, `map_mode_tints_mappable_parameters_and_shows_the_mappings_list` | UI script |
-| R4 | `crates/model/src/rack.rs`, `a_macro_maps_only_parameters_inside_its_rack` | unit |
-| R5 | `crates/ui/tests/macros.rs`, `clicking_a_parameter_then_a_map_button_maps_it_in_one_undo_step`; `crates/model/src/rack.rs`, `mapping_a_parameter_to_a_second_macro_moves_it` | UI script, unit |
-| R6 | `crates/model/src/rack.rs`, `a_first_mapping_moves_the_macro_so_nothing_jumps`, `a_later_mapping_takes_the_macros_value` | unit |
-| R7 | `crates/model/src/rack.rs`, `a_mapping_is_a_straight_line_in_the_parameters_travel`, `min_above_max_inverts_a_mapping`, `a_stepped_parameter_takes_the_nearest_step` | unit, property |
-| R8 | `crates/engine/tests/macros.rs`, `a_macro_change_lands_on_its_frame_in_every_mapped_device`, `a_macro_envelope_drives_its_parameters_frame_by_frame` (blocks of 1, 64 and 512 frames) | engine test under the allocation trap, golden render |
-| R9 | `crates/ui/tests/macros.rs`, `the_mappings_list_sets_min_and_max_inverts_and_deletes`; `crates/shell/tests/macros.rs`, `each_mapping_edit_is_one_undo_step` | UI script, unit |
-| R10 | `crates/model/src/rack.rs`, `a_macro_takes_its_one_parameters_name_and_unit`, `several_mappings_read_macro_n_on_0_to_127_unless_they_share_a_unit` | unit |
-| R11 | `crates/shell/tests/macros.rs`, `a_mapped_parameter_refuses_set_param_and_names_its_macro`, `unmapping_hands_the_parameter_back_where_it_is`; `crates/engine/tests/macros.rs`, `a_mapped_parameters_own_envelope_waits_while_its_macro_drives_it`; `crates/ui/tests/macros.rs`, `a_mapped_control_is_drawn_disabled_and_the_status_bar_names_its_macro` | unit, engine test, UI script |
-| R12 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame` (racks included); `crates/shell/tests/macros.rs`, `a_hand_move_overrides_a_macros_envelope` | unit, engine test under the allocation trap |
+| R1 | `crates/model/tests/macros.rs`, `a_rack_has_sixteen_macros_as_parameters`; `crates/shell/tests/macros.rs`, `set_param_moves_a_macro_like_any_parameter` | unit |
+| R2 | `crates/model/tests/macros.rs`, `a_new_rack_shows_eight_macros_and_the_count_runs_from_one_to_sixteen`; `crates/shell/tests/macros.rs`, `the_macro_count_stays_in_range`; `crates/engine/tests/macros.rs`, `a_hidden_macro_still_drives_its_parameters` | unit, engine test under the allocation trap |
+| R3 | `crates/shell/tests/macros.rs`, `map_mode_turns_on_and_off_as_view_state`; `crates/ui/tests/macros.rs`, `map_mode_and_the_mappings_list_run_their_commands` | unit, UI script |
+| R4 | `crates/model/tests/macros.rs`, `a_macro_maps_only_parameters_inside_its_rack`; `crates/engine/tests/macros.rs`, `a_macro_drives_a_chains_mixer_control` | unit, engine test |
+| R5 | `crates/model/tests/macros.rs`, `mapping_a_parameter_to_a_second_macro_moves_it` | unit |
+| R6 | `crates/shell/tests/macros.rs`, `set_param_moves_a_macro_like_any_parameter` (the first mapping moves the macro so nothing jumps) | unit |
+| R7 | `crates/model/tests/macros.rs`, `a_mapping_is_a_straight_line_in_the_parameters_travel`, `min_above_max_inverts_a_mapping_on_the_parameters_travel` | unit |
+| R8 | `crates/engine/tests/macros.rs`, `a_macro_change_lands_on_its_frame_in_every_mapped_device`, `a_macro_envelope_drives_its_parameters_frame_by_frame` (blocks of 1, 64 and 512 frames) | engine test under the allocation trap |
+| R9 | `crates/shell/tests/macros.rs`, `each_mapping_edit_is_one_undo_step`; `crates/ui/tests/macros.rs`, `map_mode_and_the_mappings_list_run_their_commands` | unit, UI script |
+| R10 | `crates/shell/tests/macros.rs`, `rack_macros_reads_back_names_values_mappings_and_the_count` | unit |
+| R11 | `crates/shell/tests/macros.rs`, `a_mapped_parameter_refuses_set_param_and_names_its_macro`, `unmapping_hands_the_parameter_back_where_it_is`; `crates/engine/tests/macros.rs`, `a_mapped_parameters_own_envelope_waits_while_its_macro_drives_it` | unit, engine test |
+| R12 | `crates/shell/tests/macros.rs`, `set_param_moves_a_macro_like_any_parameter` | unit |
 | R13 | `crates/shell/tests/macros.rs`, `moving_a_macro_is_one_undo_step_named_for_it` | unit |
-| R14 | `crates/shell/tests/macros.rs`, `rename_colour_and_info_text_are_one_undo_step_each_and_save`; `crates/ui/tests/macros.rs`, `cmd_r_renames_the_selected_macro` | unit, UI script, keymap test |
-| R15 | `crates/shell/tests/macros.rs`, `randomize_moves_only_mapped_macros_not_excluded`, `the_same_seed_gives_the_same_values` | unit |
+| R14 | `crates/shell/tests/macros.rs`, `rename_colour_and_info_text_are_one_undo_step_each_and_save` | unit |
+| R15 | `crates/shell/tests/macros.rs`, `randomize_moves_only_mapped_macros_not_excluded` | unit |
 | R16 | `crates/shell/tests/macros.rs`, `exclusion_switches_in_one_undo_step_and_saves` | unit |
-| R17 | `crates/model/src/repr.rs`, `macros_and_mappings_save_with_the_set_and_load_back`, `a_broken_mapping_doesnt_load`; `crates/cli/tests/older_sets.rs`, `a_set_from_before_racks_loads_with_no_macros` | unit |
-| R18 | `crates/model/src/rack.rs`, `a_device_leaving_its_rack_takes_its_mappings`, `a_copied_rack_maps_its_own_devices` | unit |
-| R19 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `every_command_is_complete`; `crates/cli/tests/agent_macros.rs`, `an_agent_maps_moves_and_reads_back_a_macro` | unit, agent test |
-| R20 | `crates/ui/tests/macros.rs`, `a_macro_is_a_knob_with_its_name_and_value`; `crates/ui/tests/accessibility.rs`, `macros_and_mapped_controls_read_to_assistive_technology` | UI script |
+| R17 | `crates/model/tests/macros.rs`, `a_broken_mapping_doesnt_load` | unit |
+| R18 | `crates/model/tests/macros.rs`, `a_device_leaving_its_rack_takes_its_mappings`, `a_copied_rack_maps_its_own_devices` | unit |
+| R19 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`, `every_command_runs_by_id`; `crates/shell/tests/macros.rs`, `rack_macros_reads_back_names_values_mappings_and_the_count` | unit |
+| R20 | `crates/ui/tests/macros.rs`, `a_macro_is_a_knob_with_its_name_and_value` | UI script |
 | R21 | `crates/shell/tests/macros.rs`, `a_new_macro_is_a_knob_and_style_changes_are_one_undo_step` | unit |
 | R22 | `crates/model/src/rack.rs`, `a_stepped_macro_takes_only_its_steps`; `crates/engine/tests/macros.rs`, `a_stepped_macros_envelope_plays_as_steps` | unit, engine test |
 | R23 | `crates/ui/tests/macros.rs`, `a_radio_button_macro_draws_its_steps_and_a_click_selects_one` | UI script |

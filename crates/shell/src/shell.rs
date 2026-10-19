@@ -238,6 +238,9 @@ pub enum Effect {
     /// Start renaming a chain in its row of the chain list; Return runs
     /// `chain.rename` with the new name (WP-5.2).
     RenameChain(bl_model::ChainId),
+    /// Start renaming a macro in its Macro Controls slot; Return runs
+    /// `rack.rename_macro` with the new name (WP-5.4).
+    RenameMacro(bl_model::DeviceId, u8),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -720,6 +723,33 @@ const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long a MIDI indicator stays lit after a message.
 const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// The macro edit a document command makes, so the shell writes the values
+/// its law gives each mapped parameter in the same undo step (macros spec,
+/// R13).
+enum MacroEdit {
+    /// A macro moved by `device.set_param`, named in the undo step.
+    Macro {
+        rack: bl_model::DeviceId,
+        number: u8,
+        label: String,
+    },
+    /// A new mapping: `first` holds the target's value before it, when the
+    /// macro had no mapping yet (R6).
+    Mapping {
+        rack: bl_model::DeviceId,
+        number: u8,
+        target: bl_model::MacroTarget,
+        first: Option<f64>,
+    },
+    /// A mapping's range changed (R9).
+    Target {
+        rack: bl_model::DeviceId,
+        target: bl_model::MacroTarget,
+    },
+    /// Randomize set the mapped macros (R15).
+    Randomize { rack: bl_model::DeviceId },
+}
 
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
@@ -5717,6 +5747,13 @@ impl Shell {
             }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
+                // Spec: macros R14. With a macro selected, Rename names it,
+                // not the device.
+                if let Some((rack, number)) = self.devices.macro_selected() {
+                    self.effects.push(Effect::RenameMacro(rack, number));
+                    self.touch();
+                    return Ok(Value::Null);
+                }
                 let device = serde_json::from_value(args["device"].clone()).map_err(|error| {
                     ShellError::InvalidArgs {
                         command: id.to_owned(),
@@ -5742,6 +5779,18 @@ impl Shell {
                         reason: "select a chain first".to_owned(),
                     })?;
                 self.effects.push(Effect::RenameChain(chain));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "rack.rename_macro" if !has("name") => {
+                let (rack, number) =
+                    self.devices
+                        .macro_selected()
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select a macro first".to_owned(),
+                        })?;
+                self.effects.push(Effect::RenameMacro(rack, number));
                 self.touch();
                 Ok(Value::Null)
             }
@@ -5874,6 +5923,159 @@ impl Shell {
     ///
     /// If the edit names media it can't use, or needs an analysis that isn't
     /// ready.
+    /// Runs an edit through `bl_model::registry::run`, inside a transaction
+    /// named for the macro when the command moves one, and writes the values
+    /// the macro law gives each mapped parameter before the step closes
+    /// (macros spec, R13).
+    fn run_document_edit(&mut self, id: &str, args: Value) -> Result<ChangeSet, ShellError> {
+        let command = model::command_from_args(id, args.clone()).ok();
+        // Spec: macros R11. A mapped parameter belongs to its macro: its own
+        // control and `device.set_param` are refused, naming the macro.
+        if let Some(bl_model::Command::SetDeviceParam { device, param, .. }) = &command
+            && let Some(name) = self
+                .devices
+                .macro_holding(self.editor.document(), *device, *param)
+        {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: format!(
+                    "{device}'s parameter {} is held by macro \"{name}\"",
+                    param.0
+                ),
+            });
+        }
+        let edit = command
+            .as_ref()
+            .and_then(|command| self.macro_edit(command));
+        let Some(edit) = edit else {
+            return model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: error.to_string(),
+            });
+        };
+        let label = match &edit {
+            MacroEdit::Macro { label, .. } => std::borrow::Cow::Owned(label.clone()),
+            _ => std::borrow::Cow::Borrowed(
+                command
+                    .as_ref()
+                    .map_or("Change macros", bl_model::Command::label),
+            ),
+        };
+        self.editor.begin(label);
+        let changes = match model::run(&mut self.editor, id, args) {
+            Ok(changes) => changes,
+            Err(error) => {
+                self.editor.cancel().ok();
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: error.to_string(),
+                });
+            }
+        };
+        let updates = self.macro_edit_commands(&edit);
+        for update in &updates {
+            if let Err(error) = self.editor.apply(update.clone()) {
+                self.editor.cancel().ok();
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: error.to_string(),
+                });
+            }
+        }
+        self.editor.commit().ok();
+        Ok(changes)
+    }
+
+    /// The macro edit `command` makes, if it makes one.
+    fn macro_edit(&self, command: &bl_model::Command) -> Option<MacroEdit> {
+        let doc = self.editor.document();
+        match command {
+            bl_model::Command::SetDeviceParam { device, param, .. } => {
+                let number = bl_model::macro_number(*param)?;
+                let rack = doc.device(*device)?;
+                rack.rack_kind()?;
+                let name = self.devices.macro_name(doc, rack, number);
+                Some(MacroEdit::Macro {
+                    rack: *device,
+                    number,
+                    label: format!("Change \"{name}\""),
+                })
+            }
+            bl_model::Command::MapMacro {
+                rack,
+                macro_number,
+                target,
+            } => {
+                let device = doc.device(*rack)?;
+                let first = device.macros.mappings_of(*macro_number).next().is_none();
+                let before = first
+                    .then(|| self.devices.target_value(doc, *target))
+                    .flatten();
+                Some(MacroEdit::Mapping {
+                    rack: *rack,
+                    number: *macro_number,
+                    target: *target,
+                    first: before,
+                })
+            }
+            bl_model::Command::SetMappingRange { rack, target, .. }
+            | bl_model::Command::InvertMapping { rack, target } => Some(MacroEdit::Target {
+                rack: *rack,
+                target: *target,
+            }),
+            bl_model::Command::RandomizeMacros { rack, .. } => {
+                Some(MacroEdit::Randomize { rack: *rack })
+            }
+            _ => None,
+        }
+    }
+
+    /// The commands that write the values `edit` gives the parameters it
+    /// maps, after the edit itself has run.
+    fn macro_edit_commands(&self, edit: &MacroEdit) -> Vec<bl_model::Command> {
+        let doc = self.editor.document();
+        match edit {
+            MacroEdit::Macro { rack, number, .. } => {
+                doc.device(*rack).map_or_else(Vec::new, |rack| {
+                    self.devices.macro_commands(doc, rack, *number)
+                })
+            }
+            MacroEdit::Mapping {
+                rack,
+                number,
+                target,
+                first,
+            } => {
+                let Some(device) = doc.device(*rack) else {
+                    return Vec::new();
+                };
+                if let Some(value) = first {
+                    // R6. The macro moves to the position that gives the
+                    // parameter the value it has, so nothing jumps.
+                    let Some(info) = self.devices.target_info(doc, *target) else {
+                        return Vec::new();
+                    };
+                    let position = info.travel.position(*value);
+                    vec![bl_model::Command::SetMappedValue {
+                        target: bl_model::MacroTarget::Device {
+                            device: *rack,
+                            param: bl_model::macro_param(*number),
+                        },
+                        value: position,
+                    }]
+                } else {
+                    self.devices.target_commands(doc, device, *target)
+                }
+            }
+            MacroEdit::Target { rack, target } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.target_commands(doc, rack, *target)
+            }),
+            MacroEdit::Randomize { rack } => doc
+                .device(*rack)
+                .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+        }
+    }
+
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
         self.prepare_warping(id, args)
@@ -6069,11 +6271,7 @@ impl Shell {
                     )?;
                     Some((track, target, before, value))
                 });
-            let changes =
-                model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
-                    command: id.to_owned(),
-                    message: error.to_string(),
-                })?;
+            let changes = self.run_document_edit(id, args)?;
             // Spec: sample-editor R11. An edit in the Sample Editor pauses
             // Follow until playback starts or stops.
             if sample_edit_command(id) {

@@ -217,7 +217,6 @@ impl ChorusEnsemble {
 }
 
 impl NativeDevice for ChorusEnsemble {
-    #[allow(clippy::needless_range_loop)]
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);

@@ -49,7 +49,7 @@ pub const FLANGER_TIME: ParamId = ParamId(11);
 /// Doubler Time: base delay time in milliseconds.
 pub const DOUBLER_TIME: ParamId = ParamId(12);
 
-/// LFO Wave: one of [`Wave::ALL`].
+/// LFO Wave: one of [`WAVES`].
 pub const LFO_WAVE: ParamId = ParamId(13);
 /// LFO Mode: Hz or Sync.
 pub const LFO_MODE: ParamId = ParamId(14);
@@ -87,6 +87,34 @@ pub const ENV_RELEASE: ParamId = ParamId(28);
 /// Safe Bass: cutoff frequency of high-pass filter on wet path in Hz.
 pub const SAFE_BASS: ParamId = ParamId(29);
 
+/// The main LFO's waves, in the chooser's order, under the manual's names.
+pub const WAVES: [&str; 10] = [
+    "Sine",
+    "Triangle",
+    "Saw Up",
+    "Saw Down",
+    "Rectangle",
+    "Random",
+    "Random S&H",
+    "Triangle Analog",
+    "Triangle 8",
+    "Triangle 16",
+];
+
+/// The effects LFO's waves the chooser's [`WAVES`] play, in order.
+const WAVE_OF: [Wave; 10] = [
+    Wave::Sine,
+    Wave::Triangle,
+    Wave::SawUp,
+    Wave::SawDown,
+    Wave::Rectangle,
+    Wave::Random,
+    Wave::SampleHold,
+    Wave::TriangleAnalog,
+    Wave::Triangle8,
+    Wave::Triangle16,
+];
+
 pub const MODES: [&str; 3] = ["Phaser", "Flanger", "Doubler"];
 pub const RATE_MODES: [&str; 2] = ["Hz", "Sync"];
 pub const STEREO_MODES: [&str; 2] = ["Phase", "Spin"];
@@ -117,7 +145,6 @@ const MAX_DELAY_SECS: f64 = 0.5;
 /// Phaser-Flanger's device type.
 #[must_use]
 pub fn phaser_flanger_type() -> DeviceType {
-    let waves: Vec<&str> = Wave::ALL.iter().map(|w| w.name()).collect();
     let divisions: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
 
     let params = vec![
@@ -166,7 +193,7 @@ pub fn phaser_flanger_type() -> DeviceType {
             ParamUnit::Milliseconds,
         )
         .describe("Base delay time in Doubler mode."),
-        ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &waves, 1)
+        ParamDescriptor::choice(LFO_WAVE, "LFO Wave", &WAVES, 1)
             .describe("The waveform of the main LFO."),
         ParamDescriptor::choice(LFO_MODE, "LFO Mode", &RATE_MODES, 0)
             .describe("Whether the main LFO rate is in Hertz or tempo-synced."),
@@ -390,7 +417,6 @@ impl PhaserFlanger {
 }
 
 impl NativeDevice for PhaserFlanger {
-    #[allow(clippy::needless_range_loop)]
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);
@@ -420,7 +446,7 @@ impl NativeDevice for PhaserFlanger {
         let flanger_time_ms = val(FLANGER_TIME).clamp(0.05, 20.0);
         let doubler_time_ms = val(DOUBLER_TIME).clamp(5.0, 100.0);
 
-        let lfo_wave = Wave::from_index(val(LFO_WAVE).round() as usize);
+        let lfo_wave = WAVE_OF[(val(LFO_WAVE).round() as usize).min(WAVE_OF.len() - 1)];
         let lfo_mode_idx = val(LFO_MODE).round() as usize;
         let lfo_hz = val(LFO_HZ).clamp(0.01, 40.0);
         let lfo_div_idx = (val(LFO_DIVISION).round() as usize).min(DIVISIONS.len() - 1);
@@ -470,9 +496,9 @@ impl NativeDevice for PhaserFlanger {
 
         let output_ramp = ramp(OUTPUT);
 
-        // Update safe bass filters (2nd-order Linkwitz-Riley crossover)
-        let sb_hp_coeffs = lr2_hp_coeffs(safe_bass_hz, rate_f64);
-        let sb_lp_coeffs = lr2_lp_coeffs(safe_bass_hz, rate_f64);
+        // Update the Safe Bass crossover's two halves.
+        let sb_hp_coeffs = safe_bass_hp_coeffs(safe_bass_hz, rate_f64);
+        let sb_lp_coeffs = safe_bass_lp_coeffs(safe_bass_hz, rate_f64);
         for sb in &mut self.safe_bass_hp {
             sb.set(sb_hp_coeffs);
         }
@@ -604,30 +630,38 @@ fn allpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
     }
 }
 
-fn lr2_lp_coeffs(freq: f64, sample_rate: f64) -> Coeffs {
-    let w0 = (TAU * freq / sample_rate).clamp(1e-5, PI * 0.98);
-    let alpha = (w0.sin() / (2.0 * 0.5)).max(1e-6);
-    let a0 = 1.0 + alpha;
+/// The Safe Bass crossover's two halves, a first-order pair at the cutoff:
+/// the low band takes the input and the high band the wet signal, and the
+/// two sum to the signal again wherever the effect leaves it alone, so the
+/// dry/wet mix moves the low band neither out of phase nor out of the mix.
+/// (Beatlayer's own: the manual gives Safe Bass no slope.)
+fn safe_bass_lp_coeffs(freq: f64, sample_rate: f64) -> Coeffs {
+    let k = one_pole_k(freq, sample_rate);
+    let a = 1.0 / (1.0 + k);
     Coeffs {
-        b0: (-((1.0 - w0.cos()) / 2.0) / a0) as f32,
-        b1: (-(1.0 - w0.cos()) / a0) as f32,
-        b2: (-((1.0 - w0.cos()) / 2.0) / a0) as f32,
-        a1: ((-2.0 * w0.cos()) / a0) as f32,
-        a2: ((1.0 - alpha) / a0) as f32,
+        b0: (k * a) as f32,
+        b1: (k * a) as f32,
+        b2: 0.0,
+        a1: ((k - 1.0) * a) as f32,
+        a2: 0.0,
     }
 }
 
-fn lr2_hp_coeffs(freq: f64, sample_rate: f64) -> Coeffs {
-    let w0 = (TAU * freq / sample_rate).clamp(1e-5, PI * 0.98);
-    let alpha = (w0.sin() / (2.0 * 0.5)).max(1e-6);
-    let a0 = 1.0 + alpha;
+fn safe_bass_hp_coeffs(freq: f64, sample_rate: f64) -> Coeffs {
+    let k = one_pole_k(freq, sample_rate);
+    let a = 1.0 / (1.0 + k);
     Coeffs {
-        b0: (((1.0 + w0.cos()) / 2.0) / a0) as f32,
-        b1: (-(1.0 + w0.cos()) / a0) as f32,
-        b2: (((1.0 + w0.cos()) / 2.0) / a0) as f32,
-        a1: ((-2.0 * w0.cos()) / a0) as f32,
-        a2: ((1.0 - alpha) / a0) as f32,
+        b0: a as f32,
+        b1: (-a) as f32,
+        b2: 0.0,
+        a1: ((k - 1.0) * a) as f32,
+        a2: 0.0,
     }
+}
+
+/// The bilinear prewarp of a first-order section at `freq`.
+fn one_pole_k(freq: f64, sample_rate: f64) -> f64 {
+    (PI * freq / sample_rate).clamp(1e-5, PI * 0.49).tan()
 }
 
 fn lowpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {

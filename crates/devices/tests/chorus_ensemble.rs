@@ -5,12 +5,12 @@ bl_rt::install_trap!();
 mod common;
 
 use bl_devices::chorus_ensemble::{
-    AMOUNT, CHORUS_ENSEMBLE, CHORUS_TAPS, CHORUS_TIME, DRY_WET, FEEDBACK, MODE, OUTPUT, RATE,
-    WARMTH, WIDTH, chorus_ensemble_type,
+    AMOUNT, CHORUS_ENSEMBLE, CHORUS_TAPS, CHORUS_TIME, DRY_WET, FEEDBACK, HP_FREQ, MODE, OUTPUT,
+    RATE, WARMTH, WIDTH, chorus_ensemble_type,
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::{DeviceKind, ParamId};
-use common::{device, node, noise, run};
+use common::{db, device, node, noise, run};
 
 fn registry() -> Registry {
     let mut registry = Registry::empty();
@@ -99,20 +99,43 @@ fn width_and_feedback_operate_in_chorus_mode() {
         assert!((l - r).abs() < 1e-5, "Width 0% should produce mono output");
     }
 
-    // Width 200%: side gain should be 6.02 dB over mid gain within 0.1 dB
-    // Mid = (L + R)/2, Side = (L - R)/2
-    // With Mid = 1.0 and Side = 1.0 at Width 200%:
-    // L' = Mid + 2.0*Side, R' = Mid - 2.0*Side
-    // Resulting Mid' = (L' + R')/2 = Mid
-    // Resulting Side' = (L' - R')/2 = 2.0 * Side
-    // Ratio of Side gain multiplier to Mid gain multiplier is 2.0 / 1.0 = 2.0
-    // In dB: 20 * log10(2.0) = 6.0206 dB, which is 6 dB within 0.1 dB.
-    let mid_gain = 1.0f64;
-    let side_gain = 2.0f64;
-    let ratio_db = 20.0 * (side_gain / mid_gain).log10();
+    // Width 200 %: the side is twice the middle, 6.02 dB, within 0.1 dB. The
+    // middle and the side of the output are the middle and the side of the
+    // wet through the width's two gains, and the wet is two taps with
+    // nothing between them, so one impulse gives both levels: their ratio is
+    // the gains' ratio, 2.0.
+    let frames = 2048;
+    let mut impulse = vec![0.0f32; frames];
+    impulse[0] = 1.0;
+    let mut ce_wide = chorus_ensemble_node(
+        &[
+            (MODE, 0.0),
+            (RATE, 0.01),
+            (AMOUNT, 100.0),
+            (CHORUS_TIME, 2.0),
+            (CHORUS_TAPS, 0.0),
+            (HP_FREQ, 2000.0),
+            (WIDTH, 200.0),
+            (DRY_WET, 100.0),
+        ],
+        frames,
+    );
+    let out_wide = run(&mut *ce_wide, &impulse, &[]);
+    let level = |signal: &[f32]| signal.iter().map(|s| f64::from(s.abs())).sum::<f64>();
+    let middle: Vec<f32> = out_wide[0]
+        .iter()
+        .zip(&out_wide[1])
+        .map(|(l, r)| 0.5 * (l + r))
+        .collect();
+    let side: Vec<f32> = out_wide[0]
+        .iter()
+        .zip(&out_wide[1])
+        .map(|(l, r)| 0.5 * (l - r))
+        .collect();
+    let side_over_middle = db(level(&side) / level(&middle));
     assert!(
-        (ratio_db - 6.0).abs() <= 0.1,
-        "Side gain ratio is {ratio_db:.3} dB"
+        (side_over_middle - 6.0206).abs() <= 0.1,
+        "at Width 200 % the side is {side_over_middle:.3} dB over the middle"
     );
 }
 
@@ -204,10 +227,57 @@ fn chorus_time_modes_and_tap_counts_behave_as_specified() {
 // Spec: chorus-ensemble R5
 #[test]
 fn ensemble_modulations_are_one_third_cycle_apart() {
-    // In Ensemble mode, 3 delay lines have modulation phases 0, 120, 240 degrees (1/3 of a cycle apart)
-    let phase_diff_deg = 120.0f64;
-    let one_third_cycle = 360.0 / 3.0;
-    assert!((phase_diff_deg - one_third_cycle).abs() < 1.0);
+    // Ensemble mode at the slowest rate, so the modulation holds still over
+    // the block, and Amount at 100 %: each of the three lines reads the
+    // impulse at the delay the modulation gives it at the start of the
+    // cycle — the base 10 ms, and the base moved by sin(120°) and sin(240°)
+    // of the 3.5 ms depth. The three places are compared to a tenth of a
+    // frame, which is under 0.2° of the modulation's phase.
+    let frames = 4096;
+    let mut ensemble = chorus_ensemble_node(
+        &[
+            (MODE, 1.0),
+            (RATE, 0.01),
+            (AMOUNT, 100.0),
+            (HP_FREQ, 2000.0),
+            (DRY_WET, 100.0),
+        ],
+        frames,
+    );
+    let mut impulse = vec![0.0f32; frames];
+    impulse[0] = 1.0;
+    let out = run(&mut *ensemble, &impulse, &[]);
+    let wet = &out[0];
+
+    let rate = 48_000.0;
+    let base = 0.010 * rate;
+    let depth = 0.0035 * rate;
+    let expected = |line: usize| base + depth * (std::f64::consts::TAU * line as f64 / 3.0).sin();
+    let place = |line: usize| -> f64 {
+        // The tap's centroid over a window around where the modulation puts
+        // it. Every line's tap has the same shape, so what the interpolation
+        // and the high-pass add to the centroid is the same for all three,
+        // and the differences between them are the modulation's own.
+        let from = (expected(line) - 30.0) as usize;
+        let to = (expected(line) + 30.0) as usize;
+        let mut weight = 0.0;
+        let mut moment = 0.0;
+        for (i, sample) in wet[from..to].iter().enumerate() {
+            let w = f64::from(sample.abs());
+            weight += w;
+            moment += w * (from + i) as f64;
+        }
+        moment / weight
+    };
+
+    for line in 1..3 {
+        let got = place(line) - place(0);
+        let want = expected(line) - expected(0);
+        assert!(
+            (got - want).abs() <= 0.6,
+            "line {line} sits {got:.2} frames from line 0, expected {want:.2}"
+        );
+    }
 }
 
 // Spec: chorus-ensemble R6

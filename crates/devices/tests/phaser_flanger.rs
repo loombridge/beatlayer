@@ -6,11 +6,12 @@ mod common;
 
 use bl_devices::phaser_flanger::{
     AMOUNT, BLEND, CENTER, DOUBLER_TIME, DRY_WET, ENV_AMOUNT, ENV_ATTACK, ENV_ON, ENV_RELEASE,
-    FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO2_HZ, LFO2_MIX, MODE, NOTCHES,
-    OUTPUT, PHASER_FLANGER, SAFE_BASS, SPREAD, WARMTH, phaser_flanger_type, phaser_notch_freq,
+    FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO_WAVE, LFO2_HZ, LFO2_MIX, MODE,
+    NOTCHES, OUTPUT, PHASER_FLANGER, SAFE_BASS, SPREAD, WARMTH, WAVES, phaser_flanger_type,
+    phaser_notch_freq,
 };
 use bl_engine::{DeviceType, Node, Registry};
-use bl_model::{DeviceKind, ParamId};
+use bl_model::{DeviceKind, ParamId, ParamKind};
 use common::response::{db, impulse_response, response_at};
 use common::{device, node, noise, run};
 
@@ -288,6 +289,20 @@ fn main_lfo_duty_cycle_moves_delay_time_path() {
         .map(|(a, b)| (a - b).abs())
         .sum();
     assert!(diff > 1.0, "Duty cycle should change modulation trajectory");
+
+    // The chooser offers the manual's ten waves, with Triangle the default:
+    // the shared LFO's Shark Tooth and Wander are not among them.
+    let kind = phaser_flanger_type();
+    let wave = kind
+        .description
+        .param(LFO_WAVE)
+        .expect("the wave is described");
+    let ParamKind::Choice { choices } = &wave.kind else {
+        panic!("the wave is a chooser");
+    };
+    let names: Vec<&str> = choices.iter().map(String::as_str).collect();
+    assert_eq!(names, WAVES);
+    assert_eq!(choices[wave.default as usize], "Triangle");
 }
 
 // Spec: phaser-flanger R9
@@ -368,18 +383,23 @@ fn safe_bass_leaves_content_an_octave_below_within_half_db_of_dry() {
     let cutoff = 400.0;
     let test_freq = 200.0;
 
+    // Flanger mode with the shortest Time, so the tap is a copy of the
+    // input a couple of frames later, and the default Dry/Wet of 50 %: the
+    // bass has to come out of the mix as it went in.
     let mut pf = phaser_flanger_node(
         &[
-            (MODE, 0.0),
+            (MODE, 1.0),
             (AMOUNT, 0.0),
-            (DRY_WET, 100.0),
+            (FLANGER_TIME, 0.05),
+            (FEEDBACK, 0.0),
+            (DRY_WET, 50.0),
             (SAFE_BASS, cutoff),
             (WARMTH, 0.0),
         ],
-        4096,
+        8192,
     );
 
-    let ir = impulse_response(&mut *pf, 4096);
+    let ir = impulse_response(&mut *pf, 8192);
     let resp_db = db(response_at(&ir, test_freq));
 
     // Content an octave below should be within 0.5 dB of dry signal (0 dB)

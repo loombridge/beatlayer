@@ -315,7 +315,7 @@ mod tests {
         let mut settings = settings();
         settings.round_roins = 3;
         let plan = plan(&settings);
-        assert_eq!(plan.samples.len(), 51);
+        assert_eq!(plan.samples.len(), 102);
         let first = &plan.samples[0];
         assert_eq!(first.round_robin, 0);
         assert_eq!(plan.samples[1].round_robin, 1);
@@ -330,9 +330,9 @@ mod tests {
         settings.name = "Drift".to_owned();
         settings.round_roins = 2;
         let plan = plan(&settings);
-        assert_eq!(file_name(&settings, &plan.samples[0]), "Drift C1 v64");
-        assert_eq!(file_name(&settings, &plan.samples[1]), "Drift C1 v64 rr1");
-        assert_eq!(file_name(&settings, &plan.samples[2]), "Drift C1 v127");
-        assert_eq!(file_name(&settings, &plan.samples[3]), "Drift C1 v127 rr1");
+        assert_eq!(file_name(&settings, &plan.samples[0]), "Drift C1 v64 rr1");
+        assert_eq!(file_name(&settings, &plan.samples[1]), "Drift C1 v64 rr2");
+        assert_eq!(file_name(&settings, &plan.samples[2]), "Drift C1 v127 rr1");
+        assert_eq!(file_name(&settings, &plan.samples[3]), "Drift C1 v127 rr2");
     }
 }

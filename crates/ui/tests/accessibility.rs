@@ -3384,6 +3384,26 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.move_to_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
+        // The autosampler's dialog (WP-5.16, IMP-27).
+        (
+            "device.autosample_open",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R64)",
+            )),
+        ),
+        (
+            "device.autosample",
+            Exception(Equivalent(
+                "the autosampler's dialog's Autosample, which Tab reaches",
+            )),
+        ),
+        (
+            "device.autosample_cancel",
+            Exception(Equivalent(
+                "the autosampler's dialog's Cancel, which Tab reaches",
+            )),
+        ),
         // Separate Stems' dialog (IMP-11).
         ("stems.status", Exception(Query)),
         (

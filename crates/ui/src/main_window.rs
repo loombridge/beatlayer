@@ -490,9 +490,12 @@ impl MainWindowUi {
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
         // window while it's open.
         crate::stems_dialog::show(ctx, shell, theme, &mut events);
+        crate::slice_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         // An open menu, or Separate Stems' dialog, keeps the keys.
-        self.menu_open = egui::Popup::is_any_open(ctx) || shell.stems_dialog().is_some();
+        self.menu_open = egui::Popup::is_any_open(ctx)
+            || shell.stems_dialog().is_some()
+            || shell.slice_dialog().is_some();
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);

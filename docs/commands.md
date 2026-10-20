@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-532 commands in 37 areas.
+535 commands in 37 areas.
 
 ## Permission classes
 
@@ -152,6 +152,7 @@ Each command has:
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
 | [`chain.set_zone`](#chainset_zone) | Change Chain Zone | `edit` |  |  |
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
+| [`clip.close_slice_dialog`](#clipclose_slice_dialog) | Close Slice to New MIDI Track | `read` |  |  |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
 | [`clip.crop`](#clipcrop) | Crop Clip | `edit` | `Cmd+Shift+J`; `Cmd+Shift+J` | `Ctrl+Shift+J`; `Ctrl+Shift+J` |
@@ -172,6 +173,7 @@ Each command has:
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
+| [`clip.open_slice_dialog`](#clipopen_slice_dialog) | Slice to New MIDI Track | `read` |  |  |
 | [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
@@ -204,6 +206,7 @@ Each command has:
 | [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | Slice to New MIDI Track | `edit` |  |  |
 | [`clip.slide_contents`](#clipslide_contents) | Slide Clip Contents | `edit` | `Shift+Option+drag` | `Shift+Alt+drag` |
 | [`clip.stretch`](#clipstretch) | Stretch Clip | `edit` | `Shift+drag the clip title bar` | `Shift+drag the clip title bar` |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
@@ -2742,6 +2745,18 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 ### Area `clip`
 
+#### `clip.close_slice_dialog`
+
+**Close Slice to New MIDI Track**. Permission: `read`. Contexts: `global`.
+
+Closes the Slice to New MIDI Track dialog. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
+
 #### `clip.create`
 
 **Create Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -3122,6 +3137,22 @@ Arguments:
 | `by` | [`Ticks`](#ticks) | yes | How far to move them, in ticks: negative moves them earlier. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.open_slice_dialog`
+
+**Slice to New MIDI Track**. Permission: `read`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Opens the Slice to New MIDI Track dialog for an audio clip (`clip`, or the one audio clip selected in either view). The dialog holds the Slice By chooser (the beat divisions, Transients, and Warp Markers), the Slicing Preset chooser, and Preserve warped timing, and its OK runs `clip.slice_to_midi_track`. Changes nothing in the set: an agent calls `clip.slice_to_midi_track` instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
 
 #### `clip.quantize_audio`
 
@@ -3710,6 +3741,25 @@ Arguments:
 | `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.slice_to_midi_track`
+
+**Slice to New MIDI Track**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Cuts an audio clip into slices on a new MIDI track. The clip is sliced over its region: from its Start marker to its End marker, or, with the loop on, from the earlier of its Start marker and its loop's start to the loop's end. `by` is a beat division (`eight_bars`, `four_bars`, `two_bars`, `one_bar`, `half`, `quarter`, `eighth`, `sixteenth` — the default — or `thirty_second`), `transients` (one slice at each of the clip's transients in the region), or `warp_markers` (one at each of its warp markers; refused for an unwarped clip). With `preserve_warped_timing` on (the default) the slices are cut from the clip's warped audio, so each sounds as it did and its note falls where it played; off, they are cut from the clip's own file, unwarped. `preset` names a slicing preset: Beatlayer's factory presets (the default makes a Drum Rack of one sampler per slice, each chain receiving a note from C1 up and playing C3; `One Sampler` makes one sampler in Slice mode) or a user preset in the User Library's Defaults/Slicing folder. The new MIDI track goes directly after the clip's track, takes the clip's name, and holds a MIDI clip with one note per slice, rising chromatically, each lasting to the next, at velocity 127. More than 128 slices are refused (64 for `One Sampler`). Slicing leaves the audio clip as it was and is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `by` | [`SliceBy`](#sliceby) or null | no | How to cut it: a beat division, `transients`, or `warp_markers`. Left out, `sixteenth` (R2). |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+| `preserve_warped_timing` | boolean or null | no | Whether the slices are cut from the clip's warped audio, keeping the timing warping gave them. Left out, `true` (R2, R6). |
+| `preset` | string or null | no | The slicing preset's name: one of Beatlayer's factory presets or a user preset in the User Library's `Defaults/Slicing/` folder (R11). Left out, the default preset. |
+
+Result: [`SliceResult`](#sliceresult).
 
 #### `clip.slide_contents`
 
@@ -10063,6 +10113,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_warp_mode`](#clipset_warp_mode) | the query tool's `clip` | `data.audio.warp_mode` |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | the query tool's `song` | `tracks` |
 | [`clip.slide_contents`](#clipslide_contents) | the query tool's `clip` | `data.audio.start` |
 | [`clip.stretch`](#clipstretch) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
@@ -26219,6 +26270,181 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SliceBy`
+
+How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.
+
+One of:
+
+- `"eight_bars"`: A slice every 8 bars.
+- `"four_bars"`: A slice every 4 bars.
+- `"two_bars"`: A slice every 2 bars.
+- `"one_bar"`: A slice every bar.
+- `"half"`: A slice every half note.
+- `"quarter"`: A slice every quarter note.
+- `"eighth"`: A slice every eighth note.
+- `"sixteenth"`: A slice every sixteenth note: the dialog's default (R2).
+- `"thirty_second"`: A slice every thirty-second note.
+- `"transients"`: A slice at each of the clip's file's transients inside the region.
+- `"warp_markers"`: A slice at each of the clip's warp markers inside the region.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.",
+  "oneOf": [
+    {
+      "const": "eight_bars",
+      "description": "A slice every 8 bars.",
+      "type": "string"
+    },
+    {
+      "const": "four_bars",
+      "description": "A slice every 4 bars.",
+      "type": "string"
+    },
+    {
+      "const": "two_bars",
+      "description": "A slice every 2 bars.",
+      "type": "string"
+    },
+    {
+      "const": "one_bar",
+      "description": "A slice every bar.",
+      "type": "string"
+    },
+    {
+      "const": "half",
+      "description": "A slice every half note.",
+      "type": "string"
+    },
+    {
+      "const": "quarter",
+      "description": "A slice every quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "eighth",
+      "description": "A slice every eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "sixteenth",
+      "description": "A slice every sixteenth note: the dialog's default (R2).",
+      "type": "string"
+    },
+    {
+      "const": "thirty_second",
+      "description": "A slice every thirty-second note.",
+      "type": "string"
+    },
+    {
+      "const": "transients",
+      "description": "A slice at each of the clip's file's transients inside the region.",
+      "type": "string"
+    },
+    {
+      "const": "warp_markers",
+      "description": "A slice at each of the clip's warp markers inside the region.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SliceDialogStatus`
+
+The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `clip` | [`ClipId`](#clipid) or null | no | The clip it would slice, if one is chosen. |
+| `presets` | array of string | no | The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip it would slice, if one is chosen."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "presets": {
+      "description": "The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SliceResult`
+
+What `clip.slice_to_midi_track` made (R13).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The new MIDI track, directly after the clip's track (R7). |
+| `clip` | [`ClipId`](#clipid) | yes | The MIDI clip on it, at the audio clip's place (R9). |
+| `slices` | integer, at least 0 | yes | How many slices it made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.slice_to_midi_track` made (R13).",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The MIDI clip on it, at the audio clip's place (R9)."
+    },
+    "slices": {
+      "description": "How many slices it made.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The new MIDI track, directly after the clip's track (R7)."
+    }
+  },
+  "required": [
+    "track",
+    "clip",
+    "slices"
   ],
   "type": "object"
 }

@@ -3408,6 +3408,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
         ),
+        // Slice to New MIDI Track's dialog (WP-4.16).
+        (
+            "clip.slice_to_midi_track",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's OK, which Tab reaches",
+            )),
+        ),
+        (
+            "clip.close_slice_dialog",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's Cancel, or Esc",
+            )),
+        ),
         // Gaps.
         (
             "export.audio",

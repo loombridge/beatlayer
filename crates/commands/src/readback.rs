@@ -201,6 +201,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.rename", query(Clip, "name")),
     ("clip.reset_transients", read("clip.transients", "transients")),
     ("clip.save_default", read("clip.defaults", "defaults")),
+    ("clip.slice_to_midi_track", query(Song, "tracks")),
     ("clip.crop", query(Clip, "data")),
     ("clip.crop_region", query(Clip, "data")),
     ("clip.crop_span", query(Clip, "data")),

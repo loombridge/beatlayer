@@ -15,6 +15,7 @@ use crate::arrangement::SET_GRID;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
@@ -402,6 +403,11 @@ pub fn arrangement_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
 const AUDIO_CLIP: &[Row] = &[
     SEPARATOR,
     (
+        "C-CLIP-ARR-027e",
+        "Slice to New MIDI Track",
+        Cmd(SLICE_TO_MIDI),
+    ),
+    (
         "C-CLIP-ARR-027a",
         "Convert Harmony to New MIDI Track",
         Pending(None),
@@ -609,14 +615,15 @@ mod tests {
             .iter()
             .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
             .collect();
-        assert_eq!(added.len(), 4);
+        assert_eq!(added.len(), 5);
         let reverse = audio
             .iter()
             .position(|i| i.row == "C-CLIP-ARR-018")
             .unwrap();
         assert!(audio[reverse + 1].is_separator());
+        assert_eq!(audio[reverse + 2].label, "Slice to New MIDI Track");
         assert_eq!(
-            audio[reverse + 5].label,
+            audio[reverse + 6].label,
             "Separate Stems to New Audio Tracks"
         );
         let Some(text) = std::fs::read_to_string(

@@ -17,7 +17,9 @@
 
 use bl_media::stream::{AudioSource, Filled, PlanarMut, StreamStats, Transition};
 
-/// The most frames a single read may ask for: a warped clip's window.
+/// The most frames a single read may ask for when nothing bigger is asked of
+/// it: a warped clip's window is as wide as its mode needs, and the player
+/// reads a clip through its own room (`crate::warped::WindowBuf`).
 pub(crate) const WINDOW_FRAMES: usize = 10_240;
 
 /// How many frames of what it has read a streamed clip keeps: the most a
@@ -147,7 +149,12 @@ impl ClipSource {
         let channels = tail.channels.min(out.channels());
         let usable = tail.len > 0 && tail.end == source.position();
         let behind = tail.end.saturating_sub(position);
-        if usable && position < tail.end && behind <= tail.len as u64 {
+        // A read wider than the scratch (a grain mode's window, on the block a
+        // mode change renders the mode it left) is served straight from the
+        // source instead: it is a jump either way, and the scratch can't hold
+        // the rest.
+        let fits = n - (behind as usize).min(n) <= WINDOW_FRAMES;
+        if usable && position < tail.end && behind <= tail.len as u64 && fits {
             // Part of this read is behind the source: the tail has it.
             let behind = behind as usize;
             let overlap = behind.min(n);

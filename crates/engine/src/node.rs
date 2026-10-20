@@ -512,6 +512,12 @@ pub struct Block<'a> {
     /// input channels it is set to, planar with the block's channels and
     /// stride (WP-5.34). `None` for every other device.
     pub(crate) external: Option<&'a [f32]>,
+    /// Where a device with extra audio outputs past its main one writes
+    /// them (WP-5.45): one buffer per output, in the order the device
+    /// declares them, each planar with the block's channels and stride, at
+    /// `output * channels * stride`. `None` for a device that has none, or
+    /// one no route reads.
+    pub(crate) outputs: Option<&'a mut [f32]>,
     /// The notes the device plays in this block, in order of offset
     /// (WP-2.6). The engine sends none yet: MIDI clips and inputs reach
     /// devices with WP-2.1 and 2.2.
@@ -576,6 +582,7 @@ impl<'a> Block<'a> {
             tempo: &DEFAULT_TEMPO,
             sidechain: None,
             external: None,
+            outputs: None,
             notes: &[],
             notes_out: None,
             session: &[],
@@ -815,6 +822,48 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.external.map(|data| &data[start..start + self.frames])
+    }
+
+    /// Where a device with extra audio outputs writes one of them
+    /// (WP-5.45): output `output`, channel `channel`, planar. `None` for a
+    /// device that has no extra outputs, or one no route reads.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    pub fn output_mut(&mut self, output: usize, channel: usize) -> Option<&mut [f32]> {
+        assert!(channel < self.channels, "channel {channel} out of range");
+        let channels = self.channels;
+        let stride = self.stride;
+        let frames = self.frames;
+        self.outputs.as_mut().and_then(|data| {
+            let start = (output * channels + channel) * stride;
+            data.get_mut(start..start + frames)
+        })
+    }
+
+    /// Every extra output's buffers, writable, as [`output_mut`](Self::output_mut)
+    /// describes them. `None` for a device that has no extra outputs, or one
+    /// no route reads.
+    pub fn outputs_mut(&mut self) -> Option<&mut [f32]> {
+        self.outputs.as_deref_mut()
+    }
+
+    /// Output `output`'s lanes, writable, in order. `None` for a device that
+    /// has no extra outputs, or one no route reads.
+    pub fn output_channels_mut(
+        &mut self,
+        output: usize,
+    ) -> Option<impl ExactSizeIterator<Item = &mut [f32]>> {
+        let (channels, stride, frames) = (self.channels, self.stride, self.frames);
+        let data = self.outputs.as_deref_mut()?;
+        let size = channels * stride.max(1);
+        let at = output * size;
+        data.get_mut(at..at + size).map(|data| {
+            data.chunks_exact_mut(stride.max(1))
+                .take(channels)
+                .map(move |channel| &mut channel[..frames])
+        })
     }
 
     /// One channel's samples, writable.

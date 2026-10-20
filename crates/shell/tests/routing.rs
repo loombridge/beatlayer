@@ -150,6 +150,7 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
             track: audio[1],
             tap: Tap::PostFx,
             chain: None,
+            output: None,
         }
     );
     assert_eq!(
@@ -730,6 +731,7 @@ fn a_track_with_racks_offers_three_taps_per_chain() {
             track: audio[1],
             tap: Tap::PostFx,
             chain: Some(chains[1]),
+            output: None,
         }
     );
     assert_eq!(
@@ -937,6 +939,7 @@ fn a_drum_rack_offers_its_return_chains_taps() {
             track: midi[0],
             tap: Tap::PostMixer,
             chain: Some(made.chain),
+            output: None,
         }
     );
     // A drum chain can't be tapped.

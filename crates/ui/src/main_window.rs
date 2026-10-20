@@ -761,6 +761,13 @@ impl MainWindowUi {
             if *el == Element::MetronomeMenu {
                 Self::metronome_menu(&response, shell, events);
             }
+            if *el == Element::Tempo {
+                // Spec: warping R46. The tempo field's context menu holds
+                // Unfollow Tempo Automation.
+                response.context_menu(|ui| {
+                    Self::tempo_menu_content(ui, shell, events);
+                });
+            }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
             }
@@ -777,6 +784,23 @@ impl MainWindowUi {
         egui::Popup::menu(response).show(|ui| {
             Self::metronome_menu_content(ui, shell, events);
         });
+    }
+
+    /// The tempo field's context menu (the warping spec, R46): Unfollow
+    /// Tempo Automation, which makes every leading clip a follower and
+    /// writes the tempo they set into the Song Tempo envelope.
+    fn tempo_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let leading = shell.editor().document().any_tempo_leader();
+        let mut item = ui.button("Unfollow Tempo Automation");
+        if !leading {
+            item = item.on_hover_text("no clip leads the tempo");
+        }
+        if item.clicked() && leading {
+            events.push(UiEvent::Invoke(Invocation::new(
+                control_bar::UNFOLLOW_TEMPO_AUTOMATION,
+                serde_json::json!({}),
+            )));
+        }
     }
 
     fn metronome_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {

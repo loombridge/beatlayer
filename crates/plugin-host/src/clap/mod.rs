@@ -408,6 +408,7 @@ impl ClapHost {
                 .map(str::to_owned);
             let mut probe = new_instance(&entry, id, &self.inner.info)?;
             let params = describe::params(&mut probe.plugin_handle());
+            let outputs = describe::outputs(&mut probe.plugin_handle());
             drop(probe);
             found.push(ClapType {
                 path: path.to_owned(),
@@ -419,6 +420,7 @@ impl ClapHost {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    outputs,
                 },
                 vendor,
                 version,
@@ -960,7 +962,7 @@ impl NodeFactory for LoanFactory {
         else {
             return None;
         };
-        let (node, ends) = ClapNode::new(config);
+        let (node, ends) = ClapNode::new(config, extra_outputs(&self.inner, &device.kind));
         let mut guard = lock(&self.inner.main);
         let problem = match guard.get() {
             Ok(main) if main.lending => borrow(main, device, *config, ends, &self.inner).err(),
@@ -979,6 +981,13 @@ impl NodeFactory for LoanFactory {
             .map(|t| t.device_type.clone())
             .collect()
     }
+
+    fn outputs(&self, kind: &DeviceKind) -> Vec<String> {
+        lock(&self.inner.types)
+            .iter()
+            .find(|t| t.device_type.kind == *kind)
+            .map_or_else(Vec::new, |t| t.device_type.outputs.clone())
+    }
 }
 
 /// The CLAP plug-ins' factory for the engine's registry. It makes each CLAP
@@ -996,7 +1005,7 @@ impl NodeFactory for ClapFactory {
         else {
             return None;
         };
-        let (node, ends) = ClapNode::new(config);
+        let (node, ends) = ClapNode::new(config, extra_outputs(&self.inner, &device.kind));
         lock(&self.inner.requests).push(Request {
             device: device.clone(),
             config: *config,
@@ -1017,6 +1026,23 @@ impl NodeFactory for ClapFactory {
             .map(|t| t.device_type.clone())
             .collect()
     }
+
+    fn outputs(&self, kind: &DeviceKind) -> Vec<String> {
+        lock(&self.inner.types)
+            .iter()
+            .find(|t| t.device_type.kind == *kind)
+            .map_or_else(Vec::new, |t| t.device_type.outputs.clone())
+    }
+}
+
+/// How many audio output ports the plug-in of `kind` has past its main one
+/// (WP-5.45): 0 for one the host hasn't met, so its node feeds only the main
+/// port.
+fn extra_outputs(inner: &Inner, kind: &DeviceKind) -> usize {
+    lock(&inner.types)
+        .iter()
+        .find(|t| t.device_type.kind == *kind)
+        .map_or(0, |t| t.device_type.outputs.len())
 }
 
 /// A CLAP plug-in's device kind.

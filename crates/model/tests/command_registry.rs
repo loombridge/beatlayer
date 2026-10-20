@@ -10,9 +10,9 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Chain, ChainId, Change, ChangeSet,
-    Channel, Clip, ClipData, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
-    FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
+    Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash,
+    CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort,
+    FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
     LaunchQuantization, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam,
     ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId,
     SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom,
@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        193,
+        197,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -74,7 +74,8 @@ fn every_document_command_is_registered() {
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
 WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
          set_configured_params, WP-4.13 the two for Crop Clip, WP-5.36 seven for track \
-         delay, the pan mode, each split side, and the two latency switches, and WP-5.4 ten \
+         delay, the pan mode, each split side, and the two latency switches, WP-4.11 \
+         four for tempo leaders, stretching and sliding, and WP-5.4 ten \
          for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
          rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
          set_macro_randomize_excluded and set_mapped_value"
@@ -291,6 +292,7 @@ fn every_command_runs_by_id() {
             track: reverb,
             tap: Tap::PostFx,
             chain: None,
+            output: None,
         }
     );
     assert_eq!(routing.monitor, Monitor::In);
@@ -783,6 +785,32 @@ fn every_command_runs_by_id() {
         json!({ "clip": loop_clip, "from": 0.5, "to": 2.5 }),
     );
     assert!(warped(&agent).looping);
+    // Tempo leaders, stretching and sliding (WP-4.11).
+    agent.run(
+        "clip.set_tempo_leader",
+        json!({ "clip": loop_clip, "leader": true }),
+    );
+    assert!(warped(&agent).tempo_leader);
+    agent.run(
+        "clip.set_tempo_leader",
+        json!({ "clip": loop_clip, "leader": false }),
+    );
+    assert!(!warped(&agent).tempo_leader);
+    let end = agent
+        .editor
+        .document()
+        .clip(loop_clip)
+        .expect("the clip is there")
+        .end();
+    agent.run(
+        "clip.stretch",
+        json!({ "clip": loop_clip, "edge": "right", "at": end.get() + quarter }),
+    );
+    agent.run(
+        "clip.slide_contents",
+        json!({ "clip": loop_clip, "by": -quarter }),
+    );
+    agent.run("song.unfollow_tempo_automation", json!({}));
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -1534,6 +1562,7 @@ fn every_command_runs_by_id() {
                 track: drums,
                 tap: Tap::PostFx,
                 chain: None,
+                output: None,
             },
             gain: 2.0,
             mix: 0.5,
@@ -1956,6 +1985,10 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "song.unfollow_tempo_automation",
+            Command::UnfollowTempoAutomation {},
+        ),
+        (
             "song.set_time_signature_change",
             Command::SetTimeSignatureChange {
                 at: Ticks::QUARTER * 4,
@@ -2236,6 +2269,7 @@ fn schemas_match_what_commands_serialise() {
                     track: TrackId(fresh()),
                     tap: Tap::PreFx,
                     chain: None,
+                    output: None,
                 },
                 channel: None,
             },
@@ -2459,6 +2493,25 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipHighQuality {
                 clip,
                 high_quality: false,
+            },
+        ),
+        (
+            "clip.set_tempo_leader",
+            Command::SetTempoLeader { clip, leader: true },
+        ),
+        (
+            "clip.stretch",
+            Command::Stretch {
+                clip,
+                edge: ClipEdge::Right,
+                at: Ticks::QUARTER * 8,
+            },
+        ),
+        (
+            "clip.slide_contents",
+            Command::SlideContents {
+                clip,
+                by: Ticks::SIXTEENTH,
             },
         ),
         (
@@ -2918,6 +2971,7 @@ fn schemas_match_what_commands_serialise() {
                     track,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
             },
         ),
@@ -3614,6 +3668,9 @@ fn bindings_follow_the_spec() {
         "clip.delete_warp_markers",
         "clip.insert_transient",
         "clip.delete_transients",
+        // WP-4.11: the two Arrangement mouse gestures (S-ARR-005, S-ARR-006).
+        "clip.stretch",
+        "clip.slide_contents",
     ]
     .into_iter()
     .collect();
@@ -3623,4 +3680,7 @@ fn bindings_follow_the_spec() {
     assert_eq!(bindings("clip.delete_warp_markers"), ["S-SAMPLE-010"]);
     assert_eq!(bindings("clip.insert_transient"), ["S-SAMPLE-011"]);
     assert_eq!(bindings("clip.delete_transients"), ["S-SAMPLE-012"]);
+    // Spec: warping R47, R54
+    assert_eq!(bindings("clip.stretch"), ["S-ARR-006"]);
+    assert_eq!(bindings("clip.slide_contents"), ["S-ARR-005"]);
 }

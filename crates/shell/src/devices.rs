@@ -319,6 +319,17 @@ impl DeviceView {
         self.types = types;
     }
 
+    /// The extra audio outputs devices of `kind` offer past their main one,
+    /// by the names their type gives them (WP-5.45); empty for a type that
+    /// offers none, or one the host hasn't met.
+    #[must_use]
+    pub fn outputs(&self, kind: &DeviceKind) -> &[String] {
+        self.types
+            .iter()
+            .find(|t| t.kind == *kind)
+            .map_or(&[], |t| &t.outputs)
+    }
+
     /// The description of devices of `kind`, if their type has one.
     #[must_use]
     pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {

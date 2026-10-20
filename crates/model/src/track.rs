@@ -344,7 +344,8 @@ impl Channel {
                    `resampling` (the Main output), `track` (another audio track, a MIDI track with \
                    an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
                    instrument or audio effect rack on that track, that chain's signal at \
-                   `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   `tap`; or with an `output`, one of an instrument's extra outputs on that \
+                   track), or `none` (No Input). MIDI tracks: `all_ins` (every \
                    MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
                    by its name as the MIDI settings list it), `track` (another MIDI track), or \
                    `none`."
@@ -380,7 +381,7 @@ pub enum Input {
         /// track, or Main; for a MIDI track, another MIDI track.
         track: TrackId,
         /// Where in that track the signal is taken: Post Mixer if it's left
-        /// out.
+        /// out. An instrument output is taken whatever this says.
         #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
         tap: Tap,
         /// A chain of an instrument or audio effect rack on that track, at
@@ -388,7 +389,28 @@ pub enum Input {
         /// track's own (the racks spec, R38 to R41).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         chain: Option<ChainId>,
+        /// An instrument on that track, at any depth, whose extra output is
+        /// taken instead of the track's own signal (the routing spec).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<DeviceOutput>,
     },
+}
+
+/// One of a device's extra audio outputs, past its main one: an
+/// instrument's second stereo output, one of the eight-slot drum sampler's
+/// individual outputs (the routing spec, R12, R16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "One of a device's extra audio outputs, past its main one: `device` (an \
+                   instrument on the tapped track, at any depth in its racks) and `output`, \
+                   which of that device's extra outputs it is, counted from 0 in the order the \
+                   device declares them."
+)]
+pub struct DeviceOutput {
+    /// The device.
+    pub device: DeviceId,
+    /// Which of its extra outputs, counted from 0 past the main one.
+    pub output: u32,
 }
 
 /// Where a track's signal is taken when another track takes it as its

@@ -204,6 +204,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: warped_loop_140,
     },
     Fixture {
+        name: "leader-tempo",
+        about: "A one-bar clip that leads the tempo (WP-4.11): its own tempo is 90 BPM in a \
+                120 BPM song, so the set plays at the clip's speed over its span and the clip \
+                plays as if unwarped, while a following clip after the span follows the song's \
+                120.",
+        build: leader_tempo,
+    },
+    Fixture {
         name: "beats-120",
         about: "A one-bar drum loop warped at 120 BPM in Beats at the clip's own tempo, Preserve \
                 Transients and Loop Forward: at this tempo every Preserve and loop mode plays it \
@@ -386,7 +394,9 @@ impl Song {
     }
 
     /// How long the song plays to the end of its last clip, and a quarter of
-    /// a second more, rounded up to a quarter of a second.
+    /// a second more, rounded up to a quarter of a second. The ticks are
+    /// measured through the tempo map the set plays, a leading clip's tempo
+    /// included (the warping spec, R48).
     fn to_last_clip(&self) -> f64 {
         let document = self.editor.document();
         let end = document
@@ -395,7 +405,7 @@ impl Song {
             .map(bl_model::Clip::end)
             .max()
             .expect("the song has clips");
-        let seconds = document.settings().tempo.ticks_to_seconds(end) + 0.25;
+        let seconds = document.tempo_map().ticks_to_seconds(end) + 0.25;
         (seconds * 4.0).ceil() / 4.0
     }
 
@@ -1324,6 +1334,53 @@ fn warped_loop(song_bpm: f64, high_quality: bool) -> Scene {
         ..AudioData::new(file)
     };
     song.audio_clip(track, Ticks::ZERO, bar * 3, audio);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: warping R43 to R48. A one-bar clip that leads the tempo, its own
+/// tempo 90 BPM in a song whose own tempo is 120, so the set plays at the
+/// clip's speed over its span and the clip plays as if unwarped; a second,
+/// following clip after the span follows the song's own 120.
+fn leader_tempo() -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(120.0)),
+    });
+    let bar = Ticks::QUARTER * 4;
+    // Four quarter notes over eight thirds of a second is 90 BPM.
+    let leader_file = song.file(
+        "lead.wav",
+        48_000,
+        &[chirp(128_000, 48_000, 220.0, 1_320.0, 0.0625)],
+    );
+    // Four quarter notes over four thirds of a second is 180 BPM, so the
+    // clip reads at two thirds of the song's speed at 120.
+    let follower_file = song.file(
+        "follow.wav",
+        48_000,
+        &[chirp(64_000, 48_000, 330.0, 990.0, 0.046_875)],
+    );
+    let marker = |time: f64, beat: Ticks| bl_model::WarpMarker { time, beat };
+    let leader = song.track(TrackKind::Audio, "Lead", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![marker(0.0, Ticks::ZERO), marker(128_000.0 / 48_000.0, bar)],
+        tempo: Some(90.0),
+        tempo_leader: true,
+        warp_mode: bl_model::WarpMode::RePitch,
+        ..AudioData::new(leader_file)
+    };
+    song.audio_clip(leader, Ticks::ZERO, bar, audio);
+    let follower = song.track(TrackKind::Audio, "Follow", None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![marker(0.0, Ticks::ZERO), marker(64_000.0 / 48_000.0, bar)],
+        tempo: Some(180.0),
+        warp_mode: bl_model::WarpMode::RePitch,
+        ..AudioData::new(follower_file)
+    };
+    song.audio_clip(follower, bar, bar, audio);
     let seconds = song.to_last_clip();
     song.finish(seconds)
 }

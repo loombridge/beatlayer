@@ -861,6 +861,7 @@ fn consolidated_audio(
         signature: None,
         warp_mode: bl_model::WarpMode::Beats,
         warp_settings: bl_model::WarpSettings::default(),
+        tempo_leader: false,
         ram: false,
         high_quality: true,
         transient_edits: bl_model::TransientEdits::default(),

@@ -126,6 +126,28 @@ pub const ASK_RESIZE_HEIGHT: u32 = 400;
 /// (`hang`) on purpose. Only the scanner's tests set it.
 pub const TEST_SCAN_VAR: &str = "BL_TEST_CLAP_SCAN";
 
+/// The environment variable a test sets to the number of extra stereo output
+/// ports the plug-in offers past its main one (WP-5.45), such as `1` for a
+/// second stereo output another track can take as its Audio From. Unset (0)
+/// for the one port every other test sees. A test sets it before it loads
+/// the host: nextest runs each test in its own process.
+pub const OUTPUTS_VAR: &str = "BL_TEST_CLAP_OUTPUTS";
+
+/// What an extra output port carries, as a share of the main output's
+/// signal: a quarter, so a test can tell the two apart.
+pub const EXTRA_OUTPUT_GAIN: f32 = 0.25;
+
+/// What the extra output ports are called, port 2 first.
+const EXTRA_PORT_NAMES: [&[u8]; 4] = [b"Output 2", b"Output 3", b"Output 4", b"Output 5"];
+
+/// How many extra output ports the plug-in offers, from [`OUTPUTS_VAR`].
+fn extra_outputs() -> u32 {
+    std::env::var(OUTPUTS_VAR)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 const NO_FAILURE: u8 = 0;
 const PROCESS_FAILS: u8 = 1;
 const ACTIVATE_FAILS: u8 = 2;
@@ -478,6 +500,33 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                 _ => {}
             }
         }
+        // The output ports past the main one (WP-5.45): the main output at
+        // a quarter of its level, so a test can tell the two apart.
+        let mut rest = audio;
+        let others = rest.output_port_count().saturating_sub(1);
+        if others > 0 {
+            let (_, outputs) = rest.raw_buffers();
+            let (source, main_channels) = {
+                let main = &outputs[0];
+                (main.data32, main.channel_count as usize)
+            };
+            for out in outputs.iter_mut().skip(1) {
+                let channels = out.channel_count as usize;
+                for channel in 0..channels {
+                    let from_channel = channel.min(main_channels.saturating_sub(1));
+                    // SAFETY: the host gave every port `channel_count`
+                    // buffers of `frames_count` 32-bit samples, as the
+                    // buffers it passed say.
+                    unsafe {
+                        let from = *source.add(from_channel);
+                        let to = *out.data32.add(channel);
+                        for i in 0..frames {
+                            *to.add(i) = *from.add(i) * EXTRA_OUTPUT_GAIN;
+                        }
+                    }
+                }
+            }
+        }
         Ok(ProcessStatus::ContinueIfNotQuiet)
     }
 }
@@ -491,20 +540,50 @@ fn transposed(pckn: Pckn) -> Pckn {
 }
 
 impl PluginAudioPortsImpl for MainThread<'_> {
-    fn count(&self, _is_input: bool) -> u32 {
-        1
+    fn count(&self, is_input: bool) -> u32 {
+        if is_input { 1 } else { 1 + extra_outputs() }
     }
 
-    fn get(&self, index: u32, _is_input: bool, writer: &mut AudioPortInfoWriter<'_>) {
-        if index == 0 {
-            writer.set(&AudioPortInfo {
+    fn get(&self, index: u32, is_input: bool, writer: &mut AudioPortInfoWriter<'_>) {
+        if is_input {
+            if index == 0 {
+                writer.set(&AudioPortInfo {
+                    id: ClapId::new(0),
+                    name: b"Main",
+                    channel_count: 2,
+                    flags: AudioPortFlags::IS_MAIN,
+                    port_type: Some(AudioPortType::STEREO),
+                    in_place_pair: None,
+                });
+            }
+            return;
+        }
+        match index {
+            0 => writer.set(&AudioPortInfo {
                 id: ClapId::new(0),
                 name: b"Main",
                 channel_count: 2,
                 flags: AudioPortFlags::IS_MAIN,
                 port_type: Some(AudioPortType::STEREO),
                 in_place_pair: None,
-            });
+            }),
+            // An extra output, so another track can take it as its Audio
+            // From (WP-5.45). Its name is `EXTRA_PORT_NAMES[index - 1]`.
+            _ if index <= extra_outputs() => {
+                let name = EXTRA_PORT_NAMES
+                    .get(index as usize - 1)
+                    .copied()
+                    .unwrap_or(b"Output");
+                writer.set(&AudioPortInfo {
+                    id: ClapId::new(index),
+                    name,
+                    channel_count: 2,
+                    flags: AudioPortFlags::empty(),
+                    port_type: Some(AudioPortType::STEREO),
+                    in_place_pair: None,
+                });
+            }
+            _ => {}
         }
     }
 }

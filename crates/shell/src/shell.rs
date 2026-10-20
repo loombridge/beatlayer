@@ -649,6 +649,14 @@ fn clip_marker_command(id: &str) -> bool {
     )
 }
 
+/// Whether `id` is one of the Arrangement's own clip drags, which the
+/// document runs per frame as gestures: stretching a warped clip's edge (the
+/// warping spec, R47) and sliding a clip's contents (R54), each one undo step
+/// however far the drag goes.
+fn arrangement_clip_command(id: &str) -> bool {
+    matches!(id, "clip.stretch" | "clip.slide_contents")
+}
+
 /// Whether `id` is an edit the Sample Editor makes to an audio clip's
 /// markers, transients or region.
 fn sample_edit_command(id: &str) -> bool {
@@ -666,6 +674,8 @@ fn sample_edit_command(id: &str) -> bool {
 /// The name of the undo step a marker-strip or Sample Editor gesture makes.
 fn marker_label(id: &str) -> &'static str {
     match id {
+        "clip.stretch" => "Stretch clip",
+        "clip.slide_contents" => "Slide clip contents",
         model::SET_MIDI_REGION | "clip.set_region" => "Change clip region",
         model::SET_MIDI_LOOP | "clip.set_loop" => "Change clip loop",
         "clip.insert_warp_marker" | "clip.move_warp_markers" => "Move warp markers",
@@ -1461,11 +1471,23 @@ impl Shell {
     #[must_use]
     pub fn interface(&self) -> crate::routing::Interface {
         let (inputs, outputs) = self.audio.channels();
+        // The extra audio outputs the set's devices offer past their main
+        // one, which another track's Audio From lists (WP-5.45).
+        let mut device_outputs = std::collections::BTreeMap::new();
+        for track in self.editor.document().tracks() {
+            for device in track.devices_deep() {
+                let outputs = self.devices.outputs(&device.kind);
+                if !outputs.is_empty() {
+                    device_outputs.insert(device.id, outputs.to_vec());
+                }
+            }
+        }
         crate::routing::Interface {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
             midi_outputs: self.midi.output_names(),
+            device_outputs,
         }
     }
 
@@ -1510,6 +1532,15 @@ impl Shell {
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
+    /// Drives the shell's clocks from `clock`: the computer keyboard stamps
+    /// its notes with it, and the next audio stream times its blocks from it
+    /// (T199). Call it after [`Shell::use_midi_backend`] and before
+    /// [`Shell::start_audio`].
+    pub fn use_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.midi.set_test_clock(clock.clone());
+        self.audio.set_test_clock(clock);
+    }
+
     /// The MIDI ports and the computer MIDI keyboard.
     #[must_use]
     pub fn midi(&self) -> &MidiHost {
@@ -1532,26 +1563,46 @@ impl Shell {
         before != self.midi.ports()
     }
 
-    /// Spec: midi-chord R15. While a Chord device's Learn is on, the keys
-    /// played set its shifts: the first key down is the root and the other
-    /// keys held become Shift 1 to 6 in order, one undo step each time the
-    /// chord changes. Returns whether the set changed.
-    fn learn_chords(&mut self) -> bool {
-        use bl_devices::stack::{LEARN, STACK, shift};
-        use bl_model::{Command, DeviceKind};
-        let learning: Vec<_> = self
+    /// Spec: midi-chord R15 and midi-cc-sender R7. While a Chord device's
+    /// Learn is on, the keys played set its shifts; while a CC Control
+    /// device's Learn is on, an incoming controller is handed to its next
+    /// Custom dial without one. Each change is one undo step. Returns
+    /// whether the set changed.
+    fn learn_midi(&mut self) -> bool {
+        use bl_devices::midi_cc::{
+            CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_is_listed, cc_type_for, dial_cc, dial_value,
+        };
+        use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
+        use bl_model::{Command, DeviceId, DeviceKind, ParamId};
+        let devices: Vec<(DeviceId, String)> = self
             .editor
             .document()
             .tracks()
             .flat_map(|track| track.devices_deep())
-            .filter(|device| {
-                matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
-                    && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
+            .filter_map(|device| match &device.kind {
+                DeviceKind::Native { device_type } => Some((device.id, device_type.clone())),
+                _ => None,
             })
-            .map(|device| device.id)
             .collect();
+        let learning = |device_type: &str, param: ParamId| -> Vec<DeviceId> {
+            devices
+                .iter()
+                .filter(|(id, kind)| {
+                    kind == device_type
+                        && self
+                            .editor
+                            .document()
+                            .device(*id)
+                            .and_then(|device| device.params.get(&param).copied())
+                            .is_some_and(|on| on >= 0.5)
+                })
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let chords = learning(STACK, CHORD_LEARN);
+        let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if learning.is_empty() {
+        if chords.is_empty() && senders.is_empty() {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -1563,27 +1614,81 @@ impl Shell {
             sender.set_tap(true);
             self.chord_learn.tapping = true;
         }
-        sender.take_notes(&mut self.chord_learn.heard);
-        let Some(shifts) = self.chord_learn.listen() else {
-            return false;
-        };
-        self.edit(|editor| {
-            editor.begin("Learn Chord");
-            for device in learning {
-                for (n, value) in shifts.iter().enumerate() {
-                    let command = Command::SetDeviceParam {
-                        device,
-                        param: shift(n as u32),
-                        value: f64::from(*value),
-                    };
-                    editor
-                        .apply(command)
-                        .expect("a shift takes any whole number in range");
+        let mut heard = Vec::new();
+        sender.take_notes(&mut heard);
+        let mut changed = false;
+        if !chords.is_empty()
+            && let Some(shifts) = self.chord_learn.listen_from(&heard)
+        {
+            self.edit(|editor| {
+                editor.begin("Learn Chord");
+                for device in &chords {
+                    for (n, value) in shifts.iter().enumerate() {
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device: *device,
+                                param: shift(n as u32),
+                                value: f64::from(*value),
+                            })
+                            .expect("a shift takes any whole number in range");
+                    }
                 }
-            }
-            editor.commit().expect("the learned shifts commit");
-        });
-        true
+                editor.commit().expect("the learned shifts commit");
+            });
+            changed = true;
+        }
+        // Spec: midi-cc-sender R6. A controller the CC Type list leaves out
+        // (bank select and the channel mode messages) isn't learned.
+        let learned: Vec<(u8, f64)> = heard
+            .iter()
+            .filter(|message| message.status() & 0xF0 == 0xB0 && cc_is_listed(message.data1()))
+            .map(|message| (message.data1(), f64::from(message.data2())))
+            .collect();
+        if !senders.is_empty() && !learned.is_empty() {
+            let free: Vec<(DeviceId, Vec<u32>)> = senders
+                .iter()
+                .map(|device| {
+                    let params = &self
+                        .editor
+                        .document()
+                        .device(*device)
+                        .expect("the device is in the set")
+                        .params;
+                    let free = (0..DIALS)
+                        .filter(|k| params.get(&dial_cc(*k)).is_none_or(|cc| *cc == 0.0))
+                        .collect();
+                    (*device, free)
+                })
+                .collect();
+            self.edit(|editor| {
+                editor.begin("Learn CC Control");
+                for (device, mut free) in free.clone() {
+                    for &(controller, value) in &learned {
+                        let Some(k) = free.first().copied() else {
+                            break;
+                        };
+                        free.remove(0);
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_cc(k),
+                                value: cc_type_for(controller),
+                            })
+                            .expect("a controller is in the CC Type list");
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_value(k),
+                                value,
+                            })
+                            .expect("a controller value is in range");
+                    }
+                }
+                editor.commit().expect("the learned controllers commit");
+            });
+            changed = true;
+        }
+        changed
     }
 
     /// The preferences.
@@ -3647,7 +3752,7 @@ impl Shell {
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
-        changed |= self.learn_chords();
+        changed |= self.learn_midi();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
@@ -3991,6 +4096,7 @@ impl Shell {
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !clip_marker_command(&invocation.id)
+                && !arrangement_clip_command(&invocation.id)
             {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
@@ -4017,7 +4123,7 @@ impl Shell {
             clip_view::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
-        } else if clip_marker_command(&invocation.id) {
+        } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
             marker_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
@@ -4054,7 +4160,7 @@ impl Shell {
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
                    invocation: &Invocation| {
-            if clip_marker_command(&invocation.id) {
+            if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
                 // The document's own clip commands, run per frame like the
                 // Clip View's note commands.
                 model::run(editor, &invocation.id, invocation.args.clone())
@@ -4148,7 +4254,7 @@ impl Shell {
             let Ok(step) = self.prepare_gesture_step(step) else {
                 break;
             };
-            let outcome = if clip_marker_command(&step.id) {
+            let outcome = if clip_marker_command(&step.id) || arrangement_clip_command(&step.id) {
                 model::run(&mut self.editor, &step.id, step.args.clone())
                     .map(|_| ())
                     .map_err(|error| EditFailure::Refused(error.to_string()))

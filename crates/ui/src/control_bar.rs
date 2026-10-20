@@ -160,6 +160,10 @@ pub const CAPTURE_MIDI: &str = bl_shell::capture_midi_commands::CAPTURE;
 /// The Re-Enable Automation command (the automation spec, R5).
 pub const RE_ENABLE_AUTOMATION: &str = bl_model::registry::RE_ENABLE_AUTOMATION;
 
+/// Unfollow Tempo Automation, in the tempo field's context menu (the
+/// warping spec, R46).
+pub const UNFOLLOW_TEMPO_AUTOMATION: &str = "song.unfollow_tempo_automation";
+
 fn loop_on(shell: &Shell) -> bool {
     shell
         .editor()

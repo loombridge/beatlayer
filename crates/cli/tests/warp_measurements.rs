@@ -1,0 +1,439 @@
+//! Measurements for Tones and Texture warp modes (R4, R6, R18, R19, R34, R35).
+
+bl_rt::install_trap!();
+
+use std::sync::Arc;
+
+use bl_analysis::Audio;
+use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
+use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
+use bl_media::SampleData;
+use bl_model::{
+    AudioData, Clip, ClipData, Command, ContentHash, Editor, TextureSettings, TonesSettings,
+    TrackKind, WarpMarker, WarpMode,
+};
+
+const RATE: SampleRate = SampleRate::HZ_48000;
+const HASH_SINE: ContentHash = ContentHash([1; 32]);
+const HASH_SAW: ContentHash = ContentHash([2; 32]);
+const HASH_NOISE: ContentHash = ContentHash([3; 32]);
+
+fn sine_sample(freq: f64, seconds: f64) -> Arc<SampleData> {
+    let frames = (seconds * 48_000.0).round() as usize;
+    let left: Vec<f32> = (0..frames)
+        .map(|i| {
+            (0.501187 * (2.0 * std::f64::consts::PI * freq * i as f64 / 48_000.0).sin()) as f32
+        })
+        .collect();
+    let right = left.clone();
+    Arc::new(SampleData::new(48_000, vec![left, right]).unwrap())
+}
+
+fn saw_sample(freq: f64, seconds: f64) -> Arc<SampleData> {
+    let frames = (seconds * 48_000.0).round() as usize;
+    let num_harmonics = (10_000.0 / freq).floor() as usize;
+    let mut left = vec![0.0f32; frames];
+    for k in 1..=num_harmonics {
+        let sign = if k % 2 == 1 { 1.0 } else { -1.0 };
+        let amp = (2.0 / std::f64::consts::PI) * (sign / k as f64);
+        for (i, sample) in left.iter_mut().enumerate() {
+            *sample += (amp
+                * (2.0 * std::f64::consts::PI * (freq * k as f64) * i as f64 / 48_000.0).sin())
+                as f32;
+        }
+    }
+    let sum_sq: f64 = left.iter().map(|&s| (s as f64).powi(2)).sum();
+    let rms = (sum_sq / frames as f64).sqrt();
+    let target_rms = 0.501187;
+    let scale = (target_rms / rms) as f32;
+    for s in &mut left {
+        *s *= scale;
+    }
+    let right = left.clone();
+    Arc::new(SampleData::new(48_000, vec![left, right]).unwrap())
+}
+
+fn pink_noise_sample(seconds: f64, seed: u64) -> Arc<SampleData> {
+    let noise = bl_analysis::signals::pink_noise(-6.0, seconds, 48_000, seed);
+    let right = noise.clone();
+    Arc::new(SampleData::new(48_000, vec![noise, right]).unwrap())
+}
+
+fn test_media() -> MediaMap {
+    let mut map = MediaMap::new();
+    map.insert(HASH_SINE, sine_sample(440.0, 4.0));
+    map.insert(HASH_SAW, saw_sample(220.0, 4.0));
+    map.insert(HASH_NOISE, pink_noise_sample(4.0, 42));
+    map
+}
+
+fn build_song(
+    tempo: f64,
+    media: ContentHash,
+    mode: WarpMode,
+    tones: Option<TonesSettings>,
+    texture: Option<TextureSettings>,
+    warped: bool,
+) -> Editor {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(tempo).unwrap()),
+        })
+        .unwrap();
+
+    let track_id = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track_id,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+
+    let mut audio = AudioData {
+        warp: warped,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(media)
+    };
+    if let Some(tones) = tones {
+        audio.warp_settings.tones = tones;
+    }
+    if let Some(texture) = texture {
+        audio.warp_settings.texture = texture;
+    }
+
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE * 4,
+        ClipData::Audio(audio),
+    );
+    editor
+        .apply(Command::CreateClip {
+            track: track_id,
+            clip,
+        })
+        .unwrap();
+
+    editor
+}
+
+fn render(editor: &Editor, media: &MediaMap, frames: u64, block: usize) -> Vec<f32> {
+    let registry = Registry::new().with_media(Arc::new(media.clone()));
+    let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+    offline.sync(editor.document());
+    assert!(offline.missing_media().is_empty());
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(frames, |output| out.extend_from_slice(output.channel(0)));
+    assert_eq!(offline.heap_operations(), 0, "block size {block}");
+    out
+}
+
+/// Plays `editor` for `frames` frames in blocks of `block`, locating to
+/// `locate` on the block that starts at frame `at`, and returns the left
+/// channel (R7).
+fn render_locating(
+    editor: &Editor,
+    media: &MediaMap,
+    frames: u64,
+    block: usize,
+    at: u64,
+    locate: Ticks,
+) -> Vec<f32> {
+    let registry = Registry::new().with_media(Arc::new(media.clone()));
+    let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+    offline.sync(editor.document());
+    assert!(offline.missing_media().is_empty());
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    let mut done = 0;
+    while done < frames {
+        if done == at {
+            offline.sender().transport(TransportCommand::Locate(locate));
+        }
+        let n = (block as u64).min(frames - done);
+        out.extend_from_slice(offline.process(n as usize).channel(0));
+        done += n;
+    }
+    assert_eq!(offline.heap_operations(), 0, "block size {block}");
+    out
+}
+
+fn estimate_pitch(samples: &[f32], rate: f64) -> f64 {
+    let n = samples.len().min(9600);
+    let windowed: Vec<f64> = samples[..n]
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos());
+            f64::from(s) * w
+        })
+        .collect();
+
+    let dft_mag = |f: f64| -> f64 {
+        let omega = 2.0 * std::f64::consts::PI * f / rate;
+        let mut re = 0.0f64;
+        let mut im = 0.0f64;
+        for (i, &s) in windowed.iter().enumerate() {
+            let angle = omega * i as f64;
+            re += s * angle.cos();
+            im -= s * angle.sin();
+        }
+        (re * re + im * im).sqrt()
+    };
+
+    let mut best_f = 100.0;
+    let mut best_mag = 0.0f64;
+    let mut f = 100.0;
+    while f <= 600.0 {
+        let mag = dft_mag(f);
+        if mag > best_mag {
+            best_mag = mag;
+            best_f = f;
+        }
+        f += 2.0;
+    }
+
+    let mut fine_best_f = best_f;
+    let mut fine_best_mag = 0.0f64;
+    let mut f = best_f - 2.0;
+    let end_f = best_f + 2.0;
+    while f <= end_f {
+        let mag = dft_mag(f);
+        if mag > fine_best_mag {
+            fine_best_mag = mag;
+            fine_best_f = f;
+        }
+        f += 0.05;
+    }
+
+    let step = 0.05;
+    let alpha = dft_mag(fine_best_f - step);
+    let beta = fine_best_mag;
+    let gamma = dft_mag(fine_best_f + step);
+    let denom = alpha - 2.0 * beta + gamma;
+    let delta = if denom.abs() > 1e-12 {
+        0.5 * (alpha - gamma) / denom
+    } else {
+        0.0
+    };
+    fine_best_f + delta * step
+}
+
+fn measure_rms_db(samples: &[f32]) -> f64 {
+    let sum_sq: f64 = samples.iter().map(|&s| (s as f64).powi(2)).sum();
+    let rms = (sum_sq / samples.len() as f64).sqrt();
+    20.0 * rms.max(1e-12).log10()
+}
+
+// Spec: warp-modes R4. Bit-identical neutrality at speed 1.0
+#[test]
+fn speed_1_null_test_tones_and_texture() {
+    let media = test_media();
+    let unwarped = build_song(120.0, HASH_SINE, WarpMode::RePitch, None, None, false);
+    let want = render(&unwarped, &media, 48_000, 512);
+
+    let tones = build_song(120.0, HASH_SINE, WarpMode::Tones, None, None, true);
+    let got_tones = render(&tones, &media, 48_000, 512);
+    assert_eq!(got_tones, want, "Tones speed 1 null test");
+
+    let texture = build_song(120.0, HASH_SINE, WarpMode::Texture, None, None, true);
+    let got_texture = render(&texture, &media, 48_000, 512);
+    assert_eq!(got_texture, want, "Texture speed 1 null test");
+}
+
+// Spec: warp-modes R6. Block size independence (blocks 1, 61, 512, 4096)
+#[test]
+fn block_size_invariance_tones_and_texture() {
+    let media = test_media();
+
+    // Tones at 180 BPM (speed 1.5)
+    let tones_song = build_song(180.0, HASH_SINE, WarpMode::Tones, None, None, true);
+    let tones_ref = render(&tones_song, &media, 48_000, 512);
+    for block in [1, 61, 512, 4_096] {
+        let got = render(&tones_song, &media, 48_000, block);
+        assert_eq!(got, tones_ref, "Tones block size {block}");
+    }
+
+    // Texture at 180 BPM (speed 1.5)
+    let texture_song = build_song(180.0, HASH_SINE, WarpMode::Texture, None, None, true);
+    let texture_ref = render(&texture_song, &media, 48_000, 512);
+    for block in [1, 61, 512, 4_096] {
+        let got = render(&texture_song, &media, 48_000, block);
+        assert_eq!(got, texture_ref, "Texture block size {block}");
+    }
+}
+
+// Spec: warp-modes R7, R35. A locate into a Tones or a Texture clip starts a
+// grain at the point, so its level over the first 50 ms is within 1 dB of its
+// level when the clip plays through.
+#[test]
+fn a_locate_into_tones_and_texture_starts_a_grain_at_the_point() {
+    let media = test_media();
+    // At 180 BPM a quarter note is 16,000 frames, so locating to beat 3 lands
+    // on frame 32,000, well inside the clip.
+    let locate = Ticks::QUARTER * 2;
+    let at = 32_000_u64;
+    for mode in [WarpMode::Tones, WarpMode::Texture] {
+        let song = build_song(180.0, HASH_SINE, mode, None, None, true);
+        let through = render(&song, &media, 48_000, 512);
+        let located = render_locating(&song, &media, 48_000, 512, at, locate);
+        let window = at as usize..at as usize + 2_400;
+        let through_db = measure_rms_db(&through[window.clone()]);
+        let located_db = measure_rms_db(&located[window]);
+        assert!(
+            (through_db - located_db).abs() < 1.0,
+            "{mode:?}: {located_db:.2} dB over the first 50 ms after the locate, against \
+             {through_db:.2} dB playing through"
+        );
+    }
+}
+
+// Spec: warp-modes R35. Deterministic renders
+#[test]
+fn deterministic_renders() {
+    let media = test_media();
+
+    // Tones
+    let tones_song = build_song(180.0, HASH_SINE, WarpMode::Tones, None, None, true);
+    let tones1 = render(&tones_song, &media, 48_000, 512);
+    let tones2 = render(&tones_song, &media, 48_000, 512);
+    assert_eq!(tones1, tones2, "Tones deterministic render");
+
+    // Texture at Flux 0 with different seeds
+    let tex_flux0_a = build_song(
+        180.0,
+        HASH_SINE,
+        WarpMode::Texture,
+        None,
+        Some(TextureSettings {
+            grain_size: 65.0,
+            flux: 0.0,
+        }),
+        true,
+    );
+    let tex_flux0_b = build_song(
+        180.0,
+        HASH_SINE,
+        WarpMode::Texture,
+        None,
+        Some(TextureSettings {
+            grain_size: 65.0,
+            flux: 0.0,
+        }),
+        true,
+    );
+    let out_a = render(&tex_flux0_a, &media, 48_000, 512);
+    let out_b = render(&tex_flux0_b, &media, 48_000, 512);
+    assert_eq!(out_a, out_b, "Texture flux 0 deterministic render");
+}
+
+// Spec: warp-modes R35. Tones 440 Hz sine and 220 Hz saw pitch within 1 cent, level within 1 dB
+#[test]
+fn tones_pitch_and_level_targets() {
+    let media = test_media();
+    let ref_sine = &media.get(HASH_SINE).unwrap().channel(0).unwrap()[24_000..72_000];
+    let ref_sine_db = measure_rms_db(ref_sine);
+    let ref_saw = &media.get(HASH_SAW).unwrap().channel(0).unwrap()[24_000..72_000];
+    let ref_saw_db = measure_rms_db(ref_saw);
+
+    for tempo in [60.0, 90.0, 180.0, 240.0] {
+        // Sine 440 Hz
+        let sine_song = build_song(tempo, HASH_SINE, WarpMode::Tones, None, None, true);
+        let sine_out = render(&sine_song, &media, 96_000, 512);
+        // Measure steady part over 1 second (48,000 frames)
+        let steady_sine = &sine_out[24_000..72_000];
+        let sine_pitch = estimate_pitch(steady_sine, 48_000.0);
+        let sine_cents = 1200.0 * (sine_pitch / 440.0).log2();
+        assert!(
+            sine_cents.abs() < 1.0,
+            "tempo {tempo}: sine pitch {sine_pitch:.2} Hz ({sine_cents:.3} cents)"
+        );
+        let sine_db = measure_rms_db(steady_sine);
+        assert!(
+            (sine_db - ref_sine_db).abs() < 1.0,
+            "tempo {tempo}: sine level {sine_db:.2} dB vs ref {ref_sine_db:.2} dB"
+        );
+
+        // Saw 220 Hz
+        let saw_song = build_song(tempo, HASH_SAW, WarpMode::Tones, None, None, true);
+        let saw_out = render(&saw_song, &media, 96_000, 512);
+        let steady_saw = &saw_out[24_000..72_000];
+        let saw_pitch = estimate_pitch(steady_saw, 48_000.0);
+        let saw_cents = 1200.0 * (saw_pitch / 220.0).log2();
+        assert!(
+            saw_cents.abs() < 1.0,
+            "tempo {tempo}: saw pitch {saw_pitch:.2} Hz ({saw_cents:.3} cents)"
+        );
+        let saw_db = measure_rms_db(steady_saw);
+        assert!(
+            (saw_db - ref_saw_db).abs() < 1.0,
+            "tempo {tempo}: saw level {saw_db:.2} dB vs ref {ref_saw_db:.2} dB"
+        );
+    }
+}
+
+// Spec: warp-modes R35. Texture sine within 1 cent, pink noise balance within 1.5 dB/band
+#[test]
+fn texture_sine_and_pink_noise_targets() {
+    let media = test_media();
+    let ref_sine = &media.get(HASH_SINE).unwrap().channel(0).unwrap()[24_000..72_000];
+    let ref_sine_db = measure_rms_db(ref_sine);
+
+    for tempo in [60.0, 90.0, 180.0, 240.0] {
+        // Sine 440 Hz
+        let sine_song = build_song(tempo, HASH_SINE, WarpMode::Texture, None, None, true);
+        let sine_out = render(&sine_song, &media, 96_000, 512);
+        let steady_sine = &sine_out[24_000..72_000];
+        let sine_pitch = estimate_pitch(steady_sine, 48_000.0);
+        let sine_cents = 1200.0 * (sine_pitch / 440.0).log2();
+        assert!(
+            sine_cents.abs() < 1.0,
+            "tempo {tempo}: texture sine pitch {sine_pitch:.2} Hz ({sine_cents:.3} cents)"
+        );
+        let sine_db = measure_rms_db(steady_sine);
+        assert!(
+            (sine_db - ref_sine_db).abs() < 1.0,
+            "tempo {tempo}: texture sine level {sine_db:.2} dB vs ref {ref_sine_db:.2} dB"
+        );
+
+        // Pink noise octave bands
+        let noise_song = build_song(tempo, HASH_NOISE, WarpMode::Texture, None, None, true);
+        let noise_out = render(&noise_song, &media, 144_000, 512);
+        let steady_noise = &noise_out[24_000..144_000];
+        let audio_out = Audio::new(steady_noise, 1, 48_000).unwrap();
+        let bands_out = bl_analysis::spectrum::octave_bands(&audio_out);
+
+        let noise_ref = pink_noise_sample(4.0, 42);
+        let audio_ref = Audio::new(noise_ref.channel(0).unwrap(), 1, 48_000).unwrap();
+        let bands_ref = bl_analysis::spectrum::octave_bands(&audio_ref);
+
+        let tot_out: f64 = bands_out.iter().map(|b| b.power).sum();
+        let tot_ref: f64 = bands_ref.iter().map(|b| b.power).sum();
+        let tot_diff = bl_analysis::power_db(tot_out).unwrap_or(0.0)
+            - bl_analysis::power_db(tot_ref).unwrap_or(0.0);
+
+        for (b_out, b_ref) in bands_out.iter().zip(&bands_ref) {
+            // Check octave bands from 63 Hz to 16 kHz
+            if b_out.centre >= 63.0 && b_out.centre <= 16_000.0 {
+                let db_out = bl_analysis::power_db(b_out.power).unwrap_or(-100.0);
+                let db_ref = bl_analysis::power_db(b_ref.power).unwrap_or(-100.0);
+                let rel_diff = ((db_out - db_ref) - tot_diff).abs();
+                assert!(
+                    rel_diff <= 1.5,
+                    "tempo {tempo}, band {:.0} Hz: rel diff {rel_diff:.2} dB > 1.5 dB (out {db_out:.2} vs ref {db_ref:.2})",
+                    b_out.centre
+                );
+            }
+        }
+    }
+}

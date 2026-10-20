@@ -12,7 +12,7 @@
 //! The behaviour is in the arrangement editing spec.
 
 use bl_core::time::Ticks;
-use bl_model::{ClipId, Document, TrackId};
+use bl_model::{ClipData, ClipId, Document, TrackId};
 use bl_shell::arrangement::editing::{earliest_move, resize_limits};
 use bl_shell::arrangement::rows::{Row, first_row_at};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
@@ -28,6 +28,19 @@ use crate::main_window::UiEvent;
 /// How close to a clip's edge, in points, a press resizes it rather than
 /// moving it. Narrow clips keep their middle for moving.
 pub const EDGE_GRAB: f32 = 4.0;
+
+/// `clip.stretch`: stretch a warped clip (the warping spec, R47).
+const STRETCH: &str = "clip.stretch";
+/// `clip.slide_contents`: slide a clip's contents inside it (R54).
+const SLIDE_CONTENTS: &str = "clip.slide_contents";
+
+/// The `edge` argument [`STRETCH`] takes for an Arrangement edge.
+fn stretch_edge(edge: Edge) -> &'static str {
+    match edge {
+        Edge::Start => "left",
+        Edge::End => "right",
+    }
+}
 
 /// Where on a clip the pointer is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +146,15 @@ pub struct EditKeys {
     /// Select time inside a clip from its title bar: Shift with Option
     /// (Alt) (S-ARR-007).
     pub time_in_clip: bool,
+    /// Slide a clip's contents inside the clip: Shift with Option (Alt), on
+    /// the clip's body (S-ARR-005, I-DRAG-013); with `slide_bypass` as well,
+    /// it doesn't snap (S-ARR-036).
+    pub slide: bool,
+    /// Slide a clip's contents without snapping: Cmd with Shift and Option on
+    /// macOS, Ctrl with Shift and Alt on Windows and Linux (S-ARR-036,
+    /// I-DRAG-014). The general `bypass` is Alt there, which is this
+    /// gesture's slide key.
+    pub slide_bypass: bool,
 }
 
 impl EditKeys {
@@ -150,6 +172,8 @@ impl EditKeys {
             toggle: modifiers.command,
             extend: modifiers.shift,
             time_in_clip: modifiers.shift && modifiers.alt,
+            slide: modifiers.shift && modifiers.alt,
+            slide_bypass: modifiers.command,
         }
     }
 }
@@ -181,6 +205,20 @@ enum ClipDrag {
         at: Ticks,
         /// How far the edges may move, earlier and later.
         limits: (Ticks, Ticks),
+    },
+    /// Shift-dragging a warped clip's edge, which stretches it (the warping
+    /// spec, R47): the other edge stays put and the clip's contents scale.
+    Stretch {
+        clip: ClipId,
+        /// The edge being dragged.
+        edge: Edge,
+    },
+    /// Shift+Option-dragging a clip's contents, which slide inside it
+    /// (R54): the clip stays put.
+    Slide {
+        clip: ClipId,
+        /// The tick under the pointer when the drag began.
+        from: Ticks,
     },
 }
 
@@ -242,6 +280,17 @@ impl ClipGestures {
             vec![hit.clip]
         };
         match hit.zone {
+            // Spec: warping R54. Shift+Option on a clip's body slides its
+            // contents inside it.
+            Zone::Body if keys.slide => {
+                if !selected {
+                    invoke(events, ids::SELECT_CLIPS, json!({ "clips": [hit.clip] }));
+                }
+                self.drag = Some(ClipDrag::Slide {
+                    clip: hit.clip,
+                    from: at,
+                });
+            }
             Zone::Body => return false,
             Zone::Title if keys.time_in_clip => return false,
             Zone::Title => {
@@ -267,6 +316,16 @@ impl ClipGestures {
                 };
                 if !selected {
                     invoke(events, ids::SELECT_CLIPS, json!({ "clips": [hit.clip] }));
+                }
+                // Spec: warping R47. Shift-dragging a warped clip's edge
+                // stretches it instead of resizing it.
+                let warped = matches!(&clip.data, ClipData::Audio(audio) if audio.warp);
+                if keys.extend && warped {
+                    self.drag = Some(ClipDrag::Stretch {
+                        clip: hit.clip,
+                        edge,
+                    });
+                    return true;
                 }
                 let position = match edge {
                     Edge::Start => clip.start,
@@ -341,6 +400,22 @@ impl ClipGestures {
                     ids::RESIZE_CLIPS,
                     json!({ "clips": clips, "anchor": anchor, "edge": edge, "by": by }),
                 ))
+            }
+            // Spec: warping R47. The dragged edge goes where the pointer is,
+            // snapped as a resize is.
+            ClipDrag::Stretch { clip, edge } => {
+                let at = lanes.view.snap_drag(lanes.doc, at, keys.bypass);
+                Some((
+                    STRETCH,
+                    json!({ "clip": clip, "edge": stretch_edge(*edge), "at": at }),
+                ))
+            }
+            // Spec: warping R54. The contents move by the drag, snapped to
+            // the grid unless Cmd is held as well.
+            ClipDrag::Slide { clip, from } => {
+                let to = lanes.view.snap_drag(lanes.doc, at, keys.slide_bypass);
+                let from = lanes.view.snap_drag(lanes.doc, *from, keys.slide_bypass);
+                Some((SLIDE_CONTENTS, json!({ "clip": clip, "by": to - from })))
             }
         }
     }
@@ -438,6 +513,8 @@ impl ClipGestures {
             Some(ClipDrag::Move { .. }) if keys.copy => return Some(CursorIcon::Copy),
             Some(ClipDrag::Move { .. }) => return Some(CursorIcon::Grabbing),
             Some(ClipDrag::Resize { .. }) => return Some(CursorIcon::ResizeHorizontal),
+            Some(ClipDrag::Stretch { .. }) => return Some(CursorIcon::ResizeHorizontal),
+            Some(ClipDrag::Slide { .. }) => return Some(CursorIcon::Grabbing),
             None => {}
         }
         match lanes.hit(hover)?.zone {

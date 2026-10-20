@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use bl_core::time::Ticks;
 use bl_media::Peaks;
-use bl_model::{AudioData, Clip, ClipData, ClipId, Command, Document, TrackId};
+use bl_model::{AudioData, Clip, ClipData, ClipId, Command, Document, TrackId, WarpMarker};
 use bl_shell::arrangement_commands::{self as view_ids, ArrangementState};
 use bl_shell::editing_commands as ids;
 use bl_shell::files::factory_default_set;
@@ -378,6 +378,158 @@ fn dragging_an_edge_resizes_and_esc_cancels_a_drag() {
     assert_eq!(*s.doc(), before);
     assert!(!s.h.shell.gesture_open());
     assert_eq!(s.steps(), 2);
+}
+
+/// The modifier that slides a clip's contents: Shift with Option (Alt)
+/// (S-ARR-005).
+fn slide_key() -> Modifiers {
+    Modifiers::SHIFT | Modifiers::ALT
+}
+
+/// The modifier that slides a clip's contents without snapping: Cmd with
+/// Shift and Option on macOS, Ctrl with Shift and Alt elsewhere (S-ARR-036).
+fn slide_bypass_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD | Modifiers::COMMAND
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND
+    }
+}
+
+/// A warped audio clip on 3 Audio over bars 2 to 6: four quarters over a two
+/// second file, so 120 BPM.
+fn warped_set() -> Set {
+    let mut editor = factory_default_set();
+    let tracks: Vec<TrackId> = editor.document().top_level().collect();
+    let a: ClipId = editor.new_id();
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![
+            WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            },
+            WarpMarker {
+                time: 2.0,
+                beat: Ticks(4 * Ticks::QUARTER.get()),
+            },
+        ],
+        tempo: Some(120.0),
+        ..AudioData::new(benchmark::media_hash(0))
+    };
+    editor
+        .apply(Command::CreateClip {
+            track: tracks[2],
+            clip: Clip::new(a, Ticks(2 * BAR), Ticks(4 * BAR), ClipData::Audio(audio)),
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell = benchmark::shell_with(editor);
+    h.settle();
+    Set { h, a, b: a, tracks }
+}
+
+fn audio_of(clip: &Clip) -> AudioData {
+    match &clip.data {
+        ClipData::Audio(audio) => audio.clone(),
+        ClipData::Midi(_) => panic!("an audio clip"),
+    }
+}
+
+// Spec: warping R47
+#[test]
+fn shift_dragging_a_warped_clips_edge_stretches_it_in_one_step() {
+    let mut s = warped_set();
+    let a = s.a;
+    let before = s.clip(a);
+    // Shift-dragging the right edge a bar later stretches the clip: its
+    // length becomes the dragged one and every beat scales about the Start
+    // marker's beat.
+    s.drag(
+        pos2(x(6.0) - 2.0, AUDIO_3.1),
+        pos2(x(7.0) - 2.0, AUDIO_3.1),
+        Modifiers::SHIFT,
+        true,
+    );
+    assert_eq!(s.bars(a), (2.0, 7.0));
+    let after = audio_of(&s.clip(a));
+    assert_eq!(after.tempo, Some(120.0 * 5.0 / 4.0));
+    assert_eq!(s.steps(), 1);
+    assert_eq!(s.undo_label().as_deref(), Some("Stretch clip"));
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(audio_of(&s.clip(a)), audio_of(&before), "one step");
+    s.h.shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(s.bars(a), (2.0, 7.0));
+
+    // Esc puts it back and records nothing.
+    let before = s.doc().clone();
+    s.drag(
+        pos2(x(7.0) - 2.0, AUDIO_3.1),
+        pos2(x(9.0), AUDIO_3.1),
+        Modifiers::SHIFT,
+        false,
+    );
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.release(pos2(x(9.0), AUDIO_3.1), Modifiers::SHIFT);
+    assert_eq!(*s.doc(), before);
+    assert_eq!(s.steps(), 1);
+}
+
+// Spec: warping R54
+#[test]
+fn shift_option_dragging_a_clips_contents_slides_them_in_one_step() {
+    let mut s = warped_set();
+    let a = s.a;
+    let before = s.clip(a);
+    // Shift+Option on the clip's body, a bar later: the clip stays put and
+    // its contents move a bar on.
+    s.drag(
+        pos2(x(4.0), AUDIO_3.1),
+        pos2(x(5.07), AUDIO_3.1),
+        slide_key(),
+        true,
+    );
+    let after = s.clip(a);
+    assert_eq!(
+        (after.start, after.length),
+        (before.start, before.length),
+        "the clip stays put"
+    );
+    let (was, now) = (audio_of(&before), audio_of(&after));
+    assert_eq!(now.start, was.start - BAR as f64, "the contents moved on");
+    assert_eq!(
+        now.warp_markers, was.warp_markers,
+        "the map keeps its beats"
+    );
+    assert_eq!(s.steps(), 1);
+    assert_eq!(s.undo_label().as_deref(), Some("Slide clip contents"));
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(s.doc().clip(a).unwrap().data, before.data, "one step");
+
+    // Without the modifier a drag on the body selects time instead; with Cmd
+    // held as well the slide doesn't snap.
+    let doc = s.doc().clone();
+    s.drag(
+        pos2(x(4.0), AUDIO_3.1),
+        pos2(x(5.0), AUDIO_3.1),
+        Modifiers::NONE,
+        true,
+    );
+    assert_eq!(s.doc().clip(a).unwrap().data, doc.clip(a).unwrap().data);
+    let before = s.clip(a);
+    let bypass = slide_key() | slide_bypass_key();
+    s.drag(
+        pos2(x(4.0), AUDIO_3.1),
+        pos2(x(5.0) + 2.0, AUDIO_3.1),
+        bypass,
+        true,
+    );
+    let moved = audio_of(&before).start - audio_of(&s.clip(a)).start;
+    assert!(
+        (moved - BAR as f64).abs() > 1.0 && moved < BAR as f64,
+        "unsnapped by {moved}"
+    );
 }
 
 #[test]

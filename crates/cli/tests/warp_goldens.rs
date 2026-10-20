@@ -41,7 +41,9 @@ fn read(file: &[f32], position: f64) -> f64 {
 /// start for none).
 fn model(scene: &Scene) -> (Vec<f32>, Vec<f64>) {
     let document = scene.document();
-    let tempo = &document.settings().tempo;
+    // The tempo map the set plays, a leading clip's tempo included (R44,
+    // R48).
+    let tempo = &document.tempo_map();
     let rate = SAMPLE_RATE.as_f64();
     let mut out = vec![0.0f32; scene.frames as usize * 2];
     let mut positions = vec![f64::NAN; scene.frames as usize];
@@ -59,8 +61,10 @@ fn model(scene: &Scene) -> (Vec<f32>, Vec<f64>) {
                 // the loop (R5), and the file time at that beat.
                 let tick = tempo.seconds_to_ticks_exact(frame as f64 / rate);
                 let mut beat = audio.start + (tick - clip.start.get() as f64);
-                let loop_end = audio.loop_end.expect("the loop has an end");
-                if audio.looping && beat >= loop_end {
+                if audio.looping
+                    && let Some(loop_end) = audio.loop_end
+                    && beat >= loop_end
+                {
                     beat = audio.loop_start
                         + (beat - loop_end).rem_euclid(loop_end - audio.loop_start);
                 }
@@ -130,6 +134,65 @@ fn a_loop_warped_at_90_plays_on_the_bar_lines_at_120_and_140() {
                 );
             }
         }
+    }
+}
+
+// Spec: warping R43, R44, R47
+#[test]
+fn a_leader_plays_at_its_own_speed() {
+    let (scene, render) = render("leader-tempo");
+    let (expected, positions) = model(&scene);
+    assert_eq!(render.samples.len(), expected.len());
+    let mut worst = 0.0f32;
+    for (frame, &position) in positions.iter().enumerate() {
+        if !(40.0..128_000.0 - 40.0).contains(&position) {
+            continue;
+        }
+        for c in 0..2 {
+            let at = frame * 2 + c;
+            worst = worst.max((render.samples[at] - expected[at]).abs());
+        }
+    }
+    assert!(worst < 5e-4, "{worst} from the model");
+    // The leader plays as if unwarped: over its span, which at its own 90 BPM
+    // lasts eight thirds of a second, the file advances one frame per song
+    // frame.
+    for frame in [0usize, 1000, 60_000, 127_000] {
+        assert!(
+            (positions[frame] - frame as f64).abs() < 1.0,
+            "frame {frame} reads the leader at {}",
+            positions[frame]
+        );
+    }
+    // Its span ends where the set is at its own 120 again, and the follower
+    // reads its own 180 BPM file at two thirds of the song's speed.
+    assert!(positions[128_000].abs() < 1.0, "{}", positions[128_000]);
+    for frame in [128_001usize, 128_500, 150_000] {
+        let read = positions[frame];
+        let expected = (frame - 128_000) as f64 * 2.0 / 3.0;
+        assert!(
+            (read - expected).abs() < 1.0,
+            "frame {frame} reads the follower at {read}, not {expected}"
+        );
+    }
+}
+
+// Spec: warping R48
+#[test]
+fn a_set_with_a_leader_renders_as_it_plays_at_any_block_size() {
+    let fixture = fixture("leader-tempo").expect("the fixture exists");
+    let reference = fixture.render();
+    assert!(
+        reference.problems().is_empty(),
+        "{:?}",
+        reference.problems()
+    );
+    for block in [1, 61, 512, 4_096] {
+        let render = fixture.render_in_blocks(block);
+        assert!(
+            reference.same_bits(&render),
+            "a block of {block} frames differs from the default block"
+        );
     }
 }
 

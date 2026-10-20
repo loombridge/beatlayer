@@ -66,6 +66,15 @@ pub trait NativeDevice: Send + 'static {
         0
     }
 
+    /// The gain the device took off the last block it processed, in dB:
+    /// zero for a device that reduces nothing, negative for a compressor or
+    /// a limiter, positive for one that adds gain. The engine reads it after
+    /// every block for the track's gain-reduction meter (the mixer view
+    /// spec, R21). The default is zero.
+    fn gain_reduction(&self) -> f32 {
+        0.0
+    }
+
     /// Whether the device is a modulator (WP-5.10): the engine works its
     /// output out in [`control`](Self::control) before any track runs, and
     /// [`process`](Self::process) is never called.
@@ -749,6 +758,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 
     fn latency(&self) -> u32 {
         self.device.latency()
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.device.gain_reduction()
     }
 
     fn display(&mut self) -> Option<DisplayReader> {

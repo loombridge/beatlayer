@@ -1660,6 +1660,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
     );
+    let track_menu = Equivalent(
+        "the track's context menu, opened from its title bar with the context menu key \
+         (S-CTX-002), then the arrows and Enter, as in Live",
+    );
     let metronome_menu = Equivalent(
         "the Metronome settings menu, from its pop-up arrow or context menu, as in Live \
          (manual 19.4.1)",
@@ -2392,6 +2396,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
+        ("track.set_devices_enabled", Exception(track_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(

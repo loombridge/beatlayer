@@ -325,6 +325,70 @@ fn with_several_tracks_selected_each_item_acts_on_all_of_them() {
     assert_eq!(last_step(&h), "Delete Track(s)");
 }
 
+// Spec: device-chains R39; IMP-25. The menu's Deactivate All Devices
+// switches every top-level device on the selected tracks off, and reads
+// Activate All Devices when they are all off already.
+#[test]
+fn deactivate_all_devices_switches_the_selected_tracks_devices() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio], "title_bars": true }),
+        )
+        .unwrap();
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    let t = bl_engine::testing::gain_type();
+    for name in ["A", "B"] {
+        h.shell
+            .invoke(
+                "device.add",
+                json!({ "device": { "kind": t.kind, "name": name, "role": t.role } }),
+            )
+            .unwrap();
+    }
+    let off = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .track(audio)
+            .unwrap()
+            .devices()
+            .all(|d| !d.enabled)
+    };
+    let steps = h.shell.editor().undo_history().len();
+
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Deactivate All Devices").disabled);
+    choose(&mut h, "Deactivate All Devices");
+    assert!(off(&h), "every top-level device switched off");
+    assert_eq!(last_step(&h), "Deactivate All Devices");
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+
+    // Every device off: the item reads Activate All Devices.
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    assert!(!item(&nodes, "Activate All Devices").disabled);
+    choose(&mut h, "Activate All Devices");
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .track(audio)
+            .unwrap()
+            .devices()
+            .all(|d| d.enabled),
+        "every top-level device back on"
+    );
+    assert_eq!(last_step(&h), "Activate All Devices");
+}
+
 // Spec: track-context-menu R7 (a group, a time selection)
 #[test]
 fn a_group_and_a_time_selection_add_their_items() {

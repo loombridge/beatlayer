@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-532 commands in 37 areas.
+534 commands in 37 areas.
 
 ## Permission classes
 
@@ -522,6 +522,7 @@ Each command has:
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
 | [`transport.insert_marker_to_playhead`](#transportinsert_marker_to_playhead) | Move Insert Marker To Playhead | `read` | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
@@ -546,6 +547,7 @@ Each command has:
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
 | [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
+| [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
@@ -9301,6 +9303,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.set_devices_enabled`
+
+**Deactivate All Devices**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
+
+Switches every top-level device on the tracks (`tracks`, or the selected tracks) off, or on with `enabled`: true, as the track context menu's Deactivate All Devices does. It reaches only the tracks' own devices, not the devices inside a rack. With `enabled` left out it switches: off, unless every top-level device on the tracks is already off and there is one, when it turns them on. One undo step either way, named Deactivate All Devices or Activate All Devices.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Switch the devices on (true) or off (false); when left out, off unless every top-level device on the tracks is already off, when on. |
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`DevicesEnabled`](#devicesenabled).
+
 #### `track.ungroup`
 
 **Ungroup Tracks**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
@@ -9688,6 +9707,18 @@ Arguments:
 | `tab` | [`ClipTab`](#cliptab) or null | no | The tab to show. Left out, the Clip View goes on to the next one. |
 
 Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.close_plug_in_windows`
+
+**Close All Plug-in Windows**. Permission: `read`. Contexts: `global`.
+
+Closes every open plug-in editor window at once, as View ▸ Close All Plug-in Windows does. It closes editors only: floating native device windows stay as they are, so it changes nothing in the set, isn't an undo step, and is in the read class. It has no key. Returns how many editor windows it closed.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ClosedPlugInWindows`](#closedpluginwindows).
 
 #### `view.draw_mode`
 
@@ -10277,6 +10308,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
 | [`transport.set_loop_enabled`](#transportset_loop_enabled) | `transport.state` | `loop_on` |
@@ -13631,6 +13663,36 @@ What `arrangement.copy` put on the clipboard.
 
 </details>
 
+### `ClosedPlugInWindows`
+
+What `view.close_plug_in_windows` returns: how many editor windows it closed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `closed` | integer, at least 0 | yes | The editor windows it closed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.close_plug_in_windows` returns: how many editor windows it closed.",
+  "properties": {
+    "closed": {
+      "description": "The editor windows it closed.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "closed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ComplexProSettings`
 
 Complex Pro's controls.
@@ -15643,6 +15705,43 @@ Warp settings for a device that plays media (WP-5.15b, Simpler).
       "type": "boolean"
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `DevicesEnabled`
+
+What `track.set_devices_enabled` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it reached, in the order given. |
+| `enabled` | boolean | yes | Whether their devices are on afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.set_devices_enabled` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether their devices are on afterwards.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "The tracks it reached, in the order given.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "enabled"
+  ],
   "type": "object"
 }
 ```
@@ -20735,6 +20834,7 @@ What `mixer_view.state` and the other view commands return.
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R21); empty when no engine has published meters. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20749,6 +20849,14 @@ What `mixer_view.state` and the other view commands return.
     "crossfader": {
       "description": "Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set.",
       "type": "boolean"
+    },
+    "gain_reduction": {
+      "default": [],
+      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R21); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
     },
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
@@ -20788,7 +20896,8 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
-    "track_options"
+    "track_options",
+    "gain_reduction"
   ],
   "type": "object"
 }
@@ -27323,6 +27432,41 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `TrackGainReduction`
+
+One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R21).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `reduction` | number | yes | The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R21).",
+  "properties": {
+    "reduction": {
+      "description": "The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "reduction"
+  ],
+  "type": "object"
 }
 ```
 

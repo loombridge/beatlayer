@@ -8,7 +8,8 @@ use bl_model::{Document, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, ViewMixerState,
+    COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, TrackGainReduction,
+    ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
     CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE,
@@ -161,6 +162,7 @@ impl MixerView {
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
             track_options: self.track_options,
+            gain_reduction: Vec::new(),
         }
     }
 

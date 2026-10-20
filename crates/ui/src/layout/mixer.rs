@@ -589,6 +589,9 @@ pub struct StripLayout {
     pub fader: Rect,
     /// The meter (x 60 to 71, y 11 to 119).
     pub meter: Rect,
+    /// The gain-reduction bar, a thin bar beside the meter (x 71 to 74, y 11
+    /// to 119; IMP-25, the mixer view spec R21).
+    pub gain_reduction: Rect,
     /// The scale's labels' column (x 74 to 86).
     pub labels: (f32, f32),
     /// The strip section's top, which [`SCALE_LABELS`] count from.
@@ -610,6 +613,7 @@ impl StripLayout {
             arm: at(column, top, 15.0, 106.0, 36.0, 119.0),
             fader: at(column, top, 46.0, travel_top, 59.0, travel_bottom),
             meter: at(column, top, 60.0, 11.0, 71.0, 119.0),
+            gain_reduction: at(column, top, 71.5, 11.0, 73.5, 119.0),
             labels: (column.left() + 74.0, column.left() + 86.0),
             top,
         }
@@ -617,7 +621,7 @@ impl StripLayout {
 
     /// Every control, for checks.
     #[must_use]
-    pub fn parts(&self) -> [Rect; 8] {
+    pub fn parts(&self) -> [Rect; 9] {
         [
             self.peak_field,
             self.pan_triangle,
@@ -627,6 +631,7 @@ impl StripLayout {
             self.arm,
             self.fader,
             self.meter,
+            self.gain_reduction,
         ]
     }
 }
@@ -866,6 +871,7 @@ mod tests {
         assert_eq!(rel(strip.solo), (15.0, 91.0, 36.0, 102.5));
         assert_eq!(rel(strip.arm), (15.0, 106.0, 36.0, 119.0));
         assert_eq!(rel(strip.meter), (60.0, 11.0, 71.0, 119.0));
+        assert_eq!(rel(strip.gain_reduction), (71.5, 11.0, 73.5, 119.0));
         assert_eq!(
             (strip.fader.left() - 320.0, strip.fader.right() - 320.0),
             (46.0, 59.0)

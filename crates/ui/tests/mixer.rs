@@ -265,6 +265,8 @@ fn every_strip_has_its_controls_where_live_has_them() {
     let fader = get("Track Volume");
     assert_eq!((fader.0, fader.2), (46.0, 59.0));
     assert_eq!(get("Track Meter"), (60.0, 11.0, 71.0, 119.0));
+    // The gain-reduction bar is a thin bar beside the meter (IMP-25, R21).
+    assert_eq!(get("Gain Reduction"), (71.5, 11.0, 73.5, 119.0));
     // No volume number field in the strip: the only Track Volume is the
     // fader.
     let volumes = nodes
@@ -541,6 +543,12 @@ fn the_arrangement_mixer_is_the_session_mixer_under_the_lanes() {
     let peak = rect_of(inside(&nodes, "3 Audio", "Peak Level").unwrap());
     assert_eq!(relative(peak, column, STRIP_TOP).0, 8.0);
     assert_eq!(peak.top() - STRIP_TOP, 13.0);
+    // The gain-reduction bar sits beside the meter here too (R21).
+    let reduction = rect_of(inside(&nodes, "3 Audio", "Gain Reduction").unwrap());
+    assert_eq!(
+        relative(reduction, column, STRIP_TOP),
+        (71.5, 11.0, 73.5, 119.0)
+    );
     // Hidden again, the lanes have their height back.
     h.shell.run(ids::TOGGLE, json!({})).unwrap();
     let lanes = rect_of(Harness::node(&tree(&mut h), "Track Lanes"));
@@ -973,6 +981,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
         track: t[2],
         peak: [half, half * 0.5],
         rms: [half * 0.5, half * 0.25],
+        gain_reduction: -6.0,
     }];
     h.shell.set_meters(&meters);
     let output = h.frame(vec![]);
@@ -981,6 +990,11 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
     assert_eq!(meter.role, Role::Meter);
     assert_eq!(meter.value, "peak -6.0, RMS -12.0");
     assert!((meter.numeric.unwrap() + 6.0).abs() < 1e-3);
+    // The gain-reduction bar beside the meter reads its value too (R21).
+    let reduction = inside(&nodes, "3 Audio", "Gain Reduction").unwrap();
+    assert_eq!(reduction.role, Role::Meter);
+    assert_eq!(reduction.value, "-6.0 dB");
+    assert!((reduction.numeric.unwrap() + 6.0).abs() < 1e-3);
     assert_eq!(
         inside(&nodes, "3 Audio", "Peak Level").unwrap().value,
         "-6.0 dB"
@@ -997,6 +1011,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
         track: t[2],
         peak: [0.0; 2],
         rms: [0.0; 2],
+        gain_reduction: 0.0,
     }]);
     h.frame(vec![]);
     let output = h.frame(vec![]);
@@ -1011,6 +1026,30 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
     assert_eq!(
         inside(&nodes, "3 Audio", "Track Meter").unwrap().value,
         "peak -inf, RMS -inf"
+    );
+    assert_eq!(
+        inside(&nodes, "3 Audio", "Gain Reduction").unwrap().value,
+        "0.0 dB"
+    );
+    // A reduction on its own keeps the window redrawing (R21).
+    h.shell.set_meters(&[TrackMeter {
+        track: t[2],
+        peak: [0.0; 2],
+        rms: [0.0; 2],
+        gain_reduction: -6.0,
+    }]);
+    h.frame(vec![]);
+    let output = h.frame(vec![]);
+    let delay = output
+        .viewport_output
+        .values()
+        .next()
+        .unwrap()
+        .repaint_delay;
+    assert_eq!(
+        delay,
+        std::time::Duration::ZERO,
+        "the gain-reduction bar redraws"
     );
 }
 
@@ -1292,6 +1331,7 @@ fn every_mixer_control_reaches_assistive_technology() {
             ("Track Volume", Role::Slider),
             (pan, Role::Slider),
             ("Track Meter", Role::Meter),
+            ("Gain Reduction", Role::Meter),
         ] {
             let node = inside(&nodes, column, label).unwrap_or_else(|| panic!("{column}: {label}"));
             assert_eq!(node.role, role, "{column}: {label}");
@@ -1501,6 +1541,20 @@ fn mixer_rows_keep_their_places_at_every_zoom() {
             .unwrap();
         h.size = vec2(1600.0 * zoom, (1000.0 - TITLE_BAR) * zoom + TITLE_BAR);
         let nodes = tree(&mut h);
+        // The gain-reduction bar keeps its place beside the meter at every
+        // zoom (R21).
+        let meter = rect_of(inside(&nodes, "3 Audio", "Track Meter").unwrap());
+        let reduction = rect_of(inside(&nodes, "3 Audio", "Gain Reduction").unwrap());
+        assert_eq!(
+            (
+                reduction.left() - meter.left(),
+                reduction.width(),
+                reduction.top() - meter.top(),
+                reduction.bottom() - meter.bottom()
+            ),
+            (11.5, 2.0, 0.0, 0.0),
+            "{percent}%"
+        );
         let drawn = rect_of(Harness::node(&nodes, "Session Mixer"));
         let top = TITLE_BAR / zoom;
         let expected = ShellLayout::compute(REFERENCE, true, true).main_view;

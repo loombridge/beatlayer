@@ -11,6 +11,7 @@
 
 use bl_commands::Context::{Arrangement, Global};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::TrackId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -86,8 +87,20 @@ pub struct ViewMixerState {
     pub scroll: f64,
 }
 
-/// What `mixer_view.state` and the other view commands return.
+/// One track's gain reduction, as `mixer_view.state` reports it (IMP-25,
+/// the mixer view spec R21).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackGainReduction {
+    /// The track.
+    pub track: TrackId,
+    /// The most reduction any of the track's compressors or limiters
+    /// reported for the last block, in dB, as a compressor's Gain Reduction
+    /// reads it: zero when none of them reduced.
+    pub reduction: f32,
+}
+
+/// What `mixer_view.state` and the other view commands return.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MixerViewState {
     /// The Session View's mixer.
     pub session: ViewMixerState,
@@ -113,6 +126,10 @@ pub struct MixerViewState {
     /// Keep Monitoring Latency). Shown only while this shows; hidden in a
     /// new set.
     pub track_options: bool,
+    /// Each track's gain reduction, in the order the tracks run (IMP-25,
+    /// R21); empty when no engine has published meters.
+    #[serde(default)]
+    pub gain_reduction: Vec<TrackGainReduction>,
 }
 
 /// Arguments of `mixer_view.toggle`.

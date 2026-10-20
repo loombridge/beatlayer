@@ -14,7 +14,6 @@
 
 bl_rt::install_trap!();
 
-
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Clip, EnvelopeKind, MixerParam, SceneId, TrackId};
@@ -243,7 +242,9 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
     pass_time(&control, &mut shell, 300);
     shell.run("session.stop_recording", json!({})).unwrap();
     poll_until(&control, &mut shell, "the recording to end", recorded);
-    poll_until(&control, &mut shell, "the clip to play", |shell| playing(shell, keys));
+    poll_until(&control, &mut shell, "the clip to play", |shell| {
+        playing(shell, keys)
+    });
     arm_automation(&mut shell);
     let clips = shell
         .editor()
@@ -354,7 +355,9 @@ fn a_hand_move_takes_the_parameter_back_until_the_clip_launches_again() {
     let scene = scenes(&shell)[0];
     arm_automation(&mut shell);
     record_with_move(&control, &mut shell, keys, scene, 0.25);
-    poll_until(&control, &mut shell, "the clip to play", |shell| playing(shell, keys));
+    poll_until(&control, &mut shell, "the clip to play", |shell| {
+        playing(shell, keys)
+    });
     let enabled = |shell: &Shell| {
         slot_clip(shell, keys, scene)
             .unwrap()

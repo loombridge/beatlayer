@@ -212,7 +212,9 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
     ];
     run(&mut shell, |s| transport::typed(s, Group::Position, &typed));
     let marker = BAR * 2 + Ticks::QUARTER * 2;
-    wait(&control, &mut shell, "the locate", |e| e.insert_marker == marker);
+    wait(&control, &mut shell, "the locate", |e| {
+        e.insert_marker == marker
+    });
     assert_eq!(
         shell.arrangement().insert_marker(),
         marker,
@@ -241,7 +243,9 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
         transport::step(s, Field::new(Group::Position, 2), -1, false)
     });
     let at = BAR + Ticks::QUARTER * 3 - Ticks::SIXTEENTH;
-    wait(&control, &mut shell, "a sixteenth back", |e| e.insert_marker == at);
+    wait(&control, &mut shell, "a sixteenth back", |e| {
+        e.insert_marker == at
+    });
     assert_eq!(state(&mut shell).arrangement_position, "2.3.4");
     // While the song plays, the fields show the playhead.
     shell.run("transport.play", json!({})).unwrap();
@@ -442,7 +446,9 @@ fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() 
     shell
         .run("arrangement.set_insert_marker", json!({ "at": BAR * 16 }))
         .unwrap();
-    let after = wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 16);
+    let after = wait(&control, &mut shell, "the marker", |e| {
+        e.insert_marker == BAR * 16
+    });
     assert!(after.playing, "playback carries on");
     assert!(
         after.position >= before.position && after.position < BAR * 16,
@@ -456,7 +462,9 @@ fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() 
             json!({ "start": BAR * 2, "end": BAR * 4 }),
         )
         .unwrap();
-    wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 2);
+    wait(&control, &mut shell, "the marker", |e| {
+        e.insert_marker == BAR * 2
+    });
     // Move Insert Marker To Playhead, and a second Stop, move the view's
     // marker too.
     shell.run("transport.stop", json!({})).unwrap();
@@ -469,7 +477,9 @@ fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() 
     });
     assert_eq!(shell.arrangement().insert_marker(), stopped.position);
     shell.run("transport.stop", json!({})).unwrap();
-    wait(&control, &mut shell, "the return", |e| e.insert_marker == Ticks::ZERO);
+    wait(&control, &mut shell, "the return", |e| {
+        e.insert_marker == Ticks::ZERO
+    });
     assert_eq!(shell.arrangement().insert_marker(), Ticks::ZERO);
     shell.audio_mut().stop();
 }
@@ -488,13 +498,17 @@ fn a_device_change_keeps_the_song_where_it_was_stopped() {
     shell
         .run("arrangement.set_insert_marker", json!({ "at": BAR * 3 }))
         .unwrap();
-    wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 3);
+    wait(&control, &mut shell, "the marker", |e| {
+        e.insert_marker == BAR * 3
+    });
     shell
         .run("audio.configure", json!({ "buffer_size": 128 }))
         .unwrap();
     let moved = shell.audio_mut().transport_state();
     assert!(moved.position > BAR * 8, "{moved:?}");
-    let back = wait(&control, &mut shell, "the new engine's first block", |e| e.clock > 0);
+    let back = wait(&control, &mut shell, "the new engine's first block", |e| {
+        e.clock > 0
+    });
     assert!(!back.playing, "stopped after the restart");
     assert_eq!(back.insert_marker, BAR * 3);
     // Within a block of where the old engine last showed it.

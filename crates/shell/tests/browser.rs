@@ -16,8 +16,8 @@ use bl_shell::browser_commands::{
     self as ids, AddResult, BrowserState, ItemKind, Label, PreviewState, Section,
 };
 use bl_shell::settings::Preferences;
-use bl_shell::{Area, Effect, Shell, ShellError, commands};
 use bl_shell::testing;
+use bl_shell::{Area, Effect, Shell, ShellError, commands};
 use serde_json::{Value, json};
 
 const BAR: i64 = Ticks::WHOLE.get();

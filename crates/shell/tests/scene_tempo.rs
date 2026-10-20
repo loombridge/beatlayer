@@ -153,9 +153,12 @@ fn capture_copies_the_playing_clips_and_the_clips_play_on_in_the_copies() {
             .iter()
             .any(|slot| slot.scene == launched && slot.state == SlotState::Playing)
     });
-    testing::wait_for(&control, &mut shell, "the scene's tempo to apply", |shell| {
-        shell.scene_override().tempo.is_some()
-    });
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the scene's tempo to apply",
+        |shell| shell.scene_override().tempo.is_some(),
+    );
     assert_eq!(shell.current_tempo(), Bpm::new(100.0).unwrap());
     // A selection elsewhere doesn't matter once a scene has launched.
     shell
@@ -281,9 +284,12 @@ fn re_enable_automation_gives_back_the_sets_tempo() {
     shell
         .run("session.launch_scene", json!({ "scene": scene }))
         .unwrap();
-    testing::wait_for(&control, &mut shell, "the scene's tempo to apply", |shell| {
-        shell.scene_override().tempo.is_some()
-    });
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the scene's tempo to apply",
+        |shell| shell.scene_override().tempo.is_some(),
+    );
     assert_eq!(shell.current_tempo(), Bpm::new(80.0).unwrap());
     shell.run("automation.re_enable", json!({})).unwrap();
     testing::wait_for(&control, &mut shell, "the override to clear", |shell| {

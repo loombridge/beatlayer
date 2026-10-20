@@ -393,9 +393,12 @@ fn a_recording_that_cannot_write_is_reported_and_makes_no_clip() {
     play_for(&control, &mut shell, 200);
     shell.run("transport.stop", json!({})).unwrap();
     // Give the writer and the shell a few polls to report.
-    testing::wait_for(&control, &mut shell, "the failure to be reported", |shell| {
-        shell.message().is_some()
-    });
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the failure to be reported",
+        |shell| shell.message().is_some(),
+    );
 
     let message = shell.message().map(|message| message.text.clone());
     assert!(
@@ -448,9 +451,12 @@ fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes(
     shell.run("transport.play", json!({})).unwrap();
     play_for(&control, &mut shell, 200);
     shell.run("transport.stop", json!({})).unwrap();
-    testing::wait_for(&control, &mut shell, "the failure to be reported", |shell| {
-        shell.message().is_some()
-    });
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the failure to be reported",
+        |shell| shell.message().is_some(),
+    );
 
     let message = shell.message().map(|message| message.text.clone());
     assert!(
@@ -479,7 +485,7 @@ fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes(
 #[test]
 fn midi_arrangement_overdub_is_one_undo_step_saved_with_the_set() {
     let dir = TestDir::new("overdub");
-    let (mut shell, control) = duplex_shell();
+    let (mut shell, _control) = duplex_shell();
     assert!(!shell.editor().document().settings().midi_overdub);
     shell
         .run("transport.set_midi_overdub", json!({ "enabled": true }))
@@ -538,7 +544,10 @@ fn impulse_through(
 ) -> (Ticks, usize, Value, f32) {
     let dir = TestDir::new("loopback");
     let (backend, control) = four_channel_backend();
-    let mut shell = shell_on(backend.with_latency(400, 600).with_loopback(1_480), &control);
+    let mut shell = shell_on(
+        backend.with_latency(400, 600).with_loopback(1_480),
+        &control,
+    );
     let saved: Value = shell
         .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
         .unwrap();
@@ -751,7 +760,11 @@ fn punch_records_only_between_the_brace_ends() {
 }
 
 /// The track's take lanes, once a recording has made them.
-fn wait_for_lanes(control: &NullControl, shell: &mut Shell, track: TrackId) -> Vec<bl_model::TakeLane> {
+fn wait_for_lanes(
+    control: &NullControl,
+    shell: &mut Shell,
+    track: TrackId,
+) -> Vec<bl_model::TakeLane> {
     let mut found = Vec::new();
     testing::wait_for(control, shell, "the recording's take lane", |shell| {
         found = shell

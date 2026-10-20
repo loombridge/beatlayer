@@ -39,7 +39,9 @@ pub fn rig() -> (Shell, NullControl) {
         Box::new(ProjectFiles::new()),
     );
     // Headless runs and tests touch no real keychain.
-    shell.use_keychain(std::sync::Arc::new(bl_assistant::keychain::MemoryKeychain::new()));
+    shell.use_keychain(std::sync::Arc::new(
+        bl_assistant::keychain::MemoryKeychain::new(),
+    ));
     shell.use_test_clock(control.clock().expect("manual pacing"));
     (shell, control)
 }

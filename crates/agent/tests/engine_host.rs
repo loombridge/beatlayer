@@ -10,8 +10,8 @@
 
 use bl_agent::client::{Client, InProcess};
 use bl_agent::{Agent, QuestionKind};
-use bl_core::time::{SampleRate, Ticks};
 use bl_audio_io::NullControl;
+use bl_core::time::{SampleRate, Ticks};
 use bl_shell::testing;
 use serde_json::{Value, json};
 
@@ -99,7 +99,12 @@ fn frame_of(client: &mut Client<InProcess>, at: &str) -> i64 {
 }
 
 fn audio_track(control: &NullControl, client: &mut Client<InProcess>) -> u64 {
-    call(control, client, "query", json!({ "path": "track \"3 Audio\"" }))["id"]
+    call(
+        control,
+        client,
+        "query",
+        json!({ "path": "track \"3 Audio\"" }),
+    )["id"]
         .as_u64()
         .unwrap()
 }
@@ -139,8 +144,15 @@ fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_un
             "{added}"
         );
     }
-    call(&control, &mut client, "transport", json!({ "action": "play" }));
-    wait(&control, &mut client, "both to fire", |c| all_fired(&control, c));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "both to fire", |c| {
+        all_fired(&control, c)
+    });
 
     // Each fired on the frame its bar and beat falls on.
     let entries = scheduled(&control, &mut client);
@@ -174,8 +186,15 @@ fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_un
         now["position"]["ticks"].as_i64().unwrap() >= BAR / 2,
         "{now}"
     );
-    call(&control, &mut client, "transport", json!({ "action": "stop" }));
-    wait(&control, &mut client, "the stop", |c| status(&control, c)["playing"] == false);
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
+    wait(&control, &mut client, "the stop", |c| {
+        status(&control, c)["playing"] == false
+    });
 }
 
 #[test]
@@ -205,7 +224,9 @@ fn the_agent_s_and_the_person_s_transport_commands_share_one_queue_in_order() {
         .shell
         .invoke("transport.stop", json!({}))
         .unwrap();
-    wait(&control, &mut client, "the stop", |c| status(&control, c)["playing"] == false);
+    wait(&control, &mut client, "the stop", |c| {
+        status(&control, c)["playing"] == false
+    });
     let stopped = status(&control, &mut client);
     let position = stopped["position"]["ticks"].as_i64().unwrap();
     assert!(
@@ -253,8 +274,15 @@ fn a_new_engine_gets_the_commands_still_scheduled_and_none_plays_without_one() {
         .unwrap();
     pump(&control, &mut client);
     assert_eq!(status(&control, &mut client)["engine_plays_here"], true);
-    call(&control, &mut client, "transport", json!({ "action": "play" }));
-    wait(&control, &mut client, "the mute", |c| all_fired(&control, c));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "the mute", |c| {
+        all_fired(&control, c)
+    });
     let entries = scheduled(&control, &mut client);
     assert_eq!(entries.len(), 1);
     assert_eq!(
@@ -283,7 +311,12 @@ fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
         json!({ "action": "add", "at": "1.2.1", "command": "mixer.set_mute",
                 "args": { "track": track, "mute": true } }),
     );
-    call(&control, &mut client, "transport", json!({ "action": "play" }));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
     // The person drags a fader on another track meanwhile.
     let shell = &mut client.transport().shell;
     shell.begin_gesture("Change volume");
@@ -322,7 +355,12 @@ fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
             "Change volume"
         ]
     );
-    call(&control, &mut client, "transport", json!({ "action": "stop" }));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
 }
 
 #[test]
@@ -365,5 +403,10 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
             .is_some_and(|text| text.starts_with("the set has never been saved")),
         "{message:?}"
     );
-    call(&control, &mut client, "transport", json!({ "action": "stop" }));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
 }

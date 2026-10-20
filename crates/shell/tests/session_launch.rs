@@ -274,7 +274,7 @@ fn shell_with_a_slot_clip() -> (
 // Spec: launch-quantisation R16.
 #[test]
 fn a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one() {
-    let (mut shell, control, track, first, second) = shell_with_a_slot_clip();
+    let (mut shell, _control, track, first, second) = shell_with_a_slot_clip();
     let selected = |shell: &mut Shell| shell.run("session.state", json!({})).unwrap();
 
     // Select on Launch: the launched slot is selected.
@@ -318,7 +318,7 @@ fn a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one() {
 // Spec: launch-quantisation R16.
 #[test]
 fn launching_an_empty_slot_or_the_last_scene_selects_nothing_new() {
-    let (mut shell, control, track, first, _) = shell_with_a_slot_clip();
+    let (mut shell, _control, track, first, _) = shell_with_a_slot_clip();
     let scenes: Vec<_> = shell.editor().document().scenes().map(|s| s.id).collect();
     let last = *scenes.last().unwrap();
     shell

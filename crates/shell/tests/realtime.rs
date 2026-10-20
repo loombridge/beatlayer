@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use bl_audio_io::{AudioBuffer, AudioBufferMut, AudioCallback as _, ProcessContext};
 use bl_shell::Shell;
-use bl_shell::testing;
 use bl_shell::audio::{EngineCallback, EngineShared, ToneSettings};
+use bl_shell::testing;
 use serde_json::json;
 
 bl_rt::install_trap!();

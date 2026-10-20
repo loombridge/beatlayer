@@ -40,6 +40,7 @@ use bl_audio_io::{
     DeviceInfo, DeviceSelector, Error, PortRequest, ProcessContext, Stream, StreamInfo,
     StreamRequest, StreamStats,
 };
+use bl_core::clock::TestClock;
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewTransport, PreviewVoice,
@@ -175,6 +176,10 @@ pub struct EngineCallback {
     processor: Option<Processor>,
     /// The browser's preview voice, mixed in after the tone (WP-1.10).
     preview: Option<PreviewVoice>,
+    /// With the null device paced by hand, the clock the block's start is
+    /// timed from, so MIDI lands on its frame however busy the machine is
+    /// (T199). Without one, the block starts now.
+    clock: Option<TestClock>,
 }
 
 impl EngineCallback {
@@ -188,6 +193,7 @@ impl EngineCallback {
             incoming: None,
             processor: None,
             preview: None,
+            clock: None,
         }
     }
 
@@ -209,6 +215,14 @@ impl EngineCallback {
         self.preview = Some(preview);
         self
     }
+
+    /// The same, timing each block from `clock` instead of the system's, for
+    /// the null device's manual pacing (T199).
+    #[must_use]
+    pub fn with_test_clock(mut self, clock: TestClock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
 }
 
 impl AudioCallback for EngineCallback {
@@ -218,7 +232,11 @@ impl AudioCallback for EngineCallback {
         input: &AudioBuffer<'_>,
         output: &mut AudioBufferMut<'_>,
     ) {
-        let started = Instant::now();
+        let began = Instant::now();
+        // With the null device paced by hand, the block's start is the test
+        // clock's time (T199); the system's clock still measures how long the
+        // callback took.
+        let started = self.clock.as_ref().map_or(began, TestClock::now);
         if self.processor.is_none()
             && let Some(incoming) = self.incoming.as_mut()
         {
@@ -305,7 +323,7 @@ impl AudioCallback for EngineCallback {
             });
             preview.render_with_transport(ctx.frames, output.iter_mut(), transport);
         }
-        let busy = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let busy = u64::try_from(began.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let audio = ctx.frames as u64 * 1_000_000_000 / u64::from(ctx.sample_rate.max(1));
         self.shared.busy_ns.fetch_add(busy, Relaxed);
         self.shared.audio_ns.fetch_add(audio, Relaxed);
@@ -434,6 +452,9 @@ pub struct AudioHost {
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
+    /// A test clock for the next stream's blocks, with the null device's
+    /// manual pacing (T199).
+    test_clock: Option<TestClock>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -513,6 +534,7 @@ impl AudioHost {
             midi: None,
             midi_out: None,
             latency_sent: (0, 0),
+            test_clock: None,
         }
     }
 
@@ -520,6 +542,13 @@ impl AudioHost {
     /// input (WP-2.2; the MIDI I/O spec, R14).
     pub fn set_midi(&mut self, sender: bl_midi_io::InputSender) {
         self.midi = Some(sender);
+    }
+
+    /// Times the next stream's blocks from `clock` instead of the system's,
+    /// for the null device's manual pacing (T199). It applies to a stream
+    /// opened after it, as [`AudioHost::set_midi`] does for its queue.
+    pub fn set_test_clock(&mut self, clock: TestClock) {
+        self.test_clock = Some(clock);
     }
 
     /// Gives every engine from now on the queue it sends MIDI to output
@@ -1169,9 +1198,12 @@ impl AudioHost {
             .ok_or("the audio drop thread isn't running")?;
         let (preview, voice) = preview_channel(gc, Arc::clone(&self.preview_shared));
         let (handoff, incoming) = RingBuffer::new(1);
-        let callback = Box::new(
-            EngineCallback::with_engine(Arc::clone(&self.shared), incoming).with_preview(voice),
-        );
+        let mut callback =
+            EngineCallback::with_engine(Arc::clone(&self.shared), incoming).with_preview(voice);
+        if let Some(clock) = &self.test_clock {
+            callback = callback.with_test_clock(clock.clone());
+        }
+        let callback = Box::new(callback);
         let mut stream = self
             .backend()?
             .open_stream(&request, callback)

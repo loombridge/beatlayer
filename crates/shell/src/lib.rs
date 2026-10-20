@@ -94,6 +94,8 @@ pub mod session_view;
 pub mod settings;
 mod shell;
 pub mod stems;
+#[doc(hidden)]
+pub mod testing;
 pub mod tracks;
 pub mod transport;
 

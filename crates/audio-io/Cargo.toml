@@ -14,6 +14,8 @@ publish.workspace = true
 asio = ["dep:azo"]
 
 [dependencies]
+# The clock a test drives by hand, which the manual pacing reads (T199).
+bl-core.workspace = true
 bl-rt.workspace = true
 # Core Audio, WASAPI shared, and ALSA. Pinned to 0.18 until its duplex streams
 # land (see the architecture's audio I/O section); until then a stream with

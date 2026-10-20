@@ -1492,6 +1492,15 @@ impl Shell {
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
+    /// Drives the shell's clocks from `clock`: the computer keyboard stamps
+    /// its notes with it, and the next audio stream times its blocks from it
+    /// (T199). Call it after [`Shell::use_midi_backend`] and before
+    /// [`Shell::start_audio`].
+    pub fn use_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.midi.set_test_clock(clock.clone());
+        self.audio.set_test_clock(clock);
+    }
+
     /// The MIDI ports and the computer MIDI keyboard.
     #[must_use]
     pub fn midi(&self) -> &MidiHost {

@@ -1,0 +1,73 @@
+//! Helpers for tests that run the shell on a null device paced by hand
+//! (T199): advance the set by milliseconds or blocks, and poll the engine
+//! while doing it, so a test never waits on the wall clock for a result.
+
+use std::time::Duration;
+
+use bl_audio_io::NullControl;
+
+use crate::Shell;
+
+/// How much test time one step of [`advance`] and [`wait_for`] covers.
+pub const STEP_MS: u64 = 5;
+
+/// Runs `blocks` blocks on the null stream and lets the shell read what the
+/// engine published.
+pub fn run_blocks(control: &NullControl, shell: &mut Shell, blocks: u64) {
+    control.run_blocks(blocks);
+    shell.poll_engine();
+}
+
+/// Advances the set by `millis` of test time in [`STEP_MS`] steps, polling the
+/// engine after each. The null device is paced by hand, so this runs at once
+/// and lands on the same frames however busy the machine is.
+pub fn advance(control: &NullControl, shell: &mut Shell, millis: u64) {
+    let clock = control.clock().expect("a manually paced null stream");
+    let rate = f64::from(shell.audio().sample_rate().unwrap_or(48_000));
+    let target = clock.elapsed() + Duration::from_millis(millis);
+    while clock.elapsed() < target {
+        let remaining = target - clock.elapsed();
+        let capped = remaining.min(Duration::from_millis(STEP_MS));
+        let frames = (capped.as_secs_f64() * rate).ceil() as u64;
+        control.run_frames(frames.max(1));
+        shell.poll_engine();
+    }
+}
+
+/// Waits until the engine plays the set as it is now: the change has reached
+/// the audio thread and a few blocks have run with it, so a note played next
+/// reaches a track just armed or changed.
+pub fn settle(control: &NullControl, shell: &mut Shell) {
+    assert!(
+        shell.audio().flush(Duration::from_secs(10)),
+        "the engine never took the set"
+    );
+    let blocks = |shell: &Shell| shell.audio().stats().map_or(0, |s| s.blocks);
+    let start = blocks(shell);
+    for _ in 0..2_000 {
+        if blocks(shell) >= start + 4 {
+            return;
+        }
+        advance(control, shell, STEP_MS);
+    }
+    panic!("the stream stopped");
+}
+
+/// Polls the engine and advances the set by [`STEP_MS`] until `done` says
+/// so, for up to two thousand steps (about ten seconds of test time). Panics
+/// with `what` if it never does.
+pub fn wait_for(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    mut done: impl FnMut(&mut Shell) -> bool,
+) {
+    for _ in 0..2_000 {
+        shell.poll_engine();
+        if done(shell) {
+            return;
+        }
+        advance(control, shell, STEP_MS);
+    }
+    panic!("waited for {what}");
+}

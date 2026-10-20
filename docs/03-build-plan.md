@@ -368,7 +368,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 0.1 | done | 10 October 2026 |  |
 | 0.2 | done | 10 October 2026 |  |
 | 0.3 | done | 10 October 2026 |  |
-| 0.4 | done | 10 October 2026 |  |
+| 0.4 | done | 20 October 2026 | [#241](https://github.com/loombridge/beatlayer/pull/241): tests drive time themselves — the null device runs a block only when a test asks for it, on the stream's own thread, one test clock advances by each block's length and is what the device, the MIDI stamps and the engine's block start read, `bl_shell::testing` holds the shared helpers, and `cargo xtask check` fails a `thread::sleep` or `Instant::now` in test code outside its allowlist (the architecture's testing section) |
 | 0.5 | done | 10 October 2026 |  |
 | 0.6 | done | 10 October 2026 |  |
 | 0.7 | done | 10 October 2026 |  |

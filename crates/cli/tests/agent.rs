@@ -1999,7 +1999,11 @@ fn an_agent_folds_a_racks_chains_out_and_reads_the_strips_back() {
     let rack = ids["rack"].as_u64().unwrap();
     let keys = ids["keys"].as_u64().unwrap();
     // The chains are folded out as strips, and the state reports them.
-    let folded = run(&mut client, "mixer_view.fold_chains", json!({ "rack": rack }));
+    let folded = run(
+        &mut client,
+        "mixer_view.fold_chains",
+        json!({ "rack": rack }),
+    );
     let strips = folded["chains"].as_array().unwrap();
     assert_eq!(strips.len(), 2);
     assert_eq!(strips[0]["chain"].as_u64(), Some(keys));
@@ -2007,8 +2011,16 @@ fn an_agent_folds_a_racks_chains_out_and_reads_the_strips_back() {
     assert_eq!(strips[0]["rack"].as_u64(), Some(rack));
     assert_eq!(strips[0]["track"].as_u64(), Some(midi));
     // The chain's mixer is set by ID, and reads back in the query.
-    run(&mut client, "chain.set_gain", json!({ "chain": keys, "volume": 0.5 }));
-    let chain = call(&mut client, "query", json!({ "id": keys, "detail": "full" }));
+    run(
+        &mut client,
+        "chain.set_gain",
+        json!({ "chain": keys, "volume": 0.5 }),
+    );
+    let chain = call(
+        &mut client,
+        "query",
+        json!({ "id": keys, "detail": "full" }),
+    );
     assert_eq!(chain["mixer"]["volume"], 0.5);
     // And the strip shows the new value.
     let state = run(&mut client, "mixer_view.state", json!({}));

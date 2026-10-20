@@ -1453,7 +1453,16 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
     let shell = ShellLayout::compute(size, true, true);
     let session = SessionLayout::compute(shell.main_view, Some(Sections::DEFAULT));
     let mut rows = session.rows();
-    rows.extend(MixerLayout::compute(session.mixer.unwrap(), &vec![TrackColumn::track(); 4], 2, Sections::DEFAULT, 0.0).rows());
+    rows.extend(
+        MixerLayout::compute(
+            session.mixer.unwrap(),
+            &[TrackColumn::track(); 4],
+            2,
+            Sections::DEFAULT,
+            0.0,
+        )
+        .rows(),
+    );
     let arrangement =
         ArrangementLayout::compute_with_mixer(shell.main_view, true, 3, Sections::DEFAULT);
     rows.extend(arrangement.rows());
@@ -1461,7 +1470,7 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
     rows.extend(
         MixerLayout::compute(
             mixer.with_min_y(mixer.top() + 17.0),
-            &vec![TrackColumn::track(); 4],
+            &[TrackColumn::track(); 4],
             2,
             Sections::DEFAULT,
             0.0,
@@ -1925,8 +1934,16 @@ fn a_racks_chains_fold_out_as_strips_without_slots() {
     assert!(state.racks.iter().any(|r| r.rack == rack && r.folded));
     // The strips are in the mixers, named for their chain and their rack.
     let nodes = tree(&mut h);
-    assert!(nodes.iter().any(|n| n.label == "Chain Strip Keys of Instrument Rack"));
-    assert!(nodes.iter().any(|n| n.label == "Chain Strip Bass of Instrument Rack"));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Chain Strip Keys of Instrument Rack")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Chain Strip Bass of Instrument Rack")
+    );
     // A chain's column has no clip slots.
     let slots = nodes.iter().filter(|n| n.role == Role::ListItem).count();
     assert!(slots > 0);
@@ -1939,15 +1956,23 @@ fn a_racks_chains_fold_out_as_strips_without_slots() {
         .unwrap();
     h.settle();
     let nodes = tree(&mut h);
-    assert!(nodes.iter().any(|n| n.label == "Chain Strip Keys of Instrument Rack"));
-    assert!(nodes.iter().any(|n| n.label == "Chain Strip Bass of Instrument Rack"));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Chain Strip Keys of Instrument Rack")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Chain Strip Bass of Instrument Rack")
+    );
 }
 
 // Spec: racks R27.
 #[test]
 fn a_nested_rack_folds_out_from_its_chains_strip() {
     let mut h = session();
-    let (_track, rack, chains) = folded_rack(&mut h);
+    let (_track, _rack, chains) = folded_rack(&mut h);
     // A rack inside a chain has its own fold button, on that chain's strip.
     let nested: Added = serde_json::from_value(
         h.shell
@@ -1995,7 +2020,10 @@ fn a_nested_rack_folds_out_from_its_chains_strip() {
         .find(|r| r.left() > 414.0)
         .expect("the chain strip's fold button")
         .center();
-    assert!(at.y < 100.0, "the strip's fold button is in the title row: {at:?}");
+    assert!(
+        at.y < 100.0,
+        "the strip's fold button is in the title row: {at:?}"
+    );
     click(&mut h, at, Modifiers::NONE);
     let state = state(&mut h.shell);
     assert_eq!(state.chains.len(), 4);
@@ -2013,7 +2041,11 @@ fn a_strips_volume_and_the_chain_lists_move_each_other() {
     let (_track, rack, chains) = folded_rack(&mut h);
     // The strip's Volume moves the chain, and the chain list's slider with
     // it, in one undo step.
-    let slider = control(&mut h, "Chain Strip Keys of Instrument Rack", "Chain Volume of Keys");
+    let slider = control(
+        &mut h,
+        "Chain Strip Keys of Instrument Rack",
+        "Chain Volume of Keys",
+    );
     let before = h.shell.editor().undo_history().len();
     drag(
         &mut h,
@@ -2060,7 +2092,11 @@ fn selected_chain_strips_change_together_and_the_chain_list_does_not() {
     click(&mut h, at, Modifiers::COMMAND);
     // The first chain's Volume moves, and the second's with it, keeping
     // their difference.
-    let slider = control(&mut h, "Chain Strip Keys of Instrument Rack", "Chain Volume of Keys");
+    let slider = control(
+        &mut h,
+        "Chain Strip Keys of Instrument Rack",
+        "Chain Volume of Keys",
+    );
     drag(
         &mut h,
         slider.center(),
@@ -2091,7 +2127,7 @@ fn selected_chain_strips_change_together_and_the_chain_list_does_not() {
 #[test]
 fn clicking_a_strips_title_bar_shows_only_its_chains_devices() {
     let mut h = session();
-    let (_track, rack, chains) = folded_rack(&mut h);
+    let (_track, _rack, chains) = folded_rack(&mut h);
     // A device in the first chain, so the Device View has something to
     // show.
     h.shell
@@ -2115,11 +2151,7 @@ fn clicking_a_strips_title_bar_shows_only_its_chains_devices() {
     let at = rect_of(title).center();
     click(&mut h, at, Modifiers::NONE);
     let state = h.shell.device_view_state();
-    let shown = state
-        .devices
-        .iter()
-        .filter(|d| d.title == "Gain")
-        .count();
+    let shown = state.devices.iter().filter(|d| d.title == "Gain").count();
     assert_eq!(shown, 0, "the other chain's devices are shown");
 }
 
@@ -2252,10 +2284,9 @@ fn chain_strips_reorder_rename_and_group() {
 #[test]
 fn only_the_strips_in_view_are_built() {
     let mut h = session();
-    let (_track, rack, chains) = folded_rack(&mut h);
+    let (_track, _rack, _chains) = folded_rack(&mut h);
     // The strips in view are built, and no more.
     let built = h.main.mixer().built_columns();
     assert!(built > 0);
     assert!(built <= 15);
 }
-

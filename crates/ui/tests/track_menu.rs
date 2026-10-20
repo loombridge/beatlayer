@@ -86,7 +86,13 @@ fn header_title(h: &mut Harness, name: &str) -> Pos2 {
 fn title_in(h: &Harness, row: Rect, track: TrackId) -> Pos2 {
     let columns = h.shell.mixer_columns();
     let returns = h.shell.editor().document().returns().count();
-    let layout = MixerLayout::compute(row, &vec![TrackColumn::track(); columns.len()], returns, Sections::DEFAULT, 0.0);
+    let layout = MixerLayout::compute(
+        row,
+        &vec![TrackColumn::track(); columns.len()],
+        returns,
+        Sections::DEFAULT,
+        0.0,
+    );
     let at = columns.iter().position(|t| *t == track).unwrap();
     pos2(layout.columns[at].rect.center().x, row.center().y)
 }

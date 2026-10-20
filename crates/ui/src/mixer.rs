@@ -341,7 +341,7 @@ impl MixerUi {
                 let Some(strip) = folds.strips.iter().find(|s| s.chain == chain.chain) else {
                     continue;
                 };
-                self.chain_column(&mut ui, shell, theme, &column, strip, &layout, events);
+                self.chain_column(&mut ui, shell, theme, column, strip, &layout, events);
                 continue;
             }
             let track = column_track(doc, &columns, &returns, column);
@@ -472,6 +472,7 @@ impl MixerUi {
     /// A chain's strip in the mixer (racks spec, R27): the column, the
     /// chain's colour along its bottom, and the chain list's controls for
     /// the chain.
+    #[expect(clippy::too_many_arguments, reason = "the strip's inputs")]
     fn chain_column(
         &mut self,
         ui: &mut Ui,
@@ -498,7 +499,11 @@ impl MixerUi {
         );
         column_ui.set_clip_rect(clip.intersect(layout.area));
         let painter = column_ui.painter();
-        painter.rect_filled(column.rect.shrink2(vec2(0.5, 0.0)), 0.0, theme.colors.lane.0);
+        painter.rect_filled(
+            column.rect.shrink2(vec2(0.5, 0.0)),
+            0.0,
+            theme.colors.lane.0,
+        );
         painter.line_segment(
             [column.rect.right_top(), column.rect.right_bottom()],
             Stroke::new(1.0, theme.colors.lane_line.0),

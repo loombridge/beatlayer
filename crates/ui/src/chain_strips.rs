@@ -9,9 +9,7 @@ use bl_shell::mixer_controls;
 use bl_shell::mixer_view::ChainStrip;
 use bl_shell::{Invocation, Shell};
 use egui::accesskit::{Action, Role};
-use egui::{
-    Align2, Id, Key, Rect, Sense, Shape, Stroke, WidgetInfo, WidgetType, Ui, pos2,
-};
+use egui::{Align2, Id, Key, Rect, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, pos2};
 use serde_json::json;
 
 use crate::layout::mixer::ChainStripLayout;
@@ -203,7 +201,7 @@ pub fn title_bar(
         WidgetInfo::labeled(
             WidgetType::Button,
             false,
-            &format!("Chain {} of {}", strip.name, strip.rack_name),
+            format!("Chain {} of {}", strip.name, strip.rack_name),
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -285,7 +283,8 @@ fn draw_rename(
         ui.ctx().data_mut(|d| d.remove::<Renaming>(renaming_id()));
     } else {
         renaming.text = Some(text.clone());
-        ui.ctx().data_mut(|d| d.insert_temp(renaming_id(), renaming));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(renaming_id(), renaming));
     }
 }
 
@@ -380,7 +379,9 @@ fn slider(
                 },
             )
         });
-        events.push(UiEvent::BeginNamedGesture(format!("Change \"Chain {name}\"")));
+        events.push(UiEvent::BeginNamedGesture(format!(
+            "Change \"Chain {name}\""
+        )));
     }
     if response.dragged()
         && !response.double_clicked()
@@ -405,7 +406,9 @@ fn slider(
     {
         let place = f64::from(((pointer.x - at.left()) / at.width()).clamp(0.0, 1.0));
         let starts = starts(shell, chain);
-        events.push(UiEvent::BeginNamedGesture(format!("Change \"Chain {name}\"")));
+        events.push(UiEvent::BeginNamedGesture(format!(
+            "Change \"Chain {name}\""
+        )));
         events.extend(
             moved(chain, &starts, place, volume)
                 .into_iter()
@@ -507,9 +510,15 @@ fn moved(chain: ChainId, starts: &[Start], place: f64, volume: bool) -> Vec<Invo
                 (other.pan + shift).clamp(-1.0, 1.0)
             };
             if volume {
-                Invocation::new("chain.set_gain", json!({ "chain": other.chain, "volume": value }))
+                Invocation::new(
+                    "chain.set_gain",
+                    json!({ "chain": other.chain, "volume": value }),
+                )
             } else {
-                Invocation::new("chain.set_pan", json!({ "chain": other.chain, "pan": value }))
+                Invocation::new(
+                    "chain.set_pan",
+                    json!({ "chain": other.chain, "pan": value }),
+                )
             }
         })
         .collect()
@@ -517,13 +526,7 @@ fn moved(chain: ChainId, starts: &[Start], place: f64, volume: bool) -> Vec<Invo
 
 /// A chain's Chain Activator in its strip (racks spec, R27): the chain
 /// list's button, so a change in either place shows in the other.
-fn activator(
-    ui: &mut Ui,
-    theme: &Theme,
-    at: Rect,
-    strip: &ChainStrip,
-    events: &mut Vec<UiEvent>,
-) {
+fn activator(ui: &mut Ui, theme: &Theme, at: Rect, strip: &ChainStrip, events: &mut Vec<UiEvent>) {
     let id = activator_id(strip.chain);
     let response = ui.interact(at, id, Sense::click());
     if response.clicked() {
@@ -539,7 +542,11 @@ fn activator(
     painter.circle_filled(
         at.center(),
         r,
-        if strip.enabled { c.accent.0 } else { c.window.0 },
+        if strip.enabled {
+            c.accent.0
+        } else {
+            c.window.0
+        },
     );
     painter.circle_stroke(at.center(), r, Stroke::new(1.0, c.separator.0));
     response.widget_info(|| {
@@ -579,7 +586,7 @@ fn solo(
             .device(strip.rack)
             .map(|rack| rack.chains.iter().filter(|c| c.mixer.solo).count())
             .unwrap_or(0);
-        let on = if strip.solo && soloed == 1 { false } else { true };
+        let on = !(strip.solo && soloed == 1);
         for other in selected_in_rack(shell, strip.chain) {
             if other != strip.chain {
                 events.push(UiEvent::Invoke(Invocation::new(
@@ -598,9 +605,19 @@ fn solo(
     } else {
         c.window.0
     };
-    let ink = if strip.solo { c.accent_text.0 } else { c.text_dim.0 };
+    let ink = if strip.solo {
+        c.accent_text.0
+    } else {
+        c.text_dim.0
+    };
     painter.rect_filled(at, theme.sizes.corner, face);
-    painter.text(at.center(), Align2::CENTER_CENTER, "S", theme.small_font(), ink);
+    painter.text(
+        at.center(),
+        Align2::CENTER_CENTER,
+        "S",
+        theme.small_font(),
+        ink,
+    );
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, strip.solo, "Solo"));
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(Role::Button);

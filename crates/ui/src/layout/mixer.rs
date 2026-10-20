@@ -281,9 +281,7 @@ impl TrackColumn {
     /// A chain's column, folded out after its track's.
     #[must_use]
     pub const fn chain(chain: ChainColumn) -> Self {
-        Self {
-            chain: Some(chain),
-        }
+        Self { chain: Some(chain) }
     }
 }
 
@@ -852,7 +850,13 @@ mod tests {
     fn columns_follow_layout_md_and_scroll_under_the_returns() {
         let view = main_view();
         let session = SessionLayout::compute(view, Some(Sections::DEFAULT));
-        let mixer = MixerLayout::compute(session.mixer.unwrap(), &tracks(4), 2, Sections::DEFAULT, 0.0);
+        let mixer = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(4),
+            2,
+            Sections::DEFAULT,
+            0.0,
+        );
         // L-SES-001: from x 320, 94 points each.
         let lefts: Vec<f32> = mixer.columns.iter().map(|c| c.rect.left()).collect();
         assert_eq!(lefts, [320.0, 414.0, 508.0, 602.0]);
@@ -867,7 +871,13 @@ mod tests {
         let drop = mixer.drop_area.unwrap();
         assert!((drop.left() - 700.0).abs() <= 4.0 && (drop.right() - 1297.0).abs() <= 2.0);
         // Many tracks scroll under the returns, which stay put.
-        let many = MixerLayout::compute(session.mixer.unwrap(), &tracks(200), 2, Sections::DEFAULT, 940.0);
+        let many = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(200),
+            2,
+            Sections::DEFAULT,
+            940.0,
+        );
         assert_eq!(many.columns[0].index, 10);
         assert_eq!(many.columns[0].rect.left(), 320.0);
         assert!(many.columns.len() <= 12);
@@ -875,9 +885,21 @@ mod tests {
         assert_eq!(many.returns, mixer.returns);
         assert_eq!(many.drop_area, None);
         // The scroll stays within the tracks.
-        let far = MixerLayout::compute(session.mixer.unwrap(), &tracks(200), 2, Sections::DEFAULT, 1e9);
+        let far = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(200),
+            2,
+            Sections::DEFAULT,
+            1e9,
+        );
         assert_eq!(far.columns.last().unwrap().index, 199);
-        let few = MixerLayout::compute(session.mixer.unwrap(), &tracks(4), 2, Sections::DEFAULT, 500.0);
+        let few = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(4),
+            2,
+            Sections::DEFAULT,
+            500.0,
+        );
         assert_eq!(few.scroll, 0.0);
         // Without the returns, the tracks run to Main.
         let no_returns = Sections {

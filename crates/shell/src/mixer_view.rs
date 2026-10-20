@@ -11,7 +11,7 @@ use bl_model::{Device, DeviceId, Document, RackKind, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    ChainStrip, COLUMN_WIDTH, MixerOf, MixerViewState, RackFold, ScrollArgs, SectionArgs,
+    COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, SectionArgs,
     ToggleArgs, ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
@@ -307,7 +307,8 @@ impl MixerView {
                         "`x` must be a finite number".to_owned(),
                     ));
                 }
-                let columns = columns(doc, arrangement).len() + self.folds(doc, arrangement).1.len();
+                let columns =
+                    columns(doc, arrangement).len() + self.folds(doc, arrangement).1.len();
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.scroll = (mixer.scroll + x).clamp(0.0, max_scroll(columns));
             }
@@ -362,8 +363,10 @@ impl MixerView {
 /// R27): an instrument or drum rack of more than one chain.
 #[must_use]
 pub fn foldable(rack: &Device) -> bool {
-    matches!(rack.rack_kind(), Some(RackKind::Instrument | RackKind::Drum))
-        && rack.chains.len() > 1
+    matches!(
+        rack.rack_kind(),
+        Some(RackKind::Instrument | RackKind::Drum)
+    ) && rack.chains.len() > 1
 }
 
 /// The furthest a mixer of `columns` track columns scrolls: until its last

@@ -3644,6 +3644,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.add_layers",
             "device.add_slice",
             "device.audition_sample",
+            "device.autosample_open",
             "device.convert",
             "device.crop_sample",
             "device.delete_layers",

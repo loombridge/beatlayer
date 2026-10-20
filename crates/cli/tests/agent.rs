@@ -4817,3 +4817,113 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
         }
     }
 }
+
+// Spec: spectrum-analyser R9, tuner R8, oscilloscope R8 (WP-5.28): an agent adds
+// Spectrum, Tuner and Oscilloscope, reads their parameters, sets some by ID,
+// reads each display, and finds the devices and values again when the saved set
+// is opened.
+#[test]
+fn an_agent_inserts_sets_and_reads_the_measurement_devices_by_id_and_reopens_them() {
+    use bl_devices::{oscilloscope, spectrum_analyser, tuner};
+
+    let dir = TempDir::new("measurement");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("measurement-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add measurement devices", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Spec"}, "name": "Spectrum",
+                                    "kind": { "native": { "device_type": spectrum_analyser::SPECTRUM } },
+                                    "enabled": true, "params": [] } } },
+            { "command": "device.insert",
+              "args": { "track": track, "index": 1,
+                        "device": { "id": {"$new": "Tun"}, "name": "Tuner",
+                                    "kind": { "native": { "device_type": tuner::TUNER } },
+                                    "enabled": true, "params": [] } } },
+            { "command": "device.insert",
+              "args": { "track": track, "index": 2,
+                        "device": { "id": {"$new": "Osc"}, "name": "Oscilloscope",
+                                    "kind": { "native": { "device_type": oscilloscope::OSCILLOSCOPE } },
+                                    "enabled": true, "params": [] } } },
+        ] }),
+    );
+    let spec = reply["ids"]["Spec"].clone();
+    let tun = reply["ids"]["Tun"].clone();
+    let osc = reply["ids"]["Osc"].clone();
+
+    // Set parameters by ID
+    let mut set = |device: &Value, param: bl_model::ParamId, value: f64| {
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value },
+            }] }),
+        );
+    };
+
+    set(&spec, spectrum_analyser::BLOCK, 2.0);
+    set(&spec, spectrum_analyser::REFRESH, 40.0);
+    set(&tun, tuner::REFERENCE, 432.0);
+    set(&osc, oscilloscope::TIME, 25.0);
+
+    // Read parameters back
+    for (device, id_str) in [(&spec, "Spectrum"), (&tun, "Tuner"), (&osc, "Oscilloscope")] {
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        let params = read["results"][0]["result"]["params"].as_array().unwrap();
+        assert!(!params.is_empty(), "{id_str} has parameters");
+    }
+
+    // Readout / display command
+    for device in [&spec, &tun, &osc] {
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        );
+        let display = &read["results"][0]["result"];
+        assert_eq!(display["live"], json!(false));
+    }
+
+    // Save and reopen
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Measurement.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let devices: Vec<_> = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .collect();
+    let find = |kind: &str| {
+        devices
+            .iter()
+            .find(|d| {
+                matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == kind)
+            })
+            .unwrap_or_else(|| panic!("no {kind} in the reopened set"))
+    };
+
+    assert_eq!(
+        find(spectrum_analyser::SPECTRUM).params[&spectrum_analyser::BLOCK],
+        2.0
+    );
+    assert_eq!(find(tuner::TUNER).params[&tuner::REFERENCE], 432.0);
+    assert_eq!(
+        find(oscilloscope::OSCILLOSCOPE).params[&oscilloscope::TIME],
+        25.0
+    );
+}

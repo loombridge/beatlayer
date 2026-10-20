@@ -62,6 +62,7 @@ pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
 pub mod note_echo;
+pub mod oscilloscope;
 pub mod overdrive;
 pub mod phaser_flanger;
 pub mod play_mod;
@@ -73,12 +74,14 @@ pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectrum_analyser;
 pub mod stack;
 pub mod strike_mod;
 pub mod testing;
 pub mod three_band_eq;
 pub mod touch;
 pub mod tube;
+pub mod tuner;
 pub mod utility;
 pub mod wax;
 
@@ -115,6 +118,7 @@ pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
+pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
@@ -123,10 +127,12 @@ pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
+pub use tuner::{TUNER, Tuner, tuner_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -176,6 +182,14 @@ pub fn display(
         PHASER_FLANGER => Some(phaser_flanger::display(device, description, values, data)),
         CHORUS_ENSEMBLE => Some(chorus_ensemble::display(device, description, values, data)),
         MIDI_MONITOR => Some(midi_monitor::display(device, values, data)),
+        SPECTRUM => Some(spectrum_analyser::display(
+            device,
+            description,
+            values,
+            data,
+        )),
+        TUNER => Some(tuner::display(device, description, values, data)),
+        OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         _ => None,
     }
 }
@@ -231,6 +245,9 @@ pub fn register(registry: &mut Registry) {
     shifter::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
+    spectrum_analyser::register(registry);
+    tuner::register(registry);
+    oscilloscope::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

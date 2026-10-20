@@ -5,8 +5,8 @@
 use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess};
 use bl_devices::{
-    arpeggiator_type, dice_type, hold_type, lift_type, note_echo_type, remap_type, stack_type,
-    touch_type,
+    arpeggiator_type, cc_control_type, dice_type, hold_type, lift_type, midi_monitor_type,
+    mpe_control_type, note_echo_type, remap_type, stack_type, touch_type,
 };
 use bl_model::{DeviceId, TrackId, TrackKind};
 use bl_shell::Shell;
@@ -73,6 +73,9 @@ fn an_agent_reaches_every_parameter_of_every_midi_effect() {
         hold_type(),
         arpeggiator_type(),
         note_echo_type(),
+        cc_control_type(),
+        mpe_control_type(),
+        midi_monitor_type(),
     ] {
         let name = &device_type.name;
         assert_eq!(device_type.role, bl_model::DeviceRole::MidiEffect, "{name}");

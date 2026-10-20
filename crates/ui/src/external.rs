@@ -172,41 +172,58 @@ pub fn draw(
     );
 
     // Hardware Latency: a number box a vertical drag changes, as one undo
-    // step; a double-click puts it back to 0.
+    // step; a double-click puts it back to 0. Spec: delay-compensation R7.
+    // While Delay Compensation is off both it and its unit switch are
+    // disabled, keeping the value.
+    let available = shell.editor().document().settings().delay_compensation;
     let current = section.hardware_latency;
     let text = latency_text(current);
     let id = control_id(device, "latency");
-    let response = ui.interact(latency, id, Sense::click_and_drag());
-    crate::focus::register(ui.ctx(), id, Area::Detail, None);
-    if response.drag_started() {
-        response.request_focus();
-        ui.data_mut(|d| d.insert_temp(id, position(current)));
-        events.push(UiEvent::BeginGesture(LATENCY_STEP));
-    }
-    if response.dragged() {
-        let start: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
-        let moved = -f64::from(response.drag_delta().y) * DRAG_PER_POINT;
-        let next = (start + moved).clamp(0.0, 1.0);
-        ui.data_mut(|d| d.insert_temp(id, next));
-        let value = at(current, next);
-        if value != current {
-            events.push(UiEvent::Invoke(set_latency(device, value)));
+    let response = ui.interact(
+        latency,
+        id,
+        if available {
+            Sense::click_and_drag()
+        } else {
+            Sense::hover()
+        },
+    );
+    if available {
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.drag_started() {
+            response.request_focus();
+            ui.data_mut(|d| d.insert_temp(id, position(current)));
+            events.push(UiEvent::BeginGesture(LATENCY_STEP));
         }
-    }
-    if response.drag_stopped() {
-        events.push(UiEvent::EndGesture);
-    }
-    if response.double_clicked() {
-        let zero = at(current, 0.0);
-        if zero != current {
-            events.push(UiEvent::Invoke(set_latency(device, zero)));
+        if response.dragged() {
+            let start: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+            let moved = -f64::from(response.drag_delta().y) * DRAG_PER_POINT;
+            let next = (start + moved).clamp(0.0, 1.0);
+            ui.data_mut(|d| d.insert_temp(id, next));
+            let value = at(current, next);
+            if value != current {
+                events.push(UiEvent::Invoke(set_latency(device, value)));
+            }
+        }
+        if response.drag_stopped() {
+            events.push(UiEvent::EndGesture);
+        }
+        if response.double_clicked() {
+            let zero = at(current, 0.0);
+            if zero != current {
+                events.push(UiEvent::Invoke(set_latency(device, zero)));
+            }
         }
     }
     let painter = ui.painter_at(latency.expand(2.0));
     painter.rect(
         latency,
         theme.sizes.corner,
-        c.window.0,
+        if available {
+            c.window.0
+        } else {
+            c.control.0.gamma_multiply(0.6)
+        },
         Stroke::new(1.0, c.separator.0),
         StrokeKind::Inside,
     );
@@ -215,19 +232,35 @@ pub fn draw(
         Align2::RIGHT_CENTER,
         &text,
         theme.small_font(),
-        c.text.0,
+        if available { c.text.0 } else { c.pending.0 },
     );
     focus_ring(ui, theme, latency, &response);
     describe(ui, id, Role::SpinButton, "Hardware Latency", &text);
+    if !available {
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_disabled();
+            node.set_description("Unavailable while Delay Compensation is off".to_owned());
+        });
+    }
 
     // The unit switch: milliseconds or samples. Switching converts the value
     // at the sample rate the device runs at, to whole samples (R12).
     let id = control_id(device, "unit");
-    let response = ui.interact(unit, id, Sense::click());
-    crate::focus::register(ui.ctx(), id, Area::Detail, None);
-    if pressed(ui, &response) {
-        let rate = shell.audio().sample_rate().unwrap_or(48_000);
-        invoke_latency(events, device, current.switched(rate));
+    let response = ui.interact(
+        unit,
+        id,
+        if available {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if available {
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if pressed(ui, &response) {
+            let rate = shell.audio().sample_rate().unwrap_or(48_000);
+            invoke_latency(events, device, current.switched(rate));
+        }
     }
     let label = match current {
         HardwareLatency::Milliseconds { .. } => "ms",
@@ -237,7 +270,11 @@ pub fn draw(
     painter.rect(
         unit,
         theme.sizes.corner,
-        c.control.0,
+        if available {
+            c.control.0
+        } else {
+            c.control.0.gamma_multiply(0.6)
+        },
         Stroke::new(1.0, c.separator.0),
         StrokeKind::Inside,
     );
@@ -246,10 +283,16 @@ pub fn draw(
         Align2::CENTER_CENTER,
         label,
         theme.small_font(),
-        c.text.0,
+        if available { c.text.0 } else { c.pending.0 },
     );
     focus_ring(ui, theme, unit, &response);
     describe(ui, id, Role::Button, "Hardware Latency Unit", label);
+    if !available {
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_disabled();
+            node.set_description("Unavailable while Delay Compensation is off".to_owned());
+        });
+    }
 }
 
 fn invoke_latency(events: &mut Vec<UiEvent>, device: DeviceId, latency: HardwareLatency) {

@@ -14,6 +14,138 @@ use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::rack::Chain;
 use crate::shared::Shared;
 
+/// A track's pan mode (the mixer spec, manual 18.1): the default Stereo Pan
+/// Mode, where one control balances both channels, or Split Stereo Pan Mode,
+/// where a control places each input channel on its own.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "A track's pan mode: `stereo` (the default) balances both channels with one \
+                   control, `split` places the left and right channels with two controls."
+)]
+pub enum PanMode {
+    /// One control balances both channels (the default).
+    #[default]
+    Stereo,
+    /// Two controls place each input channel on its own.
+    Split,
+}
+
+impl PanMode {
+    /// Whether this is [`PanMode::Stereo`], the default, so a set leaves it
+    /// out.
+    #[must_use]
+    pub fn is_stereo(&self) -> bool {
+        matches!(self, Self::Stereo)
+    }
+}
+
+/// A track delay's unit is part of its value, like Hardware Latency's: the
+/// value is kept in milliseconds or in samples (frames) and the unit switch
+/// converts it at the current sample rate.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "unit", rename_all = "snake_case")]
+#[schemars(
+    description = "A track's delay (the mixer spec): `{ \"unit\": \"milliseconds\", \"value\": \
+                   10.0 }` (−1000 to 1000, two decimals; kept in milliseconds when the sample \
+                   rate changes) or `{ \"unit\": \"samples\", \"value\": 480 }` (−192000 to \
+                   192000; kept in samples). Positive delays the track, negative plays it \
+                   early."
+)]
+pub enum TrackDelay {
+    /// Milliseconds, −1000 to 1000.
+    Milliseconds {
+        /// The delay: positive delays the track, negative plays it early.
+        value: f64,
+    },
+    /// Samples (frames of the current sample rate), −192000 to 192000.
+    Samples {
+        /// The delay: positive delays the track, negative plays it early.
+        value: i64,
+    },
+}
+
+impl Default for TrackDelay {
+    /// A new track's: 0 ms.
+    fn default() -> Self {
+        Self::Milliseconds { value: 0.0 }
+    }
+}
+
+/// The most track delay in milliseconds: Beatlayer's own bound.
+pub const MAX_TRACK_DELAY_MS: f64 = 1000.0;
+
+/// The most track delay in samples: Beatlayer's own bound, the same as
+/// Hardware Latency's.
+pub const MAX_TRACK_DELAY_SAMPLES: i64 = 192_000;
+
+impl TrackDelay {
+    /// Whether it is the default, 0 ms.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Whether the value is in range (and finite).
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        match *self {
+            Self::Milliseconds { value } => {
+                (-MAX_TRACK_DELAY_MS..=MAX_TRACK_DELAY_MS).contains(&value)
+            }
+            Self::Samples { value } => {
+                (-MAX_TRACK_DELAY_SAMPLES..=MAX_TRACK_DELAY_SAMPLES).contains(&value)
+            }
+        }
+    }
+
+    /// The delay in whole frames at `sample_rate` hertz: positive delays the
+    /// track, negative plays it early.
+    #[must_use]
+    pub fn frames(&self, sample_rate: u32) -> i64 {
+        match *self {
+            Self::Milliseconds { value } => {
+                (value * f64::from(sample_rate) / 1000.0).round() as i64
+            }
+            Self::Samples { value } => value,
+        }
+    }
+
+    /// The same delay in the other unit at `sample_rate`, to whole samples
+    /// when it becomes samples and to two decimals when it becomes
+    /// milliseconds, as Hardware Latency's unit switch converts.
+    #[must_use]
+    pub fn switched(&self, sample_rate: u32) -> Self {
+        match *self {
+            Self::Milliseconds { .. } => Self::Samples {
+                value: self.frames(sample_rate),
+            },
+            Self::Samples { value } => Self::Milliseconds {
+                value: (value as f64 * 1000.0 / f64::from(sample_rate.max(1)) * 100.0).round()
+                    / 100.0,
+            },
+        }
+    }
+}
+
+/// Whether an `f64` is 0.0, where a set leaves a split pan value out.
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
 /// The kind of a track, fixed when the track is created.
 ///
 /// The rules for each kind are in the tracks and undo spec.
@@ -212,7 +344,8 @@ impl Channel {
                    `resampling` (the Main output), `track` (another audio track, a MIDI track with \
                    an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
                    instrument or audio effect rack on that track, that chain's signal at \
-                   `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   `tap`; or with an `output`, one of an instrument's extra outputs on that \
+                   track), or `none` (No Input). MIDI tracks: `all_ins` (every \
                    MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
                    by its name as the MIDI settings list it), `track` (another MIDI track), or \
                    `none`."
@@ -248,7 +381,7 @@ pub enum Input {
         /// track, or Main; for a MIDI track, another MIDI track.
         track: TrackId,
         /// Where in that track the signal is taken: Post Mixer if it's left
-        /// out.
+        /// out. An instrument output is taken whatever this says.
         #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
         tap: Tap,
         /// A chain of an instrument or audio effect rack on that track, at
@@ -256,7 +389,28 @@ pub enum Input {
         /// track's own (the racks spec, R38 to R41).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         chain: Option<ChainId>,
+        /// An instrument on that track, at any depth, whose extra output is
+        /// taken instead of the track's own signal (the routing spec).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<DeviceOutput>,
     },
+}
+
+/// One of a device's extra audio outputs, past its main one: an
+/// instrument's second stereo output, one of the eight-slot drum sampler's
+/// individual outputs (the routing spec, R12, R16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "One of a device's extra audio outputs, past its main one: `device` (an \
+                   instrument on the tapped track, at any depth in its racks) and `output`, \
+                   which of that device's extra outputs it is, counted from 0 in the order the \
+                   device declares them."
+)]
+pub struct DeviceOutput {
+    /// The device.
+    pub device: DeviceId,
+    /// Which of its extra outputs, counted from 0 past the main one.
+    pub output: u32,
 }
 
 /// Where a track's signal is taken when another track takes it as its
@@ -505,6 +659,19 @@ pub struct Mixer {
     /// saved before WP-1.6 loads unchanged.
     #[serde(default, skip_serializing_if = "SendTap::is_post")]
     pub tap: SendTap,
+    /// The pan mode (the mixer spec, manual 18.1). Saved only where it isn't
+    /// the default Stereo Pan Mode.
+    #[serde(default, skip_serializing_if = "PanMode::is_stereo")]
+    pub pan_mode: PanMode,
+    /// In Split Stereo Pan Mode, the left input channel's position, from −1
+    /// (left) to 1 (right), on the constant-power law. Saved only where it
+    /// differs from the default (centre).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub split_left: f64,
+    /// In Split Stereo Pan Mode, the right input channel's position, as
+    /// [`Mixer::split_left`]. Saved only where it differs from the default.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub split_right: f64,
 }
 
 impl Default for Mixer {
@@ -519,6 +686,9 @@ impl Default for Mixer {
             arm: false,
             crossfade: CrossfadeAssign::None,
             tap: SendTap::Post,
+            pan_mode: PanMode::Stereo,
+            split_left: 0.0,
+            split_right: 0.0,
         }
     }
 }
@@ -539,6 +709,14 @@ pub struct Track {
     pub(crate) routing: Routing,
     pub(crate) devices: Vector<Shared<Device>>,
     pub(crate) clips: OrdMap<ClipId, Shared<Clip>>,
+    /// The track's delay (the mixer spec, manual 18.7): the frames its output
+    /// is shifted by, positive to delay it and negative to play it early.
+    pub(crate) delay: TrackDelay,
+    /// Keep Monitoring Latency (the delay-compensation spec, manual 18.8):
+    /// whether a monitored track keeps its delay compensation so the
+    /// recording matches what is heard. On in a new track; saved only when
+    /// off.
+    pub(crate) keep_monitoring_latency: bool,
     /// The clips in the track's Session slots, by scene. A slot that holds
     /// nothing isn't listed: every audio and MIDI track has a slot in every
     /// scene, and a slot with no entry is empty. Return, group, and Main
@@ -569,6 +747,8 @@ impl Track {
             routing: Routing::new(kind),
             devices: Vector::new(),
             clips: OrdMap::new(),
+            delay: TrackDelay::default(),
+            keep_monitoring_latency: true,
             slots: OrdMap::new(),
             removed_stop_buttons: BTreeSet::new(),
             take_lanes: Vector::new(),
@@ -599,6 +779,19 @@ impl Track {
     #[must_use]
     pub fn mixer(&self) -> &Mixer {
         &self.mixer
+    }
+
+    /// The track's delay (the mixer spec).
+    #[must_use]
+    pub const fn delay(&self) -> TrackDelay {
+        self.delay
+    }
+
+    /// Whether a monitored track keeps its delay compensation (the
+    /// delay-compensation spec, manual 18.8).
+    #[must_use]
+    pub const fn keep_monitoring_latency(&self) -> bool {
+        self.keep_monitoring_latency
     }
 
     /// The track's sends that aren't at −∞ dB, as (return track, level) in
@@ -813,6 +1006,8 @@ impl Track {
             || self.name != other.name
             || self.mixer != other.mixer
             || self.routing != other.routing
+            || self.delay != other.delay
+            || self.keep_monitoring_latency != other.keep_monitoring_latency
             || self.removed_stop_buttons != other.removed_stop_buttons
             || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)

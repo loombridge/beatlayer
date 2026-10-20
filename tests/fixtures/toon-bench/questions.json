@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "56",
+    "answer": "59",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"

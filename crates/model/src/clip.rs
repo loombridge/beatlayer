@@ -21,14 +21,14 @@
 //! one per parameter of its track they modulate; they play while the clip
 //! plays, and the rules are in the clip envelopes spec.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{TempoMap, Ticks, TimeSignature};
 use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::automation::{AutomationTarget, Envelope};
+use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
@@ -757,6 +757,225 @@ impl MidiData {
         self.move_by(from, to);
         self
     }
+
+    /// The clip cropped to `from`..`to` of its contents (the audio clip
+    /// editing spec, R17): the notes that start outside the region go, a note
+    /// that starts inside and runs past the region's end is cut to end there,
+    /// and the Start and End markers and the loop brace begin at the region's
+    /// start. No file is involved, so the notes' own values are kept.
+    #[must_use]
+    pub fn cropped(&self, from: Ticks, to: Ticks) -> Self {
+        let region = to.saturating_sub(from);
+        let notes: Vector<Note> = self
+            .notes
+            .iter()
+            .filter(|note| note.start >= from && note.start < to)
+            .map(|note| Note {
+                start: note.start - from,
+                length: note.length.min(region - (note.start - from)),
+                ..note.clone()
+            })
+            .collect();
+        Self {
+            notes,
+            start: (self.start - from).max(Ticks::ZERO),
+            end: cropped_end(self.end, from, to),
+            loop_start: (self.loop_start - from).max(Ticks::ZERO),
+            loop_end: cropped_end(self.loop_end, from, to),
+            ..self.clone()
+        }
+    }
+}
+
+/// A MIDI marker's position after a crop, or `None` where the crop's end cuts
+/// it off and the clip's end stands in for it.
+fn cropped_end(marker: Option<Ticks>, from: Ticks, to: Ticks) -> Option<Ticks> {
+    match marker {
+        Some(at) if at > from && at < to => Some(at - from),
+        _ => None,
+    }
+}
+
+/// The song stretches the MIDI clip `clip` plays over `start`..`end`, each
+/// with the part of its contents that plays there, as `(song start, song
+/// end, content start, content end)`, in order: the clip's first pass and
+/// each repetition of its loop brace, cut at the range's edges. It mirrors
+/// the player's own reading of a clip (the engine's MIDI clip player).
+fn played_stretches(
+    clip: &Clip,
+    midi: &MidiData,
+    start: Ticks,
+    end: Ticks,
+) -> Vec<(Ticks, Ticks, Ticks, Ticks)> {
+    if clip.length <= Ticks::ZERO || end <= start {
+        return Vec::new();
+    }
+    let marker = midi.start;
+    let mut windows: Vec<(Ticks, Ticks)> = Vec::new();
+    if midi.looping {
+        let loop_end = midi.loop_end.unwrap_or_else(|| {
+            (midi.loop_start + clip.length).max(midi.loop_start + Ticks::QUARTER)
+        });
+        if loop_end > midi.loop_start && marker < loop_end {
+            let brace = loop_end - midi.loop_start;
+            let first = (loop_end - marker).min(clip.length);
+            windows.push((marker, marker + first));
+            let mut at = first;
+            while at < clip.length {
+                let repeat = brace.min(clip.length - at);
+                windows.push((midi.loop_start, midi.loop_start + repeat));
+                at += repeat;
+            }
+        }
+    } else {
+        let end_marker = midi.end.unwrap_or(marker + clip.length);
+        if end_marker > marker {
+            let active = clip.length.min(end_marker - marker);
+            windows.push((marker, marker + active));
+        }
+    }
+    // Each window's song position: the clip starts at `clip.start`, playing
+    // its contents from the Start marker.
+    let mut stretches = Vec::with_capacity(windows.len());
+    let mut song = clip.start;
+    for (content_start, content_end) in windows {
+        let song_end = song + (content_end - content_start);
+        let from = song.max(start);
+        let to = song_end.min(end);
+        if to > from {
+            let inside = from - song;
+            stretches.push((
+                from,
+                to,
+                content_start + inside,
+                content_start + inside + (to - from),
+            ));
+        }
+        song = song_end;
+    }
+    stretches
+}
+
+/// What Consolidate makes of a MIDI track's clips over the song range
+/// `start`..`end` (the audio clip editing spec, R19, R23): one clip named
+/// `name`, `length` long from `start`, holding every note the range plays at
+/// the position it plays it, with each repetition of a looped clip written
+/// out and notes cut at the range's edges, and the clips' own envelopes
+/// written in at the positions they played. Its loop is on over its whole
+/// contents, so dragging its edge adds repetitions.
+#[must_use]
+pub fn consolidated_midi(
+    id: ClipId,
+    name: String,
+    clips: &[&Clip],
+    start: Ticks,
+    end: Ticks,
+) -> Clip {
+    let mut notes: Vec<Note> = Vec::new();
+    let mut envelopes: Vec<(ClipEnvelope, BTreeMap<Ticks, Breakpoint>)> = Vec::new();
+    for clip in clips {
+        let ClipData::Midi(midi) = &clip.data else {
+            continue;
+        };
+        for (song_start, song_end, content_start, content_end) in
+            played_stretches(clip, midi, start, end)
+        {
+            for note in midi.notes.iter() {
+                if note.start < content_start || note.start >= content_end {
+                    continue;
+                }
+                let at = song_start + (note.start - content_start);
+                let length = note.length.min(song_end - at);
+                if length > Ticks::ZERO {
+                    notes.push(Note {
+                        start: at - start,
+                        length,
+                        ..note.clone()
+                    });
+                }
+            }
+            for envelope in clip.envelopes() {
+                let slot = entry(&mut envelopes, envelope);
+                if envelope.linked {
+                    // A linked envelope runs over what the clip's contents
+                    // play: each of its breakpoints lands where it played,
+                    // and each stretch's ends are held.
+                    for point in envelope.envelope.points() {
+                        if point.at >= content_start && point.at < content_end {
+                            let at = song_start + (point.at - content_start) - start;
+                            slot.insert(at, Breakpoint { at, ..point });
+                        }
+                    }
+                    for (content, song) in [(content_start, song_start), (content_end, song_end)] {
+                        if let Some(value) = envelope.envelope.value_at(content) {
+                            slot.entry(song - start).or_insert(Breakpoint {
+                                at: song - start,
+                                value,
+                                bend: 0.0,
+                            });
+                        }
+                    }
+                } else {
+                    // An unlinked one plays once from the clip's start, one
+                    // tick per tick.
+                    let from = start - clip.start;
+                    let to = end - clip.start;
+                    for point in envelope
+                        .envelope
+                        .points()
+                        .filter(|p| p.at >= from && p.at < to)
+                    {
+                        let at = point.at + clip.start - start;
+                        slot.insert(at, Breakpoint { at, ..point });
+                    }
+                }
+            }
+        }
+    }
+    notes.sort_by_key(|note| (note.start, note.key));
+    let envelopes = envelopes
+        .into_iter()
+        .map(|(mut envelope, points)| {
+            envelope.envelope =
+                Envelope::from_points(points.into_values().collect()).unwrap_or_default();
+            envelope
+        })
+        .collect();
+    Clip {
+        id,
+        name,
+        start,
+        length: end - start,
+        offset: Ticks::ZERO,
+        mute: false,
+        data: ClipData::Midi(MidiData {
+            notes: notes.into(),
+            start: Ticks::ZERO,
+            end: None,
+            looping: true,
+            loop_start: Ticks::ZERO,
+            loop_end: None,
+            signature: None,
+        }),
+        envelopes,
+        launch: ClipLaunch::default(),
+    }
+}
+
+/// The merged envelope `envelope`'s points go into, making its entry the
+/// first time a clip carries one for its parameter.
+fn entry<'a>(
+    merged: &'a mut Vec<(ClipEnvelope, BTreeMap<Ticks, Breakpoint>)>,
+    envelope: &ClipEnvelope,
+) -> &'a mut BTreeMap<Ticks, Breakpoint> {
+    let at = merged
+        .iter()
+        .position(|(held, _)| held.target == envelope.target && held.kind == envelope.kind);
+    let at = at.unwrap_or_else(|| {
+        merged.push((envelope.clone(), std::collections::BTreeMap::new()));
+        merged.len() - 1
+    });
+    &mut merged[at].1
 }
 
 /// One point of a note's pressure (WP-2.29): from `at` after the note's

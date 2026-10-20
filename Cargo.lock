@@ -744,6 +744,7 @@ name = "bl-audio-io"
 version = "0.2.0"
 dependencies = [
  "azo",
+ "bl-core",
  "bl-rt",
  "cpal",
  "objc2-core-audio",

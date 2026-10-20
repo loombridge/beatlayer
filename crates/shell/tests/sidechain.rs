@@ -118,6 +118,7 @@ fn the_sidechain_section_lists_its_sources_as_live_does() {
             track: audio[0],
             tap: Tap::PostFx,
             chain: None,
+            output: None,
         }
     );
     assert!(!sidechain.enabled);

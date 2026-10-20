@@ -24,6 +24,9 @@ pub struct MidiHost {
     ports: MidiPorts,
     keyboard: ComputerKeyboard,
     sender: InputSender,
+    /// A clock that stamps the keyboard's notes instead of the system's,
+    /// for tests that drive a null device by hand (T199).
+    clock: Option<bl_core::clock::TestClock>,
 }
 
 impl std::fmt::Debug for MidiHost {
@@ -91,9 +94,16 @@ impl MidiHost {
             ports,
             keyboard,
             sender,
+            clock: None,
         };
         host.refresh();
         host
+    }
+
+    /// Stamps the keyboard's notes from `clock` instead of the system's
+    /// (T199), as the null device's manual pacing needs.
+    pub fn set_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.clock = Some(clock);
     }
 
     /// Lists the system's ports again, opening and closing them as their
@@ -219,9 +229,13 @@ impl MidiHost {
     }
 
     fn send(&self, message: MidiMessage) {
+        let time = self
+            .clock
+            .as_ref()
+            .map_or_else(Instant::now, |clock| clock.now());
         self.sender.send(MidiInputEvent {
             source: MidiSource::ComputerKeyboard,
-            time: Instant::now(),
+            time,
             message,
         });
     }

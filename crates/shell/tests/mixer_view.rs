@@ -53,6 +53,26 @@ fn select(shell: &mut Shell, selected: &[TrackId], title_bars: bool) {
         .unwrap();
 }
 
+// Spec: mixer-view R12.
+#[test]
+fn track_options_show_and_hide_and_are_hidden_in_a_new_set() {
+    let mut shell = Shell::headless();
+    assert!(!state(&mut shell).track_options, "hidden in a new set");
+    let before = undo_steps(&shell);
+    shell.invoke(ids::TRACK_OPTIONS, json!({})).unwrap();
+    assert!(state(&mut shell).track_options);
+    assert_eq!(undo_steps(&shell), before, "view state, not an undo step");
+    shell.invoke(ids::TRACK_OPTIONS, json!({})).unwrap();
+    assert!(!state(&mut shell).track_options, "it hides again");
+    shell
+        .invoke(ids::TRACK_OPTIONS, json!({ "shown": true }))
+        .unwrap();
+    assert!(state(&mut shell).track_options);
+    // A new set hides it, as it starts.
+    shell.run("set.new", json!({})).unwrap();
+    assert!(!state(&mut shell).track_options);
+}
+
 // Spec: mixer-view R11, R12.
 #[test]
 fn a_new_set_shows_the_session_mixer_and_hides_the_arrangement_s() {

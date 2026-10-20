@@ -245,6 +245,15 @@ pub enum ModelError {
     },
     /// The chain is a MIDI effect rack's, which has no volume or pan.
     ChainHasNoMixer(ChainId),
+    /// The chain's rack has no split stereo pan mode: only a track mixer has
+    /// split panning (the mixer spec).
+    ChainHasNoSplitPan(ChainId),
+    /// A track's delay can be set only while the set's delay compensation is
+    /// on (the delay compensation spec, R7).
+    TrackDelayNeedsCompensation,
+    /// Reduced Latency When Monitoring can be on only while the set's delay
+    /// compensation is on (the delay compensation spec, R8).
+    ReducedLatencyNeedsCompensation,
     /// The chain's rack doesn't give its chains a zone of this kind: an audio
     /// effect rack's chains have only a chain select zone, and a drum
     /// rack's none.
@@ -316,6 +325,16 @@ impl fmt::Display for ModelError {
             Self::ChainHasNoMixer(id) => write!(
                 f,
                 "{id} belongs to a MIDI effect rack, whose chains have no volume or pan"
+            ),
+            Self::ChainHasNoSplitPan(id) => write!(
+                f,
+                "{id} is a rack chain, which has no split stereo pan mode"
+            ),
+            Self::TrackDelayNeedsCompensation => {
+                f.write_str("a track's delay can be set only while delay compensation is on")
+            }
+            Self::ReducedLatencyNeedsCompensation => f.write_str(
+                "Reduced Latency When Monitoring can be on only while delay compensation is on",
             ),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
             Self::NoSuchLayer(id) => write!(f, "no layer {}", id.0),

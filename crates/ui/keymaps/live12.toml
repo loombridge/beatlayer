@@ -2509,7 +2509,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+J"]
 win = ["Ctrl+J"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.consolidate", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-003"
@@ -2520,7 +2523,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+J"]
 win = ["Ctrl+Shift+J"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.crop", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-004"
@@ -4472,7 +4478,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Shift+J"]
 win = ["Ctrl+Shift+J"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip.crop", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-ARR-037"

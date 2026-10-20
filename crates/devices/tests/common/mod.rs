@@ -250,6 +250,17 @@ pub fn notes_through(
     notes: &[bl_engine::NoteEvent],
     frames: usize,
 ) -> Vec<bl_engine::NoteEvent> {
+    notes_through_events(node, notes, &[], frames)
+}
+
+/// The same, with `events` (parameter changes) landing in the block on their
+/// own frames.
+pub fn notes_through_events(
+    node: &mut dyn Node,
+    notes: &[bl_engine::NoteEvent],
+    events: &[NodeEvent],
+    frames: usize,
+) -> Vec<bl_engine::NoteEvent> {
     let mut out = bl_engine::NoteBuffer::with_capacity(8192);
     let mut data = vec![0.0f32; CHANNELS * frames];
     let mut block = Block::new(
@@ -257,7 +268,7 @@ pub fn notes_through(
         CHANNELS,
         frames,
         frames,
-        &[],
+        events,
         TransportInfo::default(),
         RATE,
     )

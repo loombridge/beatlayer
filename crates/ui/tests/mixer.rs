@@ -1066,9 +1066,9 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
     let labels: Vec<&str> = items.iter().map(|(_, l, _)| *l).collect();
     assert_eq!(labels, MIXER_CONTROLS);
-    // Track Options and Performance Impact wait; the Crossfader section is
-    // built now (WP-3.17).
-    assert!(items[3].2 && !items[4].2 && items[5].2 && !items[1].2);
+    // Track Options (WP-5.36) and the Crossfader section (WP-3.17) are built
+    // now; Performance Impact waits, and Sends is enabled.
+    assert!(!items[3].2 && !items[4].2 && items[5].2 && !items[1].2);
     let at = nodes
         .iter()
         .find(|n| n.role == Role::Button && name(&n.label) == Some("Sends"))
@@ -1114,7 +1114,16 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     h.shell.run(ids::CROSSFADER, json!({})).unwrap();
     assert_eq!(menu_item(&h, "M-VIEW-032e").checked, Some(true));
     h.shell.run(ids::CROSSFADER, json!({})).unwrap();
-    for row in ["M-VIEW-032d", "M-VIEW-032f", "M-VIEW-033a"] {
+    // Track Options is built now (WP-5.36), unticked in a new set; the
+    // Arrangement's (M-VIEW-033c) shares it.
+    let track_options = menu_item(&h, "M-VIEW-032d");
+    assert!(
+        track_options.enabled
+            && track_options.checked == Some(false)
+            && track_options.chord.is_none()
+    );
+    assert!(menu_item(&h, "M-VIEW-033c").enabled);
+    for row in ["M-VIEW-032f", "M-VIEW-033a"] {
         assert!(!menu_item(&h, row).enabled, "{row} waits");
     }
     let shown = state(&mut h.shell);
@@ -1626,6 +1635,7 @@ fn the_in_out_choosers_and_monitor_route_the_track() {
             track: t[3],
             tap: bl_model::Tap::PostMixer,
             chain: None,
+            output: None,
         }
     );
     assert_eq!(h.shell.editor().undo_history().len(), before + 1);
@@ -1741,4 +1751,74 @@ fn a_returns_pre_post_switch_on_mains_column_switches_it() {
     h.click(switch.center());
     h.settle();
     assert_eq!(tap(&h), bl_model::SendTap::Post);
+}
+
+// Spec: mixer-view R3, R4, R29. In Split Stereo Pan Mode two controls sit
+// beside the pan knob, one placing each input channel; each runs its own
+// command on a drag.
+#[test]
+fn the_split_controls_sit_beside_the_pan_knob() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    // A new track is in Stereo Pan Mode: only the pan knob shows.
+    let nodes = tree(&mut h);
+    assert!(inside(&nodes, "3 Audio", "Split Pan Left").is_none());
+    assert!(inside(&nodes, "3 Audio", "Split Pan Right").is_none());
+    // Split Stereo Pan Mode, as the pan control's context menu sets it.
+    h.shell
+        .run(
+            "mixer.set_pan_mode",
+            json!({ "track": t[2], "mode": "split" }),
+        )
+        .unwrap();
+    let nodes = tree(&mut h);
+    let column = rect_of(inside(&nodes, "Session Mixer", "3 Audio").unwrap());
+    let pan = rect_of(inside(&nodes, "3 Audio", "Track Pan").unwrap());
+    let left = rect_of(inside(&nodes, "3 Audio", "Split Pan Left").unwrap());
+    let right = rect_of(inside(&nodes, "3 Audio", "Split Pan Right").unwrap());
+    // Beside the pan knob, to its left and right, sharing its row and inside
+    // the column.
+    let p = relative(pan, column, STRIP_TOP);
+    let l = relative(left, column, STRIP_TOP);
+    let r = relative(right, column, STRIP_TOP);
+    assert!(l.2 <= p.0, "left {l:?} is left of pan {p:?}");
+    assert!(r.0 >= p.2, "right {r:?} is right of pan {p:?}");
+    for split in [l, r] {
+        assert!(
+            split.1 >= p.1 && split.3 <= p.3,
+            "the split shares the pan's row: {split:?} vs {p:?}"
+        );
+        assert!(split.0 >= 0.0 && split.2 <= column.width(), "{split:?}");
+    }
+    // Dragging the left control right runs mixer.set_split_pan_left and
+    // moves split_left to 1.0, in one undo step.
+    let before = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        left.center(),
+        &[vec2(0.0, -2.0); 30],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(mixer(&h.shell, t[2]).split_left, 1.0);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Change \"Split Pan Left\"")
+    );
+    // The right control moves the other way, its own command.
+    let before = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        right.center(),
+        &[vec2(0.0, 2.0); 30],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(mixer(&h.shell, t[2]).split_right, -1.0);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Change \"Split Pan Right\"")
+    );
 }

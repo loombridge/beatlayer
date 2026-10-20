@@ -36,6 +36,7 @@ pub mod crusher;
 pub mod degrade;
 pub mod delay;
 pub mod dice;
+pub mod drum_bus;
 pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
@@ -52,7 +53,10 @@ pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
+pub mod midi_cc;
 mod midi_fx;
+pub mod midi_monitor;
+pub mod midi_mpe;
 pub mod modulator;
 pub mod multiband_dynamics;
 pub mod multisampler;
@@ -91,6 +95,7 @@ pub use crusher::{CRUSHER, crusher_type};
 pub use degrade::{DEGRADE, degrade_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
+pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
@@ -104,6 +109,9 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use midi_cc::{CC_CONTROL, cc_control_type};
+pub use midi_monitor::{MIDI_MONITOR, midi_monitor_type};
+pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
@@ -146,6 +154,7 @@ pub fn display(
         DEGRADE => Some(degrade::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
+        DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -166,6 +175,7 @@ pub fn display(
         )),
         PHASER_FLANGER => Some(phaser_flanger::display(device, description, values, data)),
         CHORUS_ENSEMBLE => Some(chorus_ensemble::display(device, description, values, data)),
+        MIDI_MONITOR => Some(midi_monitor::display(device, values, data)),
         _ => None,
     }
 }
@@ -203,6 +213,9 @@ pub fn register(registry: &mut Registry) {
     hold::register(registry);
     arpeggiator::register(registry);
     note_echo::register(registry);
+    midi_cc::register(registry);
+    midi_mpe::register(registry);
+    midi_monitor::register(registry);
     hardware::register(registry);
     degrade::register(registry);
     crusher::register(registry);
@@ -210,6 +223,7 @@ pub fn register(registry: &mut Registry) {
     auto_filter::register(registry);
     auto_pan_tremolo::register(registry);
     saturator::register(registry);
+    drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
     beat_repeat::register(registry);

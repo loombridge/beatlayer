@@ -19,8 +19,9 @@ use egui::{
 use serde_json::json;
 
 use crate::layout::header_columns::{IN_OUT, METER, MIXER, TITLE};
+use crate::layout::mixer::split_pan_row;
 use crate::main_window::UiEvent;
-use crate::mixer::{Place, StripParts};
+use crate::mixer::{Place, SplitSide, StripParts};
 use crate::theme::Theme;
 use crate::track_menu::{TrackMenus, rename_edit};
 
@@ -318,7 +319,16 @@ pub fn header(
     let left_half = Rect::from_min_max(row2.min, pos2(row2.left() + half - 1.0, row2.bottom()));
     let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
     parts.volume_field(ui, left_half, events);
-    parts.pan(ui, right_half, None, events);
+    // In Split Stereo Pan Mode two controls sit beside the pan in this row,
+    // one placing each input channel (the mixer spec, R3, R29).
+    if track.mixer().pan_mode == bl_model::PanMode::Split {
+        let [left, pan, right] = split_pan_row(right_half);
+        parts.split_pan(ui, left, SplitSide::Left, events);
+        parts.pan(ui, pan, None, events);
+        parts.split_pan(ui, right, SplitSide::Right, events);
+    } else {
+        parts.pan(ui, right_half, None, events);
+    }
     let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
     if height >= 52.0 && track.kind().has_sends() && !midi_only {
         // The sends, one per return, side by side (L-ARR-009; with more
@@ -338,6 +348,12 @@ pub fn header(
             );
             parts.send(ui, cell, to, index, events);
         }
+    }
+    // The Track Options row (L-MIX-005): the Track Delay with its unit
+    // switch and Keep Monitoring Latency, as far down as the height allows.
+    if crate::mixer::sections(shell).track_options && height >= 68.0 {
+        let row4 = column(MIXER, row_top + 48.0, row_top + 62.0);
+        parts.track_options_section(ui, row4, (row4.top(), row4.bottom()), events);
     }
 
     // The In/Out column (L-ARR-008), as many rows as fit.

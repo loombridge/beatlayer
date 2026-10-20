@@ -1,7 +1,7 @@
 # Audio clip editing: Reverse, Crop, Consolidate, and Consolidate Time to New Scene
 
-- **Status:** partial (R1 to R6, WP-4.20, are built; R7 to R28 wait for WP-4.7 and WP-4.13)
-- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
+- **Status:** partial (R1 to R6, WP-4.20, and R14 to R28, WP-4.13, are built; R7 to R13 wait for WP-4.7)
+- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28, built). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
 - **Parity-matrix row:** Audio clips and warping: Clip pitch, reverse, RAM mode, high-quality interpolation (reverse); Split, Crop, Crop to Time Selection (crop); Consolidate
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -95,18 +95,18 @@ This spec covers what each edit does to the clip and to the disk, where its file
 | R11 | `crates/shell/tests/audio_editing.rs`, `reversing_a_selection_across_clips_plays_it_backwards`; `crates/cli/tests/clip_goldens.rs`, `a_reversed_selection_renders_as_its_reference` | shell test, golden render |
 | R12 | `crates/shell/tests/audio_editing.rs`, `a_selection_with_a_midi_clip_isnt_reversed`; `crates/ui/tests/audio_editing.rs`, `reverse_is_offered_on_midi_clips_and_one_session_clip_at_a_time` | shell test, UI script |
 | R13 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/cli/tests/agent_audio_editing.rs`, `an_agent_reverses_a_clip_and_reads_it_back` | unit, agent test |
-| R14 | `crates/shell/tests/audio_editing.rs`, `crop_writes_the_region_of_a_looped_and_an_unlooped_clip` | shell test |
-| R15 | `crates/engine/tests/clips.rs`, `a_cropped_clip_plays_exactly_what_it_did` (looped and unlooped, warped and not, at block sizes of 1, 61, 512, and 4,096) | engine test under the allocation trap |
-| R16 | `crates/shell/tests/audio_editing.rs`, `crop_to_a_time_selection_and_a_selection_over_a_loop_wrap_is_refused` | shell test |
+| R14 | `crates/shell/tests/audio_editing.rs`, `crop_writes_the_region_of_a_clip_and_the_clip_plays_it` | shell test |
+| R15 | `crates/shell/tests/audio_editing.rs`, `a_cropped_clip_plays_exactly_what_it_did` (at block sizes of 1, 61, 512, and 4,096), `crop_of_a_looped_warped_clip_keeps_what_it_played`; `crates/model/src/command.rs`, `cropping_a_warped_clip_moves_its_warp_map_back_with_it` | shell test, unit |
+| R16 | `crates/shell/tests/audio_editing.rs`, `crop_to_a_time_selection_moves_the_clips_edges_to_it`, `crop_of_a_selection_over_a_loop_wrap_names_consolidate` | shell test |
 | R17 | `crates/model/src/command.rs`, `cropping_a_midi_clip_deletes_the_notes_outside_its_region` | unit |
-| R18 | `crates/agent/tests/permissions.rs`, `a_crop_that_removes_material_asks_first`; `crates/cli/tests/agent_audio_editing.rs`, `an_agent_crops_a_clip_and_reads_it_back` | unit, agent test |
+| R18 | `crates/shell/tests/audio_editing.rs`, `a_crop_that_removes_material_asks_first`; `crates/cli/tests/agent_audio_editing.rs`, `without_autonomous_a_crop_is_refused` | shell test, agent test |
 | R19 | `crates/shell/tests/audio_editing.rs`, `consolidate_makes_one_clip_per_track_over_the_range` | shell test |
-| R20 | `crates/shell/tests/audio_editing.rs`, `a_consolidated_file_is_taken_before_the_devices`, `mono_clips_consolidate_to_a_mono_file` | shell test |
-| R21 | `crates/shell/tests/audio_editing.rs`, `a_consolidated_file_is_normalised_and_its_gain_makes_up_for_it` | shell test |
-| R22 | `crates/cli/tests/clip_goldens.rs`, `a_consolidated_clip_nulls_against_the_clips_it_replaced` (residual below −120 dBFS, at several tempos) | golden render |
+| R20 | `crates/shell/tests/audio_editing.rs`, `a_consolidated_file_is_taken_before_the_devices_and_normalised`, `a_mono_source_consolidates_to_a_mono_file` | shell test |
+| R21 | `crates/shell/tests/audio_editing.rs`, `a_consolidated_file_is_taken_before_the_devices_and_normalised` | shell test |
+| R22 | `crates/shell/tests/audio_editing.rs`, `a_consolidated_clip_nulls_against_the_clips_it_replaced` (residual below −120 dBFS, at 120 and 100 BPM and block sizes of 1, 61, 512, and 4,096) | shell test |
 | R23 | `crates/model/src/command.rs`, `consolidating_midi_clips_writes_out_every_note_and_envelope_they_played` | unit |
-| R24 | `crates/shell/tests/freeze.rs`, `consolidating_on_a_frozen_track_keeps_it_frozen` | shell test |
-| R25 | `crates/model/tests/undo_properties.rs` (with `arrangement.consolidate`); `crates/agent/tests/permissions.rs`, `consolidate_asks_first` | property, unit |
-| R26 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_fills_a_new_scene_after_the_selected_one` | shell test |
-| R27 | `crates/cli/tests/agent_audio_editing.rs`, `an_agent_consolidates_time_to_a_new_scene` | agent test |
-| R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `crates/ui/tests/audio_editing.rs`, `the_audio_editing_keys_and_items_act_on_the_selection`; `xtask/src/keymap.rs` | unit, UI script, keymap test |
+| R24 | waits for WP-4.14 (Freeze Track): an unfrozen track's Consolidate is what these tests cover | — |
+| R25 | `crates/shell/tests/audio_editing.rs`, `consolidate_makes_one_clip_per_track_over_the_range` (one undo step); `crates/cli/tests/agent_audio_editing.rs`, `an_agent_crops_and_consolidates_by_command_id_and_reads_them_back` | shell test, agent test |
+| R26 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_fills_a_new_scene_and_leaves_the_arrangement` | shell test |
+| R27 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_chooses_the_scene_it_follows`; `crates/cli/tests/agent_audio_editing.rs`, `an_agent_crops_and_consolidates_by_command_id_and_reads_them_back` | shell test, agent test |
+| R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `xtask/src/keymap.rs`, `the_repository_keymap_is_in_sync` (S-ARR-002, S-ARR-003, S-SES-028 bound) | unit, keymap test |

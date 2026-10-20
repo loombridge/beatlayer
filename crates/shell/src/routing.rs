@@ -10,8 +10,8 @@
 //! MIDI input ports the computer offers (WP-2.2).
 
 use bl_model::{
-    Chain, Channel, Device, DeviceId, DeviceRole, Document, Input, MidiTo, Monitor, Output,
-    RackKind, Tap, TrackId, TrackKind,
+    Chain, Channel, Device, DeviceId, DeviceOutput, DeviceRole, Document, Input, MidiTo, Monitor,
+    Output, RackKind, Tap, TrackId, TrackKind,
 };
 use bl_shell_spec::commands::APP_SETTINGS;
 use serde_json::{Value, json};
@@ -19,8 +19,9 @@ use serde_json::{Value, json};
 use crate::Invocation;
 
 /// What the In/Out choosers list from outside the set: how many input and
-/// output channels the open audio device has (zero while none is open), and
-/// the MIDI input ports the computer offers.
+/// output channels the open audio device has (zero while none is open), the
+/// MIDI input ports the computer offers, and the extra audio outputs each
+/// device in the set offers past its main one (WP-5.45).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Interface {
     /// The device's input channels.
@@ -33,6 +34,11 @@ pub struct Interface {
     /// The names of the MIDI output ports whose Track switch is on, in the
     /// order the Settings window lists them (the external devices spec, R1).
     pub midi_outputs: Vec<String>,
+    /// Each device's extra audio outputs, by the names its type gives them,
+    /// in the order it declares them: an instrument's second stereo output,
+    /// one of the eight-slot drum sampler's individual outputs (WP-5.45).
+    /// A device that offers none is left out.
+    pub device_outputs: std::collections::BTreeMap<DeviceId, Vec<String>>,
 }
 
 /// One line of a chooser's list.
@@ -494,6 +500,7 @@ fn input_channel(
             track: from,
             tap,
             chain,
+            output,
         } => {
             let mut entries: Vec<Entry> = [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
                 .into_iter()
@@ -504,7 +511,7 @@ fn input_channel(
                             track,
                             json!({ "type": "track", "track": from, "tap": tap_name(t) }),
                         ),
-                        chain.is_none() && t == tap,
+                        chain.is_none() && output.is_none() && t == tap,
                     )
                 })
                 .collect();
@@ -523,6 +530,23 @@ fn input_channel(
                             chain == Some(c.id) && t == tap,
                         ));
                     }
+                }
+                // Then the extra outputs of the track's instruments, at any
+                // depth in its racks (WP-5.45).
+                for (device, index, name) in device_outputs(doc, from, interface) {
+                    entries.push(Entry::choice(
+                        instrument_output_label(device, name),
+                        set_input(
+                            track,
+                            json!({ "type": "track", "track": from,
+                                    "output": { "device": device.id, "output": index } }),
+                        ),
+                        output
+                            == Some(DeviceOutput {
+                                device: device.id,
+                                output: index,
+                            }),
+                    ));
                 }
             }
             Chooser {
@@ -842,6 +866,38 @@ fn rack_chains(doc: &Document, track: TrackId) -> Vec<(&Device, &Chain)> {
 /// and the tap, with vertical bars between (the racks spec, R39).
 fn chain_tap_label(rack: &Device, chain: &Chain, tap: Tap) -> String {
     format!("{} | {} | {}", rack.title(), chain.name, tap_label(tap))
+}
+
+/// The devices on a track, at any depth in its racks, that offer extra audio
+/// outputs, each with the output's place and name, in signal order
+/// (WP-5.45). Only what its device type declares: a device whose type the
+/// host hasn't met offers none. Manual 17.5.2.5 leaves the order and the
+/// label open, and speaks of instruments alone; a plug-in that offers extra
+/// audio ports has them listed too, whatever its role.
+fn device_outputs<'a>(
+    doc: &'a Document,
+    track: TrackId,
+    interface: &'a Interface,
+) -> Vec<(&'a Device, u32, &'a str)> {
+    let mut out = Vec::new();
+    let Some(t) = doc.track(track) else {
+        return out;
+    };
+    for device in t.devices_deep() {
+        let Some(names) = interface.device_outputs.get(&device.id) else {
+            continue;
+        };
+        for (index, name) in names.iter().enumerate() {
+            out.push((device, index as u32, name.as_str()));
+        }
+    }
+    out
+}
+
+/// A device's extra output as the chooser reads it: the device's title and
+/// the output's name, with a vertical bar between (WP-5.45).
+fn instrument_output_label(device: &Device, name: &str) -> String {
+    format!("{} | {}", device.title(), name)
 }
 
 /// A chooser showing its chosen entry.

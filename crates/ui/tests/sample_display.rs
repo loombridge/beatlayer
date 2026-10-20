@@ -167,6 +167,29 @@ fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
     h.settle();
 }
 
+fn press(pos: Pos2, pressed: bool, button: PointerButton) -> Event {
+    Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+fn double_click(h: &mut Harness, at: Pos2) {
+    h.time += 1.0;
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![
+        press(at, true, PointerButton::Primary),
+        press(at, false, PointerButton::Primary),
+    ]);
+    h.frame(vec![
+        press(at, true, PointerButton::Primary),
+        press(at, false, PointerButton::Primary),
+    ]);
+    h.settle();
+}
+
 // Spec: multisampler R54
 #[test]
 fn snapshots_display_draws_its_flags_and_slices() {
@@ -438,4 +461,235 @@ fn a_drop_replaces_and_an_option_drop_adds_a_layer() {
         "so the two sound together"
     );
     let _ = hash;
+}
+
+// Spec: multisampler R54; sampler R20
+#[test]
+fn manual_slice_gestures_add_move_and_delete() {
+    let (mut h, device) = window(&sampler::sampler_type());
+    // Put Simpler in Slice mode with Manual slicing (SLICE_BY = 3.0)
+    set_param(&mut h, device, MODE, 2.0);
+    set_param(&mut h, device, SLICE_BY, 3.0);
+    h.settle();
+
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .is_empty()
+    );
+    let steps_initial = h.shell.editor().undo_history().len();
+
+    let all = nodes(&mut h);
+    let display = bounds(&all, "Sample Display");
+    let at = pos2(
+        display.x0 as f32 + (display.x1 - display.x0) as f32 * 0.4,
+        ((display.y0 + display.y1) / 2.0) as f32,
+    );
+
+    // 1. Double-click adds a slice as one undo step.
+    double_click(&mut h, at);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps_initial + 1,
+        "add slice is one undo step"
+    );
+    let slices = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .slices
+        .clone();
+    assert_eq!(slices.len(), 1, "one slice added");
+    let slice_frame = slices[0];
+
+    // Check that the manual slice shows in accessibility tree / UI
+    let all = nodes(&mut h);
+    let slice_node = all
+        .iter()
+        .find(|n| n.label == "Slice 2")
+        .expect("the manual slice handle shows");
+    assert!(slice_node.description.contains("hand"));
+
+    // 2. Dragging the slice moves it as one undo step.
+    let steps_after_add = h.shell.editor().undo_history().len();
+    let slice_pos = centre(slice_node.bounds.unwrap());
+    drag(
+        &mut h,
+        slice_pos,
+        slice_pos + vec2(40.0, 0.0),
+        Modifiers::NONE,
+    );
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps_after_add + 1,
+        "move slice is one undo step"
+    );
+    let moved_slices = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .slices
+        .clone();
+    assert_eq!(moved_slices.len(), 1);
+    assert!(moved_slices[0] > slice_frame, "slice moved forward");
+
+    // 3. Double-clicking the slice deletes it as one undo step.
+    let steps_after_move = h.shell.editor().undo_history().len();
+    let all = nodes(&mut h);
+    let moved_node = all.iter().find(|n| n.label == "Slice 2").expect("slice 2");
+    let moved_pos = centre(moved_node.bounds.unwrap());
+    double_click(&mut h, moved_pos);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps_after_move + 1,
+        "delete slice is one undo step"
+    );
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .is_empty()
+    );
+
+    // 4. Undo brings it back.
+    h.shell.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .len(),
+        1,
+        "undo brought the slice back"
+    );
+
+    // 5. Test agent API commands for warp and slices.
+    h.shell
+        .run("device.set_warp", json!({ "device": device, "warp": true }))
+        .unwrap();
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .warp
+            .warp
+    );
+
+    h.shell
+        .run(
+            "device.set_warp_mode",
+            json!({ "device": device, "mode": "beats" }),
+        )
+        .unwrap();
+    assert_eq!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .warp
+            .mode,
+        bl_model::WarpMode::Beats
+    );
+
+    h.shell
+        .run(
+            "device.set_sample_bpm",
+            json!({ "device": device, "bpm": 95.0 }),
+        )
+        .unwrap();
+    assert_eq!(
+        h.shell.editor().document().device(device).unwrap().warp.bpm,
+        Some(95.0)
+    );
+
+    h.shell
+        .run(
+            "device.scale_tempo",
+            json!({ "device": device, "factor": 2.0 }),
+        )
+        .unwrap();
+    assert_eq!(
+        h.shell.editor().document().device(device).unwrap().warp.bpm,
+        Some(190.0)
+    );
+
+    h.shell
+        .run(
+            "device.add_slice",
+            json!({ "device": device, "frame": 30_000 }),
+        )
+        .unwrap();
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .contains(&30_000)
+    );
+
+    h.shell
+        .run(
+            "device.move_slice",
+            json!({ "device": device, "from": 30_000, "to": 35_000 }),
+        )
+        .unwrap();
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .contains(&35_000)
+    );
+
+    h.shell
+        .run(
+            "device.delete_slice",
+            json!({ "device": device, "frame": 35_000 }),
+        )
+        .unwrap();
+    assert!(
+        !h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .slices
+            .contains(&35_000)
+    );
+
+    // 6. Saved and reopened preserves manual slices and warp settings.
+    let doc = h.shell.editor().document().clone();
+    let serialized = serde_json::to_string(&doc).unwrap();
+    let loaded: bl_model::Document = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(
+        loaded.device(device).unwrap().slices,
+        doc.device(device).unwrap().slices,
+        "slices survive serialize/deserialize"
+    );
+    assert_eq!(
+        loaded.device(device).unwrap().warp,
+        doc.device(device).unwrap().warp,
+        "warp survives serialize/deserialize"
+    );
 }

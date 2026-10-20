@@ -71,8 +71,9 @@ impl InputSender {
     /// Queues a message for the engine. Returns `false`, counting it as
     /// dropped, if the queue is full.
     pub fn send(&self, event: MidiInputEvent) -> bool {
-        if self.tap.on.load(Relaxed) && (event.message.is_note_on() || event.message.is_note_off())
-        {
+        let status = event.message.status() & 0xF0;
+        let tapped = event.message.is_note_on() || event.message.is_note_off() || status == 0xB0;
+        if self.tap.on.load(Relaxed) && tapped {
             let mut notes = self
                 .tap
                 .notes

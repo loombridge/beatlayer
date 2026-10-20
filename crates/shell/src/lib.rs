@@ -94,6 +94,8 @@ pub mod session_view;
 pub mod settings;
 mod shell;
 pub mod stems;
+#[doc(hidden)]
+pub mod testing;
 pub mod tracks;
 pub mod transport;
 
@@ -147,7 +149,7 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::{commands, context_menus, menus, register};
+pub use bl_shell_spec::{audio_editing, commands, context_menus, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
     TransientList, WindowKind,

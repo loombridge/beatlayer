@@ -61,6 +61,7 @@ use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -87,6 +88,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+pub(crate) mod audio_editing;
 mod capture;
 mod multisampler;
 mod processed_files;
@@ -156,6 +158,12 @@ pub enum Area {
 /// switch (M-OPT-025).
 const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
 const CUE_MODE: &str = "mixer.set_cue_mode";
+/// `mixer.set_delay_compensation`, which Options ▸ Delay Compensation runs
+/// as a switch (M-OPT-008).
+const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
+/// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
+/// When Monitoring runs as a switch (M-OPT-009).
+const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -1433,11 +1441,23 @@ impl Shell {
     #[must_use]
     pub fn interface(&self) -> crate::routing::Interface {
         let (inputs, outputs) = self.audio.channels();
+        // The extra audio outputs the set's devices offer past their main
+        // one, which another track's Audio From lists (WP-5.45).
+        let mut device_outputs = std::collections::BTreeMap::new();
+        for track in self.editor.document().tracks() {
+            for device in track.devices_deep() {
+                let outputs = self.devices.outputs(&device.kind);
+                if !outputs.is_empty() {
+                    device_outputs.insert(device.id, outputs.to_vec());
+                }
+            }
+        }
         crate::routing::Interface {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
             midi_outputs: self.midi.output_names(),
+            device_outputs,
         }
     }
 
@@ -1482,6 +1502,15 @@ impl Shell {
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
+    /// Drives the shell's clocks from `clock`: the computer keyboard stamps
+    /// its notes with it, and the next audio stream times its blocks from it
+    /// (T199). Call it after [`Shell::use_midi_backend`] and before
+    /// [`Shell::start_audio`].
+    pub fn use_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.midi.set_test_clock(clock.clone());
+        self.audio.set_test_clock(clock);
+    }
+
     /// The MIDI ports and the computer MIDI keyboard.
     #[must_use]
     pub fn midi(&self) -> &MidiHost {
@@ -1504,26 +1533,46 @@ impl Shell {
         before != self.midi.ports()
     }
 
-    /// Spec: midi-chord R15. While a Chord device's Learn is on, the keys
-    /// played set its shifts: the first key down is the root and the other
-    /// keys held become Shift 1 to 6 in order, one undo step each time the
-    /// chord changes. Returns whether the set changed.
-    fn learn_chords(&mut self) -> bool {
-        use bl_devices::stack::{LEARN, STACK, shift};
-        use bl_model::{Command, DeviceKind};
-        let learning: Vec<_> = self
+    /// Spec: midi-chord R15 and midi-cc-sender R7. While a Chord device's
+    /// Learn is on, the keys played set its shifts; while a CC Control
+    /// device's Learn is on, an incoming controller is handed to its next
+    /// Custom dial without one. Each change is one undo step. Returns
+    /// whether the set changed.
+    fn learn_midi(&mut self) -> bool {
+        use bl_devices::midi_cc::{
+            CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_is_listed, cc_type_for, dial_cc, dial_value,
+        };
+        use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
+        use bl_model::{Command, DeviceId, DeviceKind, ParamId};
+        let devices: Vec<(DeviceId, String)> = self
             .editor
             .document()
             .tracks()
             .flat_map(|track| track.devices_deep())
-            .filter(|device| {
-                matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
-                    && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
+            .filter_map(|device| match &device.kind {
+                DeviceKind::Native { device_type } => Some((device.id, device_type.clone())),
+                _ => None,
             })
-            .map(|device| device.id)
             .collect();
+        let learning = |device_type: &str, param: ParamId| -> Vec<DeviceId> {
+            devices
+                .iter()
+                .filter(|(id, kind)| {
+                    kind == device_type
+                        && self
+                            .editor
+                            .document()
+                            .device(*id)
+                            .and_then(|device| device.params.get(&param).copied())
+                            .is_some_and(|on| on >= 0.5)
+                })
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let chords = learning(STACK, CHORD_LEARN);
+        let senders = learning(CC_CONTROL, CC_LEARN);
         let sender = self.midi.sender().clone();
-        if learning.is_empty() {
+        if chords.is_empty() && senders.is_empty() {
             if self.chord_learn.tapping {
                 sender.set_tap(false);
                 self.chord_learn.tapping = false;
@@ -1535,27 +1584,81 @@ impl Shell {
             sender.set_tap(true);
             self.chord_learn.tapping = true;
         }
-        sender.take_notes(&mut self.chord_learn.heard);
-        let Some(shifts) = self.chord_learn.listen() else {
-            return false;
-        };
-        self.edit(|editor| {
-            editor.begin("Learn Chord");
-            for device in learning {
-                for (n, value) in shifts.iter().enumerate() {
-                    let command = Command::SetDeviceParam {
-                        device,
-                        param: shift(n as u32),
-                        value: f64::from(*value),
-                    };
-                    editor
-                        .apply(command)
-                        .expect("a shift takes any whole number in range");
+        let mut heard = Vec::new();
+        sender.take_notes(&mut heard);
+        let mut changed = false;
+        if !chords.is_empty()
+            && let Some(shifts) = self.chord_learn.listen_from(&heard)
+        {
+            self.edit(|editor| {
+                editor.begin("Learn Chord");
+                for device in &chords {
+                    for (n, value) in shifts.iter().enumerate() {
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device: *device,
+                                param: shift(n as u32),
+                                value: f64::from(*value),
+                            })
+                            .expect("a shift takes any whole number in range");
+                    }
                 }
-            }
-            editor.commit().expect("the learned shifts commit");
-        });
-        true
+                editor.commit().expect("the learned shifts commit");
+            });
+            changed = true;
+        }
+        // Spec: midi-cc-sender R6. A controller the CC Type list leaves out
+        // (bank select and the channel mode messages) isn't learned.
+        let learned: Vec<(u8, f64)> = heard
+            .iter()
+            .filter(|message| message.status() & 0xF0 == 0xB0 && cc_is_listed(message.data1()))
+            .map(|message| (message.data1(), f64::from(message.data2())))
+            .collect();
+        if !senders.is_empty() && !learned.is_empty() {
+            let free: Vec<(DeviceId, Vec<u32>)> = senders
+                .iter()
+                .map(|device| {
+                    let params = &self
+                        .editor
+                        .document()
+                        .device(*device)
+                        .expect("the device is in the set")
+                        .params;
+                    let free = (0..DIALS)
+                        .filter(|k| params.get(&dial_cc(*k)).is_none_or(|cc| *cc == 0.0))
+                        .collect();
+                    (*device, free)
+                })
+                .collect();
+            self.edit(|editor| {
+                editor.begin("Learn CC Control");
+                for (device, mut free) in free.clone() {
+                    for &(controller, value) in &learned {
+                        let Some(k) = free.first().copied() else {
+                            break;
+                        };
+                        free.remove(0);
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_cc(k),
+                                value: cc_type_for(controller),
+                            })
+                            .expect("a controller is in the CC Type list");
+                        editor
+                            .apply(Command::SetDeviceParam {
+                                device,
+                                param: dial_value(k),
+                                value,
+                            })
+                            .expect("a controller value is in range");
+                    }
+                }
+                editor.commit().expect("the learned controllers commit");
+            });
+            changed = true;
+        }
+        changed
     }
 
     /// The preferences.
@@ -3619,7 +3722,7 @@ impl Shell {
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
-        changed |= self.learn_chords();
+        changed |= self.learn_midi();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
@@ -3868,6 +3971,7 @@ impl Shell {
     ) -> Result<Value, ShellError> {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -3907,6 +4011,9 @@ impl Shell {
             .get(id)
             .and_then(|spec| spec.permission)
             .unwrap_or(bl_commands::Permission::External);
+        let shown = self
+            .clip_view
+            .shown_any_clip(self.editor.document(), &self.arrangement);
         crate::permission::assess(
             id,
             args,
@@ -3914,6 +4021,7 @@ impl Shell {
             crate::permission::Scene {
                 insert_marker: self.arrangement.insert_marker(),
                 selected_track: self.arrangement.selected_tracks().first().copied(),
+                shown_clip: shown,
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
@@ -4977,6 +5085,10 @@ impl Shell {
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
+            DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
+            REDUCED_LATENCY_MONITORING => {
+                Some(self.editor.document().settings().reduced_latency_monitoring)
+            }
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5085,12 +5197,31 @@ impl Shell {
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
+        if audio_ids::handles(id) {
+            // Spec: audio-clip-editing R28. The menus' enabled states.
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.can_audio_edit(id, &args);
+        }
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.dirty,
+            // Options ▸ Reduced Latency When Monitoring is available only
+            // while Delay Compensation is on (the delay-compensation spec,
+            // R8).
+            REDUCED_LATENCY_MONITORING => {
+                return self.editor.document().settings().delay_compensation;
+            }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
@@ -5476,6 +5607,18 @@ impl Shell {
             let on = self.editor.document().settings().solo_in_place;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == DELAY_COMPENSATION && !fields.contains_key("enabled") {
+            // Options ▸ Delay Compensation switches the setting to the
+            // other state (the delay-compensation spec, R7).
+            let on = self.editor.document().settings().delay_compensation;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
+        if id == REDUCED_LATENCY_MONITORING && !fields.contains_key("enabled") {
+            // Options ▸ Reduced Latency When Monitoring switches the
+            // setting to the other state (the delay-compensation spec, R8).
+            let on = self.editor.document().settings().reduced_latency_monitoring;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == session_launch_ids::SET_QUANTIZATION_ENABLED && !fields.contains_key("enabled") {
             // Spec: launch-quantisation R3. Options ▸ Launch Quantization
             // Enabled switches the setting to the other state.
@@ -5744,6 +5887,10 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
+            DELAY_COMPENSATION | REDUCED_LATENCY_MONITORING if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             "transport.set_midi_overdub" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -5950,6 +6097,7 @@ impl Shell {
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -5966,6 +6114,9 @@ impl Shell {
                 reason: "a drag that edits the set is under way; it ends when it's released"
                     .to_owned(),
             });
+        }
+        if audio_ids::handles(id) {
+            return self.run_audio_editing(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();

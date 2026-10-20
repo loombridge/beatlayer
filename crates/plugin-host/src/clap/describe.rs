@@ -2,6 +2,7 @@
 //! a chain from its features.
 
 use bl_model::{DeviceRole, ParamDescriptor, ParamId, ParamKind, ParamUnit, param::Taper};
+use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
 use clack_host::prelude::*;
 
@@ -18,6 +19,32 @@ pub(crate) fn role<'a>(features: impl Iterator<Item = &'a std::ffi::CStr>) -> De
     } else {
         DeviceRole::AudioEffect
     }
+}
+
+/// The plug-in's audio output ports past its main one (WP-5.45): the names
+/// another track's Audio From chooser lists them under, empty when it has
+/// only its main output.
+///
+/// # Panics
+///
+/// Never: a port with no name reads as `Output <n>`, counting from 1.
+pub(crate) fn outputs(plugin: &mut PluginMainThreadHandle<'_>) -> Vec<String> {
+    let Some(ext) = plugin.get_extension::<PluginAudioPorts>() else {
+        return Vec::new();
+    };
+    let mut buffer = AudioPortInfoBuffer::new();
+    let count = ext.count(plugin, false);
+    let mut names = Vec::new();
+    for index in 1..count {
+        let info = ext.get(plugin, index, false, &mut buffer);
+        let name = info
+            .as_ref()
+            .map(|info| String::from_utf8_lossy(info.name).trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| format!("Output {}", index + 1));
+        names.push(name);
+    }
+    names
 }
 
 /// The IDs of the parameters the plug-in marks modulatable: it takes

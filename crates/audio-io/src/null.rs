@@ -12,10 +12,11 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use bl_core::clock::TestClock;
 use bl_rt::{RtThreadConfig, WorkInterval};
 
 use crate::buffer::PlanarScratch;
@@ -50,6 +51,11 @@ pub enum Pacing {
     /// Blocks run back to back as fast as the callback allows, and lateness
     /// isn't measured. Tests use this to run minutes of audio in moments.
     Free,
+    /// No block runs until a test asks, through
+    /// [`NullControl::run_blocks`] or [`NullControl::run_frames`] (T199).
+    /// A test clock advances by each block's length, so notes it plays land
+    /// on their frames however busy the machine is.
+    Manual,
 }
 
 /// Settings for the null backend.
@@ -110,6 +116,100 @@ struct InputTone {
     amplitude: AtomicU32,
 }
 
+/// Hand pacing: a test asks for blocks, and the stream's own thread runs
+/// them, one at a time, until the count is reached.
+#[derive(Debug, Default)]
+struct ManualState {
+    /// Blocks asked for since the stream started.
+    requested: u64,
+    /// Blocks finished since the stream started.
+    completed: u64,
+    /// Whether a stream is running to run them.
+    active: bool,
+    /// Whether that stream is stopping, so a waiter gives up.
+    stopping: bool,
+}
+
+#[derive(Debug, Default)]
+struct ManualPacer {
+    state: Mutex<ManualState>,
+    /// The stream's thread waits here for a block to be asked for.
+    ready: Condvar,
+    /// A test waits here for the blocks it asked for to finish.
+    done: Condvar,
+}
+
+impl ManualPacer {
+    /// Says a stream is about to run, and forgets requests from before.
+    fn start(&self) {
+        let mut state = self.lock();
+        assert!(!state.active, "two manual streams share one null backend");
+        state.active = true;
+        state.stopping = false;
+        state.requested = state.completed;
+    }
+
+    /// Says the stream has stopped, waking anyone waiting for its blocks.
+    fn stop(&self) {
+        self.lock().stopping = true;
+        self.ready.notify_all();
+        self.done.notify_all();
+    }
+
+    fn stopped(&self) {
+        let mut state = self.lock();
+        state.active = false;
+        state.stopping = false;
+    }
+
+    /// The stream's thread asks for a block. Returns whether to run one;
+    /// false when the stream is stopping.
+    fn wait_for_block(&self, stop: &AtomicBool) -> bool {
+        let mut state = self.lock();
+        while state.requested <= state.completed && !state.stopping && !stop.load(Ordering::Acquire)
+        {
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        !state.stopping && !stop.load(Ordering::Acquire)
+    }
+
+    /// Counts a block the stream ran and wakes the test waiting for it.
+    fn finished_block(&self) {
+        self.lock().completed += 1;
+        self.done.notify_all();
+    }
+
+    /// Runs exactly `blocks` blocks on the stream's thread, and returns once
+    /// they have run.
+    fn run(&self, blocks: u64) {
+        let mut state = self.lock();
+        assert!(state.active, "start the null stream before running blocks");
+        if blocks == 0 {
+            return;
+        }
+        state.requested = state.requested.saturating_add(blocks);
+        let target = state.requested;
+        self.ready.notify_all();
+        while state.completed < target {
+            assert!(
+                !state.stopping,
+                "the null stream stopped before the blocks finished"
+            );
+            state = self
+                .done
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ManualState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 /// What one null backend's devices and streams share.
 #[derive(Debug)]
 struct World {
@@ -129,10 +229,18 @@ struct World {
     /// Power events for [`NullPower`], oldest first, and when the machine
     /// went to sleep. Never touched by a stream's thread.
     power: Mutex<(VecDeque<PowerEvent>, Option<Instant>)>,
+    /// With manual pacing, the clock a test advances with the blocks (T199).
+    clock: Option<TestClock>,
+    /// With manual pacing, the blocks a test asks for.
+    pacer: Option<Arc<ManualPacer>>,
+    /// The frames in one block of the running manual stream, for
+    /// [`NullControl::run_frames`].
+    manual_frames: AtomicU32,
 }
 
 impl World {
-    fn new(devices: &[(&str, &str)], channels: u16) -> Self {
+    fn new(devices: &[(&str, &str)], channels: u16, pacing: Pacing) -> Self {
+        let manual = pacing == Pacing::Manual;
         assert!(!devices.is_empty(), "a null backend needs a device");
         for (i, (local, _)) in devices.iter().enumerate() {
             assert!(
@@ -161,6 +269,9 @@ impl World {
             asleep: AtomicBool::new(false),
             stalls: AtomicU64::new(0),
             power: Mutex::new((VecDeque::new(), None)),
+            clock: manual.then(TestClock::new),
+            pacer: manual.then(|| Arc::new(ManualPacer::default())),
+            manual_frames: AtomicU32::new(0),
         }
     }
 
@@ -259,7 +370,11 @@ impl NullBackend {
     ///
     /// If `devices` is empty or names an ID twice.
     pub fn with_devices(options: NullOptions, devices: &[(&str, &str)]) -> (Self, NullControl) {
-        let world = Arc::new(World::new(devices, options.device_channels()));
+        let world = Arc::new(World::new(
+            devices,
+            options.device_channels(),
+            options.pacing,
+        ));
         let control = NullControl {
             world: Arc::clone(&world),
         };
@@ -420,6 +535,9 @@ impl Backend for NullBackend {
         // time rtkit allows a real-time thread).
         let realtime = self.options.pacing == Pacing::RealTime;
         let period = frames_to_duration(u64::from(frames), sample_rate);
+        if self.options.pacing == Pacing::Manual {
+            self.world.manual_frames.store(frames, Ordering::Release);
+        }
         let interval = if realtime {
             WorkInterval::new("Beatlayer null device").ok()
         } else {
@@ -455,6 +573,8 @@ impl Backend for NullBackend {
             blocks: 0,
             interval,
             period,
+            clock: self.world.clock.clone(),
+            pacer: self.world.pacer.clone(),
             world: Arc::clone(&self.world),
             device: index,
             follows_default,
@@ -488,6 +608,7 @@ impl Backend for NullBackend {
             info,
             counters,
             workgroup,
+            pacer: self.world.pacer.clone(),
         }))
     }
 }
@@ -616,6 +737,42 @@ impl NullControl {
             world: Arc::clone(&self.world),
         }
     }
+
+    /// The clock manual pacing advances by each block's length (T199).
+    /// `None` unless the backend is paced [`Manual`](Pacing::Manual).
+    #[must_use]
+    pub fn clock(&self) -> Option<TestClock> {
+        self.world.clock.clone()
+    }
+
+    /// Runs exactly `blocks` blocks on the stream's own thread, and returns
+    /// once they have run (T199). The stream must be started first, and the
+    /// backend paced [`Manually`](Pacing::Manual); the test clock moves on by
+    /// each block's length as they run.
+    ///
+    /// # Panics
+    ///
+    /// If the backend isn't paced manually, or its stream isn't running.
+    pub fn run_blocks(&self, blocks: u64) {
+        self.pacer().run(blocks);
+    }
+
+    /// Runs as many whole blocks as `frames` need on the stream's own thread,
+    /// and returns once they have run (T199). The last block runs in full, so
+    /// a little more than `frames` may play. Panics as
+    /// [`run_blocks`](Self::run_blocks) does.
+    pub fn run_frames(&self, frames: u64) {
+        let block = u64::from(self.world.manual_frames.load(Ordering::Acquire));
+        assert!(block > 0, "start the null stream before running frames");
+        self.run_blocks(frames.div_ceil(block));
+    }
+
+    fn pacer(&self) -> &ManualPacer {
+        self.world
+            .pacer
+            .as_deref()
+            .expect("the null backend isn't paced manually")
+    }
 }
 
 /// The power events a [`NullControl`] simulates, as a [`PowerMonitor`].
@@ -665,6 +822,10 @@ struct NullEngine {
     interval: Option<WorkInterval>,
     /// How long one block lasts.
     period: Duration,
+    /// Manual pacing's clock (T199), which moves on by `period` a block.
+    clock: Option<TestClock>,
+    /// Manual pacing's block requests (T199).
+    pacer: Option<Arc<ManualPacer>>,
     world: Arc<World>,
     /// The device the stream runs on now.
     device: usize,
@@ -710,6 +871,16 @@ impl NullEngine {
                 first_block = self.blocks;
                 self.counters.request_resync();
             }
+            if let Some(pacer) = &self.pacer {
+                // Paced by hand (T199): wait for a test to ask for this block,
+                // then move the test clock to the block's start.
+                if !pacer.wait_for_block(stop) {
+                    break;
+                }
+                if let Some(clock) = &self.clock {
+                    clock.advance(self.period);
+                }
+            }
             if self.options.pacing == Pacing::RealTime {
                 let due = began
                     + frames_to_duration((self.blocks - first_block) * frames, self.sample_rate);
@@ -739,6 +910,9 @@ impl NullEngine {
                 let _ = interval.finish();
             }
             self.blocks += 1;
+            if let Some(pacer) = &self.pacer {
+                pacer.finished_block();
+            }
         }
         self.runner.release_thread();
         self
@@ -831,6 +1005,8 @@ struct NullStream {
     info: StreamInfo,
     counters: Arc<Counters>,
     workgroup: Option<Workgroup>,
+    /// Manual pacing's block requests (T199).
+    pacer: Option<Arc<ManualPacer>>,
 }
 
 impl Stream for NullStream {
@@ -850,6 +1026,9 @@ impl Stream for NullStream {
         })?;
         self.stop.store(false, Ordering::Release);
         self.counters.request_resync();
+        if let Some(pacer) = &self.pacer {
+            pacer.start();
+        }
         let stop = Arc::clone(&self.stop);
         let thread = thread::Builder::new()
             .name("bl-audio-null".into())
@@ -869,12 +1048,18 @@ impl Stream for NullStream {
             return Ok(());
         };
         self.stop.store(true, Ordering::Release);
+        if let Some(pacer) = &self.pacer {
+            pacer.stop();
+        }
         let engine = thread.join().map_err(|_| {
             Error::new(
                 ErrorKind::Backend,
                 "the null device's thread panicked; a callback probably did",
             )
         })?;
+        if let Some(pacer) = &self.pacer {
+            pacer.stopped();
+        }
         self.engine = Some(engine);
         Ok(())
     }
@@ -1073,6 +1258,38 @@ mod tests {
         }
         #[cfg(target_os = "macos")]
         assert_eq!(report.workgroup, crate::WorkgroupJoin::Joined);
+    }
+
+    // T199: a test drives the blocks, and the clock moves on by their length.
+    #[test]
+    fn manual_pacing_runs_the_blocks_a_test_asks_for() {
+        let options = NullOptions {
+            pacing: Pacing::Manual,
+            frame_limit: None,
+            channels: 2,
+        };
+        let (backend, control) = NullBackend::with_devices(options, &[(LOCAL, NAME)]);
+        let clock = control.clock().expect("a manual clock");
+        let blocks = Arc::new(AtomicU64::new(0));
+        let mut stream = backend
+            .open_stream(&duplex(256), Box::new(Count(Arc::clone(&blocks))))
+            .unwrap();
+        stream.start().unwrap();
+        assert_eq!(blocks.load(Ordering::Relaxed), 0, "no block runs unasked");
+
+        control.run_blocks(7);
+        assert_eq!(blocks.load(Ordering::Relaxed), 7);
+        assert_eq!(stream.stats().blocks, 7);
+        let period = frames_to_duration(256, 48_000);
+        assert_eq!(clock.elapsed(), period * 7);
+
+        // Frames round up to whole blocks.
+        control.run_frames(256 * 3 + 1);
+        assert_eq!(blocks.load(Ordering::Relaxed), 11);
+        assert_eq!(clock.elapsed(), period * 11);
+        assert_eq!(stream.stats().heap_operations, 0);
+        stream.stop().unwrap();
+        assert!(control.clock().is_some());
     }
 
     #[test]

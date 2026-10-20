@@ -148,6 +148,9 @@ pub const STRIP_HEIGHT: f32 = 123.0;
 /// controls' sizes are [`unmeasured`]).
 pub const CROSSFADER_HEIGHT: f32 = 28.0;
 
+/// The Track Options section's height under the strip (L-MIX-005).
+pub const TRACK_OPTIONS_HEIGHT: f32 = 26.0;
+
 /// The Main track's column width (L-SES-006: 1487 to 1591).
 pub const MAIN_COLUMN: f32 = 104.0;
 
@@ -195,6 +198,9 @@ pub struct Sections {
     pub crossfader: bool,
     /// The return tracks' columns.
     pub returns: bool,
+    /// The tracks' Track Options sections: the Track Delay with its unit
+    /// switch and Keep Monitoring Latency. Hidden by default (observed).
+    pub track_options: bool,
 }
 
 impl Sections {
@@ -205,6 +211,7 @@ impl Sections {
         volume: true,
         crossfader: false,
         returns: true,
+        track_options: false,
     };
 
     /// The height of the sections that show, stacked, with the colour strip
@@ -220,6 +227,9 @@ impl Sections {
         }
         if self.volume {
             height += STRIP_HEIGHT;
+        }
+        if self.track_options {
+            height += TRACK_OPTIONS_HEIGHT;
         }
         if self.crossfader {
             height += CROSSFADER_HEIGHT;
@@ -276,6 +286,8 @@ pub struct MixerLayout {
     pub sends: Option<(f32, f32)>,
     /// The Crossfader section's, if it shows.
     pub crossfader: Option<(f32, f32)>,
+    /// The Track Options section's, if it shows.
+    pub track_options: Option<(f32, f32)>,
     /// The strip's, if it shows.
     pub strip: Option<(f32, f32)>,
     /// The colour strip's, at the bottom (L-MIX-009).
@@ -352,9 +364,11 @@ impl MixerLayout {
             })
         };
         // L-SES-009's order from the bottom: the colour strip, then the
-        // Crossfader section under the strips (L-MIX-006), then the strips,
-        // Sends, and In/Out above them.
+        // Crossfader section under the strips (L-MIX-006), then the Track
+        // Options under the strips (L-MIX-005), then the strips, Sends, and
+        // In/Out above them.
         let crossfader = stack(sections.crossfader, CROSSFADER_HEIGHT);
+        let track_options = stack(sections.track_options, TRACK_OPTIONS_HEIGHT);
         let strip = stack(sections.volume, STRIP_HEIGHT);
         let sends = stack(sections.sends, SENDS_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
@@ -372,6 +386,7 @@ impl MixerLayout {
             in_out,
             sends,
             crossfader,
+            track_options,
             strip,
             colour,
             scroll,
@@ -425,6 +440,9 @@ impl MixerLayout {
                 "Crossfader and Assign Buttons",
                 across(span),
             ));
+        }
+        if let Some(span) = self.track_options {
+            rows.push(super::row("L-MIX-005", "Track Options", across(span)));
         }
         if let Some(span) = self.strip {
             rows.push(super::row("L-MIX-003", "Mixer Strip", across(span)));
@@ -611,6 +629,63 @@ impl StripLayout {
             self.meter,
         ]
     }
+}
+
+/// The Track Options section's three controls in a column across the
+/// section's span (L-MIX-005): the Track Delay field, its unit switch
+/// beside it, and Keep Monitoring Latency at the right. No observation has
+/// measured these yet, so their sizes are [`unmeasured`].
+#[must_use]
+pub fn track_options(column: Rect, span: (f32, f32)) -> [Rect; 3] {
+    use unmeasured::PAD;
+    let top = span.0 + 3.0;
+    let bottom = span.1 - 3.0;
+    let delay = Rect::from_min_max(
+        pos2(column.left() + PAD, top),
+        pos2(column.left() + PAD + 46.0, bottom),
+    );
+    let unit = Rect::from_min_max(
+        pos2(delay.right() + 2.0, top),
+        pos2(delay.right() + 2.0 + 22.0, bottom),
+    );
+    let keep = Rect::from_min_max(
+        pos2(unit.right() + 3.0, top),
+        pos2(column.right() - PAD, bottom),
+    );
+    [delay, unit, keep]
+}
+
+/// The two Split Stereo Pan Mode controls beside the pan knob in a strip
+/// (the mixer spec, R29): to its left and right, each as tall as it.
+#[must_use]
+pub fn split_pans(pan: Rect) -> [Rect; 2] {
+    const WIDTH: f32 = 6.0;
+    const GAP: f32 = 1.0;
+    [
+        Rect::from_min_max(
+            pos2(pan.left() - GAP - WIDTH, pan.top()),
+            pos2(pan.left() - GAP, pan.bottom()),
+        ),
+        Rect::from_min_max(
+            pos2(pan.right() + GAP, pan.top()),
+            pos2(pan.right() + GAP + WIDTH, pan.bottom()),
+        ),
+    ]
+}
+
+/// A header's pan row in Split Stereo Pan Mode (the mixer spec, R29): the
+/// left split control, the pan control between them, and the right split
+/// control, across `area`.
+#[must_use]
+pub fn split_pan_row(area: Rect) -> [Rect; 3] {
+    const WIDTH: f32 = 9.0;
+    let left = Rect::from_min_max(area.min, pos2(area.left() + WIDTH, area.bottom()));
+    let right = Rect::from_min_max(pos2(area.right() - WIDTH, area.top()), area.max);
+    let pan = Rect::from_min_max(
+        pos2(left.right() + 1.0, area.top()),
+        pos2(right.left() - 1.0, area.bottom()),
+    );
+    [left, pan, right]
 }
 
 /// The In/Out section's `index`th row (of seven) in a column (L-MIX-001).

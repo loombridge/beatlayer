@@ -48,10 +48,11 @@ fn sample(frames: usize, value: impl Fn(usize) -> f32) -> Arc<bl_media::SampleDa
 /// would.
 fn give(node: &mut dyn Node, slot: usize, data: &Arc<bl_media::SampleData>) {
     let collector = Collector::new();
-    node.receive_data(collector.handle().data(SlotSample {
-        slot,
-        sample: Arc::clone(data),
-    }));
+    node.receive_data(
+        collector
+            .handle()
+            .data(SlotSample::new(slot, Arc::clone(data))),
+    );
 }
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {

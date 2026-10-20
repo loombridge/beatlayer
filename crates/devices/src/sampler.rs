@@ -134,6 +134,16 @@ pub const LFO_PITCH: ParamId = ParamId(48);
 pub const LFO_PAN: ParamId = ParamId(49);
 /// How far the LFO moves the filter's cutoff.
 pub const LFO_FILTER: ParamId = ParamId(50);
+/// The pitch envelope's attack time.
+pub const PITCH_ENV_ATTACK: ParamId = ParamId(51);
+/// The pitch envelope's decay time.
+pub const PITCH_ENV_DECAY: ParamId = ParamId(52);
+/// The pitch envelope's sustain level.
+pub const PITCH_ENV_SUSTAIN: ParamId = ParamId(53);
+/// The pitch envelope's release time.
+pub const PITCH_ENV_RELEASE: ParamId = ParamId(54);
+/// How far the pitch envelope moves the pitch, in semitones each way.
+pub const PITCH_ENV_AMOUNT: ParamId = ParamId(55);
 
 /// The Mode choices: Classic, One-Shot, then Slice.
 pub const MODES: [&str; 3] = ["Classic", "One-Shot", "Slice"];
@@ -484,6 +494,28 @@ pub fn sampler_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far the LFO moves the filter's cutoff, up to four octaves each way."),
+        time(PITCH_ENV_ATTACK, "Pitch Attack", 0.0)
+            .describe("How long the pitch envelope takes to reach its peak."),
+        time(PITCH_ENV_DECAY, "Pitch Decay", 0.0)
+            .describe("How long the pitch envelope takes to fall to its sustain level."),
+        ParamDescriptor::continuous(
+            PITCH_ENV_SUSTAIN,
+            "Pitch Sustain",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("The level the pitch envelope holds while the note sounds."),
+        time(PITCH_ENV_RELEASE, "Pitch Release", 100.0)
+            .describe("How long the pitch envelope takes to fall after the note ends."),
+        ParamDescriptor::continuous(
+            PITCH_ENV_AMOUNT,
+            "Pitch Env",
+            (-48.0, 48.0),
+            0.0,
+            ParamUnit::Semitones,
+        )
+        .describe("How far the pitch envelope moves the pitch, up to 48 semitones each way."),
     ];
     DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
@@ -528,6 +560,11 @@ fn layout() -> DeviceLayout {
             (GLIDE_MODE, Widget::Chooser),
             (GLIDE_TIME, Widget::Knob),
             (VOICES, Widget::Number),
+            (PITCH_ENV_ATTACK, Widget::Knob),
+            (PITCH_ENV_DECAY, Widget::Knob),
+            (PITCH_ENV_SUSTAIN, Widget::Knob),
+            (PITCH_ENV_RELEASE, Widget::Knob),
+            (PITCH_ENV_AMOUNT, Widget::Knob),
         ],
     );
     let amp = ControlBand::stacked(
@@ -703,12 +740,16 @@ impl Sampler {
         }
     }
 
-    /// The sample, if the media library gave one.
-    fn sample(&self) -> Option<&SampleData> {
+    /// The slot sample, if the media library gave one.
+    fn slot_sample(&self) -> Option<&SlotSample> {
         self.data
             .as_ref()
             .and_then(|data| data.downcast_ref::<SlotSample>())
-            .map(|slot| slot.sample.as_ref())
+    }
+
+    /// The sample, if the media library gave one.
+    fn sample(&self) -> Option<&SampleData> {
+        self.slot_sample().map(|slot| slot.sample.as_ref())
     }
 
     /// The settings one stretch of a block plays by.
@@ -746,16 +787,30 @@ impl Sampler {
         } else {
             (params.value(at(FADE_IN)), 0.0, 1.0)
         };
+        let (warped, warp_bpm) = match self.slot_sample() {
+            Some(s) => (s.warp.warp, s.warp.bpm.unwrap_or(120.0)),
+            None => (false, 120.0),
+        };
         // Frames in a sixteenth note at the stretch's tempo (the delay's
         // law): Slicing's Beat divisions and the LFO's synced rate read
         // it.
-        let sixteenth =
+        let sixteenth = if warped {
+            rate.as_f64() * 60.0 / warp_bpm / 4.0
+        } else {
+            rate.as_f64() * 60.0 / tempo.bpm_at(tempo.frames_to_ticks(position, rate)).get() / 4.0
+        };
+        let lfo_sixteenth =
             rate.as_f64() * 60.0 / tempo.bpm_at(tempo.frames_to_ticks(position, rate)).get() / 4.0;
         let lfo_cycle_frames = if params.value(at(LFO_SYNC)) >= 0.5 {
-            params.value(at(LFO_DIVISION)).max(1.0) * sixteenth
+            params.value(at(LFO_DIVISION)).max(1.0) * lfo_sixteenth
         } else {
             rate.as_f64() / params.value(at(LFO_RATE)).clamp(LFO_MIN_HZ, LFO_MAX_HZ)
         };
+        let pitch_attack_frames = frames_of(params.value(at(PITCH_ENV_ATTACK)), rate.as_f64());
+        let pitch_decay_frames = frames_of(params.value(at(PITCH_ENV_DECAY)), rate.as_f64());
+        let pitch_sustain = (params.value(at(PITCH_ENV_SUSTAIN)) / 100.0) as f32;
+        let pitch_release_frames = frames_of(params.value(at(PITCH_ENV_RELEASE)), rate.as_f64());
+        let pitch_amount = params.value(at(PITCH_ENV_AMOUNT));
         Settings {
             sample_rate: rate.as_f64(),
             mode,
@@ -805,13 +860,20 @@ impl Sampler {
             lfo_pitch: (params.value(at(LFO_PITCH)) / 100.0) as f32,
             lfo_pan: (params.value(at(LFO_PAN)) / 100.0) as f32,
             lfo_filter: (params.value(at(LFO_FILTER)) / 100.0) as f32,
+            warped,
+            warp_bpm,
+            pitch_env_attack_frames: pitch_attack_frames,
+            pitch_env_decay_frames: pitch_decay_frames,
+            pitch_env_sustain: pitch_sustain,
+            pitch_env_release_frames: pitch_release_frames,
+            pitch_env_amount: pitch_amount,
         }
     }
 
     /// Takes a note: starts, releases or chokes voices by the mode's rules.
-    fn play(&mut self, note: NoteEvent, settings: &Settings) {
+    fn play(&mut self, note: NoteEvent, settings: &Settings, song_frame: Frames) {
         match note.kind {
-            NoteKind::On => self.note_on(note, settings, None),
+            NoteKind::On => self.note_on(note, settings, None, song_frame),
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
             // The sampler plays no per-note expression (MPE): today only
@@ -826,7 +888,13 @@ impl Sampler {
     /// Starts a voice for `note`. An audition (R54) passes where in the
     /// sample the voice starts and the frame it ends at: it plays the whole
     /// region's rules from there at the sample's root pitch, slices or not.
-    fn note_on(&mut self, note: NoteEvent, s: &Settings, audition: Option<(f64, u64)>) {
+    fn note_on(
+        &mut self,
+        note: NoteEvent,
+        s: &Settings,
+        audition: Option<(f64, u64)>,
+        song_frame: Frames,
+    ) {
         // Slicing plays the slice the note names; Classic and One-Shot the
         // whole region.
         let sliced = s.mode == Mode::Slice && audition.is_none();
@@ -910,6 +978,8 @@ impl Sampler {
         voice.counter = counter;
         voice.audition = audition.is_some();
         voice.position = audition.map_or(region_start as f64, |(at, _)| at);
+        voice.start_position = voice.position;
+        voice.start_song_frame = song_frame;
         voice.end = audition.map_or(region_end, |(_, end)| end);
         voice.pitch = from;
         voice.target = pitch;
@@ -924,6 +994,7 @@ impl Sampler {
         voice.one_shot = s.mode != Mode::Classic;
         voice.env.trigger(s.attack_frames);
         voice.filter_env.trigger(s.filter_attack_frames);
+        voice.pitch_env.trigger(s.pitch_env_attack_frames);
         // A retriggered voice starts its LFO at the offset; otherwise it
         // follows the device's free-running phase (the manual: Offset does
         // nothing when Retrigger is off).
@@ -943,7 +1014,7 @@ impl Sampler {
     /// A click in the display (R54): the button going down starts a voice
     /// at C3, the sample's own pitch, from the clicked point; going up fades
     /// it out whatever the mode's Trigger says.
-    fn audition(&mut self, audition: Audition, s: &Settings, frames: usize) {
+    fn audition(&mut self, audition: Audition, s: &Settings, frames: usize, song_frame: Frames) {
         if audition.down {
             let at = audition.from.clamp(0.0, 1.0) * frames as f64;
             let end = if at < s.region_end as f64 {
@@ -959,7 +1030,7 @@ impl Sampler {
                 velocity: 1.0,
                 note_id: None,
             };
-            self.note_on(note, s, Some((at, end)));
+            self.note_on(note, s, Some((at, end)), song_frame);
         } else {
             for voice in self.voices.iter_mut() {
                 if voice.active && voice.audition && !voice.fading {
@@ -980,10 +1051,12 @@ impl Sampler {
                 if !s.trigger {
                     voice.env.release(s.fade_out_frames);
                     voice.filter_env.release(s.filter_release_frames);
+                    voice.pitch_env.release(s.pitch_env_release_frames);
                 }
             } else {
                 voice.env.release(s.release_frames);
                 voice.filter_env.release(s.filter_release_frames);
+                voice.pitch_env.release(s.pitch_env_release_frames);
             }
         }
     }
@@ -1027,7 +1100,17 @@ impl Sampler {
     /// its LFO value. The voice's level and velocity scale the lane, and
     /// the output Volume and pan are applied after the filter, in
     /// [`mixed`](Self::mixed).
-    fn voices_frame(&mut self, s: &Settings, sample: &SampleData, frame: usize, gain: f32) {
+    #[expect(clippy::too_many_arguments, reason = "one voice's frame's inputs")]
+    fn voices_frame(
+        &mut self,
+        s: &Settings,
+        sample: &SampleData,
+        frame: usize,
+        gain: f32,
+        tempo: &TempoMap,
+        rate: SampleRate,
+        song_position: Frames,
+    ) {
         // The free-running phase the voices started from: one clock for
         // the device, so voices without Retrigger stay together.
         if s.lfo_on {
@@ -1050,6 +1133,9 @@ impl Sampler {
             voice
                 .filter_env
                 .step(s.filter_sustain, s.filter_decay_frames);
+            voice
+                .pitch_env
+                .step(s.pitch_env_sustain, s.pitch_env_decay_frames);
             // The LFO: as the manual describes, per voice, at the voice's
             // own rate, rising over its Attack after the note starts.
             let mut lfo_value = 0.0f32;
@@ -1107,7 +1193,7 @@ impl Sampler {
             self.cutoff[frame * stride + slot] =
                 s.cutoff_pitch(voice.key, voice.filter_env.level, lfo_value);
             self.lfo[frame * stride + slot] = lfo_value;
-            // The voice moves on: its pitch first (with the LFO's bend),
+            // The voice moves on: its pitch first (with the LFO's bend and pitch envelope),
             // then its position.
             if voice.step != 0.0 {
                 voice.pitch += voice.step;
@@ -1119,9 +1205,25 @@ impl Sampler {
                 }
                 voice.ratio = 2f64.powf(voice.pitch / 12.0);
             }
-            let bend = 2f64
-                .powf(LFO_PITCH_SEMITONES * f64::from(s.lfo_pitch) * f64::from(lfo_value) / 12.0);
-            voice.position += ratio * bend;
+            let pitch_env_semitones = f64::from(voice.pitch_env.level) * s.pitch_env_amount;
+            let bend = 2f64.powf(
+                (LFO_PITCH_SEMITONES * f64::from(s.lfo_pitch) * f64::from(lfo_value)
+                    + pitch_env_semitones)
+                    / 12.0,
+            );
+            if s.warped {
+                let current_frame = song_position + Frames(frame as i64);
+                let now_ticks =
+                    tempo.seconds_to_ticks_exact(current_frame.get() as f64 / rate.as_f64());
+                let start_ticks = tempo
+                    .seconds_to_ticks_exact(voice.start_song_frame.get() as f64 / rate.as_f64());
+                let played_ticks = (now_ticks - start_ticks).max(0.0);
+                let sample_time = played_ticks / (s.warp_bpm * (705_600.0 / 60.0));
+                let offset = sample_time * s.sample_rate * ratio * bend;
+                voice.position = voice.start_position + offset;
+            } else {
+                voice.position += ratio * bend;
+            }
             if s.looping && s.loop_end > s.loop_start && voice.position >= s.loop_end as f64 {
                 // The wrap resumes past the head the crossfade already
                 // played, so the fade's end and the resumed audio meet.
@@ -1210,12 +1312,14 @@ impl NativeDevice for Sampler {
         }
         // The decoded sample, held aside for the stretch; cloning the
         // `Arc` only moves a reference, so nothing allocates.
-        let sample = match self
+        let (sample, manual_slices) = match self
             .data
             .as_ref()
             .and_then(|data| data.downcast_ref::<SlotSample>())
         {
-            Some(slot) if slot.sample.frames() > 0 => Arc::clone(&slot.sample),
+            Some(slot) if slot.sample.frames() > 0 => {
+                (Arc::clone(&slot.sample), Arc::clone(&slot.slices))
+            }
             _ => {
                 for voice in &mut self.voices {
                     voice.active = false;
@@ -1225,15 +1329,21 @@ impl NativeDevice for Sampler {
         };
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         let rate = audio.sample_rate();
-        let settings = self.settings(params, rate, audio.tempo(), audio.song_position());
+        let song_position = audio.song_position();
+        let tempo = audio.tempo();
+        let settings = self.settings(params, rate, tempo, song_position);
         if let Some(audition) = self.audition.take() {
-            self.audition(audition, &settings, sample.frames());
+            self.audition(audition, &settings, sample.frames(), song_position);
         }
         // Slices are Slicing mode's alone: working them out in Classic or
         // One-Shot would scan the region on the audio thread for nothing.
         if settings.mode == Mode::Slice {
-            self.slices
-                .update(&sample, &settings.cut(), Arc::as_ptr(&sample) as usize);
+            self.slices.update(
+                &sample,
+                &settings.cut(),
+                Arc::as_ptr(&sample) as usize,
+                &manual_slices,
+            );
         }
         let gain = params.ramp(at(GAIN));
         let volume = params.ramp(at(VOLUME));
@@ -1250,15 +1360,16 @@ impl NativeDevice for Sampler {
         // 1. The notes and the voices: each voice's sample into its lane,
         //    with its cutoff and LFO.
         for frame in 0..frames {
+            let current_frame = song_position + Frames(frame as i64);
             while notes
                 .peek()
                 .is_some_and(|note| note.offset as usize <= frame)
             {
                 let note = notes.next().expect("peeked");
-                self.play(note, &settings);
+                self.play(note, &settings, current_frame);
             }
             let gain = gain.get(frame).copied().unwrap_or(1.0);
-            self.voices_frame(&settings, &sample, frame, gain);
+            self.voices_frame(&settings, &sample, frame, gain, tempo, rate, song_position);
         }
         // 2. The filter, per voice.
         if settings.filter_on {
@@ -1346,6 +1457,13 @@ struct Settings {
     lfo_pitch: f32,
     lfo_pan: f32,
     lfo_filter: f32,
+    warped: bool,
+    warp_bpm: f64,
+    pitch_env_attack_frames: u32,
+    pitch_env_decay_frames: u32,
+    pitch_env_sustain: f32,
+    pitch_env_release_frames: u32,
+    pitch_env_amount: f64,
 }
 
 impl Settings {
@@ -1462,6 +1580,7 @@ pub fn slice_boundaries(
     sample: &SampleData,
     value: &dyn Fn(ParamId) -> f64,
     sixteenth: f64,
+    manual: &[u64],
 ) -> Vec<u64> {
     let frames = sample.frames() as f64;
     let (start, length) = (value(START) / 100.0, value(LENGTH) / 100.0);
@@ -1475,7 +1594,7 @@ pub fn slice_boundaries(
         rate: f64::from(sample.sample_rate()),
     };
     let mut slices = Slices::new();
-    slices.update(sample, &cut, 0);
+    slices.update(sample, &cut, 0, manual);
     slices.bounds[..slices.count].to_vec()
 }
 
@@ -1491,6 +1610,8 @@ struct SliceSignature {
     /// The sample's address: a new sample re-slices.
     sample: usize,
     frames: u64,
+    manual_len: usize,
+    manual_sum: u64,
 }
 
 impl Slices {
@@ -1513,7 +1634,7 @@ impl Slices {
     /// Works the boundaries out again when their inputs changed. The
     /// signature holds the sensitivity to the nearest per cent, so
     /// automation that sweeps it doesn't re-slice on every block.
-    fn update(&mut self, sample: &SampleData, s: &Cut, address: usize) {
+    fn update(&mut self, sample: &SampleData, s: &Cut, address: usize, manual: &[u64]) {
         let signature = SliceSignature {
             by: s.by,
             sensitivity: (s.sensitivity * 100.0).round(),
@@ -1529,6 +1650,8 @@ impl Slices {
             region_end: s.region_end,
             sample: address,
             frames: sample.frames() as u64,
+            manual_len: manual.len(),
+            manual_sum: manual.iter().sum(),
         };
         if self.signature == Some(signature) {
             return;
@@ -1539,10 +1662,66 @@ impl Slices {
             return;
         }
         match s.by {
-            SliceBy::Manual => {}
-            SliceBy::Transient => self.detect(sample, s),
-            SliceBy::Beat => self.beat(s),
-            SliceBy::Region => self.regions(s),
+            SliceBy::Manual => self.manual(s, manual),
+            SliceBy::Transient => {
+                self.detect(sample, s);
+                self.merge_manual(s, manual);
+            }
+            SliceBy::Beat => {
+                self.beat(s);
+                self.merge_manual(s, manual);
+            }
+            SliceBy::Region => {
+                self.regions(s);
+                self.merge_manual(s, manual);
+            }
+        }
+    }
+
+    fn manual(&mut self, s: &Cut, manual: &[u64]) {
+        let has_inside = manual
+            .iter()
+            .any(|&f| f > s.region_start && f < s.region_end);
+        if !has_inside {
+            self.count = 0;
+            return;
+        }
+        self.push(s.region_start);
+        for &f in manual {
+            if f > s.region_start && f < s.region_end {
+                self.push(f);
+            }
+        }
+        self.push(s.region_end);
+        self.bounds[..self.count].sort_unstable();
+        let mut j = 0;
+        for i in 1..self.count {
+            if self.bounds[i] != self.bounds[j] {
+                j += 1;
+                self.bounds[j] = self.bounds[i];
+            }
+        }
+        if self.count > 0 {
+            self.count = j + 1;
+        }
+    }
+
+    fn merge_manual(&mut self, s: &Cut, manual: &[u64]) {
+        for &m in manual {
+            if m > s.region_start && m < s.region_end {
+                self.push(m);
+            }
+        }
+        self.bounds[..self.count].sort_unstable();
+        let mut j = 0;
+        for i in 1..self.count {
+            if self.bounds[i] != self.bounds[j] {
+                j += 1;
+                self.bounds[j] = self.bounds[i];
+            }
+        }
+        if self.count > 0 {
+            self.count = j + 1;
         }
     }
 
@@ -1737,6 +1916,12 @@ struct Voice {
     /// The filter envelope, which moves the cutoff (the sampler spec's
     /// filter rule).
     filter_env: Env,
+    /// The pitch envelope, which moves the pitch.
+    pitch_env: Env,
+    /// The song frame the voice started sounding on.
+    start_song_frame: Frames,
+    /// The sample frame the voice started on.
+    start_position: f64,
     /// Its LFO's place in its cycle.
     lfo_phase: f64,
     /// Frames since the note started, for the LFO's Attack.
@@ -1763,6 +1948,9 @@ impl Voice {
             audition: false,
             env: Env::idle(),
             filter_env: Env::idle(),
+            pitch_env: Env::idle(),
+            start_song_frame: Frames(0),
+            start_position: 0.0,
             lfo_phase: 0.0,
             lfo_age: 0,
             lfo_random: 0.0,

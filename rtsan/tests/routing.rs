@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use bl_core::time::SampleRate;
 use bl_engine::nodes::{TEST_TONE, test_tone};
-use bl_engine::testing::{self, KEY, Probe};
+use bl_engine::testing::{self, KEY, MULTI, Probe, VALUE};
 use bl_engine::{Collector, Compiler, EngineConfig, TransportCommand, channel};
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceId, DeviceKind, Editor, Input, Monitor, Output,
@@ -137,6 +137,34 @@ fn routing_and_sidechains_pass_under_rtsan() {
         })
         .unwrap();
 
+    // A MIDI track with an instrument that offers extra audio outputs, and a
+    // track that takes them (WP-5.45).
+    let multi = track(&mut editor, TrackKind::Midi, None);
+    let instrument: DeviceId = editor.new_id();
+    let mut device = Device::new(
+        instrument,
+        "Test Multi",
+        DeviceKind::Native {
+            device_type: MULTI.to_owned(),
+        },
+    )
+    .with_role(bl_model::DeviceRole::Instrument);
+    device.params.insert(VALUE, 0.5);
+    editor
+        .apply(Command::InsertDevice {
+            track: multi,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let mout = track(&mut editor, TrackKind::Audio, None);
+    editor
+        .apply(Command::SetMonitor {
+            track: mout,
+            monitor: Monitor::In,
+        })
+        .unwrap();
+
     let resampler = track(&mut editor, TrackKind::Audio, None);
     editor
         .apply(Command::SetInput {
@@ -177,6 +205,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
             track: racked,
             tap,
             chain: Some(chain),
+            output: None,
         },
         channel: None,
     };
@@ -197,6 +226,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: a,
                     tap: Tap::PostFx,
                     chain: None,
+                    output: None,
                 },
             }),
             6 => Some(Command::SetSidechainEnabled {
@@ -221,6 +251,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: a,
                     tap: Tap::PreFx,
                     chain: None,
+                    output: None,
                 },
                 channel: None,
             }),
@@ -238,6 +269,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: b,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
             }),
             22 => Some(Command::SetSidechainListen {
@@ -254,6 +286,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: a,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
                 channel: None,
             }),
@@ -271,6 +304,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: inner,
                     tap: Tap::PostFx,
                     chain: None,
+                    output: None,
                 },
             }),
             34 => Some(Command::SetSidechainEnabled {
@@ -285,11 +319,34 @@ fn routing_and_sidechains_pass_under_rtsan() {
                 track: b,
                 solo: true,
             }),
+            39 => Some(Command::SetInput {
+                track: mout,
+                input: Input::Track {
+                    track: multi,
+                    tap: Tap::PostMixer,
+                    chain: None,
+                    output: Some(bl_model::DeviceOutput {
+                        device: instrument,
+                        output: (round % 2) as u32,
+                    }),
+                },
+                channel: None,
+            }),
             40 => Some(Command::SoloExclusive { track: a }),
             42 => Some(Command::SoloExclusive { track: c }),
             44 => Some(Command::SetSolo {
                 track: c,
                 solo: false,
+            }),
+            47 => Some(Command::SetInput {
+                track: mout,
+                input: Input::Track {
+                    track: multi,
+                    tap: Tap::PostMixer,
+                    chain: None,
+                    output: None,
+                },
+                channel: None,
             }),
             46 => Some(Command::SetSidechainInput {
                 device: gate_c,
@@ -297,6 +354,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: c,
                     tap: Tap::PreFx,
                     chain: None,
+                    output: None,
                 },
             }),
             48 => Some(Command::SetOutput {
@@ -309,6 +367,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: b,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
                 channel: None,
             }),
@@ -331,6 +390,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: c,
                     tap: Tap::PostFx,
                     chain: None,
+                    output: None,
                 },
             }),
             60 => Some(Command::SetSidechainInput {
@@ -360,6 +420,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: r1,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
             }),
             72 => Some(Command::SetSidechainGain {

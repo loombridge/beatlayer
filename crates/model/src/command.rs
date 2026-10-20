@@ -33,7 +33,8 @@ use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
+    TrackDelay, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
@@ -504,6 +505,65 @@ pub enum Command {
         /// `a`, `b`, or `none`.
         assign: CrossfadeAssign,
     },
+    /// Sets a track's delay (the mixer spec, manual 18.7): positive delays
+    /// the track, negative plays it early. Its value names its unit, as
+    /// Hardware Latency's does; the unit switch converts the value. The
+    /// command is unavailable while delay compensation is off.
+    SetTrackDelay {
+        /// The track.
+        track: TrackId,
+        /// The delay and the unit it is in.
+        delay: TrackDelay,
+    },
+    /// Sets a track's pan mode (the mixer spec, manual 18.1): Stereo Pan Mode
+    /// or Split Stereo Pan Mode.
+    SetPanMode {
+        /// The track.
+        track: TrackId,
+        /// `stereo` or `split`.
+        mode: PanMode,
+    },
+    /// In Split Stereo Pan Mode, sets the left input channel's position, from
+    /// −1 (left) to 1 (right), on the constant-power law.
+    SetSplitPanLeft {
+        /// The track.
+        track: TrackId,
+        /// The position, from −1 (left) through 0 (centre) to 1 (right).
+        #[schemars(range(min = -1.0, max = 1.0))]
+        pan: f64,
+    },
+    /// In Split Stereo Pan Mode, sets the right input channel's position, as
+    /// [`Command::SetSplitPanLeft`].
+    SetSplitPanRight {
+        /// The track.
+        track: TrackId,
+        /// The position, from −1 (left) through 0 (centre) to 1 (right).
+        #[schemars(range(min = -1.0, max = 1.0))]
+        pan: f64,
+    },
+    /// Switches the set's delay compensation on or off (the delay-compensation
+    /// spec, manual 23.3). While it's off, nothing is held back, no node's
+    /// latency counts, and a track's delay has no effect.
+    SetDelayCompensation {
+        /// Whether compensation is on.
+        enabled: bool,
+    },
+    /// Switches Reduced Latency When Monitoring (the delay-compensation spec,
+    /// manual 23.3), which gives a monitored track the lowest possible
+    /// latency. Only enabled while delay compensation is on.
+    SetReducedLatencyMonitoring {
+        /// Whether a monitored track is given the lowest possible latency.
+        enabled: bool,
+    },
+    /// Sets a track's Keep Monitoring Latency (the delay-compensation spec,
+    /// manual 18.8): whether a monitored track's recording keeps its delay
+    /// compensation to match what is heard.
+    SetKeepMonitoringLatency {
+        /// The track.
+        track: TrackId,
+        /// Whether it keeps its compensation.
+        enabled: bool,
+    },
     /// Sets where an audio or MIDI track takes its input from: Audio From
     /// or MIDI From, with its channel.
     SetInput {
@@ -626,6 +686,44 @@ pub enum Command {
         clip: ClipId,
         /// The new data.
         data: ClipData,
+    },
+    /// Crops a clip to a region of its contents (the audio clip editing spec,
+    /// R14, R15, R17): an audio clip plays `media`, the region's frames of
+    /// its file, and a MIDI clip loses the notes that start outside the
+    /// region. The clip's Start and End markers, loop brace, and warp markers
+    /// move back by the region's start, so it plays exactly what it played,
+    /// and the clip stays where it is in the Arrangement.
+    CropClip {
+        /// The clip.
+        clip: ClipId,
+        /// The new file: the region's frames, written through the
+        /// processed-file writer. `null` (or nothing) for a MIDI clip, which
+        /// writes no file; an audio clip's crop must name one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+        /// Where the region starts, in the form the clip shows: seconds into
+        /// an unwarped audio clip's file, or whole ticks of a warped audio
+        /// clip's or a MIDI clip's contents.
+        from: f64,
+        /// Where it ends, after `from`, in the same form.
+        to: f64,
+    },
+    /// Crops a clip to a span of song time (the audio clip editing spec,
+    /// R16): the clip's edges move to the span, and it plays the part of
+    /// itself the span covered, at the same moments. An audio clip plays
+    /// `media`, the span's frames of its file; a MIDI clip loses the notes
+    /// the span didn't hold.
+    CropClipToRange {
+        /// The clip.
+        clip: ClipId,
+        /// The new file: the span's frames. `null` (or nothing) for a MIDI
+        /// clip, which writes no file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+        /// Where the span starts in the song.
+        start: Ticks,
+        /// Where it ends, after `start`.
+        end: Ticks,
     },
     /// Moves a clip's left edge to `start`, keeping its end and where its
     /// contents play: the clip shows more or less of its contents. An audio
@@ -1325,6 +1423,74 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Switches a device's Warp on or off (WP-5.15b).
+    SetDeviceWarp {
+        /// The device.
+        device: DeviceId,
+        /// Whether Warp is on.
+        warp: bool,
+    },
+    /// Sets a device's warp mode (WP-5.15b).
+    SetDeviceWarpMode {
+        /// The device.
+        device: DeviceId,
+        /// The mode: Beats, Tones, Texture, Re-Pitch, Complex or Complex Pro.
+        mode: WarpMode,
+    },
+    /// Sets controls of a device's warp modes (WP-5.15b).
+    SetDeviceWarpSettings {
+        /// The device.
+        device: DeviceId,
+        /// Beats' controls to change.
+        #[serde(default)]
+        beats: Option<BeatsUpdate>,
+        /// Tones' controls to change.
+        #[serde(default)]
+        tones: Option<TonesUpdate>,
+        /// Texture's controls to change.
+        #[serde(default)]
+        texture: Option<TextureUpdate>,
+        /// Complex Pro's controls to change.
+        #[serde(default)]
+        complex_pro: Option<ComplexProUpdate>,
+    },
+    /// Sets a device's sample tempo in BPM (WP-5.15b).
+    SetDeviceSampleBpm {
+        /// The device.
+        device: DeviceId,
+        /// The tempo in BPM: positive, from 1 to 1,000.
+        bpm: f64,
+    },
+    /// Multiplies a device's sample tempo by a factor (Live's ×2 and ÷2, WP-5.15b).
+    ScaleDeviceTempo {
+        /// The device.
+        device: DeviceId,
+        /// What to multiply by: 2 for ×2, 0.5 for ÷2.
+        factor: f64,
+    },
+    /// Adds a manual slice at `frame` in the sample (WP-5.15b).
+    AddSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame into the sample.
+        frame: u64,
+    },
+    /// Moves a manual slice from `from` to `to` frame (WP-5.15b).
+    MoveSlice {
+        /// The device.
+        device: DeviceId,
+        /// The existing slice's frame.
+        from: u64,
+        /// The new frame.
+        to: u64,
+    },
+    /// Deletes a manual slice at `frame` (WP-5.15b).
+    DeleteSlice {
+        /// The device.
+        device: DeviceId,
+        /// Frame of the slice to delete.
+        frame: u64,
+    },
     /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
     /// `index` or at the end. Each layer's own `id` is ignored: the device
     /// gives each the next of its layer IDs, in order, and they read back
@@ -1801,6 +1967,12 @@ impl Command {
             }
             Self::SetCrossfader { .. } => "Change crossfader",
             Self::SetCrossfadeAssign { .. } => "Assign crossfade",
+            Self::SetTrackDelay { .. } => "Change track delay",
+            Self::SetPanMode { .. } => "Change track pan mode",
+            Self::SetSplitPanLeft { .. } | Self::SetSplitPanRight { .. } => "Change split pan",
+            Self::SetDelayCompensation { .. } => "Switch Delay Compensation",
+            Self::SetReducedLatencyMonitoring { .. } => "Switch Reduced Latency When Monitoring",
+            Self::SetKeepMonitoringLatency { .. } => "Switch Keep Monitoring Latency",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetCueMode { .. } => "Switch Cue mode",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
@@ -1820,6 +1992,7 @@ impl Command {
             Self::SetClipMute { .. } => "Mute clip",
             Self::SetClipLaunchMode { .. } => "Change launch mode",
             Self::SetClipData { .. } => "Edit clip",
+            Self::CropClip { .. } | Self::CropClipToRange { .. } => "Crop clip",
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
@@ -1912,6 +2085,16 @@ impl Command {
             Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // WP-5.15b: Warp controls and slices.
+            Self::SetDeviceWarp { .. } => "Switch Warp",
+            Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
+            Self::SetDeviceWarpSettings { .. } => "Change Warp Settings",
+            Self::SetDeviceSampleBpm { .. } | Self::ScaleDeviceTempo { .. } => {
+                "Change sample tempo"
+            }
+            Self::AddSlice { .. } => "Add Slice",
+            Self::MoveSlice { .. } => "Move Slice",
+            Self::DeleteSlice { .. } => "Delete Slice",
             // WP-5.13: Live's names for the layer list's items where it has
             // them (S6); the rest are Beatlayer's own.
             Self::InsertLayers { .. } => "Add Samples",
@@ -2331,6 +2514,81 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetTrackDelay { track, delay } => {
+                // Spec: delay-compensation R7. While compensation is off the
+                // Track Delay is unavailable: the command is refused and the
+                // value stays as it was.
+                if !self.settings.delay_compensation {
+                    return Err(ModelError::TrackDelayNeedsCompensation);
+                }
+                check_value(
+                    "track delay",
+                    match *delay {
+                        TrackDelay::Milliseconds { value } => value,
+                        TrackDelay::Samples { value } => value as f64,
+                    },
+                    delay.is_valid(),
+                )?;
+                if self.track_ref(*track)?.delay != *delay {
+                    self.track_mut(*track)?.delay = *delay;
+                }
+                Ok(())
+            }
+            Command::SetPanMode { track, mode } => {
+                if self.track_ref(*track)?.mixer.pan_mode != *mode {
+                    self.track_mut(*track)?.mixer.pan_mode = *mode;
+                }
+                Ok(())
+            }
+            Command::SetSplitPanLeft { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::SplitLeft,
+                })?;
+                check_value("split pan", *pan, (-1.0..=1.0).contains(pan))?;
+                if self.track_ref(*track)?.mixer.split_left != *pan {
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.split_left = *pan;
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::SplitLeft,
+                    });
+                }
+                Ok(())
+            }
+            Command::SetSplitPanRight { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::SplitRight,
+                })?;
+                check_value("split pan", *pan, (-1.0..=1.0).contains(pan))?;
+                if self.track_ref(*track)?.mixer.split_right != *pan {
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.split_right = *pan;
+                    track_ref.override_target(&AutomationTarget::Mixer {
+                        param: MixerParam::SplitRight,
+                    });
+                }
+                Ok(())
+            }
+            Command::SetDelayCompensation { enabled } => {
+                self.settings.delay_compensation = *enabled;
+                Ok(())
+            }
+            Command::SetReducedLatencyMonitoring { enabled } => {
+                // Spec: delay-compensation R8. It can be on only while
+                // compensation is on; turning it off is always allowed.
+                if *enabled && !self.settings.delay_compensation {
+                    return Err(ModelError::ReducedLatencyNeedsCompensation);
+                }
+                self.settings.reduced_latency_monitoring = *enabled;
+                Ok(())
+            }
+            Command::SetKeepMonitoringLatency { track, enabled } => {
+                if self.track_ref(*track)?.keep_monitoring_latency != *enabled {
+                    self.track_mut(*track)?.keep_monitoring_latency = *enabled;
+                }
+                Ok(())
+            }
             Command::SetInput {
                 track,
                 input,
@@ -2411,6 +2669,20 @@ impl Document {
                 }
                 Ok(())
             }
+            // Spec: audio-clip-editing R14, R15, R17.
+            Command::CropClip {
+                clip,
+                media,
+                from,
+                to,
+            } => self.crop_clip(*clip, *media, *from, *to, None),
+            // Spec: audio-clip-editing R16.
+            Command::CropClipToRange {
+                clip,
+                media,
+                start,
+                end,
+            } => self.crop_clip_to_range(*clip, *media, *start, *end),
             Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
             Command::SetClipRegion {
                 clip,
@@ -2840,6 +3112,62 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetDeviceWarp { device, warp } => {
+                self.device_mut(*device)?.warp.warp = *warp;
+                Ok(())
+            }
+            Command::SetDeviceWarpMode { device, mode } => {
+                self.device_mut(*device)?.warp.mode = *mode;
+                Ok(())
+            }
+            Command::SetDeviceWarpSettings {
+                device,
+                beats,
+                tones,
+                texture,
+                complex_pro,
+            } => {
+                let settings = self.device_ref(*device)?.warp.settings.updated(
+                    *beats,
+                    *tones,
+                    *texture,
+                    *complex_pro,
+                )?;
+                self.device_mut(*device)?.warp.settings = settings;
+                Ok(())
+            }
+            Command::SetDeviceSampleBpm { device, bpm } => {
+                check_value("sample bpm", *bpm, (1.0..=1000.0).contains(bpm))?;
+                self.device_mut(*device)?.warp.bpm = Some(*bpm);
+                Ok(())
+            }
+            Command::ScaleDeviceTempo { device, factor } => {
+                check_value("scale factor", *factor, factor.is_finite() && *factor > 0.0)?;
+                let current = self.device_ref(*device)?.warp.bpm.unwrap_or(120.0);
+                self.device_mut(*device)?.warp.bpm = Some((current * factor).clamp(1.0, 1000.0));
+                Ok(())
+            }
+            Command::AddSlice { device, frame } => {
+                let d = self.device_mut(*device)?;
+                if !d.slices.contains(frame) {
+                    d.slices.push(*frame);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::MoveSlice { device, from, to } => {
+                let d = self.device_mut(*device)?;
+                d.slices.retain(|f| f != from);
+                if !d.slices.contains(to) {
+                    d.slices.push(*to);
+                    d.slices.sort_unstable();
+                }
+                Ok(())
+            }
+            Command::DeleteSlice { device, frame } => {
+                self.device_mut(*device)?.slices.retain(|f| f != frame);
                 Ok(())
             }
             Command::InsertLayers {
@@ -3758,6 +4086,99 @@ impl Document {
         Ok(())
     }
 
+    /// Crops `clip` (the audio clip editing spec, R14 to R17): its data to
+    /// `from`..`to` of its contents, in the form the clip shows, and, when
+    /// `span` is given, its edges to that span of the song. An audio clip's
+    /// crop names the new file it plays; a MIDI clip's writes none.
+    fn crop_clip(
+        &mut self,
+        id: ClipId,
+        media: Option<ContentHash>,
+        from: f64,
+        to: f64,
+        span: Option<(Ticks, Ticks)>,
+    ) -> Result<(), ModelError> {
+        let current = self.clip_ref(id)?.clone();
+        let mut next = current.clone();
+        match &current.data {
+            ClipData::Audio(audio) => {
+                let Some(media) = media else {
+                    return Err(ModelError::InvalidInput(
+                        "an audio clip's crop names the new file its region is written to",
+                    ));
+                };
+                let mut data = audio.cropped(from, to)?;
+                data.media = media;
+                next.data = ClipData::Audio(data);
+            }
+            ClipData::Midi(midi) => {
+                if media.is_some() {
+                    return Err(ModelError::InvalidInput(
+                        "a MIDI clip's crop writes no file",
+                    ));
+                }
+                let data = midi.cropped(whole_tick(from)?, whole_tick(to)?);
+                // The clip's contents begin at its Start marker (the clip
+                // module's own rule), which the crop moved back.
+                next.offset = data.start;
+                next.data = ClipData::Midi(data);
+            }
+        }
+        if let Some((start, end)) = span {
+            if end <= start {
+                return Err(ModelError::EmptyLength(end - start));
+            }
+            next.start = start;
+            next.length = end - start;
+        }
+        check_clip_data(&next.data)?;
+        check_clip_fits(self.track_ref(self.clip_owner(id)?)?, &next.data)?;
+        check_extent(next.start, next.length)?;
+        *self.clip_mut(id)? = next;
+        Ok(())
+    }
+
+    /// Crops `clip` to the span of song time `start`..`end` (R16): its edges
+    /// move to the span, and it plays the part of itself the span covered, at
+    /// the same moments.
+    fn crop_clip_to_range(
+        &mut self,
+        id: ClipId,
+        media: Option<ContentHash>,
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
+        if end <= start {
+            return Err(ModelError::EmptyLength(end - start));
+        }
+        let clip = self.clip_ref(id)?.clone();
+        // The span in the form the clip shows: a warped audio clip's and a
+        // MIDI clip's contents advance a tick per tick of the song, and an
+        // unwarped audio clip's by the time between the ticks.
+        let (from, to) = match &clip.data {
+            ClipData::Audio(audio) if !audio.warp => {
+                let tempo = &self.settings.tempo;
+                let at = |ticks: Ticks| tempo.ticks_to_seconds(ticks);
+                (
+                    audio.start + (at(start) - at(clip.start)),
+                    audio.start + (at(end) - at(clip.start)),
+                )
+            }
+            ClipData::Audio(audio) => (
+                audio.start + (start - clip.start).get() as f64,
+                audio.start + (end - clip.start).get() as f64,
+            ),
+            ClipData::Midi(midi) => (
+                midi.start.get() as f64 + (start - clip.start).get() as f64,
+                midi.start.get() as f64 + (end - clip.start).get() as f64,
+            ),
+        };
+        self.crop_clip(id, media, from, to, Some((start, end)))
+    }
+
     /// Sets an audio clip's markers or loop with `edit`, if the result is
     /// valid and its markers are in order, as Live keeps markers set by hand
     /// (the audio clips spec, R3 and R4).
@@ -4581,6 +5002,9 @@ impl Document {
                 if no_mixer && param != MixerParam::Mute {
                     return Err(ModelError::ChainHasNoMixer(chain));
                 }
+                if matches!(param, MixerParam::SplitLeft | MixerParam::SplitRight) {
+                    return Err(ModelError::ChainHasNoSplitPan(chain));
+                }
             }
             AutomationTarget::ChainSend { chain, to } => {
                 let track_ref = self.track_ref(track)?;
@@ -4852,6 +5276,7 @@ impl Document {
     fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
         forget(self.track_mut(track)?, gone);
         self.forget_chain_taps(&gone.chains);
+        self.forget_device_outputs(&gone.devices);
         Ok(())
     }
 
@@ -5114,6 +5539,18 @@ pub(crate) fn check_offset(offset: Ticks) -> Result<(), ModelError> {
 
 /// Checks the notes in MIDI data, and an audio clip's markers, loop, gain,
 /// and fades.
+/// A position in a clip's contents as whole ticks, which is the form a MIDI
+/// clip's contents and a warped audio clip's take.
+fn whole_tick(value: f64) -> Result<Ticks, ModelError> {
+    if !value.is_finite() || value < 0.0 || value > i64::MAX as f64 {
+        return Err(ModelError::InvalidValue {
+            what: "crop position",
+            value,
+        });
+    }
+    Ok(Ticks(value.round() as i64))
+}
+
 pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
     match data {
         ClipData::Midi(midi) => {
@@ -5290,6 +5727,10 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
             (0.0..=1.0).contains(&sidechain.mix),
         )?;
     }
+    if let Some(bpm) = device.warp.bpm {
+        check_value("sample bpm", bpm, (1.0..=1000.0).contains(&bpm))?;
+    }
+    device.warp.settings.check()?;
     Ok(())
 }
 
@@ -5328,6 +5769,16 @@ pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
         mixer.volume.is_finite() && mixer.volume >= 0.0,
     )?;
     check_value("pan", mixer.pan, (-1.0..=1.0).contains(&mixer.pan))?;
+    check_value(
+        "split pan",
+        mixer.split_left,
+        (-1.0..=1.0).contains(&mixer.split_left),
+    )?;
+    check_value(
+        "split pan",
+        mixer.split_right,
+        (-1.0..=1.0).contains(&mixer.split_right),
+    )?;
     if mixer.mute || mixer.solo {
         check_kind(track, TrackKind::has_mute_and_solo, NOT_MAIN)?;
     }
@@ -6282,6 +6733,128 @@ mod tests {
         assert_eq!(loaded, song.doc);
         loaded.check_invariants().unwrap();
         assert_eq!(loaded.track(audio_track).unwrap().take_lanes().len(), 2);
+    }
+
+    // Spec: mixer R28, R29, R30; delay-compensation R7, R8, R9
+    #[test]
+    fn the_track_delay_the_pan_mode_and_the_switches_save_and_undo() {
+        let mut editor = crate::Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+
+        editor
+            .apply(Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::Milliseconds { value: 10.0 },
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change track delay"));
+        editor
+            .apply(Command::SetPanMode {
+                track,
+                mode: PanMode::Split,
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change track pan mode"));
+        editor
+            .apply(Command::SetSplitPanLeft { track, pan: -0.5 })
+            .unwrap();
+        assert_eq!(editor.undo_history().next(), Some("Change split pan"));
+        editor
+            .apply(Command::SetSplitPanRight { track, pan: 0.5 })
+            .unwrap();
+        editor
+            .apply(Command::SetKeepMonitoringLatency {
+                track,
+                enabled: false,
+            })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Keep Monitoring Latency")
+        );
+        editor
+            .apply(Command::SetReducedLatencyMonitoring { enabled: true })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Reduced Latency When Monitoring")
+        );
+        editor
+            .apply(Command::SetDelayCompensation { enabled: false })
+            .unwrap();
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Delay Compensation")
+        );
+        // While compensation is off neither can be set: the delay is refused
+        // and Reduced Latency When Monitoring can't be turned on (the delay
+        // compensation spec, R7 and R8). No undo step is made.
+        assert!(matches!(
+            editor.apply(Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::default(),
+            }),
+            Err(crate::editor::EditError::Command(
+                crate::error::ModelError::TrackDelayNeedsCompensation
+            ))
+        ));
+        assert!(matches!(
+            editor.apply(Command::SetReducedLatencyMonitoring { enabled: true }),
+            Err(crate::editor::EditError::Command(
+                crate::error::ModelError::ReducedLatencyNeedsCompensation
+            ))
+        ));
+        assert_eq!(
+            editor.undo_history().next(),
+            Some("Switch Delay Compensation"),
+            "a refused command leaves no step"
+        );
+
+        // The set keeps them and reads them back.
+        let saved =
+            serde_json::to_string(&crate::repr::DocumentRepr::from(editor.document())).unwrap();
+        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
+        let loaded = Document::try_from(loaded).unwrap();
+        let loaded_track = loaded.track(track).unwrap();
+        assert_eq!(
+            loaded_track.delay(),
+            TrackDelay::Milliseconds { value: 10.0 }
+        );
+        assert_eq!(loaded_track.mixer().pan_mode, PanMode::Split);
+        assert_eq!(
+            (
+                loaded_track.mixer().split_left,
+                loaded_track.mixer().split_right
+            ),
+            (-0.5, 0.5)
+        );
+        assert!(!loaded_track.keep_monitoring_latency());
+        assert!(!loaded.settings().delay_compensation);
+        assert!(loaded.settings().reduced_latency_monitoring);
+
+        // Each command is one undo step and restores what it replaced.
+        for _ in 0..7 {
+            editor.undo().unwrap();
+        }
+        let undone = editor.document().track(track).unwrap();
+        assert_eq!(undone.delay(), TrackDelay::default());
+        assert_eq!(undone.mixer().pan_mode, PanMode::Stereo);
+        assert_eq!(
+            (undone.mixer().split_left, undone.mixer().split_right),
+            (0.0, 0.0)
+        );
+        assert!(undone.keep_monitoring_latency());
+        assert!(editor.document().settings().delay_compensation);
+        assert!(!editor.document().settings().reduced_latency_monitoring);
     }
 
     // Spec: audio-clips R7
@@ -9231,5 +9804,172 @@ mod tests {
         assert!(song.doc.device(device).unwrap().b_active);
         assert_eq!(param_of(&song, device, true), Some(5.0));
         assert_eq!(param_of(&song, device, false), Some(-3.0));
+    }
+
+    // Spec: audio-clip-editing R17.
+    #[test]
+    fn cropping_a_midi_clip_deletes_the_notes_outside_its_region() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 1);
+        let quarter = Ticks::QUARTER;
+        let notes = vec![
+            // Outside the region, before it.
+            Note::new(60, Ticks::ZERO, quarter, 100),
+            // Starts inside and runs past the region's end.
+            Note::new(62, quarter + quarter / 2, quarter * 2, 100),
+            // Wholly inside.
+            Note::new(64, quarter * 2, quarter / 2, 100),
+            // Outside the region, after it.
+            Note::new(65, quarter * 3 + quarter / 2, quarter, 100),
+        ];
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(MidiData::new(notes)),
+        })
+        .unwrap();
+        song.apply(Command::CropClip {
+            clip,
+            media: None,
+            from: quarter.get() as f64,
+            to: (quarter * 3).get() as f64,
+        })
+        .unwrap();
+
+        let ClipData::Midi(midi) = &song.doc.clip(clip).unwrap().data else {
+            panic!("a MIDI clip");
+        };
+        let kept: Vec<(i64, i64)> = midi
+            .notes
+            .iter()
+            .map(|note| (note.start.get(), note.length.get()))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                (quarter.get() / 2, quarter.get() * 3 / 2),
+                (quarter.get(), quarter.get() / 2)
+            ],
+            "the notes outside went, and the one running past the end is cut there"
+        );
+        assert_eq!(
+            midi.start,
+            Ticks::ZERO,
+            "the markers begin at the region's start"
+        );
+        assert_eq!(song.doc.clip(clip).unwrap().offset, Ticks::ZERO);
+    }
+
+    // Spec: audio-clip-editing R15.
+    #[test]
+    fn cropping_a_warped_clip_moves_its_warp_map_back_with_it() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let quarter = Ticks::QUARTER;
+        // Two bars of audio, a marker on every beat.
+        let markers: Vec<WarpMarker> = (0..8)
+            .map(|beat| WarpMarker {
+                time: beat as f64 * 0.5,
+                beat: quarter * beat,
+            })
+            .collect();
+        let audio = AudioData {
+            start: Ticks::ZERO.get() as f64,
+            tempo: Some(120.0),
+            warp: true,
+            warp_markers: markers,
+            ..AudioData::new(ContentHash([9; 32]))
+        };
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Audio(audio),
+        })
+        .unwrap();
+        // Crop the second half.
+        song.apply(Command::CropClip {
+            clip,
+            media: Some(ContentHash([8; 32])),
+            from: (quarter * 4).get() as f64,
+            to: (quarter * 8).get() as f64,
+        })
+        .unwrap();
+        let ClipData::Audio(audio) = &song.doc.clip(clip).unwrap().data else {
+            panic!("an audio clip");
+        };
+        assert_eq!(audio.media, ContentHash([8; 32]));
+        let first = audio.warp_markers.first().unwrap();
+        assert_eq!((first.time, first.beat), (0.0, Ticks::ZERO));
+        let last = audio.warp_markers.last().unwrap();
+        assert_eq!(
+            (last.time, last.beat),
+            (2.0, quarter * 4),
+            "the map moved back by the region's start and holds the file's end"
+        );
+    }
+
+    // Spec: audio-clip-editing R23.
+    #[test]
+    fn consolidating_midi_clips_writes_out_every_note_and_envelope_they_played() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 1);
+        let quarter = Ticks::QUARTER;
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(MidiData::new([Note::new(60, Ticks::ZERO, quarter, 100)])),
+        })
+        .unwrap();
+        // A one-quarter loop, on, so the clip plays the note four times over
+        // the whole.
+        song.apply(Command::SetMidiClipLoop {
+            clip,
+            start: Ticks::ZERO,
+            end: Some(quarter),
+        })
+        .unwrap();
+        song.apply(Command::SetClipLoopEnabled {
+            clip,
+            enabled: true,
+        })
+        .unwrap();
+        let target = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target,
+            kind: EnvelopeKind::Modulation,
+            at: Ticks::ZERO,
+            value: 0.25,
+        })
+        .unwrap();
+
+        let start = song.doc.clip(clip).unwrap().start;
+        let end = song.doc.clip(clip).unwrap().end();
+        let new_id: ClipId = song.fresh();
+        let source = song.doc.clip(clip).unwrap().clone();
+        let made =
+            crate::clip::consolidated_midi(new_id, "Merged".to_owned(), &[&source], start, end);
+
+        assert_eq!(made.id, new_id);
+        assert_eq!((made.start, made.length), (start, end - start));
+        assert_eq!(made.name, "Merged");
+        let ClipData::Midi(midi) = &made.data else {
+            panic!("a MIDI clip");
+        };
+        assert_eq!(
+            midi.notes.len(),
+            4,
+            "each repetition of the loop is written out"
+        );
+        assert_eq!(midi.notes[1].start, quarter);
+        assert!(midi.looping, "its loop is on over its whole length");
+        assert_eq!(midi.loop_start, Ticks::ZERO);
+        assert_eq!(midi.loop_end, None);
+        let envelope = made.envelopes.first().expect("the envelope came with it");
+        assert_eq!(envelope.target, target);
+        assert_eq!(envelope.kind, EnvelopeKind::Modulation);
+        assert_eq!(envelope.envelope.value_at(Ticks::ZERO), Some(0.25));
     }
 }

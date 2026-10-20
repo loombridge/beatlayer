@@ -5,6 +5,7 @@
 //! [`midi`]. With the `schemars` feature, the types that commands carry
 //! have JSON Schemas for the command registry.
 
+pub mod clock;
 pub mod id;
 pub mod midi;
 #[cfg(feature = "schemars")]

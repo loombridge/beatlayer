@@ -14,8 +14,9 @@ use bl_model::{
     CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort, FileBeats,
     FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
     LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
-    Monitor, Note, Output, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip,
-    TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
+    Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap,
+    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
+    WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -53,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        166,
+        183,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -67,11 +68,13 @@ fn every_document_command_is_registered() {
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
-         three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
+         three for a sample's edits, WP-5.15b eight for the sampler's warp controls and manual \
+         slices, WP-3.10 the two for follow actions, WP-4.2 four for the \
          warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-         WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, and WP-5.40 \
-         set_configured_params"
+WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
+         set_configured_params, WP-4.13 the two for Crop Clip, and WP-5.36 seven for track \
+         delay, the pan mode, each split side, and the two latency switches"
     );
 
     for op in &ops {
@@ -205,6 +208,40 @@ fn every_command_runs_by_id() {
         "mixer.set_crossfade_assign",
         json!({ "track": drums, "assign": "a" }),
     );
+    agent.run(
+        "mixer.set_pan_mode",
+        json!({ "track": drums, "mode": "split" }),
+    );
+    agent.run(
+        "mixer.set_split_pan_left",
+        json!({ "track": drums, "pan": -1.0 }),
+    );
+    agent.run(
+        "mixer.set_split_pan_right",
+        json!({ "track": drums, "pan": 1.0 }),
+    );
+    agent.run(
+        "mixer.set_track_delay",
+        json!({ "track": drums, "delay": { "unit": "samples", "value": 480 } }),
+    );
+    agent.run(
+        "mixer.set_reduced_latency_monitoring",
+        json!({ "enabled": true }),
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": false }));
+    agent.run(
+        "mixer.set_keep_monitoring_latency",
+        json!({ "track": drums, "enabled": false }),
+    );
+    let document = agent.editor.document();
+    assert!(!document.settings().delay_compensation);
+    assert!(document.settings().reduced_latency_monitoring);
+    assert!(!document.track(drums).unwrap().keep_monitoring_latency());
+    assert_eq!(
+        document.track(drums).unwrap().delay(),
+        TrackDelay::Samples { value: 480 }
+    );
+    agent.run("mixer.set_delay_compensation", json!({ "enabled": true }));
     assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
     let document = agent.editor.document();
     let mixer = *document.track(drums).unwrap().mixer();
@@ -251,6 +288,7 @@ fn every_command_runs_by_id() {
             track: reverb,
             tap: Tap::PostFx,
             chain: None,
+            output: None,
         }
     );
     assert_eq!(routing.monitor, Monitor::In);
@@ -1114,6 +1152,41 @@ fn every_command_runs_by_id() {
         "device.set_layer_options",
         json!({ "device": eq, "ram_mode": true, "snap": true, "linear_loop_fades": null }),
     );
+    // WP-5.15b: the sampler's warp controls and manual slices.
+    agent.run("device.set_warp", json!({ "device": eq, "warp": true }));
+    agent.run(
+        "device.set_warp_mode",
+        json!({ "device": eq, "mode": "beats" }),
+    );
+    agent.run(
+        "device.set_warp_settings",
+        json!({ "device": eq, "beats": { "preserve": "quarter", "transient_envelope": 50 } }),
+    );
+    agent.run(
+        "device.set_sample_bpm",
+        json!({ "device": eq, "bpm": 95.0 }),
+    );
+    agent.run("device.scale_tempo", json!({ "device": eq, "factor": 2.0 }));
+    agent.run("device.add_slice", json!({ "device": eq, "frame": 30_000 }));
+    agent.run(
+        "device.move_slice",
+        json!({ "device": eq, "from": 30_000, "to": 35_000 }),
+    );
+    agent.run(
+        "device.delete_slice",
+        json!({ "device": eq, "frame": 35_000 }),
+    );
+    let warp = &agent.editor.document().device(eq).unwrap().warp;
+    assert!(warp.warp && warp.mode == WarpMode::Beats && warp.bpm == Some(190.0));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .slices
+            .is_empty()
+    );
     let layers = &agent.editor.document().device(eq).unwrap().layers;
     assert_eq!(layers.list.len(), 3);
     assert!(layers.ram_mode && layers.snap && !layers.linear_loop_fades);
@@ -1459,6 +1532,7 @@ fn every_command_runs_by_id() {
                 track: drums,
                 tap: Tap::PostFx,
                 chain: None,
+                output: None,
             },
             gain: 2.0,
             mix: 0.5,
@@ -1711,6 +1785,31 @@ fn every_command_runs_by_id() {
             .only_while_recording
     );
 
+    // Crop Clip: the region the clip's markers hold, and a span of song
+    // time (WP-4.13).
+    let song: ClipId = agent.new_id();
+    agent.run(
+        "clip.create",
+        json!({ "track": drums, "clip": {
+            "id": song, "name": "Song", "start": bar * 4, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32), "start": 0.5, "end": 1.5 } },
+        } }),
+    );
+    agent.run(
+        "clip.crop_region",
+        json!({ "clip": song, "media": "ef".repeat(32), "from": 0.5, "to": 1.5 }),
+    );
+    agent.run(
+        "clip.crop_span",
+        json!({ "clip": song, "media": "ef".repeat(32), "start": bar * 4, "end": bar * 4 + quarter }),
+    );
+    let clip = agent.editor.document().clip(song).unwrap();
+    assert_eq!((clip.start.0, clip.length.0), (bar * 4, quarter));
+    let ClipData::Audio(audio) = &clip.data else {
+        panic!("{clip:?}");
+    };
+    assert_eq!(audio.start, 0.0, "the markers begin at the region's start");
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -1894,6 +1993,43 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "mixer.set_track_delay",
+            Command::SetTrackDelay {
+                track,
+                delay: TrackDelay::Samples { value: 480 },
+            },
+        ),
+        (
+            "mixer.set_pan_mode",
+            Command::SetPanMode {
+                track,
+                mode: PanMode::Split,
+            },
+        ),
+        (
+            "mixer.set_split_pan_left",
+            Command::SetSplitPanLeft { track, pan: -1.0 },
+        ),
+        (
+            "mixer.set_split_pan_right",
+            Command::SetSplitPanRight { track, pan: 1.0 },
+        ),
+        (
+            "mixer.set_delay_compensation",
+            Command::SetDelayCompensation { enabled: false },
+        ),
+        (
+            "mixer.set_reduced_latency_monitoring",
+            Command::SetReducedLatencyMonitoring { enabled: true },
+        ),
+        (
+            "mixer.set_keep_monitoring_latency",
+            Command::SetKeepMonitoringLatency {
+                track,
+                enabled: false,
+            },
+        ),
+        (
             "automation.set_breakpoint",
             Command::SetAutomationBreakpoint {
                 track,
@@ -2035,6 +2171,7 @@ fn schemas_match_what_commands_serialise() {
                     track: TrackId(fresh()),
                     tap: Tap::PreFx,
                     chain: None,
+                    output: None,
                 },
                 channel: None,
             },
@@ -2134,6 +2271,24 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLaunchMode {
                 clip,
                 mode: LaunchMode::Gate,
+            },
+        ),
+        (
+            "clip.crop_region",
+            Command::CropClip {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                from: 0.5,
+                to: 1.5,
+            },
+        ),
+        (
+            "clip.crop_span",
+            Command::CropClipToRange {
+                clip,
+                media: Some(ContentHash([0xcd; 32])),
+                start: Ticks::QUARTER,
+                end: Ticks::QUARTER * 3,
             },
         ),
         (
@@ -2594,6 +2749,70 @@ fn schemas_match_what_commands_serialise() {
                 length: 1000,
             },
         ),
+        // WP-5.15b: the sampler's warp controls and manual slices.
+        (
+            "device.set_warp",
+            Command::SetDeviceWarp { device, warp: true },
+        ),
+        (
+            "device.set_warp_mode",
+            Command::SetDeviceWarpMode {
+                device,
+                mode: WarpMode::Beats,
+            },
+        ),
+        (
+            "device.set_warp_settings",
+            Command::SetDeviceWarpSettings {
+                device,
+                beats: Some(BeatsUpdate {
+                    preserve: Some(Preserve::Quarter),
+                    transient_loop_mode: None,
+                    transient_envelope: Some(50),
+                }),
+                tones: Some(TonesUpdate {
+                    grain_size: Some(40.0),
+                }),
+                texture: None,
+                complex_pro: Some(ComplexProUpdate {
+                    formants: Some(50.0),
+                    envelope: Some(64),
+                }),
+            },
+        ),
+        (
+            "device.set_sample_bpm",
+            Command::SetDeviceSampleBpm { device, bpm: 95.0 },
+        ),
+        (
+            "device.scale_tempo",
+            Command::ScaleDeviceTempo {
+                device,
+                factor: 2.0,
+            },
+        ),
+        (
+            "device.add_slice",
+            Command::AddSlice {
+                device,
+                frame: 30_000,
+            },
+        ),
+        (
+            "device.move_slice",
+            Command::MoveSlice {
+                device,
+                from: 30_000,
+                to: 35_000,
+            },
+        ),
+        (
+            "device.delete_slice",
+            Command::DeleteSlice {
+                device,
+                frame: 35_000,
+            },
+        ),
         (
             "device.set_processed_layer_sample",
             Command::SetProcessedLayerSample {
@@ -2635,6 +2854,7 @@ fn schemas_match_what_commands_serialise() {
                     track,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                 },
             },
         ),

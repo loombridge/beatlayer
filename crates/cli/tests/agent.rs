@@ -1400,7 +1400,7 @@ fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_
     assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
     assert!(
         long.text
-            .starts_with("tracks:\n  items[11]{clips,devices,group,id,kind,mixer.arm,"),
+            .starts_with("tracks:\n  items[11]{clips,delay.unit,delay.value,devices,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside}:"),
         "{}",
         long.text
     );
@@ -3586,6 +3586,124 @@ fn an_agent_edits_a_sample_and_reads_the_edits_back() {
         read["layers"]["count"], 1,
         "Simpler is a multisampler of one layer now"
     );
+}
+
+/// Spec: sampler R18, R20. An agent sets Simpler's Warp controls and its
+/// manual slices by command ID, as the Warp controls and the display's
+/// gestures do, and reads them back.
+#[test]
+fn an_agent_sets_the_warp_controls_and_manual_slices_and_reads_them_back() {
+    let dir = TempDir::new("warp-slices");
+    let file = dir.0.join("Loop.wav");
+    write_stem(&file, 220.0);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    one(
+        &mut client,
+        "track.create",
+        json!({ "id": {"$new": "Snap"}, "kind": "midi", "name": "Snap", "index": 0 }),
+    );
+    let track = {
+        let document = client.transport().shell.editor().document();
+        document.tracks().find(|t| t.name() == "Snap").unwrap().id()
+    };
+    one(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    one(
+        &mut client,
+        "device.add",
+        json!({ "device": {
+            "kind": { "native": { "device_type": "beatlayer.snapshot" } },
+            "name": "Snap", "role": "instrument" } }),
+    );
+    let snapshot = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .devices()
+        .next()
+        .unwrap()
+        .id;
+    one(
+        &mut client,
+        "device.load_sample",
+        json!({ "device": snapshot, "path": file.to_string_lossy() }),
+    );
+
+    // The Warp controls: on, Beats, its Preserve and Transient Envelope, the
+    // sample's tempo, and ×2.
+    one(
+        &mut client,
+        "device.set_warp",
+        json!({ "device": snapshot, "warp": true }),
+    );
+    one(
+        &mut client,
+        "device.set_warp_mode",
+        json!({ "device": snapshot, "mode": "tones" }),
+    );
+    one(
+        &mut client,
+        "device.set_warp_settings",
+        json!({ "device": snapshot, "beats": { "preserve": "quarter", "transient_envelope": 40 } }),
+    );
+    one(
+        &mut client,
+        "device.set_sample_bpm",
+        json!({ "device": snapshot, "bpm": 90.0 }),
+    );
+    one(
+        &mut client,
+        "device.scale_tempo",
+        json!({ "device": snapshot, "factor": 2.0 }),
+    );
+    // The manual slices: two added, one moved, one deleted.
+    one(
+        &mut client,
+        "device.add_slice",
+        json!({ "device": snapshot, "frame": 12_000 }),
+    );
+    one(
+        &mut client,
+        "device.add_slice",
+        json!({ "device": snapshot, "frame": 30_000 }),
+    );
+    one(
+        &mut client,
+        "device.move_slice",
+        json!({ "device": snapshot, "from": 30_000, "to": 36_000 }),
+    );
+    one(
+        &mut client,
+        "device.delete_slice",
+        json!({ "device": snapshot, "frame": 12_000 }),
+    );
+
+    let saved = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", snapshot.0.get()), "detail": "full" }),
+    )["saved"]
+        .clone();
+    assert_eq!(saved["warp"]["warp"], true);
+    assert_eq!(saved["warp"]["mode"], "tones");
+    assert_eq!(saved["warp"]["bpm"], 180.0);
+    assert_eq!(saved["warp"]["settings"]["beats"]["preserve"], "quarter");
+    assert_eq!(saved["warp"]["settings"]["beats"]["transient_envelope"], 40);
+    assert_eq!(saved["slices"]["items"], json!([36_000]));
 }
 
 /// Spec: sample-editor R21. An agent selects, makes, moves and deletes warp

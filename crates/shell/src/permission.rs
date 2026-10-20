@@ -20,6 +20,8 @@ use std::collections::BTreeSet;
 use bl_commands::Permission;
 use bl_core::time::Ticks;
 use bl_model::{ClipData, ClipId, Document, Editor, TrackId, TrackKind};
+use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::audio_editing::CropArgs;
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
@@ -37,6 +39,7 @@ pub const SET_CLIP_DATA: &str = "clip.set_data";
 /// shorten clips it doesn't act on, or, for `clip.set_data`, leave a MIDI
 /// clip fewer notes than it has.
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
+    audio_ids::CROP,
     edit_ids::MOVE_CLIPS,
     edit_ids::RESIZE_CLIPS,
     edit_ids::NUDGE,
@@ -68,8 +71,11 @@ pub struct CallPermission {
     /// files that aren't read until the person allows it.
     pub may: bool,
     /// The MIDI clip the call would leave fewer notes than it has
-    /// (`clip.set_data`), if it would.
+    /// (`clip.set_data`, and `clip.crop` of a MIDI clip), if it would.
     pub fewer_notes: Option<FewerNotes>,
+    /// The clip a crop would leave holding less than it does
+    /// (`clip.crop`), if it would: audio outside the region it keeps.
+    pub cropped: Option<ClipId>,
 }
 
 /// A MIDI clip a call would leave fewer notes than it has.
@@ -92,14 +98,15 @@ impl CallPermission {
             replaces: Vec::new(),
             may: false,
             fewer_notes: None,
+            cropped: None,
         }
     }
 
     /// Whether its arguments make the call destructive whatever its
-    /// registered class: it replaces other clips, or leaves a clip fewer
-    /// notes.
+    /// registered class: it replaces other clips, leaves a clip fewer
+    /// notes, or crops audio away.
     fn deletes_material(&self) -> bool {
-        !self.replaces.is_empty() || self.fewer_notes.is_some()
+        !self.replaces.is_empty() || self.fewer_notes.is_some() || self.cropped.is_some()
     }
 
     /// Whether the call deletes or shortens other material, or deletes
@@ -136,6 +143,9 @@ pub(crate) struct Scene<'a> {
     pub(crate) clipboard: &'a Option<Clipboard>,
     pub(crate) insert_marker: Ticks,
     pub(crate) selected_track: Option<TrackId>,
+    /// The clip the shell's Clip View shows, which a call naming no clip
+    /// acts on (`clip.crop`).
+    pub(crate) shown_clip: Option<ClipId>,
 }
 
 /// Decides what calling `id` with `args` needs, against the document as it
@@ -177,6 +187,7 @@ pub(crate) fn assess(
             let at = import.at.unwrap_or(scene.insert_marker);
             dropped(scene.editor.document(), import.track, at, registered)
         }
+        audio_ids::CROP => cropping(args, registered, scene),
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
         _ => tried(id, args, registered, scene),
     }
@@ -207,6 +218,62 @@ fn dropped(
         replaces,
         may: true,
         fewer_notes: None,
+        cropped: None,
+    }
+}
+
+/// `clip.crop`, decided from its arguments against the document: destructive
+/// when it would remove anything (the audio clip editing spec, R18) — notes a
+/// MIDI clip drops, or audio outside the region it keeps.
+fn cropping(args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Ok(args) = serde_json::from_value::<CropArgs>(args.clone()) else {
+        return unchanged;
+    };
+    let doc = scene.editor.document();
+    // The span and the clip are resolved as the shell resolves them (R16):
+    // the call's, or the Arrangement's time selection and the clip it
+    // covers. A span that can't be read, or no clip at all, leaves the
+    // registered class as it is.
+    let Ok(span) = crate::shell::audio_editing::crop_span(doc, scene.view, scene.shown_clip, &args)
+    else {
+        return unchanged;
+    };
+    let Some(clip) =
+        crate::shell::audio_editing::crop_clip(doc, scene.view, scene.shown_clip, span, &args)
+            .and_then(|id| doc.clip(id))
+    else {
+        return unchanged;
+    };
+    let removes = crate::shell::audio_editing::crop_removes(clip, span);
+    match (&clip.data, removes) {
+        (ClipData::Midi(midi), true) => {
+            let (from, to) = match span {
+                Some((start, end)) => (
+                    midi.start + (start - clip.start),
+                    midi.start + (end - clip.start),
+                ),
+                None => crate::shell::audio_editing::midi_region(clip, midi),
+            };
+            let leaves = midi
+                .notes
+                .iter()
+                .filter(|note| note.start >= from && note.start < to)
+                .count();
+            CallPermission {
+                fewer_notes: Some(FewerNotes {
+                    clip: clip.id,
+                    has: midi.notes.len(),
+                    leaves,
+                }),
+                ..unchanged
+            }
+        }
+        (ClipData::Audio(_), true) => CallPermission {
+            cropped: Some(clip.id),
+            ..unchanged
+        },
+        _ => unchanged,
     }
 }
 
@@ -297,6 +364,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
         replaces,
         may: false,
         fewer_notes: None,
+        cropped: None,
     }
 }
 
@@ -311,6 +379,7 @@ mod tests {
             replaces: vec![ClipId(bl_core::id::Id::new(4).unwrap())],
             may: true,
             fewer_notes: None,
+            cropped: None,
         };
         assert_eq!(
             call.classes(),

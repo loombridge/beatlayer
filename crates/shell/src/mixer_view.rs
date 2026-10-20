@@ -11,7 +11,8 @@ pub use bl_shell_spec::mixer_view::{
     COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE, VOLUME,
+    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE,
+    TRACK_OPTIONS, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -35,6 +36,7 @@ pub struct MixerView {
     crossfader: bool,
     scene_tempo: bool,
     return_tracks: bool,
+    track_options: bool,
     /// Counts `mixer_view.focus` runs, so the window moves the focus once
     /// for each.
     focus_requests: u64,
@@ -48,7 +50,8 @@ impl Default for MixerView {
 
 impl MixerView {
     /// A new set's mixers: the Session View's shown and the Arrangement's
-    /// hidden, with In/Out, Sends, the strips, and the returns showing (the
+    /// hidden, with In/Out, Sends, the strips, and the returns showing and
+    /// the tracks' Track Options and the Crossfader sections hidden (the
     /// mixer view spec, R11, R12).
     #[must_use]
     pub fn new() -> Self {
@@ -67,6 +70,7 @@ impl MixerView {
             crossfader: false,
             scene_tempo: false,
             return_tracks: true,
+            track_options: false,
             focus_requests: 0,
         }
     }
@@ -132,6 +136,12 @@ impl MixerView {
         self.return_tracks
     }
 
+    /// Whether the tracks' Track Options sections show.
+    #[must_use]
+    pub fn track_options(&self) -> bool {
+        self.track_options
+    }
+
     /// How many times `mixer_view.focus` has run.
     #[must_use]
     pub fn focus_requests(&self) -> u64 {
@@ -150,6 +160,7 @@ impl MixerView {
             crossfader: self.crossfader,
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
+            track_options: self.track_options,
         }
     }
 
@@ -165,6 +176,7 @@ impl MixerView {
             CROSSFADER => Some(self.crossfader),
             SCENE_TEMPO => Some(self.scene_tempo),
             RETURN_TRACKS => Some(self.return_tracks),
+            TRACK_OPTIONS => Some(self.track_options),
             _ => None,
         }
     }
@@ -200,7 +212,7 @@ impl MixerView {
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.shown = shown.unwrap_or(!mixer.shown);
             }
-            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS => {
+            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS | TRACK_OPTIONS => {
                 let SectionArgs { shown } = serde_json::from_value(args).map_err(parse_error)?;
                 let section = match id {
                     IN_OUT => &mut self.in_out,
@@ -208,6 +220,7 @@ impl MixerView {
                     VOLUME => &mut self.volume,
                     CROSSFADER => &mut self.crossfader,
                     SCENE_TEMPO => &mut self.scene_tempo,
+                    TRACK_OPTIONS => &mut self.track_options,
                     _ => &mut self.return_tracks,
                 };
                 *section = shown.unwrap_or(!*section);

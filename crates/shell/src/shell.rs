@@ -61,6 +61,7 @@ use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -87,6 +88,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+pub(crate) mod audio_editing;
 mod capture;
 mod multisampler;
 mod processed_files;
@@ -156,6 +158,12 @@ pub enum Area {
 /// switch (M-OPT-025).
 const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
 const CUE_MODE: &str = "mixer.set_cue_mode";
+/// `mixer.set_delay_compensation`, which Options ▸ Delay Compensation runs
+/// as a switch (M-OPT-008).
+const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
+/// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
+/// When Monitoring runs as a switch (M-OPT-009).
+const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -1423,11 +1431,23 @@ impl Shell {
     #[must_use]
     pub fn interface(&self) -> crate::routing::Interface {
         let (inputs, outputs) = self.audio.channels();
+        // The extra audio outputs the set's devices offer past their main
+        // one, which another track's Audio From lists (WP-5.45).
+        let mut device_outputs = std::collections::BTreeMap::new();
+        for track in self.editor.document().tracks() {
+            for device in track.devices_deep() {
+                let outputs = self.devices.outputs(&device.kind);
+                if !outputs.is_empty() {
+                    device_outputs.insert(device.id, outputs.to_vec());
+                }
+            }
+        }
         crate::routing::Interface {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
             midi_outputs: self.midi.output_names(),
+            device_outputs,
         }
     }
 
@@ -1470,6 +1490,15 @@ impl Shell {
         let sender = self.midi.sender().clone();
         let output = self.midi.output().clone();
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+    }
+
+    /// Drives the shell's clocks from `clock`: the computer keyboard stamps
+    /// its notes with it, and the next audio stream times its blocks from it
+    /// (T199). Call it after [`Shell::use_midi_backend`] and before
+    /// [`Shell::start_audio`].
+    pub fn use_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.midi.set_test_clock(clock.clone());
+        self.audio.set_test_clock(clock);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.
@@ -3932,6 +3961,7 @@ impl Shell {
     ) -> Result<Value, ShellError> {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -3971,6 +4001,9 @@ impl Shell {
             .get(id)
             .and_then(|spec| spec.permission)
             .unwrap_or(bl_commands::Permission::External);
+        let shown = self
+            .clip_view
+            .shown_any_clip(self.editor.document(), &self.arrangement);
         crate::permission::assess(
             id,
             args,
@@ -3978,6 +4011,7 @@ impl Shell {
             crate::permission::Scene {
                 insert_marker: self.arrangement.insert_marker(),
                 selected_track: self.arrangement.selected_tracks().first().copied(),
+                shown_clip: shown,
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
@@ -5040,6 +5074,10 @@ impl Shell {
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
+            DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
+            REDUCED_LATENCY_MONITORING => {
+                Some(self.editor.document().settings().reduced_latency_monitoring)
+            }
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5148,12 +5186,31 @@ impl Shell {
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
+        if audio_ids::handles(id) {
+            // Spec: audio-clip-editing R28. The menus' enabled states.
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.can_audio_edit(id, &args);
+        }
         match id {
             model::UNDO => return self.editor.can_undo(),
             model::REDO => return self.editor.can_redo(),
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.dirty,
+            // Options ▸ Reduced Latency When Monitoring is available only
+            // while Delay Compensation is on (the delay-compensation spec,
+            // R8).
+            REDUCED_LATENCY_MONITORING => {
+                return self.editor.document().settings().delay_compensation;
+            }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
@@ -5539,6 +5596,18 @@ impl Shell {
             let on = self.editor.document().settings().solo_in_place;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == DELAY_COMPENSATION && !fields.contains_key("enabled") {
+            // Options ▸ Delay Compensation switches the setting to the
+            // other state (the delay-compensation spec, R7).
+            let on = self.editor.document().settings().delay_compensation;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
+        if id == REDUCED_LATENCY_MONITORING && !fields.contains_key("enabled") {
+            // Options ▸ Reduced Latency When Monitoring switches the
+            // setting to the other state (the delay-compensation spec, R8).
+            let on = self.editor.document().settings().reduced_latency_monitoring;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == session_launch_ids::SET_QUANTIZATION_ENABLED && !fields.contains_key("enabled") {
             // Spec: launch-quantisation R3. Options ▸ Launch Quantization
             // Enabled switches the setting to the other state.
@@ -5807,6 +5876,10 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
+            DELAY_COMPENSATION | REDUCED_LATENCY_MONITORING if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             "transport.set_midi_overdub" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -6013,6 +6086,7 @@ impl Shell {
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
+                || audio_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6029,6 +6103,9 @@ impl Shell {
                 reason: "a drag that edits the set is under way; it ends when it's released"
                     .to_owned(),
             });
+        }
+        if audio_ids::handles(id) {
+            return self.run_audio_editing(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();

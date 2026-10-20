@@ -462,6 +462,7 @@ impl AuHost {
                 sidechain: false,
                 external: false,
                 midi_sidechain: false,
+                outputs: Vec::new(),
             },
             vendor,
             version: has_version.then(|| version_text(version)),

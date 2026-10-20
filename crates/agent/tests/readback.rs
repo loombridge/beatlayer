@@ -8,11 +8,11 @@ use bl_agent::client::{Client, InProcess};
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, External, HardwareLatency, Input,
-    LaunchMode, LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData,
-    MidiTo, MixerParam, Monitor, Note, Output, ParamId, PressurePoint, SendTap, Sidechain,
-    TakeClip, TakeLane, Tap, TonesSettings, TrackId, TrackKind, TransientEdits, WarpMarker,
-    WarpMode, WarpSettings,
+    CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp, Editor,
+    External, HardwareLatency, Input, LaunchMode, LaunchQuantization, LaunchSettings,
+    MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor, Note, Output, PanMode,
+    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackDelay,
+    TrackId, TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -114,6 +114,7 @@ fn fixture() -> Project {
         },
         Command::SetCueMode { enabled: true },
         Command::SetCueVolume { volume: 0.5 },
+        Command::SetReducedLatencyMonitoring { enabled: true },
     ] {
         apply(&mut editor, command);
     }
@@ -144,6 +145,29 @@ fn fixture() -> Project {
             track: vox,
             assign: CrossfadeAssign::A,
         },
+        Command::SetPanMode {
+            track: vox,
+            mode: PanMode::Split,
+        },
+        Command::SetSplitPanLeft {
+            track: vox,
+            pan: -1.0,
+        },
+        Command::SetSplitPanRight {
+            track: vox,
+            pan: 1.0,
+        },
+        Command::SetTrackDelay {
+            track: vox,
+            delay: TrackDelay::Samples { value: 480 },
+        },
+        Command::SetKeepMonitoringLatency {
+            track: vox,
+            enabled: false,
+        },
+        // Switched off only now: a track's delay can't be set while delay
+        // compensation is off (the delay compensation spec, R7).
+        Command::SetDelayCompensation { enabled: false },
         Command::SetInput {
             track: vox,
             input: Input::External {
@@ -190,6 +214,39 @@ fn fixture() -> Project {
     ] {
         apply(&mut editor, command);
     }
+    // The drums take an extra output of the Keys track's instrument (WP-5.45).
+    let impulse: DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: keys,
+            index: 0,
+            device: Device::new(
+                impulse,
+                "Impulse",
+                DeviceKind::Native {
+                    device_type: "beatlayer.kitbag".to_owned(),
+                },
+            )
+            .with_role(DeviceRole::Instrument),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetInput {
+            track: drums,
+            input: Input::Track {
+                track: keys,
+                tap: Tap::PostFx,
+                chain: None,
+                output: Some(DeviceOutput {
+                    device: impulse,
+                    output: 2,
+                }),
+            },
+            channel: None,
+        },
+    );
     let volume = AutomationTarget::Mixer {
         param: MixerParam::Volume,
     };
@@ -282,6 +339,17 @@ fn fixture() -> Project {
         kind: bl_model::SampleEditKind::FadeIn,
         range: None,
     }];
+    // A sample's warp controls and the slices made by hand (WP-5.15b).
+    device.warp = DeviceWarp {
+        warp: true,
+        mode: WarpMode::Tones,
+        settings: WarpSettings {
+            tones: TonesSettings { grain_size: 40.0 },
+            ..WarpSettings::default()
+        },
+        bpm: Some(90.0),
+    };
+    device.slices = vec![1_000, 2_000];
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(
@@ -314,6 +382,7 @@ fn fixture() -> Project {
             track: drums,
             tap: Tap::PreFx,
             chain: None,
+            output: None,
         },
         gain: 0.5,
         mix: 0.25,
@@ -773,6 +842,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
     let (tracks, clips, devices) = saved_parts(&document);
     let named = |name: &str| tracks.iter().find(|t| t["name"] == name).unwrap().clone();
     let (vox, keys, verb) = (named("Vox"), named("Keys"), named("Verb"));
+    let drums = named("Drums");
     for (value, paths) in [
         (
             &document["settings"],
@@ -806,6 +876,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
             ][..],
         ),
         (&verb, &["mixer.tap"][..]),
+        (
+            &drums,
+            &["routing.input.output.device", "routing.input.output.output"][..],
+        ),
         (
             &keys,
             &[

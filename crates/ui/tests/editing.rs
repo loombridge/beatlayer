@@ -697,7 +697,7 @@ fn context_menus_reach_the_edits_and_the_grid() {
     assert_eq!(s.undo_label().as_deref(), Some("Duplicate"));
     // Items no package has built yet are there, and disabled.
     let output = s.right_click(pos2(x(7.0), AUDIO_3.1));
-    assert!(!s.choose(&output, "Crop Clip"));
+    assert!(!s.choose(&output, "Freeze Track"));
     assert_eq!(s.steps(), 1);
 
     // The lanes' menu: right-clicking an empty lane places the insert

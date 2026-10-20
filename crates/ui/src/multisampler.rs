@@ -767,6 +767,7 @@ impl MultisamplerUi {
             slices: &[],
             snapshot: false,
             takes_drops: true,
+            slice_mode: false,
         };
         self.displays.show(ui, shell, theme, &shown, rect, events);
     }

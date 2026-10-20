@@ -73,7 +73,7 @@ const RUN_FRAMES: usize = 8_192;
 /// reach can exceed it must widen it here.
 #[must_use]
 pub fn window_frames(rate: f64) -> usize {
-    RUN_FRAMES + 2 * crate::texture::max_reach(rate)
+    RUN_FRAMES + 2 * crate::texture::max_reach(rate).max(crate::complex::max_reach(rate))
 }
 
 /// A warp mode.

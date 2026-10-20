@@ -14,7 +14,7 @@
 use bl_model::modulator::ModTarget;
 use bl_model::{
     AutomationTarget, ChainId, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS,
-    MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, TrackDelay, TrackId, TrackKind,
+    MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, RackKind, TrackDelay, TrackId, TrackKind,
 };
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
@@ -467,6 +467,9 @@ impl MixerUi {
         }
         self.scroll(&ui, sections_area, of, events);
         self.focus(shell, &layout, &columns, of, events);
+        // A chain dropped out of the mixer's tracks (drum racks spec, R23,
+        // R24).
+        chain_extract(&ui, shell, &layout, events);
     }
 
     /// A chain's strip in the mixer (racks spec, R27): the column, the
@@ -738,6 +741,9 @@ fn title_bars(
             events,
         );
     }
+    // A chain dropped out of the row leaves its rack (drum racks spec,
+    // R23, R24) before a drop among the strips moves it (racks spec, R29).
+    chain_extract(ui, shell, &layout, events);
     chain_drop(ui, &layout, &folds.strips, events);
 }
 
@@ -788,6 +794,50 @@ fn chain_drop(ui: &Ui, layout: &MixerLayout, strips: &[ChainStrip], events: &mut
         )));
         events.push(UiEvent::EndGesture);
     }
+}
+
+/// Extracts a chain dragged out of the mixer (drum racks spec, R23, R24): a
+/// drum chain dropped on the drop area beside the tracks leaves its rack
+/// for a new MIDI track, and a return chain dropped on the returns leaves
+/// it for a new return track. Either is one undo step, named for the drag.
+fn chain_extract(ui: &Ui, shell: &Shell, layout: &MixerLayout, events: &mut Vec<UiEvent>) {
+    let Some(drag) = egui::DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(chain) = drag.chains.first().copied() else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return;
+    };
+    let doc = shell.editor().document();
+    let Some(row) = doc.chain(chain) else {
+        return;
+    };
+    let drum = doc.chain_rack(chain).and_then(|r| r.rack_kind()) == Some(RackKind::Drum);
+    let command =
+        if drum && !row.is_return && layout.drop_area.is_some_and(|drop| drop.contains(pointer)) {
+            "chain.extract"
+        } else if row.is_return && layout.returns.iter().any(|c| c.rect.contains(pointer)) {
+            "chain.extract_return"
+        } else {
+            return;
+        };
+    if !ui.input(|i| i.pointer.any_released()) {
+        return;
+    }
+    egui::DragAndDrop::clear_payload(ui.ctx());
+    let name = if command == "chain.extract" {
+        "Extract Chain"
+    } else {
+        "Extract Return Chain"
+    };
+    events.push(UiEvent::BeginNamedGesture(name.to_owned()));
+    events.push(UiEvent::Invoke(Invocation::new(
+        command,
+        json!({ "chain": chain }),
+    )));
+    events.push(UiEvent::EndGesture);
 }
 
 /// The mixer's columns and the racks and chains folded out in them (racks

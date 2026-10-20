@@ -121,8 +121,8 @@ fn renaming_id() -> Id {
 }
 
 /// A chain's title bar in a mixer (racks spec, R27, R28): the chain's
-/// name, which a click selects, and the fold button of the rack inside the
-/// chain. A drag moves the chain among its rack's chains (R29).
+/// name, which a click selects. A drag moves the chain among its rack's
+/// chains (R29).
 pub fn title_bar(
     ui: &mut Ui,
     shell: &Shell,
@@ -199,12 +199,17 @@ pub fn title_bar(
 }
 
 /// The chains a change on a strip reaches (racks spec, R28): the chain
-/// itself and the other selected chains of its own rack.
+/// itself and the other selected chains of its own rack while it is one of
+/// them, as a track's change reaches the selected tracks (mixer R8).
 fn selected_in_rack(shell: &Shell, chain: ChainId) -> Vec<ChainId> {
     let doc = shell.editor().document();
+    let selected = shell.devices().selected_chains(doc);
+    if !selected.contains(&chain) {
+        return vec![chain];
+    }
     let rack = doc.chain_rack(chain).map(|r| r.id);
     let mut out = vec![chain];
-    for other in shell.devices().selected_chains(doc) {
+    for other in selected {
         let same = doc.chain_rack(other).map(|r| r.id) == rack;
         if other != chain && same && !out.contains(&other) {
             out.push(other);
@@ -362,6 +367,23 @@ fn slider(
     let value = if volume { strip.volume } else { strip.pan };
     let response = ui.interact(at, id, Sense::click_and_drag());
     let drag_id = id.with("drag");
+    // Delete, or a double-click, resets it, and a screen reader's increment
+    // and decrement (or Up and Down) step it, as the chain list's slider
+    // does (mixer-view R15).
+    let (steps, reset) = crate::device_view::DeviceViewUi::slider_keys(ui, &response);
+    if reset || response.double_clicked() {
+        let default = if volume { 1.0 } else { 0.0 };
+        change(shell, chain, events, volume, |_| default);
+    } else if steps != 0 {
+        let fine = ui.input(|i| i.modifiers.shift);
+        change(shell, chain, events, volume, |start| {
+            if volume {
+                mixer_controls::step_volume(start.gain, steps, fine)
+            } else {
+                mixer_controls::step_pan(start.pan, steps)
+            }
+        });
+    }
     if response.drag_started() {
         ui.data_mut(|d| {
             d.insert_temp(
@@ -445,6 +467,33 @@ fn slider(
         node.set_label(format!("Chain {name} of {}", strip.name));
         node.set_value(text.clone());
     });
+}
+
+/// Runs one change on the chain and every other chain it reaches, as one
+/// named gesture (racks spec, R28).
+fn change(
+    shell: &Shell,
+    chain: ChainId,
+    events: &mut Vec<UiEvent>,
+    volume: bool,
+    value: impl Fn(&Start) -> f64,
+) {
+    events.push(UiEvent::BeginNamedGesture(format!(
+        "Change \"Chain {}\"",
+        if volume { "Volume" } else { "Pan" }
+    )));
+    for start in starts(shell, chain) {
+        let (command, key) = if volume {
+            ("chain.set_gain", "volume")
+        } else {
+            ("chain.set_pan", "pan")
+        };
+        events.push(UiEvent::Invoke(Invocation::new(
+            command,
+            json!({ "chain": start.chain, key: value(&start) }),
+        )));
+    }
+    events.push(UiEvent::EndGesture);
 }
 
 /// The chains a change on `chain` reaches, with the values they had when

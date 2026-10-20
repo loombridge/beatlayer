@@ -61,6 +61,7 @@ pub mod arrangement;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
+pub mod autosampler;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
@@ -110,6 +111,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_io::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
+    autosampler::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;

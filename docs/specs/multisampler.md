@@ -1,6 +1,6 @@
 # The multisampler, sample editing in the sampler devices, and the autosampler
 
-- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; R64 to R73 are WP-5.16's)
+- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built)
 - **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27)
 - **Parity-matrix row:** Instruments: Sampler (multisample, zones, modulation), plus SFZ import; Instruments: Simpler (the display's edits); [the improvements](../05-improvements.md), IMP-27 and IMP-28
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 31, sections 31.10 "Sampler" (31.10.1 to 31.10.11) and 31.11 "Simpler" (its sample display and 31.11.7 "Context Menu Options for Simpler"); chapter 23, sections 23.2 and 23.2.4.1; and the SFZ format reference at sfzformat.com, read 17 October 2026
@@ -213,7 +213,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R65 | `crates/ui/tests/autosampler.rs`, `the_dialog_holds_its_settings_and_counts_the_samples` | UI script |
 | R66 | `crates/shell/src/autosample.rs`, `the_plan_samples_each_step_and_spreads_the_zones` | unit |
 | R67 | `crates/shell/tests/autosample.rs`, `a_plugin_and_a_native_synth_render_offline_the_same_every_time` | shell test, blocks under the allocation trap |
-| R68 | `crates/shell/tests/autosample.rs`, `a_loopback_external_instrument_is_sampled_in_time`, `a_dropout_records_the_note_again` (the null audio backend's loopback) | shell test |
+| R68 | | |
 | R69 | `crates/shell/tests/autosample.rs`, `samples_are_named_and_placed_in_the_project` | shell test |
 | R70 | `crates/shell/tests/autosample.rs`, `the_result_is_a_new_track_and_one_undo_step` | shell test |
 | R71 | `crates/analysis/src/loops.rs`, `a_sustained_tone_gets_a_loop_without_a_click`; `crates/shell/tests/autosample.rs`, `a_looped_note_sustains_past_its_length` | unit; shell test |
@@ -222,6 +222,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 
 ## Not built yet
 
+- The autosampler samples a native instrument or a plug-in instrument offline (R67); the external instrument's real-time route (R68) isn't built: the engine plays the note in real time and records the Audio From channels, and no rig plays a MIDI note's sound back through the null audio backend's loopback yet, so the route has no test. Until then the external instrument is refused, with a message saying why.
 - Auto Select (R7) follows the notes the shell sends, those of the computer keyboard; notes from hardware MIDI ports or clips go to the engine directly, so they select nothing yet (`shortcut:` in the shell, upgrade with the engine publishing the layers each node plays).
 - A layer over ten seconds is read in the background behind its held start, and its tail stays in memory once read (R23's streams hold only a window); upgrade to evicting what no voice is near. A file whose rate isn't the engine's, and a render that must repeat, decode whole.
 - The zone editor overlays the foot of the main view rather than making the detail area taller; the layer list's menu items, zone drags and marker drags have no keyboard form (the accessibility spec lists them); Manage Sample waits on the File Manager (WP-2.25), and Convert to Simpler on WP-5.15.

@@ -62,6 +62,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -89,6 +90,7 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 pub(crate) mod audio_editing;
+pub mod autosample;
 mod capture;
 mod multisampler;
 mod processed_files;
@@ -443,6 +445,12 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The autosampler at work (WP-5.16, IMP-27).
+    autosample: Option<autosample::Job>,
+    /// The autosampler's dialog, open for an instrument.
+    autosample_dialog: Option<autosample::Dialog>,
+    /// What the last autosample made, for the command's result.
+    autosample_result_value: Option<bl_shell_spec::autosampler::Autosampled>,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -842,6 +850,9 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            autosample: None,
+            autosample_dialog: None,
+            autosample_result_value: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
@@ -3748,6 +3759,9 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: multisampler R73. The autosampler makes one sample at a
+        // time, so the dialog sees its progress and Cancel stops it.
+        self.poll_autosample();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
@@ -5288,6 +5302,9 @@ impl Shell {
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
         }
+        if autosampler_ids::handles(id) {
+            return self.can_autosampler(id, args);
+        }
         if id == CUE_MODE {
             // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
             // Main strip's button, are dimmed while Cue Out and Main Out
@@ -6799,6 +6816,9 @@ impl Shell {
         }
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);
+        }
+        if autosampler_ids::handles(id) {
+            return self.run_autosampler(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);

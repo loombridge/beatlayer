@@ -1168,6 +1168,22 @@ impl DeviceViewUi {
                 ui.close();
             }
         }
+        // Spec: multisampler R64. Autosample… is in an instrument's title
+        // bar menu, among its device-specific options.
+        if frame.role == bl_model::DeviceRole::Instrument {
+            ui.separator();
+            let response = ui.button("Autosample…");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::autosampler_commands::AUTOSAMPLE_OPEN,
+                    json!({ "device": frame.id }),
+                );
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+        }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it
         // turns it over, one undo step like any parameter change.

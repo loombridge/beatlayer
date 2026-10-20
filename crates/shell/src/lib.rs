@@ -67,6 +67,7 @@ pub mod arrangement;
 pub mod assistant;
 pub mod audio;
 pub mod auto_warp;
+pub mod autosample;
 mod automation_record;
 pub mod browser;
 mod chord_learn;
@@ -101,6 +102,9 @@ pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
+/// The autosampler's command IDs and its argument and result types
+/// (WP-5.16).
+pub use bl_shell_spec::autosampler as autosampler_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
 /// Capture MIDI's command ID and its result types (WP-3.14).
@@ -150,6 +154,8 @@ pub use bl_shell_spec::tracks as track_commands;
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{audio_editing, commands, context_menus, menus, register};
+/// The autosampler's progress (WP-5.16).
+pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
     TransientList, WindowKind,

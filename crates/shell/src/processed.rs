@@ -42,6 +42,8 @@ pub enum Kind {
     Bounce,
     /// A clip's separated stems (IMP-11).
     Stems,
+    /// An instrument's autosampled notes (IMP-27).
+    Autosample,
 }
 
 impl Kind {
@@ -55,6 +57,7 @@ impl Kind {
             Self::Freeze => "Freeze",
             Self::Bounce => "Bounce",
             Self::Stems => "Stems",
+            Self::Autosample => "Autosample",
         }
     }
 }

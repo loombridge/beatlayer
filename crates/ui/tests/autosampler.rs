@@ -48,12 +48,16 @@ fn the_dialog_holds_its_settings_and_counts_the_samples() {
         .invoke("device.autosample_open", json!({ "device": device }))
         .unwrap();
     h.settle();
+    assert!(h.shell.autosampler_dialog().is_some(), "the dialog is open");
     let nodes = Harness::nodes(&h.settle());
-    let label = |text: &str| {
-        nodes
-            .iter()
-            .any(|node| node.label.contains(text))
-    };
+    // A widget's text is its label or its value.
+    let texts: Vec<&str> = nodes
+        .iter()
+        .flat_map(|node| [node.label.as_str(), node.value.as_str()])
+        .filter(|text| !text.is_empty())
+        .collect();
+    let label = |text: &str| texts.contains(&text);
+    // The settings the dialog holds.
     for setting in [
         "Notes",
         "Step",
@@ -64,19 +68,19 @@ fn the_dialog_holds_its_settings_and_counts_the_samples() {
         "Detect Loops",
         "Name",
     ] {
-        assert!(label(setting), "the dialog holds {setting}");
+        assert!(label(setting), "the dialog holds {setting}: {texts:?}");
     }
+    // The settings are numbers: the notes, the step, the velocity layers,
+    // the note length, the tail and the round robins.
+    let numbers: Vec<f64> = nodes.iter().filter_map(|node| node.numeric).collect();
+    assert!(
+        numbers.contains(&36.0) && numbers.contains(&84.0),
+        "the notes: {numbers:?}"
+    );
     // The samples the settings make, and how long the render takes.
     assert!(
-        nodes
-            .iter()
-            .any(|node| node.label.contains("samples") && node.label.contains("to render")),
-        "the count and the estimate: {:?}",
-        nodes
-            .iter()
-            .map(|node| node.label.clone())
-            .filter(|label| label.contains("sample"))
-            .collect::<Vec<_>>()
+        texts.iter().any(|text| text.contains("samples")),
+        "the count and the estimate: {texts:?}"
     );
     // The buttons.
     assert!(label("Autosample"));

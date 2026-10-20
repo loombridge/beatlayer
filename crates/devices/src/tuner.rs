@@ -41,10 +41,13 @@ pub const CLASSIC_MODES: [&str; 2] = ["Target", "Strobe"];
 /// Tuner's display views.
 pub const VIEWS: [&str; 2] = ["Classic", "Histogram"];
 
-/// Buffer length for pitch detection.
-const BUFFER_LEN: usize = 4096;
 /// Analysis window size for difference function.
 const WINDOW_LEN: usize = 2048;
+/// How many new samples arrive before the pitch is measured again: one window,
+/// about 43 ms at 48 kHz. The difference function costs more than a block's
+/// worth of time at the lowest pitches, and a tuner's needle doesn't need to
+/// move faster than this. (Beatlayer's own response time, the tuner spec.)
+const ANALYSIS_INTERVAL: usize = 2048;
 /// Display data length published to the triple buffer.
 const TUNER_DISPLAY_LEN: usize = 5;
 
@@ -103,8 +106,10 @@ pub fn register(registry: &mut Registry) {
 /// Tuner audio-thread processor.
 pub struct Tuner {
     rate: f64,
+    ring_len: usize,
     ring_buffer: Vec<f32>,
     ring_pos: usize,
+    since_analysis: usize,
     diff_buffer: Vec<f32>,
     cmnd_buffer: Vec<f32>,
     detected_pitch: Option<f64>,
@@ -136,10 +141,16 @@ impl Tuner {
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
         let max_tau = (config.sample_rate.as_f64() / 38.0).ceil() as usize;
+        // The window plus the longest lag it is compared against, so the
+        // lowest pitch the tuner reads is a whole period inside the buffer at
+        // every rate the engine runs at.
+        let ring_len = WINDOW_LEN + max_tau + 2;
         Self {
             rate: config.sample_rate.as_f64(),
-            ring_buffer: vec![0.0f32; BUFFER_LEN],
+            ring_len,
+            ring_buffer: vec![0.0f32; ring_len],
             ring_pos: 0,
+            since_analysis: 0,
             diff_buffer: vec![0.0f32; max_tau + 4],
             cmnd_buffer: vec![1.0f32; max_tau + 4],
             detected_pitch: None,
@@ -184,7 +195,7 @@ impl Tuner {
         // Check signal energy
         let mut energy = 0.0f32;
         for i in 0..w {
-            let idx = (self.ring_pos + BUFFER_LEN - w + i) % BUFFER_LEN;
+            let idx = (self.ring_pos + self.ring_len - w + i) % self.ring_len;
             let s = self.ring_buffer[idx];
             energy += s * s;
         }
@@ -198,12 +209,13 @@ impl Tuner {
         }
 
         // Compute difference function d(tau)
+        let ring = self.ring_len;
         for tau in (min_tau.saturating_sub(1))..=(max_tau + 1).min(self.diff_buffer.len() - 1) {
             let mut diff_sum = 0.0f32;
             for j in 0..w {
-                let s1 = self.ring_buffer[(self.ring_pos + BUFFER_LEN - w - tau + j) % BUFFER_LEN];
-                let s2 = self.ring_buffer[(self.ring_pos + BUFFER_LEN - w + j) % BUFFER_LEN];
-                let d = s1 - s2;
+                let back = (self.ring_pos + ring - w - tau + j) % ring;
+                let now = (self.ring_pos + ring - w + j) % ring;
+                let d = self.ring_buffer[back] - self.ring_buffer[now];
                 diff_sum += d * d;
             }
             self.diff_buffer[tau] = diff_sum;
@@ -312,10 +324,17 @@ impl NativeDevice for Tuner {
                 audio.channel_mut(0)[i]
             };
             self.ring_buffer[self.ring_pos] = sample;
-            self.ring_pos = (self.ring_pos + 1) % BUFFER_LEN;
+            self.ring_pos = (self.ring_pos + 1) % self.ring_len;
         }
 
-        self.detect_pitch(reference);
+        // Spec: tuner R2. The difference function costs more than a block at
+        // the lowest pitches, so the pitch is measured once per analysis
+        // interval, not once per block; audio is never delayed by it.
+        self.since_analysis += frames;
+        if self.since_analysis >= ANALYSIS_INTERVAL {
+            self.since_analysis = 0;
+            self.detect_pitch(reference);
+        }
         // Note: audio is unmodified! Bit-identical pass-through.
     }
 

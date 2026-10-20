@@ -1,7 +1,7 @@
 # Spectrum
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.28 (measurement). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); device displays are WP-5.43 ([device displays](device-framework.md#r35-r38))
+- **Work packages:** WP-5.28 (measurement). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); device displays are WP-5.43 ([the device framework spec](device-framework.md), R35 to R38)
 - **Parity-matrix row:** Audio effects: Spectrum
 - **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.38 "Spectrum", read on 20 October 2026; [layout.md](../ui-parity/layout.md) L-DEV-004, L-DEV-007, L-DEV-013
 
@@ -35,7 +35,7 @@ The user can configure the analysis block size, channel routing (Left, Right, or
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/devices/tests/spectrum_analyser.rs`, `the_output_is_the_input_bit_for_bit` | unit, real-time trap |
+| R1 | `crates/devices/tests/spectrum_analyser.rs`, `the_output_is_the_input_bit_for_bit`, `renders_are_bit_identical_at_block_sizes_1_64_512_and_4096` | unit, real-time trap |
 | R2 | `crates/devices/tests/spectrum_analyser.rs`, `a_full_scale_sine_reads_0_db_within_point_one_db_at_every_block_size` | unit, real-time trap |
 | R3 | `crates/devices/tests/spectrum_analyser.rs`, `the_bins_are_the_rate_over_block_apart` | unit, real-time trap |
 | R4 | `crates/devices/tests/spectrum_analyser.rs`, `each_channel_choice_reads_its_channel` | unit, real-time trap |

@@ -83,25 +83,38 @@ fn a_triggered_sine_starts_on_its_rising_crossing() {
 // Spec: oscilloscope R3
 #[test]
 fn freeze_holds_the_captured_window() {
-    let frames = 1024;
+    let frames = 2048;
     let mut node = make_node(&[(TRIGGER, 0.0), (TIME, 20.0)], frames);
 
-    // Initial capture with sine wave
+    // A capture with the sine wave playing.
     let s1 = sine(200.0, 1.0, frames);
     process_mono(&mut node, &s1);
+    let first_capture = node.device().captured().to_vec();
+    assert!(
+        first_capture.iter().any(|s| s.abs() > 0.1),
+        "the sine was captured before Freeze"
+    );
 
-    // Enable Freeze
-    let mut frozen_node = make_node(&[(TRIGGER, 0.0), (TIME, 20.0), (FREEZE, 1.0)], frames);
-    // Feed same initial signal
-    process_mono(&mut frozen_node, &s1);
-    let first_capture = frozen_node.device().captured().to_vec();
-
-    // Now feed different signal (square / silent)
+    // Freeze, then feed silence: the window stays as it was.
     let silent = vec![0.0f32; frames];
-    process_mono(&mut frozen_node, &silent);
+    let mut data: Vec<f32> = silent.iter().chain(&silent).copied().collect();
+    {
+        let mut block = Block::new(
+            &mut data,
+            2,
+            frames,
+            frames,
+            &[common::set(0, FREEZE, 1.0)],
+            TransportInfo::default(),
+            RATE,
+        );
+        bl_rt::rt_test!({
+            node.process(&mut block);
+        });
+    }
 
     assert_eq!(
-        frozen_node.device().captured(),
+        node.device().captured(),
         first_capture.as_slice(),
         "freeze holds the captured window stationary despite silence"
     );
@@ -129,9 +142,9 @@ fn time_parameter_adjusts_window_span() {
 // Spec: oscilloscope R5
 #[test]
 fn gain_scales_display_without_altering_audio() {
-    let frames = 1024;
-    let gain_2x = 2.0; // 6 dB linear amplitude
-    let mut node = make_node(&[(GAIN, gain_2x), (TRIGGER, 0.0)], frames);
+    let frames = 2048;
+    let gain_2x = 2.0; // +6 dB, a linear amplitude factor of 2
+    let mut node = make_node(&[(GAIN, gain_2x), (TRIGGER, 0.0), (TIME, 20.0)], frames);
 
     let input = sine(440.0, 0.25, frames);
     let output = process_mono(&mut node, &input);
@@ -158,4 +171,23 @@ fn the_output_is_the_input_bit_for_bit() {
 
     let output = process_mono(&mut node, &noise);
     assert_eq!(output, noise, "output bit-identical to input");
+}
+
+// Spec: oscilloscope R1
+#[test]
+fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
+    let input = common::noise(16_384);
+    let mut renders = Vec::new();
+    for block in [1usize, 64, 512, 4096] {
+        let mut node = make_node(&[(TIME, 20.0), (TRIGGER, 0.0)], block);
+        let mut out = Vec::new();
+        for chunk in input.chunks(block) {
+            out.extend_from_slice(&process_mono(&mut node, chunk));
+        }
+        renders.push(out);
+    }
+    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    for render in &renders[1..] {
+        assert_eq!(render, &renders[0]);
+    }
 }

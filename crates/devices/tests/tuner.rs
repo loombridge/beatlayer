@@ -171,8 +171,8 @@ fn each_spelling_names_the_note_as_stated() {
 fn views_and_modes_switch_cleanly() {
     let desc = tuner_type();
     assert_eq!(desc.description.views, vec!["Classic", "Histogram"]);
-    let mut node = make_node(&[(CLASSIC_MODE, 1.0), (HERTZ_CENTS, 0.0)], 1024);
-    let input = sine(440.0, 1024);
+    let mut node = make_node(&[(CLASSIC_MODE, 1.0), (HERTZ_CENTS, 0.0)], 2048);
+    let input = sine(440.0, 2048);
     process_mono(&mut node, &input);
     assert!(node.device().detected_pitch().is_some());
 }
@@ -199,4 +199,69 @@ fn the_output_is_the_input_bit_for_bit() {
         });
     }
     assert_eq!(&data[..frames], left.as_slice(), "output bit-identical");
+}
+
+// Spec: tuner R1
+#[test]
+fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
+    let input = common::noise(16_384);
+    let mut renders = Vec::new();
+    for block in [1usize, 64, 512, 4096] {
+        let mut node = make_node(&[(REFERENCE, 432.0)], block);
+        let mut out = Vec::new();
+        for chunk in input.chunks(block) {
+            out.extend_from_slice(&process_mono(&mut node, chunk));
+        }
+        renders.push(out);
+    }
+    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    for render in &renders[1..] {
+        assert_eq!(render, &renders[0]);
+    }
+}
+
+// Spec: tuner R2. The analysis buffer holds a whole period of the lowest
+// pitch it reads at every rate the engine runs at (WP-5.28 review fix: at
+// 88.2 kHz and above the old fixed 4,096-sample buffer ran off its front).
+#[test]
+fn a_96_khz_stream_reads_its_pitch_within_one_cent() {
+    let rate = SampleRate::HZ_96000;
+    let desc = tuner_type();
+    let dev = device(&desc, &[(REFERENCE, 440.0)]);
+    let config = NodeConfig {
+        sample_rate: rate,
+        max_frames: 4096,
+        channels: 2,
+    };
+    let mut node = NativeNode::new(Tuner::new(&config), &desc.description, &dev, &config);
+
+    let frames = 4096;
+    let input: Vec<f32> = (0..frames)
+        .map(|i| (TAU * 440.0 * i as f64 / rate.as_f64()).sin() as f32)
+        .collect();
+    for _ in 0..2 {
+        let mut data: Vec<f32> = input.iter().chain(&input).copied().collect();
+        {
+            let mut block = Block::new(
+                &mut data,
+                2,
+                frames,
+                frames,
+                &[],
+                TransportInfo::default(),
+                rate,
+            );
+            bl_rt::rt_test!({
+                node.process(&mut block);
+            });
+        }
+    }
+
+    let detected = node.device().detected_pitch().expect("the tone is heard");
+    let cents = 1200.0 * (detected / 440.0).log2();
+    assert!(
+        cents.abs() < 1.0,
+        "440 Hz at 96 kHz reads {detected:.2} Hz ({cents:.2} cents)"
+    );
+    assert_eq!(node.device().note_name().as_deref(), Some("A4"));
 }

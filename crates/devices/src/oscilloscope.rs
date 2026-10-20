@@ -31,8 +31,9 @@ pub const TRIGGER: ParamId = ParamId(4);
 
 /// Number of points in the published waveform display series.
 pub const WAVEFORM_POINTS: usize = 256;
-/// Maximum ring buffer length (1.5 seconds at 96 kHz).
-const MAX_SAMPLES: usize = 144_000;
+/// How much audio the ring holds, in seconds: a little over the longest Time
+/// window (1 s), so the whole window fits at every rate the engine runs at.
+const RING_SECONDS: f64 = 1.05;
 
 /// Returns the descriptor and layout for Oscilloscope.
 #[must_use]
@@ -80,8 +81,14 @@ pub fn register(registry: &mut Registry) {
 /// Oscilloscope audio-thread processor.
 pub struct Oscilloscope {
     rate: f64,
+    ring_len: usize,
     ring_buffer: Vec<f32>,
     ring_pos: usize,
+    /// Samples written since the device was made; a sample's position in the
+    /// ring is its number of samples written, modulo `ring_len`.
+    written: u64,
+    /// The sample the trigger fired on, while its window is still filling.
+    pending: Option<u64>,
     captured: Vec<f32>,
     triggered: bool,
     display_buffer: [f32; WAVEFORM_POINTS],
@@ -91,10 +98,14 @@ impl Oscilloscope {
     /// Constructs a new Oscilloscope processor.
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
+        let ring_len = (config.sample_rate.as_f64() * RING_SECONDS).ceil() as usize + 2;
         Self {
             rate: config.sample_rate.as_f64(),
-            ring_buffer: vec![0.0f32; MAX_SAMPLES],
+            ring_len,
+            ring_buffer: vec![0.0f32; ring_len],
             ring_pos: 0,
+            written: 0,
+            pending: None,
             captured: vec![0.0f32; WAVEFORM_POINTS],
             triggered: false,
             display_buffer: [0.0f32; WAVEFORM_POINTS],
@@ -141,46 +152,59 @@ impl NativeDevice for Oscilloscope {
                 audio.channel_mut(0)[i]
             };
             self.ring_buffer[self.ring_pos] = sample;
-            self.ring_pos = (self.ring_pos + 1) % MAX_SAMPLES;
+            self.ring_pos = (self.ring_pos + 1) % self.ring_len;
         }
+        let block_start = self.written;
+        self.written += frames as u64;
 
         if freeze {
+            // The window waits for the next crossing once the display moves
+            // again: the samples of a trigger older than the ring are gone.
+            self.pending = None;
             return;
         }
 
-        // Search for rising edge crossing trigger_level in new frames
-        let mut trigger_idx = None;
-        for i in 0..frames {
-            let curr_idx = (start_pos + i) % MAX_SAMPLES;
-            let prev_idx = (curr_idx + MAX_SAMPLES - 1) % MAX_SAMPLES;
-            let s_prev = self.ring_buffer[prev_idx];
-            let s_curr = self.ring_buffer[curr_idx];
-            if s_prev <= trigger_level && s_curr > trigger_level {
-                trigger_idx = Some(curr_idx);
-                break;
+        // Spec: oscilloscope R4. The window is the Time parameter, which the
+        // ring holds in full at every rate.
+        let window_samples = ((time_ms / 1000.0) * self.rate).round() as usize;
+        let window_samples = window_samples.clamp(2, self.ring_len - 2);
+
+        // Search the new frames for a rising crossing of the trigger level.
+        if self.pending.is_none() {
+            for i in 0..frames {
+                let curr_idx = (start_pos + i) % self.ring_len;
+                let prev_idx = (curr_idx + self.ring_len - 1) % self.ring_len;
+                let s_prev = self.ring_buffer[prev_idx];
+                let s_curr = self.ring_buffer[curr_idx];
+                if s_prev <= trigger_level && s_curr > trigger_level {
+                    self.pending = Some(block_start + i as u64);
+                    break;
+                }
             }
         }
 
-        let window_samples = ((time_ms / 1000.0) * self.rate).round() as usize;
-        let window_samples = window_samples.clamp(2, MAX_SAMPLES / 2);
-
-        if let Some(t_idx) = trigger_idx {
-            self.triggered = true;
-            for k in 0..WAVEFORM_POINTS {
-                let frac = k as f64 / (WAVEFORM_POINTS - 1) as f64;
-                let offset = (frac * (window_samples - 1) as f64).round() as usize;
-                let sample_idx = (t_idx + offset) % MAX_SAMPLES;
-                let val = (self.ring_buffer[sample_idx] * gain).clamp(-1.0, 1.0);
-                self.captured[k] = val;
-                self.display_buffer[k] = val;
+        // Spec: oscilloscope R2, R3. The window is taken from the crossing
+        // once the audio after it has arrived, so every point drawn is real.
+        if let Some(at) = self.pending {
+            if self.written >= at + window_samples as u64 {
+                self.triggered = true;
+                for k in 0..WAVEFORM_POINTS {
+                    let frac = k as f64 / (WAVEFORM_POINTS - 1) as f64;
+                    let offset = (frac * (window_samples - 1) as f64).round() as u64;
+                    let sample_idx = ((at + offset) % self.ring_len as u64) as usize;
+                    let val = (self.ring_buffer[sample_idx] * gain).clamp(-1.0, 1.0);
+                    self.captured[k] = val;
+                    self.display_buffer[k] = val;
+                }
+                self.pending = None;
             }
         } else if !self.triggered {
             // Free-run capture if never triggered
-            let head_idx = (self.ring_pos + MAX_SAMPLES - window_samples) % MAX_SAMPLES;
+            let head_idx = (self.ring_pos + self.ring_len - window_samples) % self.ring_len;
             for k in 0..WAVEFORM_POINTS {
                 let frac = k as f64 / (WAVEFORM_POINTS - 1) as f64;
                 let offset = (frac * (window_samples - 1) as f64).round() as usize;
-                let sample_idx = (head_idx + offset) % MAX_SAMPLES;
+                let sample_idx = (head_idx + offset) % self.ring_len;
                 let val = (self.ring_buffer[sample_idx] * gain).clamp(-1.0, 1.0);
                 self.captured[k] = val;
                 self.display_buffer[k] = val;

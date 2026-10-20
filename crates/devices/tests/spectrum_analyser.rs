@@ -230,3 +230,26 @@ fn the_output_is_the_input_bit_for_bit() {
     assert_eq!(out_l, left, "left channel bit-identical");
     assert_eq!(out_r, right, "right channel bit-identical");
 }
+
+// Spec: spectrum-analyser R1
+#[test]
+fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
+    let input = common::noise(16_384);
+    let mut renders = Vec::new();
+    for block in [1usize, 64, 512, 4096] {
+        let mut node = make_node(
+            &[(BLOCK, 5.0), (CHANNEL, 2.0), (REFRESH, 20.0), (AVG, 4.0)],
+            block,
+        );
+        let mut out = Vec::new();
+        for chunk in input.chunks(block) {
+            let (left, _) = process_stereo(&mut node, chunk, chunk);
+            out.extend_from_slice(&left);
+        }
+        renders.push(out);
+    }
+    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    for render in &renders[1..] {
+        assert_eq!(render, &renders[0]);
+    }
+}

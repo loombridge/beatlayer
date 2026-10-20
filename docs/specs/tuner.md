@@ -1,7 +1,7 @@
 # Tuner
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.28 (measurement). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); device displays are WP-5.43 ([device displays](device-framework.md#r35-r38))
+- **Work packages:** WP-5.28 (measurement). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); device displays are WP-5.43 ([the device framework spec](device-framework.md), R35 to R38)
 - **Parity-matrix row:** Audio effects: Tuner
 - **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.39 "Tuner", read on 20 October 2026; chapter 15 "Using Tuning Systems"; Live 12.1 release notes
 
@@ -21,7 +21,7 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 ## Rules
 
 - **R1.** Audio passes through untouched with zero latency: output is bit-for-bit identical to input at all sample rates and block sizes. (S1, S2)
-- **R2.** Monophonic sines between 41 Hz and 2000 Hz are detected within 1 cent of their true frequency. (S1)
+- **R2.** Monophonic sines between 41 Hz and 2000 Hz are detected within 1 cent of their true frequency. The pitch is measured once per 2,048 samples of new audio (about 43 ms at 48 kHz), so the readout follows a player quickly without the analysis costing more than a block of audio time; the analysis buffer holds a whole period of 41 Hz at the node's sample rate. (S1)
 - **R3.** The distance in cents from the nearest equal-temperament semitone is calculated as $100 \times (p - \text{round}(p))$, where $p = 69 + 12 \log_2(f / \text{Ref})$. Setting the Reference to 432 Hz shifts the cents readout according to this relationship. (S1)
 - **R4.** The note spellings in the Show Options menu (Sharps `C#`, Flats `D♭`, or Sharps and Flats `C#/D♭`) govern note name formatting. (S1)
 - **R5.** The device offers Classic and Histogram views, switchable via view buttons or `device.set_display_view`. (S1, S2)
@@ -33,8 +33,8 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/devices/tests/tuner.rs`, `the_output_is_the_input_bit_for_bit` | unit, real-time trap |
-| R2 | `crates/devices/tests/tuner.rs`, `sines_from_41_hz_to_2_khz_read_their_note_within_one_cent` | unit, real-time trap |
+| R1 | `crates/devices/tests/tuner.rs`, `the_output_is_the_input_bit_for_bit`, `renders_are_bit_identical_at_block_sizes_1_64_512_and_4096` | unit, real-time trap |
+| R2 | `crates/devices/tests/tuner.rs`, `sines_from_41_hz_to_2_khz_read_their_note_within_one_cent`, `a_96_khz_stream_reads_its_pitch_within_one_cent` | unit, real-time trap |
 | R3 | `crates/devices/tests/tuner.rs`, `a_432_hz_reference_moves_the_cents_reading` | unit, real-time trap |
 | R4 | `crates/devices/tests/tuner.rs`, `each_spelling_names_the_note_as_stated` | unit, real-time trap |
 | R5 | `crates/devices/tests/tuner.rs`, `views_and_modes_switch_cleanly` | unit |
@@ -53,4 +53,4 @@ The device provides two main views: Classic View (showing a tuner needle curve w
   - `Flats (D♭)`: Toggle (menu option), default false.
   - `Sharps and Flats (C#/D♭)`: Toggle (menu option), default false.
 - Views: `Classic` and `Histogram`.
-- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector with parabolic interpolation over a 2048-sample analysis window; Phase 6 tuning systems integration.
+- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector with parabolic interpolation over a 2048-sample analysis window, measured once per 2,048 samples (Beatlayer's own response time); Phase 6 tuning systems integration.

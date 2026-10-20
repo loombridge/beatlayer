@@ -12,7 +12,7 @@ mod common;
 use std::path::PathBuf;
 
 use bl_engine::TrackMeter;
-use bl_model::{CrossfadeAssign, TrackId};
+use bl_model::{ChainId, CrossfadeAssign, DeviceId, TrackId};
 use bl_shell::menus::{MenuPlatform, menu_bar};
 use bl_shell::mixer_controls::{self as controls, Control};
 use bl_shell::mixer_view::{MixerOf, MixerViewState};
@@ -20,7 +20,7 @@ use bl_shell::mixer_view_commands as ids;
 use bl_shell::settings::zoom_factor;
 use bl_shell::{Shell, ZOOM_STEPS};
 use bl_ui::keymap::Platform;
-use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, arrangement_mixer};
+use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, TrackColumn, arrangement_mixer};
 use bl_ui::layout::{ArrangementLayout, REFERENCE, Row, ShellLayout, TITLE_BAR};
 use bl_ui::menus::item_state;
 use bl_ui::mixer::{Place, column_id, fader_id, volume_field_id};
@@ -1453,7 +1453,7 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
     let shell = ShellLayout::compute(size, true, true);
     let session = SessionLayout::compute(shell.main_view, Some(Sections::DEFAULT));
     let mut rows = session.rows();
-    rows.extend(MixerLayout::compute(session.mixer.unwrap(), 4, 2, Sections::DEFAULT, 0.0).rows());
+    rows.extend(MixerLayout::compute(session.mixer.unwrap(), &vec![TrackColumn::track(); 4], 2, Sections::DEFAULT, 0.0).rows());
     let arrangement =
         ArrangementLayout::compute_with_mixer(shell.main_view, true, 3, Sections::DEFAULT);
     rows.extend(arrangement.rows());
@@ -1461,7 +1461,7 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
     rows.extend(
         MixerLayout::compute(
             mixer.with_min_y(mixer.top() + 17.0),
-            4,
+            &vec![TrackColumn::track(); 4],
             2,
             Sections::DEFAULT,
             0.0,
@@ -1822,3 +1822,440 @@ fn the_split_controls_sit_beside_the_pan_knob() {
         Some("Change \"Split Pan Right\"")
     );
 }
+
+// A rack's chains folded out as strips in the mixers (racks spec, R27 to
+// R29).
+
+/// A device added to a track or a chain.
+#[derive(serde::Deserialize)]
+struct Added {
+    device: DeviceId,
+}
+
+/// A rack of `kind` on the shown track, with `names` as its chains' names.
+fn add_rack(h: &mut Harness, kind: &str, role: &str, names: &[&str]) -> (DeviceId, Vec<ChainId>) {
+    let added: Added = serde_json::from_value(
+        h.shell
+            .run(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": { "rack": { "kind": kind } },
+                        "name": "Rack",
+                        "role": role
+                    }
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let mut chains = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let id: ChainId = h.shell.new_id();
+        h.shell
+            .invoke(
+                "chain.add",
+                json!({
+                    "rack": added.device,
+                    "index": index,
+                    "chain": { "id": id, "name": name, "devices": [] }
+                }),
+            )
+            .unwrap();
+        chains.push(id);
+    }
+    h.settle();
+    (added.device, chains)
+}
+
+/// A MIDI track with an instrument rack of two chains, the chains folded
+/// out as strips in the mixers.
+fn folded_rack(h: &mut Harness) -> (TrackId, DeviceId, Vec<ChainId>) {
+    let track = tracks(&h.shell)[0];
+    h.shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let (rack, chains) = add_rack(h, "instrument", "instrument", &["Keys", "Bass"]);
+    let nodes = tree(h);
+    let button = Harness::node(&nodes, "Fold Chains");
+    click(h, rect_of(button).center(), Modifiers::NONE);
+    h.settle();
+    (track, rack, chains)
+}
+
+/// A chain's Volume in the set.
+fn chain_volume(shell: &Shell, chain: ChainId) -> f64 {
+    shell
+        .editor()
+        .document()
+        .chain(chain)
+        .expect("the chain")
+        .mixer
+        .volume
+}
+
+/// The chain list's row for a chain, in the Device View.
+fn chain_row(h: &mut Harness, rack: DeviceId, index: usize) -> bl_ui::rack_view::ChainRowRects {
+    let nodes = tree(h);
+    let view = rect_of(Harness::node(&nodes, "Device View"));
+    let layouts = bl_ui::rack_view::layouts(&h.shell, view);
+    let layout = layouts
+        .iter()
+        .find(|(id, _)| *id == rack)
+        .unwrap_or_else(|| panic!("no layout for {rack}"))
+        .1
+        .clone();
+    layout
+        .chain_list
+        .as_ref()
+        .expect("the chain list shows")
+        .rows[index]
+}
+
+// Spec: racks R27, and mixer-view R1, R2.
+#[test]
+fn a_racks_chains_fold_out_as_strips_without_slots() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // The chains are folded out as strips after the track.
+    let state = state(&mut h.shell);
+    assert_eq!(state.chains.len(), 2);
+    assert_eq!(state.chains[0].chain, chains[0]);
+    assert_eq!(state.chains[1].chain, chains[1]);
+    assert!(state.racks.iter().any(|r| r.rack == rack && r.folded));
+    // The strips are in the mixers, named for their chain and their rack.
+    let nodes = tree(&mut h);
+    assert!(nodes.iter().any(|n| n.label == "Chain Strip Keys of Instrument Rack"));
+    assert!(nodes.iter().any(|n| n.label == "Chain Strip Bass of Instrument Rack"));
+    // A chain's column has no clip slots.
+    let slots = nodes.iter().filter(|n| n.role == Role::ListItem).count();
+    assert!(slots > 0);
+    // The Arrangement's mixer shows them the same way.
+    h.shell
+        .run(ids::TOGGLE, json!({ "view": "arrangement" }))
+        .unwrap();
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.settle();
+    let nodes = tree(&mut h);
+    assert!(nodes.iter().any(|n| n.label == "Chain Strip Keys of Instrument Rack"));
+    assert!(nodes.iter().any(|n| n.label == "Chain Strip Bass of Instrument Rack"));
+}
+
+// Spec: racks R27.
+#[test]
+fn a_nested_rack_folds_out_from_its_chains_strip() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // A rack inside a chain has its own fold button, on that chain's strip.
+    let nested: Added = serde_json::from_value(
+        h.shell
+            .run(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": { "rack": { "kind": "instrument" } },
+                        "name": "Inner",
+                        "role": "instrument"
+                    },
+                    "chain": chains[0]
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let mut inner = Vec::new();
+    for (index, name) in ["Deep", "Wide"].iter().enumerate() {
+        let id: ChainId = h.shell.new_id();
+        h.shell
+            .invoke(
+                "chain.add",
+                json!({
+                    "rack": nested.device,
+                    "index": index,
+                    "chain": { "id": id, "name": name, "devices": [] }
+                }),
+            )
+            .unwrap();
+        inner.push(id);
+    }
+    h.settle();
+    // The strip's fold button folds the nested rack's chains out. It is in
+    // the chain's own column, right of the track's.
+    let nodes = tree(&mut h);
+    let folds: Vec<Rect> = nodes
+        .iter()
+        .filter(|n| n.label == "Fold Chains")
+        .map(rect_of)
+        .collect();
+    assert_eq!(folds.len(), 2, "the track's and the chain strip's");
+    let at = folds
+        .iter()
+        .find(|r| r.left() > 414.0)
+        .expect("the chain strip's fold button")
+        .center();
+    assert!(at.y < 100.0, "the strip's fold button is in the title row: {at:?}");
+    click(&mut h, at, Modifiers::NONE);
+    let state = state(&mut h.shell);
+    assert_eq!(state.chains.len(), 4);
+    // The nested rack's chains follow the chain that holds it.
+    assert_eq!(state.chains[0].chain, chains[0]);
+    assert_eq!(state.chains[1].chain, inner[0]);
+    assert_eq!(state.chains[2].chain, inner[1]);
+    assert_eq!(state.chains[3].chain, chains[1]);
+}
+
+// Spec: racks R27.
+#[test]
+fn a_strips_volume_and_the_chain_lists_move_each_other() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // The strip's Volume moves the chain, and the chain list's slider with
+    // it, in one undo step.
+    let slider = control(&mut h, "Chain Strip Keys of Instrument Rack", "Chain Volume of Keys");
+    let before = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        slider.center(),
+        &[vec2(-20.0, 0.0)],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let now = chain_volume(&h.shell, chains[0]);
+    assert!(now < 1.0, "{now}");
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    // The chain list's slider shows the new value.
+    let nodes = tree(&mut h);
+    let listed = Harness::node(&nodes, "Chain Volume of Keys");
+    assert_eq!(listed.value, bl_ui::rack_view::volume_text(now));
+    // And the other way round: the chain list's slider moves the strip.
+    let row = chain_row(&mut h, rack, 0);
+    let before = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        row.volume.center(),
+        &[vec2(20.0, 0.0)],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let now = chain_volume(&h.shell, chains[0]);
+    assert!(now > 0.0 && now != 1.0, "{now}");
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+}
+
+// Spec: racks R28.
+#[test]
+fn selected_chain_strips_change_together_and_the_chain_list_does_not() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // Two strips selected: a change on one reaches the other.
+    let nodes = tree(&mut h);
+    let keys = Harness::node(&nodes, "Chain Keys of Instrument Rack");
+    let at = rect_of(keys).center();
+    click(&mut h, at, Modifiers::NONE);
+    let nodes = tree(&mut h);
+    let bass = Harness::node(&nodes, "Chain Bass of Instrument Rack");
+    let at = rect_of(bass).center();
+    click(&mut h, at, Modifiers::COMMAND);
+    // The first chain's Volume moves, and the second's with it, keeping
+    // their difference.
+    let slider = control(&mut h, "Chain Strip Keys of Instrument Rack", "Chain Volume of Keys");
+    drag(
+        &mut h,
+        slider.center(),
+        &[vec2(-20.0, 0.0)],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let first = chain_volume(&h.shell, chains[0]);
+    let second = chain_volume(&h.shell, chains[1]);
+    assert!(first < 1.0, "{first}");
+    assert!(second < 1.0, "{second}");
+    assert!((first - second).abs() < 1e-9, "{first} {second}");
+    // The chain list's own slider changes only its own chain.
+    let row = chain_row(&mut h, rack, 0);
+    drag(
+        &mut h,
+        row.volume.center(),
+        &[vec2(20.0, 0.0)],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let first = chain_volume(&h.shell, chains[0]);
+    let second = chain_volume(&h.shell, chains[1]);
+    assert!(first > second, "{first} {second}");
+}
+
+// Spec: racks R28.
+#[test]
+fn clicking_a_strips_title_bar_shows_only_its_chains_devices() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // A device in the first chain, so the Device View has something to
+    // show.
+    h.shell
+        .run(
+            "device.add",
+            json!({
+                "device": {
+                    "kind": bl_engine::testing::gain_type().kind,
+                    "name": "Gain",
+                    "role": "audio_effect"
+                },
+                "chain": chains[0]
+            }),
+        )
+        .unwrap();
+    h.settle();
+    // Clicking the strip's title bar selects the chain, and the Device View
+    // shows only its devices.
+    let nodes = tree(&mut h);
+    let title = Harness::node(&nodes, "Chain Bass of Instrument Rack");
+    let at = rect_of(title).center();
+    click(&mut h, at, Modifiers::NONE);
+    let state = h.shell.device_view_state();
+    let shown = state
+        .devices
+        .iter()
+        .filter(|d| d.title == "Gain")
+        .count();
+    assert_eq!(shown, 0, "the other chain's devices are shown");
+}
+
+// Spec: racks R29.
+#[test]
+fn chain_strips_reorder_rename_and_group() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // Dragging a strip moves the chain among its rack's chains, in one undo
+    // step.
+    let nodes = tree(&mut h);
+    let title = Harness::node(&nodes, "Chain Bass of Instrument Rack");
+    let at = rect_of(title).center();
+    let nodes = tree(&mut h);
+    let keys = Harness::node(&nodes, "Chain Keys of Instrument Rack");
+    let target = rect_of(keys).center();
+    let before = h.shell.editor().undo_history().len();
+    drag(
+        &mut h,
+        at,
+        &[vec2(target.x - at.x, 0.0)],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let order: Vec<ChainId> = h
+        .shell
+        .editor()
+        .document()
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(order, [chains[1], chains[0]]);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    // Renaming from a strip: the context menu's Rename Chain, then the name
+    // typed in the strip's title bar.
+    let nodes = tree(&mut h);
+    let title = Harness::node(&nodes, "Chain Bass of Instrument Rack");
+    let at = rect_of(title).center();
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    let nodes = tree(&mut h);
+    let rename = nodes
+        .iter()
+        .find(|n| n.label == "Rename Chain")
+        .expect("the rename item");
+    let at = rect_of(rename).center();
+    click(&mut h, at, Modifiers::NONE);
+    // The name is typed in the strip's title bar, and Return gives it to
+    // the chain.
+    h.settle();
+    h.frame(vec![Event::Text("A".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    let name = h
+        .shell
+        .editor()
+        .document()
+        .chain(chains[1])
+        .unwrap()
+        .name
+        .clone();
+    assert_eq!(name, "BassA");
+    // Grouping from a strip groups the selected chains, in one undo step.
+    // Both chains are selected: a click, then Cmd-click.
+    let nodes = tree(&mut h);
+    let keys = Harness::node(&nodes, "Chain Keys of Instrument Rack");
+    let at = rect_of(keys).center();
+    click(&mut h, at, Modifiers::NONE);
+    let nodes = tree(&mut h);
+    let bass = Harness::node(&nodes, "Chain BassA of Instrument Rack");
+    let at = rect_of(bass).center();
+    click(&mut h, at, Modifiers::COMMAND);
+    let nodes = tree(&mut h);
+    let title = Harness::node(&nodes, "Chain Keys of Instrument Rack");
+    let at = rect_of(title).center();
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    let nodes = tree(&mut h);
+    let group = nodes
+        .iter()
+        .find(|n| n.label == "Group Chains")
+        .expect("the group item");
+    let at = rect_of(group).center();
+    let before = h.shell.editor().undo_history().len();
+    click(&mut h, at, Modifiers::NONE);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    // The chains are now the chains of a new rack in the first one's place.
+    let doc = h.shell.editor().document();
+    let grouped: Vec<ChainId> = doc
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .filter(|c| c.devices.first().is_some_and(|d| d.rack_kind().is_some()))
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(grouped.len(), 1, "one chain holds the new rack");
+    let inner = &doc.chain(grouped[0]).unwrap().devices[0];
+    assert_eq!(inner.chains.len(), 2, "the grouped chains are its chains");
+}
+
+// Spec: mixer-view R17.
+#[test]
+fn only_the_strips_in_view_are_built() {
+    let mut h = session();
+    let (_track, rack, chains) = folded_rack(&mut h);
+    // The strips in view are built, and no more.
+    let built = h.main.mixer().built_columns();
+    assert!(built > 0);
+    assert!(built <= 15);
+}
+

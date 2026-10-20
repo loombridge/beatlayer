@@ -6352,7 +6352,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Fold Rack Chains**. Permission: `read`. Contexts: `global`.
 
-Folds a rack's chains out in the mixers as strips after the track's, as the fold button in the track's title bar does, or folds them back in. `rack` is the rack: an instrument or drum rack of more than one chain, on a track or inside another rack's chain. An instrument or drum rack of one chain has no chains to fold out. Switches unless `shown` says which. Changes only the view, and isn't saved with the set; the chains it shows read back in `mixer_view.state`.
+Folds a rack's chains out in the mixers as strips after the track's, as the fold button in the track's title bar does, or folds them back in. `rack` is the rack: a rack of more than one chain, on a track or inside another rack's chain. A track's fold button is for the instrument or drum rack it holds; a chain's is for the rack inside it. A rack of one chain has no chains to fold out. Switches unless `shown` says which. Changes only the view, and isn't saved with the set; the chains it shows read back in `mixer_view.state`.
 
 Default keys: none.
 
@@ -12796,6 +12796,7 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
 | `name` | string | yes | The chain's name. |
 | `volume` | number | yes | The chain's Volume as linear gain: 1 is 0 dB. |
 | `pan` | number | yes | The chain's Pan, from −1 to 1. |
+| `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `enabled` | boolean | yes | Whether the chain's activator is on. |
 | `solo` | boolean | yes | Whether the chain is soloed. |
 | `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
@@ -12823,6 +12824,10 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
     },
     "enabled": {
       "description": "Whether the chain's activator is on.",
+      "type": "boolean"
+    },
+    "has_mixer": {
+      "description": "Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do.",
       "type": "boolean"
     },
     "name": {
@@ -12875,6 +12880,7 @@ A chain folded out as a strip in the mixers (racks spec, R27): the chain, the ra
     "name",
     "volume",
     "pan",
+    "has_mixer",
     "enabled",
     "solo"
   ],

@@ -2006,8 +2006,9 @@ fn a_nested_rack_folds_out_from_its_chains_strip() {
         inner.push(id);
     }
     h.settle();
-    // The strip's fold button folds the nested rack's chains out. It is in
-    // the chain's own column, right of the track's.
+    // The strip's fold button folds the nested rack's chains out. It is on
+    // the chain's own strip, in the mixer, and the track's fold button is in
+    // the row of title bars above it.
     let nodes = tree(&mut h);
     let folds: Vec<Rect> = nodes
         .iter()
@@ -2017,13 +2018,10 @@ fn a_nested_rack_folds_out_from_its_chains_strip() {
     assert_eq!(folds.len(), 2, "the track's and the chain strip's");
     let at = folds
         .iter()
-        .find(|r| r.left() > 414.0)
+        .find(|r| r.top() > 100.0)
         .expect("the chain strip's fold button")
         .center();
-    assert!(
-        at.y < 100.0,
-        "the strip's fold button is in the title row: {at:?}"
-    );
+    assert!(at.x > 414.0, "the strip's own column: {at:?}");
     click(&mut h, at, Modifiers::NONE);
     let state = state(&mut h.shell);
     assert_eq!(state.chains.len(), 4);

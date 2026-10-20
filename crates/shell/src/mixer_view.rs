@@ -180,7 +180,8 @@ impl MixerView {
     /// out as strips, in the mixers' column order (racks spec, R27).
     ///
     /// A track's chains fold out when it holds an instrument or drum rack of
-    /// more than one chain, and a chain's when it holds such a rack itself.
+    /// more than one chain, and a chain's when it holds a rack of more than
+    /// one chain (racks spec, R27).
     #[must_use]
     pub fn folds(
         &self,
@@ -193,7 +194,7 @@ impl MixerView {
             let Some(t) = doc.track(track) else {
                 continue;
             };
-            let Some(rack) = t.devices().find(|d| foldable(d)) else {
+            let Some(rack) = t.devices().find(|d| shows_chains(d)) else {
                 continue;
             };
             racks.push(self.fold_of(track, rack));
@@ -217,7 +218,7 @@ impl MixerView {
     /// A rack's chains as strips, and the chains of the racks inside them.
     fn strip_of(&self, track: TrackId, rack: &Device, chains: &mut Vec<ChainStrip>) {
         for chain in &rack.chains {
-            let nested = chain.devices.iter().find(|d| foldable(d));
+            let nested = chain.devices.iter().find(|d| chains_fold(d));
             chains.push(ChainStrip {
                 track,
                 rack: rack.id,
@@ -226,6 +227,9 @@ impl MixerView {
                 name: chain.name.clone(),
                 volume: chain.mixer.volume,
                 pan: chain.mixer.pan,
+                has_mixer: rack
+                    .rack_kind()
+                    .is_some_and(|kind| kind.chains_have_volume_and_pan()),
                 enabled: chain.mixer.enabled,
                 solo: chain.mixer.solo,
                 colour: chain.colour,
@@ -326,7 +330,7 @@ impl MixerView {
                         args.rack
                     )));
                 };
-                if !foldable(rack) {
+                if !chains_fold(rack) {
                     return Err(MixerViewError::InvalidArgs(format!(
                         "{} has no chains to fold out",
                         args.rack
@@ -362,11 +366,18 @@ impl MixerView {
 /// Whether a device's chains fold out in the mixers as strips (racks spec,
 /// R27): an instrument or drum rack of more than one chain.
 #[must_use]
-pub fn foldable(rack: &Device) -> bool {
+pub fn shows_chains(rack: &Device) -> bool {
     matches!(
         rack.rack_kind(),
         Some(RackKind::Instrument | RackKind::Drum)
     ) && rack.chains.len() > 1
+}
+
+/// Whether a rack's chains fold out in the mixers as strips (racks spec,
+/// R27): a rack of more than one chain.
+#[must_use]
+pub fn chains_fold(rack: &Device) -> bool {
+    rack.chains.len() > 1
 }
 
 /// The furthest a mixer of `columns` track columns scrolls: until its last

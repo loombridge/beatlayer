@@ -685,11 +685,15 @@ impl StripLayout {
 
 /// The controls in a chain's strip in a mixer (racks spec, R27): the chain's
 /// name, its Volume and Pan sliders, its activator and its Solo button, in
-/// the strip section, where a track's strip has its controls.
+/// the strip section, where a track's strip has its controls. The fold
+/// button of the rack inside the chain is at the strip's top right.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChainStripLayout {
     /// The chain's name, at the strip's top left.
     pub name: Rect,
+    /// The fold button of the rack inside the chain, at the strip's top
+    /// right; empty while the chain holds none.
+    pub fold: Rect,
     /// The Volume slider.
     pub volume: Rect,
     /// The Pan slider.
@@ -707,6 +711,7 @@ impl ChainStripLayout {
         let top = span.0;
         Self {
             name: at(column, top, 8.0, 13.0, 42.0, 24.0),
+            fold: at(column, top, 78.0, 13.0, 90.0, 25.0),
             volume: at(column, top, 8.0, 33.0, 86.0, 42.0),
             pan: at(column, top, 8.0, 45.0, 86.0, 54.0),
             activator: at(column, top, 15.0, 64.0, 36.0, 85.0),

@@ -162,6 +162,9 @@ pub struct ChainStrip {
     pub volume: f64,
     /// The chain's Pan, from −1 to 1.
     pub pan: f64,
+    /// Whether the chain has Volume and Pan: all but a MIDI effect rack's
+    /// chains do.
+    pub has_mixer: bool,
     /// Whether the chain's activator is on.
     pub enabled: bool,
     /// Whether the chain is soloed.
@@ -364,11 +367,12 @@ fn specs() -> Vec<CommandSpec> {
             FOLD_CHAINS,
             "Fold Rack Chains",
             "Folds a rack's chains out in the mixers as strips after the track's, as the fold \
-             button in the track's title bar does, or folds them back in. `rack` is the rack: \
-             an instrument or drum rack of more than one chain, on a track or inside another \
-             rack's chain. An instrument or drum rack of one chain has no chains to fold \
-             out. Switches unless `shown` says which. Changes only the view, and isn't saved \
-             with the set; the chains it shows read back in `mixer_view.state`.",
+             button in the track's title bar does, or folds them back in. `rack` is the rack: a \
+             rack of more than one chain, on a track or inside another rack's chain. A track's \
+             fold button is for the instrument or drum rack it holds; a chain's is for the rack \
+             inside it. A rack of one chain has no chains to fold out. Switches unless `shown` \
+             says which. Changes only the view, and isn't saved with the set; the chains it \
+             shows read back in `mixer_view.state`.",
         )
         .context(Global)
         .args::<FoldChainsArgs>(),

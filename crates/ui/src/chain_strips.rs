@@ -134,20 +134,7 @@ pub fn title_bar(
     let c = &theme.colors;
     let painter = ui.painter_at(bar);
     painter.rect_filled(bar, 0.0, c.lane.0);
-    let fold = strip.nested.as_ref().map(|nested| {
-        let rect = Rect::from_min_max(
-            pos2(bar.right() - 12.0, bar.top() + 2.0),
-            pos2(bar.right() - 2.0, bar.bottom() - 2.0),
-        );
-        (nested.rack, nested.folded, rect)
-    });
-    let name = Rect::from_min_max(
-        pos2(bar.left() + 3.0, bar.top()),
-        pos2(
-            fold.map_or(bar.right(), |(_, _, rect)| rect.left()) - 2.0,
-            bar.bottom(),
-        ),
-    );
+    let name = Rect::from_min_max(pos2(bar.left() + 3.0, bar.top()), bar.max);
     let response = ui.interact(bar, title_id(strip.chain), Sense::click_and_drag());
     if renaming_in(ui.ctx(), strip.chain).is_some() {
         draw_rename(ui, theme, name, strip, events);
@@ -159,9 +146,6 @@ pub fn title_bar(
             theme.small_font(),
             c.clip_text.0,
         );
-    }
-    if let Some((rack, folded, rect)) = fold {
-        fold_button(ui, theme, rect, rack, folded, events);
     }
     if response.clicked() {
         let modifiers = ui.input(|i| i.modifiers);
@@ -309,28 +293,36 @@ pub fn strip(
         theme.small_font(),
         c.text.0,
     );
-    slider(
-        ui,
-        shell,
-        theme,
-        layout.volume,
-        volume_id(strip.chain),
-        "Volume",
-        strip,
-        true,
-        events,
-    );
-    slider(
-        ui,
-        shell,
-        theme,
-        layout.pan,
-        pan_id(strip.chain),
-        "Pan",
-        strip,
-        false,
-        events,
-    );
+    // The fold button of the rack inside the chain, at the strip's top right
+    // (racks spec, R27).
+    if let Some(nested) = &strip.nested {
+        fold_button(ui, theme, layout.fold, nested.rack, nested.folded, events);
+    }
+    // A chain of a MIDI effect rack has no Volume or Pan (racks spec, R5).
+    if strip.has_mixer {
+        slider(
+            ui,
+            shell,
+            theme,
+            layout.volume,
+            volume_id(strip.chain),
+            "Volume",
+            strip,
+            true,
+            events,
+        );
+        slider(
+            ui,
+            shell,
+            theme,
+            layout.pan,
+            pan_id(strip.chain),
+            "Pan",
+            strip,
+            false,
+            events,
+        );
+    }
     activator(ui, theme, layout.activator, strip, events);
     solo(ui, shell, theme, layout.solo, strip, events);
 }

@@ -127,6 +127,12 @@ pub const RACK_MACROS: &str = "rack.macros";
 /// `rack.select_macro`: select a macro in a rack's Macro Controls, so
 /// Rename can name it (WP-5.4).
 pub const RACK_SELECT_MACRO: &str = "rack.select_macro";
+/// `rack.show_variations`: show or hide a rack's Macro Variations view
+/// (WP-5.5).
+pub const RACK_SHOW_VARIATIONS: &str = "rack.show_variations";
+/// `rack.select_variation`: select a variation in a rack's Macro Variations
+/// view, so Rename, Duplicate and Delete act on it (WP-5.5).
+pub const RACK_SELECT_VARIATION: &str = "rack.select_variation";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -192,6 +198,8 @@ pub const IDS: &[&str] = &[
     RACK_MAP_MODE,
     RACK_MACROS,
     RACK_SELECT_MACRO,
+    RACK_SHOW_VARIATIONS,
+    RACK_SELECT_VARIATION,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -241,6 +249,10 @@ pub const RACK_COLUMN_WIDTH: f32 = TITLE_BAR_HEIGHT;
 /// The width at 100% of the place the Macro Controls take in a rack while
 /// that view is shown (WP-5.4 fills it; to observe).
 pub const RACK_MACROS_WIDTH: f32 = 100.0;
+
+/// The width at 100% of the Macro Variations view while it's shown, beside
+/// the Macro Controls (macros spec, R25; to observe).
+pub const RACK_VARIATIONS_WIDTH: f32 = 120.0;
 
 /// The width at 100% of a rack's chain list (to observe).
 pub const RACK_CHAIN_LIST_WIDTH: f32 = 168.0;
@@ -322,6 +334,11 @@ pub fn rack_width(rack: &RackFrame) -> f32 {
     RACK_COLUMN_WIDTH
         + if rack.views.macros {
             RACK_MACROS_WIDTH
+        } else {
+            0.0
+        }
+        + if rack.views.variations {
+            RACK_VARIATIONS_WIDTH
         } else {
             0.0
         }
@@ -1321,7 +1338,33 @@ pub struct SelectMacroArgs {
     pub macro_number: Option<u8>,
 }
 
-/// What `rack.macros` reports (macros spec, R19).
+/// Arguments of `rack.show_variations`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowVariationsArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// Show the Macro Variations view (true) or hide it (false); switches if
+    /// left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// Arguments of `rack.select_variation`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectVariationArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The variation's place in the rack's list, from 0; null, or left out,
+    /// selects none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// What `rack.macros` reports (macros spec, R19 and R32).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MacroState {
     /// The rack.
@@ -1330,6 +1373,18 @@ pub struct MacroState {
     pub count: u8,
     /// Each of the 16 macros, in number order.
     pub macros: Vec<MacroInfo>,
+    /// The rack's variations, in the order they were made (macros spec, R31).
+    #[serde(default)]
+    pub variations: Vec<VariationInfo>,
+}
+
+/// One stored macro variation as `rack.macros` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VariationInfo {
+    /// Its name.
+    pub name: String,
+    /// Each macro's value from 0 to 1, in number order.
+    pub values: Vec<f64>,
 }
 
 /// One macro as `rack.macros` reports it.
@@ -1349,6 +1404,9 @@ pub struct MacroInfo {
     pub text: String,
     /// Whether Randomize leaves it alone (R16).
     pub randomize_excluded: bool,
+    /// Whether a variation launch leaves it alone (R30).
+    #[serde(default)]
+    pub variation_excluded: bool,
     /// What it drives, in the order the mappings were made (R9).
     pub mappings: Vec<MacroMappingInfo>,
 }
@@ -2187,6 +2245,27 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(DeviceView)
             .args::<SelectMacroArgs>()
+            .result::<MacroState>(),
+        CommandSpec::new(RACK_SHOW_VARIATIONS, "Show or Hide Macro Variations")
+            .description(
+                "Shows or hides a rack's Macro Variations view, the selected device's or \
+                 `rack`'s, as the Show/Hide Macro Variations view selector does. It changes \
+                 only the view: it isn't an undo step, and the set keeps which views each rack \
+                 shows. `rack.set_view` with the `variations` view does the same.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ShowVariationsArgs>()
+            .result::<MacroState>(),
+        CommandSpec::new(RACK_SELECT_VARIATION, "Select Macro Variation")
+            .description(
+                "Selects a variation in a rack's Macro Variations view, or none, so Rename, \
+                 Duplicate and Delete act on it. It changes only the view: it isn't an undo \
+                 step and the set doesn't keep it.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SelectVariationArgs>()
             .result::<MacroState>(),
         CommandSpec::new(DISPLAY, "Device Display")
             .description(

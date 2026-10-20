@@ -14,8 +14,8 @@ use bl_shell::context_menus::{self, CHAIN_COLOUR_ROW};
 use bl_shell::device_commands::{
     CHAIN_DROP_AREA_HEIGHT, CHAIN_ROW_HEIGHT, ChainRow, DEVICE_GAP, DeviceFrame,
     RACK_CHAIN_LIST_WIDTH, RACK_COLUMN_WIDTH, RACK_EMPTY_DEVICES_WIDTH, RACK_END_BRACKET_WIDTH,
-    RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH, RACK_ZONE_EDITOR_WIDTH, RackFrame,
-    TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
+    RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH, RACK_VARIATIONS_WIDTH, RACK_ZONE_EDITOR_WIDTH,
+    RackFrame, TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
 };
 use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIGHT};
 use bl_shell::{Area, Invocation, Shell};
@@ -186,6 +186,33 @@ pub struct MacroLayout {
     pub items: Vec<MacroItem>,
 }
 
+/// One variation's places in the Macro Variations view (macros spec, R25).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariationRow {
+    /// Its place in the rack's list, from 0.
+    pub index: usize,
+    /// Its whole row.
+    pub row: Rect,
+    /// The Overwrite button at its left.
+    pub overwrite: Rect,
+    /// Where its name reads.
+    pub name: Rect,
+    /// The Launch button at its right.
+    pub launch: Rect,
+}
+
+/// The Macro Variations view's controls (macros spec, R25): New above the
+/// list, and a row per variation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariationsLayout {
+    /// The whole area.
+    pub area: Rect,
+    /// The New button.
+    pub new: Rect,
+    /// The rows, in list order.
+    pub rows: Vec<VariationRow>,
+}
+
 /// Where each part of a rack sits in its frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RackLayout {
@@ -195,6 +222,8 @@ pub struct RackLayout {
     pub macros: Option<Rect>,
     /// The Macro Controls' controls, while it's shown (macros spec, R20).
     pub macro_items: Option<MacroLayout>,
+    /// The Macro Variations view, while it's shown (macros spec, R25).
+    pub variations: Option<VariationsLayout>,
     /// A drum rack's pad view, while it's shown.
     pub pads: Option<crate::drum_view::PadLayout>,
     /// The chain list, while it's shown.
@@ -214,6 +243,7 @@ pub struct RackLayout {
 pub fn selector_name(view: RackView) -> &'static str {
     match view {
         RackView::Macros => "Macro Controls View",
+        RackView::Variations => "Show/Hide Macro Variations",
         RackView::ChainList => "Chain List View",
         RackView::Devices => "Devices View",
         RackView::Pads => "Pad View",
@@ -224,12 +254,18 @@ pub fn selector_name(view: RackView) -> &'static str {
     }
 }
 
-const VIEWS: [RackView; 3] = [RackView::Macros, RackView::ChainList, RackView::Devices];
+const VIEWS: [RackView; 4] = [
+    RackView::Macros,
+    RackView::Variations,
+    RackView::ChainList,
+    RackView::Devices,
+];
 
 /// A drum rack's selectors: the pad view between the Macro Controls and the
 /// chain list, and four switches under the views (drum racks spec, R21).
-const DRUM_VIEWS: [RackView; 8] = [
+const DRUM_VIEWS: [RackView; 9] = [
     RackView::Macros,
+    RackView::Variations,
     RackView::Pads,
     RackView::ChainList,
     RackView::Devices,
@@ -473,6 +509,7 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
             pads: None,
             macros: None,
             macro_items: None,
+            variations: None,
             chain_list: None,
             zone_editor: None,
             devices: None,
@@ -501,6 +538,11 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         area
     };
     let macros = rack.views.macros.then(|| part(RACK_MACROS_WIDTH));
+    let variations = rack
+        .views
+        .variations
+        .then(|| part(RACK_VARIATIONS_WIDTH))
+        .map(|area| variations_layout(rack, area));
     let pads = (rack_pads_width(rack) > 0.0)
         .then(|| part(rack_pads_width(rack)))
         .and_then(|area| {
@@ -542,6 +584,7 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         pads,
         macros,
         macro_items: macros.map(|area| macro_layout(area, rack.views.macro_count)),
+        variations,
         chain_list,
         zone_editor,
         devices,
@@ -614,6 +657,44 @@ fn macro_layout(area: Rect, count: u8) -> MacroLayout {
         rand,
         items,
     }
+}
+
+/// Where the Macro Variations view's New button and each variation's row sit
+/// in `area` (macros spec, R25).
+fn variations_layout(rack: &RackFrame, area: Rect) -> VariationsLayout {
+    let new = Rect::from_min_size(
+        pos2(area.left() + 3.0, area.top() + 3.0),
+        vec2(area.width() - 6.0, 14.0),
+    );
+    let count = rack
+        .macros
+        .as_ref()
+        .map_or(0, |state| state.variations.len());
+    let row_h = 18.0;
+    let rows = (0..count)
+        .map(|index| {
+            let row = Rect::from_min_size(
+                pos2(area.left() + 3.0, new.bottom() + 3.0 + index as f32 * row_h),
+                vec2(area.width() - 6.0, row_h - 1.0),
+            );
+            let button =
+                |left: f32| Rect::from_min_size(pos2(left, row.top()), vec2(15.0, row.height()));
+            let overwrite = button(row.left());
+            let launch = button(row.right() - 15.0);
+            let name = Rect::from_min_max(
+                pos2(overwrite.right() + 2.0, row.top()),
+                pos2(launch.left() - 2.0, row.bottom()),
+            );
+            VariationRow {
+                index,
+                row,
+                overwrite,
+                name,
+                launch,
+            }
+        })
+        .collect();
+    VariationsLayout { area, new, rows }
 }
 
 /// How tall the header above the chain list is for `rack`.
@@ -993,6 +1074,70 @@ fn macro_button(
     pressed
 }
 
+/// One of a variation row's buttons (macros spec, R25): Overwrite at the
+/// row's left, drawn as a down arrow, or Launch at its right, drawn as a
+/// right triangle.
+fn variation_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: Id,
+    name: &str,
+    launch: bool,
+) -> bool {
+    let c = &theme.colors;
+    let response = ui.interact(rect, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, Area::Detail, None);
+    let face = if response.hovered() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect_filled(rect, theme.sizes.corner, face);
+    let ink = c.text.0;
+    let centre = rect.center();
+    if launch {
+        painter.add(Shape::convex_polygon(
+            vec![
+                centre + vec2(-2.5, -3.5),
+                centre + vec2(3.5, 0.0),
+                centre + vec2(-2.5, 3.5),
+            ],
+            ink,
+            Stroke::NONE,
+        ));
+    } else {
+        painter.line_segment(
+            [centre + vec2(0.0, -3.5), centre + vec2(0.0, 1.5)],
+            Stroke::new(1.5, ink),
+        );
+        painter.add(Shape::convex_polygon(
+            vec![
+                centre + vec2(-3.0, 0.5),
+                centre + vec2(3.0, 0.5),
+                centre + vec2(0.0, 3.5),
+            ],
+            ink,
+            Stroke::NONE,
+        ));
+    }
+    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+        painter.rect_stroke(
+            rect.expand(1.5),
+            theme.sizes.corner,
+            Stroke::new(1.0, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    let label = name.to_owned();
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(label);
+    });
+    response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+}
+
 /// How a click on a chain row changes the selection (racks spec, R22):
 /// Shift selects a range, Cmd (Ctrl) adds or removes one.
 #[must_use]
@@ -1035,6 +1180,18 @@ pub(crate) struct MacroRenaming {
     pub focused: bool,
 }
 
+/// A variation being renamed in its row of the Macro Variations view (macros
+/// spec, R29).
+#[derive(Clone, Debug)]
+pub(crate) struct VariationRenaming {
+    pub rack: DeviceId,
+    pub index: usize,
+    /// The name being typed; `None` until the row first shows, when it starts
+    /// from the name the variation has.
+    pub text: Option<String>,
+    pub focused: bool,
+}
+
 impl DeviceViewUi {
     /// Draws the body of `rack` in its frame at `rect`: the view column, and
     /// each view that's shown.
@@ -1064,6 +1221,9 @@ impl DeviceViewUi {
         }
         if let (Some(_), Some(controls)) = (layout.macros, &layout.macro_items) {
             self.macro_controls(ui, shell, theme, frame, rack, controls, events);
+        }
+        if let Some(variations) = &layout.variations {
+            self.variations_view(ui, shell, theme, frame, variations, events);
         }
         if let (Some(pads), Some(at)) = (&rack.pads, &layout.pads) {
             self.pad_view(ui, shell, theme, frame, pads, at, events);
@@ -1154,6 +1314,11 @@ impl DeviceViewUi {
             // Knobs.
             RackView::Macros => {
                 painter.circle_stroke(c0, 3.0, stroke);
+            }
+            // Two knobs, one above the other: a set of stored settings.
+            RackView::Variations => {
+                painter.circle_stroke(c0 + vec2(0.0, -2.0), 2.0, stroke);
+                painter.circle_stroke(c0 + vec2(0.0, 2.5), 2.0, stroke);
             }
             // Rows.
             RackView::ChainList => {
@@ -2030,6 +2195,26 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
+            // Spec: macros R30. Exclude Macro From Variations keeps this
+            // macro out of a variation launch.
+            let left_out = info.is_some_and(|m| m.variation_excluded);
+            let label = if left_out {
+                "Include in Variations"
+            } else {
+                "Exclude Macro From Variations"
+            };
+            if ui.button(label).clicked() {
+                invoke(
+                    events,
+                    "rack.set_macro_variation_excluded",
+                    json!({
+                        "rack": frame.id,
+                        "macro_number": item.number,
+                        "excluded": !left_out,
+                    }),
+                );
+                ui.close();
+            }
             ui.menu_button("Colour", |ui| {
                 for index in 0..PALETTE_COLUMNS as u8 {
                     let at = Rect::from_min_size(ui.cursor().min, vec2(14.0, 14.0));
@@ -2091,6 +2276,174 @@ impl DeviceViewUi {
             }
         }
         let _ = shell;
+    }
+
+    /// Draws the Macro Variations view (macros spec, R25, R29): New above the
+    /// list, and a row per variation with Overwrite at its left, its name, and
+    /// Launch at its right; clicking a row selects its variation, and a row's
+    /// context menu renames, duplicates or deletes it.
+    fn variations_view(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        layout: &VariationsLayout,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let painter = ui.painter_at(layout.area);
+        painter.rect_filled(layout.area.shrink(1.0), 0.0, c.window.0.gamma_multiply(0.5));
+        let group = Id::new(("rack-variations", frame.id));
+        ui.interact(layout.area, group, Sense::hover());
+        ui.ctx().accesskit_node_builder(group, |node| {
+            node.set_role(Role::Group);
+            node.set_label("Macro Variations".to_owned());
+        });
+        let state = frame.rack.as_ref().and_then(|rack| rack.macros.as_ref());
+        let selected = shell
+            .devices()
+            .variation_selected()
+            .filter(|(rack, _)| *rack == frame.id)
+            .map(|(_, index)| index);
+        if macro_button(
+            ui,
+            theme,
+            layout.new,
+            Id::new(("variations-new", frame.id)),
+            "New",
+            "New Macro Variation",
+            false,
+            true,
+        ) {
+            invoke(events, "rack.store_variation", json!({ "rack": frame.id }));
+        }
+        for row in &layout.rows {
+            let variation = state.and_then(|state| state.variations.get(row.index));
+            let name = variation.map_or_else(String::new, |variation| variation.name.clone());
+            let here = selected == Some(row.index);
+            painter.rect_filled(
+                row.row,
+                theme.sizes.corner,
+                if here { c.control_hover.0 } else { c.panel.0 },
+            );
+            let renaming = self
+                .renaming_variation
+                .as_mut()
+                .filter(|r| r.rack == frame.id && r.index == row.index);
+            if let Some(renaming) = renaming {
+                let mut text = renaming.text.take().unwrap_or_else(|| name.clone());
+                let edit = ui.put(
+                    row.name,
+                    egui::TextEdit::singleline(&mut text)
+                        .id(Id::new(("variation-name-edit", frame.id, row.index)))
+                        .font(theme.small_font())
+                        .margin(vec2(2.0, 0.0)),
+                );
+                if !renaming.focused {
+                    edit.request_focus();
+                    renaming.focused = true;
+                }
+                let (enter, escape) =
+                    ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+                if edit.lost_focus() || enter || escape {
+                    if enter || (edit.lost_focus() && !escape) {
+                        invoke(
+                            events,
+                            "rack.rename_variation",
+                            json!({ "rack": frame.id, "index": row.index, "name": text }),
+                        );
+                    }
+                    self.renaming_variation = None;
+                } else if let Some(renaming) = self.renaming_variation.as_mut() {
+                    renaming.text = Some(text);
+                }
+                continue;
+            }
+            let name_id = Id::new(("variation-name", frame.id, row.index));
+            let response = ui.interact(row.row, name_id, Sense::click());
+            crate::focus::register(ui.ctx(), name_id, Area::Detail, None);
+            if response.clicked() {
+                invoke(
+                    events,
+                    "rack.select_variation",
+                    json!({ "rack": frame.id, "index": row.index }),
+                );
+            }
+            response.context_menu(|ui| {
+                if ui.button("Rename").clicked() {
+                    self.renaming_variation = Some(VariationRenaming {
+                        rack: frame.id,
+                        index: row.index,
+                        text: None,
+                        focused: false,
+                    });
+                    ui.close();
+                }
+                if ui.button("Duplicate").clicked() {
+                    invoke(
+                        events,
+                        "rack.duplicate_variation",
+                        json!({ "rack": frame.id, "index": row.index }),
+                    );
+                    ui.close();
+                }
+                if ui.button("Delete").clicked() {
+                    invoke(
+                        events,
+                        "rack.delete_variation",
+                        json!({ "rack": frame.id, "index": row.index }),
+                    );
+                    ui.close();
+                }
+            });
+            response
+                .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, here, name.clone()));
+            ui.ctx().accesskit_node_builder(name_id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(name.clone());
+                node.set_selected(here);
+            });
+            painter.text(
+                row.name.center(),
+                Align2::CENTER_CENTER,
+                &name,
+                theme.small_font(),
+                if frame.enabled {
+                    c.text.0
+                } else {
+                    c.text_dim.0
+                },
+            );
+            if variation_button(
+                ui,
+                theme,
+                row.overwrite,
+                Id::new(("variation-overwrite", frame.id, row.index)),
+                "Overwrite Macro Variation",
+                false,
+            ) {
+                invoke(
+                    events,
+                    "rack.overwrite_variation",
+                    json!({ "rack": frame.id, "index": row.index }),
+                );
+            }
+            if variation_button(
+                ui,
+                theme,
+                row.launch,
+                Id::new(("variation-launch", frame.id, row.index)),
+                "Launch Macro Variation",
+                true,
+            ) {
+                invoke(
+                    events,
+                    "rack.launch_variation",
+                    json!({ "rack": frame.id, "index": row.index }),
+                );
+            }
+        }
     }
 
     fn chain_keys(&self, ui: &Ui, shell: &Shell, rack: &RackFrame, events: &mut Vec<UiEvent>) {

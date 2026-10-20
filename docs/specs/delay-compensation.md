@@ -42,7 +42,7 @@ and automation editing to `automation.md`.
 
 ## Rules
 
-- **R1.** Each device and plug-in reports the frames it delays its input by; a switched-off device reports none, but its latency is remembered so it returns when the device is switched on again. A switched-off device is out of the schedule altogether (IMP-15), so it reports no latency and takes no time. (S1, S2)
+- **R1.** Each device and plug-in reports the frames it delays its input by; a switched-off device reports none, but its latency is remembered so it returns when the device is switched on again. A switched-off device isn't run (IMP-15), so it reports no latency and takes no time. (S1, S2)
 - **R2.** Every path into a summing point — a track's inputs, a track's output into Main, into a group or into another track's input, and a send into a return — is held back to the latency of the longest path into that point, so all paths reach Main aligned. (S1)
 - **R3.** A track's clips are held back to line up with that track's inputs. (S1)
 - **R4.** A device's sidechain source is held back to line up with the device's own input at the point in the chain where the device sits. (S1)

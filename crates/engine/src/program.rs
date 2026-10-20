@@ -194,9 +194,6 @@ pub struct EngineProgram {
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
-    /// The slots of the devices that are switched off (IMP-15): they are
-    /// not in any chain, and only their parameter changes reach them.
-    pub(crate) off: Vec<u32>,
     /// How long each task ran, in nanoseconds, smoothed: the engine times
     /// each task on the thread that ran it, and the share of the set's
     /// processing time a task's is what the Performance Impact indicator
@@ -788,12 +785,12 @@ fn gather(
     scratch.len() as u64
 }
 
-/// Whether a track's mixer has its activator off (IMP-15): the track's
-/// output is silent, and nothing reads its signal before its mixer, so its
-/// chain needn't run.
+/// Whether a track's mixer has its activator off and its gain at zero
+/// (IMP-15): the track's output is silent, and nothing reads its signal
+/// before its mixer, so its chain needn't run.
 fn mixer_muted(turn: &Turn<'_>, mixer: u32) -> bool {
     match turn.slot(mixer).node.as_ref() {
-        Some(Instance::Mixer(mixer)) => mixer.muted(),
+        Some(Instance::Mixer(mixer)) => mixer.silent(),
         _ => false,
     }
 }
@@ -1193,36 +1190,7 @@ impl EngineProgram {
             &mut lane.events,
             block.transport,
         );
-        // Spec: device-chains R6, IMP-15. A device that is switched off is
-        // out of the schedule, but the changes to its parameters still
-        // reach it, so it comes back on with them.
-        let mut off = 0;
-        for &slot in &self.off {
-            // Spec: external-devices R6. An external device that is
-            // switched off ends the notes it holds on its port.
-            if let (Some(_), NodeKey::Device(device)) = (
-                self.slots[slot as usize].external,
-                self.slots[slot as usize].key,
-            ) {
-                self.midi.release(OutOwner::Device(device));
-            }
-            let changes = gather(
-                block.events,
-                slot,
-                block.from,
-                block.until,
-                &mut lane.events,
-            );
-            if changes == 0 {
-                continue;
-            }
-            off += changes;
-            if let Some(Instance::Device(node)) = self.slots[slot as usize].node.as_mut() {
-                node.flush(&lane.events);
-            }
-        }
         let delivered = modulated
-            + off
             + match pool {
                 Some(pool) => pool.run(self, lane, &block),
                 None => self.run_serial(lane, &block),

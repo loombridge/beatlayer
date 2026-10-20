@@ -1,7 +1,7 @@
 //! IMP-15: a deactivated device or track costs nothing.
 //!
-//! - A switched-off device is out of the schedule: it isn't run, and the
-//!   changes to its parameters still reach it (the device-chains spec, R6).
+//! - A switched-off device isn't run, and the changes to its parameters
+//!   still reach it (the device-chains spec, R6).
 //! - A track whose activator is off, and whose signal nothing reads before
 //!   its mixer, runs no devices; with a pre-fader send to a return, it
 //!   keeps running and the send still sounds (the mixer spec, R5).
@@ -32,7 +32,7 @@ fn run(editor: &mut Editor, id: &str, args: Value) {
 
 // Spec: device-chains R6, IMP-15.
 #[test]
-fn a_switched_off_device_is_out_of_the_schedule_and_takes_its_parameter_change() {
+fn a_switched_off_device_is_not_run_and_takes_its_parameter_change() {
     let mut rig = Rig::new(64);
     let a = track(&mut rig.editor, TrackKind::Midi, None);
     let counter = device(&mut rig.editor, a, testing::COUNTER, &[]);
@@ -102,9 +102,11 @@ fn a_deactivated_track_with_nothing_reading_it_runs_no_devices() {
         json!({ "track": a, "mute": true }),
     );
     rig.sync();
-    // The activator takes effect in the block it is sent for, so the
-    // devices run in that block and not in the one after.
-    rig.block(64);
+    // The activator's gain glides to zero over 20 ms (960 frames), and the
+    // devices run until it gets there.
+    for _ in 0..20 {
+        rig.block(64);
+    }
     let counted = rig.probe.counted.load(Relaxed);
     rig.block(64);
     rig.block(64);

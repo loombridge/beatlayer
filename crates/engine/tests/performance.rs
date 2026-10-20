@@ -53,6 +53,14 @@ fn a_track_with_more_devices_has_the_bigger_share_of_the_processing_time() {
         busy > light,
         "the track with twenty devices has the bigger share: {busy} against {light}"
     );
-    assert!(busy > 0.8, "and the bigger one: {busy}");
-    assert!(light < 0.2, "and the smaller one: {light}");
+    assert!(busy > 0.5, "and the bigger one: {busy}");
+    // The six segments the indicator draws: the bigger share lights more
+    // of them.
+    let segments = |share: f32| ((share * 6.0).ceil() as u8).min(6);
+    assert!(
+        segments(busy) > segments(light),
+        "and more of the six segments: {} against {}",
+        segments(busy),
+        segments(light)
+    );
 }

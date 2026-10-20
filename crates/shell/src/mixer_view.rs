@@ -8,11 +8,12 @@ use bl_model::{Document, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, ViewMixerState,
+    COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, TrackImpact,
+    ViewMixerState, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE,
-    TRACK_OPTIONS, VOLUME,
+    CROSSFADER, FOCUS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS,
+    STATE, TOGGLE, TRACK_OPTIONS, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -37,6 +38,7 @@ pub struct MixerView {
     scene_tempo: bool,
     return_tracks: bool,
     track_options: bool,
+    performance_impact: bool,
     /// Counts `mixer_view.focus` runs, so the window moves the focus once
     /// for each.
     focus_requests: u64,
@@ -71,6 +73,7 @@ impl MixerView {
             scene_tempo: false,
             return_tracks: true,
             track_options: false,
+            performance_impact: false,
             focus_requests: 0,
         }
     }
@@ -142,6 +145,12 @@ impl MixerView {
         self.track_options
     }
 
+    /// Whether the Performance Impact section shows.
+    #[must_use]
+    pub fn performance_impact(&self) -> bool {
+        self.performance_impact
+    }
+
     /// How many times `mixer_view.focus` has run.
     #[must_use]
     pub fn focus_requests(&self) -> u64 {
@@ -161,6 +170,20 @@ impl MixerView {
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
             track_options: self.track_options,
+            performance_impact: self.performance_impact,
+            performance_impact_values: Vec::new(),
+        }
+    }
+
+    /// The state `mixer_view.state` reports, with the Performance Impact
+    /// values the engine last published: each track's share of the set's
+    /// processing time, and how many of the six segments it lights (the
+    /// mixer spec, R31).
+    #[must_use]
+    pub fn state_with_impact(&self, impact: Vec<TrackImpact>) -> MixerViewState {
+        MixerViewState {
+            performance_impact_values: impact,
+            ..self.state()
         }
     }
 
@@ -177,6 +200,7 @@ impl MixerView {
             SCENE_TEMPO => Some(self.scene_tempo),
             RETURN_TRACKS => Some(self.return_tracks),
             TRACK_OPTIONS => Some(self.track_options),
+            PERFORMANCE_IMPACT => Some(self.performance_impact),
             _ => None,
         }
     }
@@ -212,7 +236,8 @@ impl MixerView {
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.shown = shown.unwrap_or(!mixer.shown);
             }
-            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS | TRACK_OPTIONS => {
+            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS | TRACK_OPTIONS
+            | PERFORMANCE_IMPACT => {
                 let SectionArgs { shown } = serde_json::from_value(args).map_err(parse_error)?;
                 let section = match id {
                     IN_OUT => &mut self.in_out,
@@ -221,6 +246,7 @@ impl MixerView {
                     CROSSFADER => &mut self.crossfader,
                     SCENE_TEMPO => &mut self.scene_tempo,
                     TRACK_OPTIONS => &mut self.track_options,
+                    PERFORMANCE_IMPACT => &mut self.performance_impact,
                     _ => &mut self.return_tracks,
                 };
                 *section = shown.unwrap_or(!*section);

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-532 commands in 37 areas.
+533 commands in 37 areas.
 
 ## Permission classes
 
@@ -352,6 +352,7 @@ Each command has:
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
+| [`mixer_view.performance_impact`](#mixer_viewperformance_impact) | Performance Impact | `read` |  |  |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
 | [`mixer_view.scroll`](#mixer_viewscroll) | Scroll Mixer | `read` |  |  |
@@ -6367,6 +6368,22 @@ Arguments:
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.performance_impact`
+
+**Performance Impact**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the mixers' Performance Impact section, as View > Mixer Controls > Performance Impact does: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. Switches unless `shown` says which. Changes only the view; the shares themselves are in `mixer_view.state`, as `performance_impact_values`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.return_tracks`
 
 **Return Tracks**. Permission: `read`. Contexts: `global`.
@@ -6444,7 +6461,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Mixer View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks) show. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
+Reports what the mixers show: whether the Session View's and the Arrangement View's mixers are shown and how far each is scrolled, and which sections (In/Out, Sends, the volume strips, the return tracks, the Performance Impact) show. The Performance Impact values are the engine's last, one entry per track: how many of the six segments are lit and the track's share of the set's processing time. Track values (volume, pan, the activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; read them with the query tool: a track with `detail: "full"` returns them as the set saves them. Changes nothing.
 
 Default keys: none.
 
@@ -20735,6 +20752,8 @@ What `mixer_view.state` and the other view commands return.
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
+| `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 
 <details><summary>JSON Schema</summary>
 
@@ -20753,6 +20772,18 @@ What `mixer_view.state` and the other view commands return.
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
       "type": "boolean"
+    },
+    "performance_impact": {
+      "description": "Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "performance_impact_values": {
+      "default": [],
+      "description": "Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31).",
+      "items": {
+        "$ref": "#/$defs/TrackImpact"
+      },
+      "type": "array"
     },
     "return_tracks": {
       "description": "Whether the return tracks' columns show.",
@@ -20788,7 +20819,9 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
-    "track_options"
+    "track_options",
+    "performance_impact",
+    "performance_impact_values"
   ],
   "type": "object"
 }
@@ -27342,6 +27375,50 @@ Type: integer, at least 1.
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
+}
+```
+
+</details>
+
+### `TrackImpact`
+
+One track's Performance Impact: the six segments the mixer draws under its strip, and the share of the set's processing time they show (the mixer spec, R31).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `segments` | integer from 0 to 255 | yes | How many of the six segments are lit, from 0 to 6. |
+| `share` | number | yes | The track's share of the set's processing time, from 0 to 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's Performance Impact: the six segments the mixer draws under its strip, and the share of the set's processing time they show (the mixer spec, R31).",
+  "properties": {
+    "segments": {
+      "description": "How many of the six segments are lit, from 0 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "share": {
+      "description": "The track's share of the set's processing time, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "segments",
+    "share"
+  ],
+  "type": "object"
 }
 ```
 

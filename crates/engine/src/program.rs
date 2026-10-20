@@ -194,6 +194,18 @@ pub struct EngineProgram {
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
+    /// The slots of the devices that are switched off (IMP-15): they are
+    /// not in any chain, and only their parameter changes reach them.
+    pub(crate) off: Vec<u32>,
+    /// How long each task ran, in nanoseconds, smoothed: the engine times
+    /// each task on the thread that ran it, and the share of the set's
+    /// processing time a task's is what the Performance Impact indicator
+    /// shows (the mixer spec, R31).
+    pub(crate) task_times: Vec<core::sync::atomic::AtomicU64>,
+    /// Whether each task's activator is off and nothing reads the track's
+    /// signal before its mixer (IMP-15): its devices don't run. The flag is
+    /// shared, so a rack's chains, which run on another thread, know.
+    pub(crate) idle: Vec<core::sync::atomic::AtomicBool>,
 }
 
 /// The frames a late row (WP-5.11) lags its modulator's by, and the longest
@@ -728,6 +740,10 @@ pub(crate) struct Task {
     pub(crate) dependents: Span,
     /// How many tasks feed this one.
     pub(crate) dependencies: u32,
+    /// Whether nothing reads this track's signal before its mixer (IMP-15):
+    /// no pre-fader send, no Pre FX or Post FX tap, and no sidechain keyed
+    /// from it. Its chain then runs only while its activator is on.
+    pub(crate) idle_ok: bool,
 }
 
 /// A parameter change routed to a slot, for the block being processed.
@@ -770,6 +786,16 @@ fn gather(
         }
     }
     scratch.len() as u64
+}
+
+/// Whether a track's mixer has its activator off (IMP-15): the track's
+/// output is silent, and nothing reads its signal before its mixer, so its
+/// chain needn't run.
+fn mixer_muted(turn: &Turn<'_>, mixer: u32) -> bool {
+    match turn.slot(mixer).node.as_ref() {
+        Some(Instance::Mixer(mixer)) => mixer.muted(),
+        _ => false,
+    }
 }
 
 impl EngineProgram {
@@ -944,6 +970,46 @@ impl EngineProgram {
         }
     }
 
+    /// How long the task ran, smoothed over the blocks, in nanoseconds: the
+    /// engine times each task on the thread that ran it (the mixer spec,
+    /// R31). The first measure is the value; the ones after it move a
+    /// eighth of the way towards the last, so the indicator moves rather
+    /// than jumps. Real-time safe: an atomic read and a write.
+    pub(crate) fn record_time(&self, task: usize, took: std::time::Duration) {
+        let Some(slot) = self.task_times.get(task) else {
+            return;
+        };
+        let nanos = took.as_nanos() as u64;
+        let previous = slot.load(core::sync::atomic::Ordering::Relaxed);
+        let smoothed = if previous == 0 {
+            nanos
+        } else {
+            let difference = nanos as i64 - previous as i64;
+            (previous as i64 + difference / 8).max(0) as u64
+        };
+        slot.store(smoothed, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How long the tasks ran in all, in nanoseconds: the set's processing
+    /// time, which the Performance Impact indicator's shares are of (the
+    /// mixer spec, R31).
+    pub(crate) fn total_time(&self) -> u64 {
+        self.task_times
+            .iter()
+            .map(|time| time.load(core::sync::atomic::Ordering::Relaxed))
+            .sum()
+    }
+
+    /// The task's share of the set's processing time, from 0 to 1: what the
+    /// Performance Impact indicator shows (the mixer spec, R31).
+    pub(crate) fn impact(&self, task: u32, total: u64) -> f32 {
+        if total == 0 {
+            return 0.0;
+        }
+        let time = self.task_times[task as usize].load(core::sync::atomic::Ordering::Relaxed);
+        (time as f64 / total as f64) as f32
+    }
+
     /// Moves the nodes that survive from `old` into this program. Real-time
     /// safe: it swaps pointers, so whatever was in either slot stays owned
     /// by one of the two programs. Returns `false`, and moves nothing, if
@@ -1019,6 +1085,40 @@ impl EngineProgram {
                 })
                 .count() as u32
         };
+        // Spec: IMP-15. A device that was switched off in this swap left the
+        // chain: it ends the notes it started, and they enter the chain in
+        // front of the node that followed it.
+        for s in 0..old.slots.len() {
+            let slot = s as u32;
+            if !matches!(old.slots[s].key, NodeKey::Device(_)) {
+                continue;
+            }
+            let Some(from_task) = old_task_of(old, slot) else {
+                continue;
+            };
+            let Some(to) = self
+                .migrations
+                .iter()
+                .find(|m| m.from == slot)
+                .map(|m| m.to)
+            else {
+                continue;
+            };
+            if !self.slots[to as usize].bypass {
+                continue;
+            }
+            let Some(task) = self
+                .tasks
+                .iter()
+                .position(|t| t.track == old.tasks[from_task].track)
+            else {
+                continue;
+            };
+            let at = gap(self, old, task, from_task, slot);
+            if let Some(Instance::Device(node)) = self.slots[to as usize].node.as_mut() {
+                self.releases.take(node.as_mut(), task as u32, at);
+            }
+        }
         // Removed: the old program still holds the node.
         for s in 0..old.slots.len() {
             let slot = s as u32;
@@ -1093,7 +1193,36 @@ impl EngineProgram {
             &mut lane.events,
             block.transport,
         );
+        // Spec: device-chains R6, IMP-15. A device that is switched off is
+        // out of the schedule, but the changes to its parameters still
+        // reach it, so it comes back on with them.
+        let mut off = 0;
+        for &slot in &self.off {
+            // Spec: external-devices R6. An external device that is
+            // switched off ends the notes it holds on its port.
+            if let (Some(_), NodeKey::Device(device)) = (
+                self.slots[slot as usize].external,
+                self.slots[slot as usize].key,
+            ) {
+                self.midi.release(OutOwner::Device(device));
+            }
+            let changes = gather(
+                block.events,
+                slot,
+                block.from,
+                block.until,
+                &mut lane.events,
+            );
+            if changes == 0 {
+                continue;
+            }
+            off += changes;
+            if let Some(Instance::Device(node)) = self.slots[slot as usize].node.as_mut() {
+                node.flush(&lane.events);
+            }
+        }
         let delivered = modulated
+            + off
             + match pool {
                 Some(pool) => pool.run(self, lane, &block),
                 None => self.run_serial(lane, &block),
@@ -1132,6 +1261,9 @@ impl EngineProgram {
     ) -> u64 {
         let t = t as usize;
         let task = self.tasks[t];
+        // Spec: the mixer spec, R31. The task is timed on the thread that
+        // ran it, so the pool's workers' work counts too.
+        let began = std::time::Instant::now();
         // SAFETY: the caller's promises are the turn's.
         let turn = unsafe { Turn::new(self, t) };
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
@@ -1161,6 +1293,12 @@ impl EngineProgram {
         for c in 0..channels {
             turn.buffer(t)[c * stride..c * stride + frames].fill(0.0);
         }
+
+        // Spec: IMP-15. A track whose activator is off, and whose signal
+        // nothing reads before its mixer, runs no devices: its chain is
+        // left out of the schedule while it is off.
+        let idle = task.idle_ok && mixer_muted(&turn, task.mixer);
+        self.idle[t].store(idle, core::sync::atomic::Ordering::Relaxed);
 
         let notes = 2 * t;
         turn.notes(notes).clear();
@@ -1310,6 +1448,7 @@ impl EngineProgram {
             scratch: &mut lane.events,
             device: &mut lane.device,
             wake,
+            idle,
             delivered: 0,
         };
         let ended = self.run_steps(&mut pass, task, task.chain, t, notes, 0);
@@ -1351,6 +1490,7 @@ impl EngineProgram {
                 rows: None,
             });
         }
+        self.record_time(t, began.elapsed());
         delivered
     }
 
@@ -1844,6 +1984,9 @@ struct Pass<'a> {
     device: &'a mut [f32],
     /// The threads working on the block with this one, if there are any.
     wake: Option<&'a Wake>,
+    /// Whether the task's activator is off and nothing reads the track's
+    /// signal before its mixer (IMP-15): its devices don't run.
+    idle: bool,
     delivered: u64,
 }
 
@@ -1891,7 +2034,7 @@ impl EngineProgram {
                 .iter()
                 .find(|s| s.device == slot)
                 .copied();
-            let bypass = turn.slot(slot).bypass;
+            let bypass = turn.slot(slot).bypass || pass.idle;
             // What the detector hears, made before the device runs.
             let mut heard = None;
             if let Some(sidechain) = sidechain {
@@ -2493,6 +2636,7 @@ impl EngineProgram {
             scratch: &mut lane.events,
             device: &mut lane.device,
             wake: Some(wake),
+            idle: self.idle[t].load(core::sync::atomic::Ordering::Relaxed),
             delivered: 0,
         };
         let ran = panic::catch_unwind(AssertUnwindSafe(|| {

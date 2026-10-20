@@ -11,6 +11,7 @@
 
 use bl_commands::Context::{Arrangement, Global};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::TrackId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +35,9 @@ pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
 /// `mixer_view.track_options`: show or hide the tracks' Track Options
 /// sections.
 pub const TRACK_OPTIONS: &str = "mixer_view.track_options";
+/// `mixer_view.performance_impact`: show or hide the Performance Impact
+/// section.
+pub const PERFORMANCE_IMPACT: &str = "mixer_view.performance_impact";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
 pub const SCROLL: &str = "mixer_view.scroll";
 /// `mixer_view.focus`: move the keyboard focus to the Arrangement's mixer.
@@ -51,6 +55,7 @@ pub const IDS: &[&str] = &[
     SCENE_TEMPO,
     RETURN_TRACKS,
     TRACK_OPTIONS,
+    PERFORMANCE_IMPACT,
     SCROLL,
     FOCUS,
 ];
@@ -87,7 +92,7 @@ pub struct ViewMixerState {
 }
 
 /// What `mixer_view.state` and the other view commands return.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MixerViewState {
     /// The Session View's mixer.
     pub session: ViewMixerState,
@@ -113,6 +118,40 @@ pub struct MixerViewState {
     /// Keep Monitoring Latency). Shown only while this shows; hidden in a
     /// new set.
     pub track_options: bool,
+    /// Whether the Performance Impact section shows: under each strip, the
+    /// six segments that light up from the left with the track's share of
+    /// the set's processing time. Hidden in a new set.
+    pub performance_impact: bool,
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track, how many of its six segments are lit, and its share of
+    /// the set's processing time (the mixer spec, R31).
+    #[serde(default)]
+    pub performance_impact_values: Vec<TrackImpact>,
+}
+
+/// One track's Performance Impact: the six segments the mixer draws under
+/// its strip, and the share of the set's processing time they show (the
+/// mixer spec, R31).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackImpact {
+    /// The track.
+    pub track: TrackId,
+    /// How many of the six segments are lit, from 0 to 6.
+    pub segments: u8,
+    /// The track's share of the set's processing time, from 0 to 1.
+    pub share: f32,
+}
+
+/// How many of the six Performance Impact segments a track's share of the
+/// set's processing time lights, from the left: the share of the whole set
+/// a sixth at a time, rounded up, so a track with any of it lights one
+/// (the mixer spec, R31).
+#[must_use]
+pub fn impact_segments(share: f32) -> u8 {
+    if !share.is_finite() || share <= 0.0 {
+        return 0;
+    }
+    ((share * 6.0).ceil() as u8).min(6)
 }
 
 /// Arguments of `mixer_view.toggle`.
@@ -174,10 +213,12 @@ fn specs() -> Vec<CommandSpec> {
             "Mixer View State",
             "Reports what the mixers show: whether the Session View's and the Arrangement \
              View's mixers are shown and how far each is scrolled, and which sections (In/Out, \
-             Sends, the volume strips, the return tracks) show. Track values (volume, pan, the \
-             activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; \
-             read them with the query tool: a track with `detail: \"full\"` returns them as \
-             the set saves them. Changes nothing.",
+             Sends, the volume strips, the return tracks, the Performance Impact) show. The \
+             Performance Impact values are the engine's last, one entry per track: how many of \
+             the six segments are lit and the track's share of the set's processing time. \
+             Track values (volume, pan, the activator, Solo, Arm, routing, sends, the \
+             crossfader assignment) are in the set; read them with the query tool: a track with \
+             `detail: \"full\"` returns them as the set saves them. Changes nothing.",
         )
         .context(Global)
         .args::<NoArgs>(),
@@ -264,6 +305,17 @@ fn specs() -> Vec<CommandSpec> {
              shows. Switches unless `shown` says which. Changes only the view; the delay and \
              the Keep Monitoring Latency switch are in the set (`mixer.set_track_delay`, \
              `mixer.set_keep_monitoring_latency`).",
+        )
+        .context(Global)
+        .args::<SectionArgs>(),
+        view(
+            PERFORMANCE_IMPACT,
+            "Performance Impact",
+            "Shows or hides the mixers' Performance Impact section, as View > Mixer Controls > \
+             Performance Impact does: under each strip, the six segments that light up from the \
+             left with the track's share of the set's processing time. Hidden in a new set. \
+             Switches unless `shown` says which. Changes only the view; the shares themselves \
+             are in `mixer_view.state`, as `performance_impact_values`.",
         )
         .context(Global)
         .args::<SectionArgs>(),

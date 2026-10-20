@@ -32,8 +32,9 @@ use crate::commands::{
 use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
-    RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
-    TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
+    PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
+    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
+    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -584,7 +585,11 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-032e", "Crossfader", Cmd(MIXER_CROSSFADER)),
-    ("M-VIEW-032f", "Performance Impact", Pending(None)),
+    (
+        "M-VIEW-032f",
+        "Performance Impact",
+        Cmd(MIXER_PERFORMANCE_IMPACT),
+    ),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),

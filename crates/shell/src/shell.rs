@@ -3660,6 +3660,21 @@ impl Shell {
         self.meters.iter().find(|meter| meter.track == track)
     }
 
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track's share of the set's processing time and how many of the
+    /// six segments it lights (the mixer spec, R31).
+    #[must_use]
+    pub fn impact_values(&self) -> Vec<bl_shell_spec::mixer_view::TrackImpact> {
+        self.meters
+            .iter()
+            .map(|meter| bl_shell_spec::mixer_view::TrackImpact {
+                track: meter.track,
+                segments: bl_shell_spec::mixer_view::impact_segments(meter.impact),
+                share: meter.impact,
+            })
+            .collect()
+    }
+
     /// Sets the meters the windows draw, as [`Shell::poll_engine`] does with
     /// the engine's: for benchmarks and tests with no engine running (while
     /// one runs, the next poll takes its meters instead).
@@ -6622,7 +6637,16 @@ impl Shell {
             if id != mixer_ids::STATE {
                 self.touch();
             }
-            return result.map(|state| to_value(&state));
+            return result.map(|state| {
+                // Spec: mixer R31. The Performance Impact values the engine
+                // last published, one per track.
+                let state = if id == mixer_ids::STATE {
+                    self.mixer.state_with_impact(self.impact_values())
+                } else {
+                    state
+                };
+                to_value(&state)
+            });
         }
         if session_ids::handles(id) {
             // Spec: session-view. The grid's selection and scroll are view

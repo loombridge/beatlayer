@@ -26,6 +26,10 @@ pub struct TrackMeter {
     pub peak: [f32; 2],
     /// The RMS level of the first two channels.
     pub rms: [f32; 2],
+    /// The track's share of the set's processing time, from 0 to 1 (the
+    /// mixer spec, R31): what the Performance Impact indicator shows, in
+    /// six segments.
+    pub impact: f32,
 }
 
 /// A parameter under modulation, as the last block played it (the modulation

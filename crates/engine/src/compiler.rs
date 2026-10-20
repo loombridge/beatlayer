@@ -709,10 +709,17 @@ impl Compiler {
         // they feed, their place among its inputs, and the output, whose
         // device is found once the tasks have added their chains.
         let mut output_taps: Vec<(TrackId, usize, DeviceOutput)> = Vec::new();
+        // Spec: IMP-15. The tracks whose signal something reads before its
+        // mixer: they keep running while their activator is off.
+        let mut read_before_mixer: BTreeSet<TrackId> = BTreeSet::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
+            if edge.tap != Tap::PostMixer || edge.output.is_some() || edge.via.sidechain().is_some()
+            {
+                read_before_mixer.insert(edge.from);
+            }
             let route = self.route(&mut build, document, &solo, edge, to);
             // A route that takes a device's extra output carries it whatever
             // tap it names, so its tap needs no copy of the track's own
@@ -765,6 +772,9 @@ impl Compiler {
                     delay: NO_DELAY,
                 });
                 taps.insert((track.id(), Tap::PostFx));
+                // Spec: IMP-15. The Cue Out reads every track after its
+                // devices, so no track is left out of the schedule.
+                read_before_mixer.insert(track.id());
             }
         }
 
@@ -780,6 +790,7 @@ impl Compiler {
                 inputs.remove(&id).unwrap_or_default(),
                 &mut sidechain_inputs,
                 clips_audible(track),
+                !read_before_mixer.contains(&id),
             );
         }
         // The Cue Out's task comes last, and plays on the device channels
@@ -1051,6 +1062,13 @@ impl Compiler {
             midi,
             modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
             lagged: mod_rows.any_late(document),
+            off: build.off,
+            task_times: (0..tasks)
+                .map(|_| core::sync::atomic::AtomicU64::new(0))
+                .collect(),
+            idle: (0..tasks)
+                .map(|_| core::sync::atomic::AtomicBool::new(false))
+                .collect(),
             bus: Shared::new(vec![
                 0.0;
                 (build.modulators.len() + build.signals.len())
@@ -1313,6 +1331,7 @@ impl Compiler {
             midi_keep: None,
             dependents: Span::default(),
             dependencies,
+            idle_ok: false,
         });
     }
 
@@ -1327,6 +1346,7 @@ impl Compiler {
         inputs: Vec<Input>,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
         audible: bool,
+        idle_ok: bool,
     ) {
         let mut dependencies = inputs.len() as u32;
         let input_start = build.inputs.len() as u32;
@@ -1436,6 +1456,7 @@ impl Compiler {
             post_fx: None,
             dependents: Span::default(),
             dependencies,
+            idle_ok,
         });
     }
 
@@ -1526,13 +1547,22 @@ impl Compiler {
                     };
                 build.modulators.push((slot, device.id));
             }
-            steps.push(Step::Node(slot));
-            if let Some(settings) = &device.sidechain {
-                let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
-                *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
-                self.add_sidechain(build, device.id, settings, slot, sources);
+            if device.enabled {
+                steps.push(Step::Node(slot));
+            } else {
+                // Spec: IMP-15. A device that is switched off is out of the
+                // schedule: it isn't in the chain, and only its parameter
+                // changes reach it.
+                build.off.push(slot);
             }
-            if device.midi_sidechain.is_some() {
+            if let Some(settings) = &device.sidechain {
+                if device.enabled {
+                    let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
+                    *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
+                    self.add_sidechain(build, device.id, settings, slot, sources);
+                }
+            }
+            if device.midi_sidechain.is_some() && device.enabled {
                 let from = build.midi_sources.get(&device.id).copied();
                 *dependencies += u32::from(from.is_some_and(|from| from != own));
                 build.midi_sidechains.push(DeviceMidiSidechain {
@@ -1872,6 +1902,9 @@ struct Build {
     /// The length in frames of each delay line the program needs, in the
     /// order the inputs and players name them (WP-2.11).
     delays: Vec<u32>,
+    /// The slots of the devices that are switched off (IMP-15): they are
+    /// out of the schedule, and only their parameter changes reach them.
+    off: Vec<u32>,
 }
 
 /// The key of the route that carries `edge`.

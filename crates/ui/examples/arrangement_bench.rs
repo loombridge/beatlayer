@@ -519,6 +519,7 @@ fn main() -> Result<(), String> {
                         track: *track,
                         peak: [level, level * 0.9],
                         rms: [level * 0.5, level * 0.45],
+                        impact: 0.0,
                     });
                 }
                 shell.set_meters(&meters);

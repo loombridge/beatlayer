@@ -4,7 +4,7 @@
 
 use core::ops::Range;
 
-use bl_core::time::{Frames, SampleRate, TempoMap};
+use bl_core::time::{Frames, SampleRate, TempoMap, TimeSignatureMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::modbus::{Bus, Control};
@@ -260,6 +260,13 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn song_position(&self) -> Frames {
         Frames(self.block.transport().position.get() + self.range.start as i64)
+    }
+
+    /// The song's time-signature map, which places bar lines on ticks: the
+    /// launch quantisation grid is counted on it.
+    #[must_use]
+    pub fn signatures(&self) -> &'a TimeSignatureMap {
+        self.block.signatures()
     }
 
     /// Whether the song is playing, so a tempo-synced device locks to the

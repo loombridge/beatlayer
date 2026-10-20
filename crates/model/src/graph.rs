@@ -29,7 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{ChainId, DeviceId, Document, Input, SendTap, Tap, TrackId, TrackKind};
+use crate::{ChainId, DeviceId, DeviceOutput, Document, Input, SendTap, Tap, TrackId, TrackKind};
 
 /// How a signal travels from one track into another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +85,9 @@ pub struct Edge {
     /// The chain of a rack in the source whose signal at `tap` it carries,
     /// instead of the source's own (the racks spec, R38).
     pub chain: Option<ChainId>,
+    /// The instrument on the source whose extra output it carries, instead
+    /// of the source's own signal (the routing spec).
+    pub output: Option<DeviceOutput>,
     /// Whether the destination's Monitor switch decides if it's heard: a
     /// track's own input, or another track's output into its Track In.
     pub monitored: bool,
@@ -130,6 +133,7 @@ impl Graph {
             via: Via::Output,
             tap: Tap::PostMixer,
             chain: None,
+            output: None,
             monitored: monitored_into(to),
         };
         for &id in &order {
@@ -157,6 +161,7 @@ impl Graph {
                 track: from,
                 tap,
                 chain,
+                output,
             }) = input_of(document, id)
                 && inner(from)
                 && inner(id)
@@ -167,6 +172,7 @@ impl Graph {
                     via: Via::Input,
                     tap,
                     chain,
+                    output,
                     monitored: true,
                 });
             }
@@ -241,6 +247,7 @@ impl Graph {
                                     via: Via::Chain(chain.id),
                                     tap: Tap::PostMixer,
                                     chain: Some(chain.id),
+                                    output: None,
                                     monitored: false,
                                 });
                             }
@@ -257,6 +264,7 @@ impl Graph {
                             via: Via::Send,
                             tap,
                             chain: None,
+                            output: None,
                             monitored: false,
                         });
                     }
@@ -269,12 +277,14 @@ impl Graph {
                     via: Via::Input,
                     tap: Tap::PostMixer,
                     chain: None,
+                    output: None,
                     monitored: true,
                 }),
                 Some(Input::Track {
                     track: from,
                     tap,
                     chain,
+                    output,
                 }) if !inner(from) => {
                     graph.edges.push(Edge {
                         from,
@@ -282,6 +292,7 @@ impl Graph {
                         via: Via::Input,
                         tap,
                         chain,
+                        output,
                         monitored: true,
                     });
                 }
@@ -312,6 +323,7 @@ impl Graph {
                         via: Via::Sidechain(device.id),
                         tap: *tap,
                         chain: None,
+                        output: None,
                         monitored: false,
                     });
                 }

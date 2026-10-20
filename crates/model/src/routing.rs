@@ -229,6 +229,25 @@ impl Document {
         Ok(())
     }
 
+    /// Puts every input that takes an extra output of a device in `gone` out
+    /// of use, as for a deleted track (the routing spec, R7).
+    pub(crate) fn forget_device_outputs(&mut self, gone: &BTreeSet<crate::DeviceId>) {
+        let touched: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, t)| {
+                matches!(&t.routing.input, Input::Track { output: Some(output), .. }
+                    if gone.contains(&output.device))
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in touched {
+            if let Some(track) = self.tracks.get_mut(&id) {
+                crate::shared::Shared::make_mut(track).routing.input = Input::None;
+            }
+        }
+    }
+
     /// Puts every input that taps a chain in `gone` out of use, for a chain
     /// or a rack that left its track: No Input, as for a deleted track
     /// (the racks spec, R41).
@@ -347,7 +366,10 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
         (
             TrackKind::Audio,
             Input::Track {
-                track: from, chain, ..
+                track: from,
+                chain,
+                output,
+                ..
             },
         ) => {
             // A MIDI track is an Audio From source (the racks spec, R38);
@@ -363,16 +385,32 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
                         | TrackKind::Main
                 )
             })?;
+            if chain.is_some() && output.is_some() {
+                return Err(ModelError::InvalidInput(
+                    "a track's input takes a chain or an instrument output, not both",
+                ));
+            }
+            if let Some(output) = output {
+                check_device_output(doc, *from, output)?;
+            }
             chain.map_or(Ok(()), |chain| check_chain_tap(doc, *from, chain))
         }
         (
             TrackKind::Midi,
             Input::Track {
-                track: from, chain, ..
+                track: from,
+                chain,
+                output,
+                ..
             },
         ) => {
             if chain.is_some() {
                 return Err(ModelError::InvalidInput("only an audio track taps a chain"));
+            }
+            if output.is_some() {
+                return Err(ModelError::InvalidInput(
+                    "only an audio track takes an instrument output",
+                ));
             }
             doc.check_target(track, *from, |kind| kind == TrackKind::Midi)
         }
@@ -381,6 +419,22 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
         (_, Input::None) => Ok(()),
         _ => Err(wrong_kind(track, "an audio or MIDI track")),
     }
+}
+
+/// A device output names a device on the source track, at any depth in its
+/// racks: the model doesn't know which devices have extra outputs, which is
+/// the host's account of them (the routing spec, R16).
+fn check_device_output(
+    doc: &Document,
+    from: TrackId,
+    output: &crate::DeviceOutput,
+) -> Result<(), ModelError> {
+    let source = doc.track(from).ok_or(ModelError::NoSuchTrack(from))?;
+    source
+        .devices_deep()
+        .find(|d| d.id == output.device)
+        .ok_or(ModelError::NoSuchDevice(output.device))?;
+    Ok(())
 }
 
 /// A chain tap names a chain of an instrument or audio effect rack on the
@@ -472,6 +526,11 @@ fn check_sidechain_input(doc: &Document, track: &Track, input: Input) -> Result<
         Input::Track { chain: Some(_), .. } => Err(ModelError::InvalidInput(
             "a sidechain takes a track, not a chain",
         )),
+        Input::Track {
+            output: Some(_), ..
+        } => Err(ModelError::InvalidInput(
+            "a sidechain takes a track, not an instrument output",
+        )),
         Input::Track { track: from, .. } => {
             let source = doc.track(from).ok_or(ModelError::NoSuchTrack(from))?;
             if matches!(
@@ -532,6 +591,27 @@ mod tests {
                 name: String::new(),
                 parent,
                 index,
+            })
+            .unwrap();
+        id
+    }
+
+    /// An instrument on `track`, named `name`.
+    fn instrument(editor: &mut Editor, track: TrackId, name: &str) -> DeviceId {
+        let id = editor.new_id();
+        let device = Device::new(
+            id,
+            name,
+            DeviceKind::Native {
+                device_type: "beatlayer.kitbag".to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
             })
             .unwrap();
         id
@@ -608,6 +688,7 @@ mod tests {
                     track: from,
                     tap,
                     chain: None,
+                    output: None,
                 },
             )
             .unwrap();
@@ -628,7 +709,8 @@ mod tests {
                 Input::Track {
                     track: a,
                     tap,
-                    chain: None
+                    chain: None,
+                    output: None
                 }
             ),
             Err(ModelError::CannotRoute { .. })
@@ -640,7 +722,8 @@ mod tests {
                 Input::Track {
                     track: m,
                     tap,
-                    chain: None
+                    chain: None,
+                    output: None
                 }
             )
             .is_err()
@@ -653,6 +736,7 @@ mod tests {
                 track: n,
                 tap,
                 chain: None,
+                output: None,
             },
         )
         .unwrap();
@@ -664,8 +748,28 @@ mod tests {
                 Input::Track {
                     track: a,
                     tap,
-                    chain: None
+                    chain: None,
+                    output: None
                 }
+            )
+            .is_err()
+        );
+        // An instrument output goes to an audio track's input, never a MIDI
+        // track's (WP-5.45).
+        let elsewhere = editor.new_id();
+        assert!(
+            input(
+                &mut editor,
+                m,
+                Input::Track {
+                    track: n,
+                    tap,
+                    chain: None,
+                    output: Some(crate::DeviceOutput {
+                        device: elsewhere,
+                        output: 0,
+                    }),
+                },
             )
             .is_err()
         );
@@ -844,6 +948,7 @@ mod tests {
                 track: b,
                 tap: Tap::PostMixer,
                 chain: None,
+                output: None,
             },
         )
         .unwrap();
@@ -871,6 +976,7 @@ mod tests {
                 track: c,
                 tap: Tap::PostFx,
                 chain: None,
+                output: None,
             },
         )
         .unwrap();
@@ -1142,6 +1248,7 @@ mod tests {
                     track,
                     tap: Tap::PostFx,
                     chain: None,
+                    output: None,
                 },
             )
             .unwrap();
@@ -1151,6 +1258,7 @@ mod tests {
                 track: m,
                 tap: Tap::PreFx,
                 chain: None,
+                output: None,
             },
             Input::External {
                 channel: Channel::Pair(1),
@@ -1188,6 +1296,7 @@ mod tests {
                 track: c,
                 tap: Tap::PostFx,
                 chain: None,
+                output: None,
             },
         )
         .unwrap();
@@ -1243,6 +1352,61 @@ mod tests {
     /// An audio track with an audio effect rack of two chains, the first
     /// holding another audio effect rack of one chain, and an audio track to
     /// tap them.
+    // Spec: routing R2, R7, R16. Taking an instrument's extra output is saved
+    // with the set; deleting the device leaves No Input, and undo restores
+    // both.
+    #[test]
+    fn instrument_outputs_forget_deleted_devices() {
+        let mut editor = Editor::new();
+        let source = add(&mut editor, TrackKind::Midi, None);
+        let tapper = add(&mut editor, TrackKind::Audio, None);
+        let device = instrument(&mut editor, source, "Impulse");
+        let taken = Input::Track {
+            track: source,
+            tap: Tap::PostMixer,
+            chain: None,
+            output: Some(crate::DeviceOutput { device, output: 3 }),
+        };
+        input(&mut editor, tapper, taken.clone()).unwrap();
+        assert_eq!(
+            editor.document().track(tapper).unwrap().routing().input,
+            taken
+        );
+        // It saves and loads.
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(&loaded, editor.document());
+        // A device the source track doesn't hold is refused.
+        let other = add(&mut editor, TrackKind::Midi, None);
+        let elsewhere = instrument(&mut editor, other, "Elsewhere");
+        assert!(matches!(
+            input(
+                &mut editor,
+                tapper,
+                Input::Track {
+                    track: source,
+                    tap: Tap::PostMixer,
+                    chain: None,
+                    output: Some(crate::DeviceOutput {
+                        device: elsewhere,
+                        output: 0
+                    }),
+                }
+            ),
+            Err(ModelError::NoSuchDevice(_))
+        ));
+        // Deleting the device leaves No Input; undo brings both back.
+        let before = editor.document().clone();
+        editor.apply(Command::RemoveDevice { device }).unwrap();
+        assert_eq!(
+            editor.document().track(tapper).unwrap().routing().input,
+            Input::None
+        );
+        editor.document().check_invariants().unwrap();
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &before);
+    }
+
     fn racks_to_tap(editor: &mut Editor) -> (TrackId, TrackId, DeviceId, [ChainId; 3]) {
         let source = add(editor, TrackKind::Audio, None);
         let tapper = add(editor, TrackKind::Audio, None);
@@ -1271,6 +1435,7 @@ mod tests {
                 track: source,
                 tap: Tap::PostFx,
                 chain: Some(chain),
+                output: None,
             },
         )
         .unwrap();
@@ -1285,6 +1450,7 @@ mod tests {
             track: source,
             tap: Tap::PostFx,
             chain: Some(chain),
+            output: None,
         };
         // Any depth is tapped, and saved with the set.
         for chain in [a, b, inner] {
@@ -1308,6 +1474,7 @@ mod tests {
                     track: tapper,
                     tap: Tap::PostFx,
                     chain: Some(a),
+                    output: None,
                 }
             ),
             Err(ModelError::NoSuchChain(_))
@@ -1428,6 +1595,7 @@ mod tests {
             track,
             tap: Tap::PreFx,
             chain: Some(chain),
+            output: None,
         };
         // A MIDI track's instrument rack is tapped from an audio track.
         input(&mut editor, tapper, tap(midi, keys_chain)).unwrap();
@@ -1476,6 +1644,7 @@ mod tests {
             track,
             tap: Tap::PostMixer,
             chain: None,
+            output: None,
         };
         assert!(input(&mut editor, audio, from(midi)).is_err());
         let instrument = Device::new(

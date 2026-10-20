@@ -529,6 +529,7 @@ impl Vst3Host {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    outputs: Vec::new(),
                 },
                 vendor,
                 version,

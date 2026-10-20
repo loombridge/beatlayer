@@ -281,6 +281,7 @@ fn a_source_that_would_close_a_loop_carries_nothing() {
                 track: x,
                 tap: bl_model::Tap::PostMixer,
                 chain: None,
+                output: None,
             },
             channel: None,
         })

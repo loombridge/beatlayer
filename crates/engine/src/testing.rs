@@ -81,6 +81,15 @@ pub fn instrument_type() -> DeviceType {
     DeviceType::native(INSTRUMENT, "Test Instrument", DeviceRole::Instrument)
 }
 
+/// The multi-output test instrument's device type (WP-5.45): an instrument
+/// named "Test Multi", whose devices have [`MULTI_OUTPUTS`] stereo outputs
+/// past their main one.
+pub const MULTI: &str = "test.multi";
+/// The extra outputs of [`MULTI`]'s devices.
+pub const MULTI_OUTPUTS: usize = 2;
+/// What [`MULTI`]'s devices call those outputs, in order.
+pub const MULTI_OUTPUT_NAMES: [&str; MULTI_OUTPUTS] = ["Output 2", "Output 3"];
+
 /// The test gain as a device type: an audio effect named "Test Gain".
 #[must_use]
 pub fn gain_type() -> DeviceType {
@@ -235,6 +244,10 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
             producer,
             _tracked: Tracked::new(&p),
         })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native_with_outputs(MULTI, &MULTI_OUTPUT_NAMES, move |device, _| {
+        Box::new(Multi::new(device, &p))
     });
     let p = Arc::clone(probe);
     registry.add_native(EXTERNAL, move |_, _| {
@@ -587,6 +600,42 @@ impl Node for TestInstrument {
                 frame: pos + event.offset as i64,
                 event,
             });
+        }
+    }
+}
+
+/// A multi-output test instrument (WP-5.45): it adds its value to its main
+/// output, and writes its value plus each output's number to every channel
+/// of that extra output, so a test can tell the outputs apart.
+#[derive(Debug)]
+struct Multi {
+    value: f32,
+    _tracked: Tracked,
+}
+
+impl Multi {
+    fn new(device: &Device, probe: &Arc<Probe>) -> Self {
+        Self {
+            value: device.params.get(&VALUE).copied().unwrap_or(0.0) as f32,
+            _tracked: Tracked::new(probe),
+        }
+    }
+}
+
+impl Node for Multi {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for channel in block.channels_mut() {
+            for sample in channel.iter_mut() {
+                *sample += self.value;
+            }
+        }
+        for output in 0..MULTI_OUTPUTS {
+            let level = self.value + output as f32 + 2.0;
+            if let Some(channels) = block.output_channels_mut(output) {
+                for channel in channels {
+                    channel.fill(level);
+                }
+            }
         }
     }
 }

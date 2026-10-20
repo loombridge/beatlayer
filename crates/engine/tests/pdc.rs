@@ -17,12 +17,12 @@ use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 use bl_commands::Registry as Commands;
 use bl_core::time::Ticks;
-use bl_engine::testing::{DELAY, DELAY_FRAMES, KEY};
+use bl_engine::testing::{DELAY, DELAY_FRAMES, KEY, MULTI, VALUE};
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    Editor, RackKind, TrackDelay, TrackId, TrackKind, registry,
+    DeviceRole, Editor, RackKind, TrackDelay, TrackId, TrackKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
@@ -1078,4 +1078,83 @@ fn keep_monitoring_latency_gives_a_monitored_tracks_compensation_back() {
     // A new track keeps its monitoring latency, so B is compensated as usual.
     let out = rig.render(2 * LATENCY + 512, 64);
     assert_null(&out, "a track that keeps its monitoring latency cancels");
+}
+
+/// The multi-output test device (WP-5.45), at `value`, at the end of
+/// `track`'s chain: an audio effect, so a delay may sit before it (the device
+/// chains spec, R2).
+fn multi_device(editor: &mut Editor, track: TrackId, value: f64) -> DeviceId {
+    let id = editor.new_id();
+    let mut device = Device::new(
+        id,
+        "Test Multi",
+        DeviceKind::Native {
+            device_type: MULTI.to_owned(),
+        },
+    )
+    .with_role(DeviceRole::AudioEffect);
+    device.params.insert(VALUE, value);
+    let index = editor.document().track(track).unwrap().devices().len();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index,
+            device,
+        })
+        .unwrap();
+    id
+}
+
+// A device's extra output is where the device sits in its chain: a device
+// before it delays what its outputs carry, so a track that takes one holds
+// its own clips to that place (WP-5.45, delay-compensation R2).
+#[test]
+fn an_instrument_output_behind_a_latency_device_lines_up() {
+    // A single sample a second into the clip, past the clip's opening glide.
+    let mut side = vec![0.0f32; 4_096];
+    side[2_048] = 1.0;
+    let mut media = MediaMap::new();
+    media.insert(
+        hash(4),
+        Arc::new(SampleData::new(48_000, vec![side.clone(), side]).unwrap()),
+    );
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    // The delay comes before the multi-output device, so its output sits
+    // 500 frames into the source track's chain.
+    let source = track(ed, TrackKind::Audio, None);
+    delay_device(ed, source);
+    let instrument = multi_device(ed, source, 1.0);
+    // The tapper takes the instrument's output; its Monitor is off, so its
+    // clip alone is heard, and the clip is held back to the route.
+    let tapper = track(ed, TrackKind::Audio, None);
+    clip(ed, tapper, hash(4));
+    run(
+        ed,
+        "routing.set_monitor",
+        json!({ "track": tapper, "monitor": "off" }),
+    );
+    run(
+        ed,
+        "routing.set_input",
+        json!({ "track": tapper, "input": { "type": "track", "track": source,
+                "output": { "device": instrument, "output": 0 } } }),
+    );
+    // The source's own signal stays out of Main, so the impulse is alone.
+    run(
+        ed,
+        "routing.set_output",
+        json!({ "track": source, "output": { "type": "sends_only" } }),
+    );
+    rig.sync();
+    let out = rig.render(2_048 + 2 * LATENCY + 512, 64);
+    let at = out
+        .iter()
+        .position(|&s| s.abs() > 1e-6)
+        .expect("the impulse is heard");
+    assert_eq!(
+        at,
+        2_048 + LATENCY,
+        "the impulse lands where the instrument's output is, not at the chain's start"
+    );
 }

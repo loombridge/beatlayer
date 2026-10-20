@@ -5276,6 +5276,7 @@ impl Document {
     fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
         forget(self.track_mut(track)?, gone);
         self.forget_chain_taps(&gone.chains);
+        self.forget_device_outputs(&gone.devices);
         Ok(())
     }
 

@@ -14841,6 +14841,42 @@ One device, as `audio.devices` lists it.
 
 </details>
 
+### `DeviceOutput`
+
+One of a device's extra audio outputs, past its main one: `device` (an instrument on the tapped track, at any depth in its racks) and `output`, which of that device's extra outputs it is, counted from 0 in the order the device declares them.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `output` | integer, at least 0 | yes | Which of its extra outputs, counted from 0 past the main one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of a device's extra audio outputs, past its main one: `device` (an instrument on the tapped track, at any depth in its racks) and `output`, which of that device's extra outputs it is, counted from 0 in the order the device declares them.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "output": {
+      "description": "Which of its extra outputs, counted from 0 past the main one.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "output"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DevicePanel`
 
 What the generic UI needs to draw a device (WP-2.5): its type's description and its parameters' values now.
@@ -17242,7 +17278,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -17252,13 +17288,13 @@ One of:
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
-- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `tap` ([`Tap`](#tap)): Another track's signal.
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `output` ([`DeviceOutput`](#deviceoutput) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -17361,9 +17397,20 @@ One of:
           ],
           "description": "A chain of an instrument or audio effect rack on that track, at any depth, whose signal is taken at `tap` instead of the track's own (the racks spec, R38 to R41)."
         },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An instrument on that track, at any depth, whose extra output is taken instead of the track's own signal (the routing spec)."
+        },
         "tap": {
           "$ref": "#/$defs/Tap",
-          "description": "Where in that track the signal is taken: Post Mixer if it's left out."
+          "description": "Where in that track the signal is taken: Post Mixer if it's left out. An instrument output is taken whatever this says."
         },
         "track": {
           "$ref": "#/$defs/TrackId",

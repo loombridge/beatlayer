@@ -6,11 +6,11 @@
 //! the engine published. The rules are in
 //! the control bar transport spec.
 
-use std::time::{Duration, Instant};
-
+use bl_audio_io::NullControl;
 use bl_commands::Permission;
 use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_shell::audio::EngineTransport;
+use bl_shell::testing;
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands::TransportState;
 use bl_shell::{Invocation, Shell, ShellError};
@@ -18,28 +18,33 @@ use serde_json::{Value, json};
 
 const BAR: Ticks = Ticks::WHOLE;
 
-/// A shell playing through the null device.
-fn shell() -> Shell {
-    let mut shell = Shell::headless();
+/// A shell playing through the null device, paced by hand (T199), with the
+/// control that runs its blocks.
+fn shell() -> (Shell, NullControl) {
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     assert!(shell.audio().engine_running(), "{:?}", shell.audio());
-    shell
+    (shell, control)
 }
 
-/// Polls the engine until `done` holds, for up to five seconds.
-fn wait(shell: &mut Shell, what: &str, done: impl Fn(&EngineTransport) -> bool) -> EngineTransport {
-    let until = Instant::now() + Duration::from_secs(5);
-    loop {
-        let engine = shell.poll_engine();
+/// Advances the set in [`testing::STEP_MS`] steps until `done` holds. The
+/// engine is paced by hand, so this lands on the same frames however busy the
+/// machine is; two thousand steps are about ten seconds of test time.
+fn wait(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&EngineTransport) -> bool,
+) -> EngineTransport {
+    let mut engine = shell.poll_engine();
+    for _ in 0..2_000 {
         if done(&engine) {
             return engine;
         }
-        assert!(
-            Instant::now() < until,
-            "timed out waiting for {what}: {engine:?}"
-        );
-        std::thread::sleep(Duration::from_millis(2));
+        testing::advance(control, shell, testing::STEP_MS);
+        engine = shell.poll_engine();
     }
+    panic!("timed out waiting for {what}: {engine:?}");
 }
 
 fn state(shell: &mut Shell) -> TransportState {
@@ -70,7 +75,7 @@ const TRANSPORT: &[(&str, &str)] = &[
 #[test]
 fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     // Spec: control-bar-transport R2, R12, R13
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     let registry = shell.registry();
     assert!(registry.problems().is_empty(), "{:?}", registry.problems());
     let mut registered: Vec<&str> = registry
@@ -113,29 +118,29 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     // stopped; Continue resumes there; a second Stop returns to 1.1.1.
     shell.run("transport.stop", json!({})).unwrap();
     shell.run("transport.stop", json!({})).unwrap();
-    wait(&mut shell, "the return to 1.1.1", |e| {
+    wait(&control, &mut shell, "the return to 1.1.1", |e| {
         !e.playing && e.position == Ticks::ZERO && e.insert_marker == Ticks::ZERO
     });
     shell.run("transport.play", json!({})).unwrap();
-    let first = wait(&mut shell, "playback", |e| {
+    let first = wait(&control, &mut shell, "playback", |e| {
         e.playing && e.position > Ticks::ZERO
     });
-    let later = wait(&mut shell, "the playhead to move", |e| {
+    let later = wait(&control, &mut shell, "the playhead to move", |e| {
         e.clock > first.clock + 4_800
     });
     assert!(later.position > first.position, "{first:?} then {later:?}");
     let shown = state(&mut shell);
     assert!(shown.playing && shown.engine_running);
     shell.run("transport.stop", json!({})).unwrap();
-    let stopped = wait(&mut shell, "the stop", |e| !e.playing);
+    let stopped = wait(&control, &mut shell, "the stop", |e| !e.playing);
     assert!(stopped.position > Ticks::ZERO);
     assert_eq!(stopped.insert_marker, Ticks::ZERO);
     shell.run("transport.continue", json!({})).unwrap();
-    let resumed = wait(&mut shell, "Continue", |e| e.playing);
+    let resumed = wait(&control, &mut shell, "Continue", |e| e.playing);
     assert!(resumed.position >= stopped.position);
     shell.run("transport.stop", json!({})).unwrap();
     shell.run("transport.stop", json!({})).unwrap();
-    wait(&mut shell, "the second Stop", |e| {
+    wait(&control, &mut shell, "the second Stop", |e| {
         !e.playing && e.position == Ticks::ZERO
     });
     shell.audio_mut().stop();
@@ -144,20 +149,20 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
 #[test]
 fn space_and_the_playback_menu_toggle_play_and_stop() {
     // Spec: control-bar-transport R3. The menu item's label follows.
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     assert_eq!(
         shell.dynamic_label("transport.play_stop").as_deref(),
         Some("Play")
     );
     shell.invoke("transport.play_stop", json!({})).unwrap();
-    wait(&mut shell, "playback", |e| e.playing);
+    wait(&control, &mut shell, "playback", |e| e.playing);
     assert!(shell.playing());
     assert_eq!(
         shell.dynamic_label("transport.play_stop").as_deref(),
         Some("Stop")
     );
     shell.invoke("transport.play_stop", json!({})).unwrap();
-    let stopped = wait(&mut shell, "the stop", |e| !e.playing);
+    let stopped = wait(&control, &mut shell, "the stop", |e| !e.playing);
     assert!(
         stopped.position > Ticks::ZERO,
         "Play/Stop never returns to 1.1.1"
@@ -197,7 +202,7 @@ fn without_an_engine_the_transport_says_why() {
 #[test]
 fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
     // Spec: control-bar-transport R4, R9
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     let bars = Field::new(Group::Position, 0);
     assert_eq!(state(&mut shell).arrangement_position, "1.1.1");
     let typed = [
@@ -207,7 +212,7 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
     ];
     run(&mut shell, |s| transport::typed(s, Group::Position, &typed));
     let marker = BAR * 2 + Ticks::QUARTER * 2;
-    wait(&mut shell, "the locate", |e| e.insert_marker == marker);
+    wait(&control, &mut shell, "the locate", |e| e.insert_marker == marker);
     assert_eq!(
         shell.arrangement().insert_marker(),
         marker,
@@ -219,28 +224,28 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
     // range.
     let typed = [None, Some("9".to_owned()), None];
     run(&mut shell, |s| transport::typed(s, Group::Position, &typed));
-    wait(&mut shell, "the locate", |e| {
+    wait(&control, &mut shell, "the locate", |e| {
         e.insert_marker == BAR * 2 + Ticks::QUARTER * 3
     });
     let typed = [Some("0".to_owned()), None, None];
     run(&mut shell, |s| transport::typed(s, Group::Position, &typed));
-    wait(&mut shell, "the locate", |e| {
+    wait(&control, &mut shell, "the locate", |e| {
         e.insert_marker == Ticks::QUARTER * 3
     });
     // Steps: a bar up, a sixteenth down.
     run(&mut shell, |s| transport::step(s, bars, 1, false));
-    wait(&mut shell, "a bar on", |e| {
+    wait(&control, &mut shell, "a bar on", |e| {
         e.insert_marker == BAR + Ticks::QUARTER * 3
     });
     run(&mut shell, |s| {
         transport::step(s, Field::new(Group::Position, 2), -1, false)
     });
     let at = BAR + Ticks::QUARTER * 3 - Ticks::SIXTEENTH;
-    wait(&mut shell, "a sixteenth back", |e| e.insert_marker == at);
+    wait(&control, &mut shell, "a sixteenth back", |e| e.insert_marker == at);
     assert_eq!(state(&mut shell).arrangement_position, "2.3.4");
     // While the song plays, the fields show the playhead.
     shell.run("transport.play", json!({})).unwrap();
-    let playing = wait(&mut shell, "playback", |e| {
+    let playing = wait(&control, &mut shell, "playback", |e| {
         e.playing && e.position > at + Ticks::SIXTEENTH
     });
     let _ = playing;
@@ -250,7 +255,7 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
     assert_ne!(shown.arrangement_position, "2.3.4", "{shown:?} {engine:?}");
     // Delete returns to 1.1.1, and playback jumps there.
     run(&mut shell, |s| transport::reset(s, bars));
-    wait(&mut shell, "the return", |e| {
+    wait(&control, &mut shell, "the return", |e| {
         e.insert_marker == Ticks::ZERO && e.position < BAR
     });
     shell.audio_mut().stop();
@@ -259,7 +264,7 @@ fn the_position_fields_locate_and_show_the_insert_marker_or_the_playhead() {
 #[test]
 fn the_loop_fields_and_switch_are_undoable_document_edits() {
     // Spec: control-bar-transport R5, R8
-    let mut shell = shell();
+    let (mut shell, _) = shell();
     let shown = state(&mut shell);
     assert_eq!(
         (
@@ -320,7 +325,7 @@ fn the_loop_fields_and_switch_are_undoable_document_edits() {
 fn the_engine_plays_the_documents_loop() {
     // Spec: control-bar-transport R13. A one-beat loop at 1.1.1: the
     // playhead never leaves it.
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     shell
         .run(
             "transport.set_loop",
@@ -331,16 +336,19 @@ fn the_engine_plays_the_documents_loop() {
         .run("transport.set_loop_enabled", json!({ "enabled": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    let first = wait(&mut shell, "playback", |e| e.playing);
+    let first = wait(&control, &mut shell, "playback", |e| e.playing);
     let mut wrapped = false;
     let mut last = Ticks::ZERO;
-    let until = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < until && !wrapped {
+    let steps = 2_000;
+    for _ in 0..steps {
+        if wrapped {
+            break;
+        }
         let engine = shell.poll_engine();
         assert!(engine.position < Ticks::QUARTER, "{engine:?}");
         wrapped |= engine.position < last && engine.clock > first.clock;
         last = engine.position;
-        std::thread::sleep(Duration::from_millis(3));
+        testing::advance(&control, &mut shell, testing::STEP_MS);
     }
     assert!(wrapped, "the loop wrapped");
     assert!(
@@ -353,7 +361,7 @@ fn the_engine_plays_the_documents_loop() {
 #[test]
 fn tempo_and_signature_fields_set_the_song_as_undo_steps() {
     // Spec: control-bar-transport R6, R7, R8, R9
-    let mut shell = shell();
+    let (mut shell, _) = shell();
     let tempo = Field::new(Group::Tempo, 0);
     assert_eq!(transport::text(&shell, tempo), "120.00");
     run(&mut shell, |s| transport::step(s, tempo, 1, false));
@@ -426,15 +434,15 @@ fn tempo_and_signature_fields_set_the_song_as_undo_steps() {
 #[test]
 fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() {
     // Spec: control-bar-transport R15
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     shell.run("transport.play", json!({})).unwrap();
-    let before = wait(&mut shell, "playback", |e| {
+    let before = wait(&control, &mut shell, "playback", |e| {
         e.playing && e.position > Ticks::ZERO
     });
     shell
         .run("arrangement.set_insert_marker", json!({ "at": BAR * 16 }))
         .unwrap();
-    let after = wait(&mut shell, "the marker", |e| e.insert_marker == BAR * 16);
+    let after = wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 16);
     assert!(after.playing, "playback carries on");
     assert!(
         after.position >= before.position && after.position < BAR * 16,
@@ -448,20 +456,20 @@ fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() 
             json!({ "start": BAR * 2, "end": BAR * 4 }),
         )
         .unwrap();
-    wait(&mut shell, "the marker", |e| e.insert_marker == BAR * 2);
+    wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 2);
     // Move Insert Marker To Playhead, and a second Stop, move the view's
     // marker too.
     shell.run("transport.stop", json!({})).unwrap();
-    let stopped = wait(&mut shell, "the stop", |e| !e.playing);
+    let stopped = wait(&control, &mut shell, "the stop", |e| !e.playing);
     shell
         .run("transport.insert_marker_to_playhead", json!({}))
         .unwrap();
-    wait(&mut shell, "the marker", |e| {
+    wait(&control, &mut shell, "the marker", |e| {
         e.insert_marker == stopped.position
     });
     assert_eq!(shell.arrangement().insert_marker(), stopped.position);
     shell.run("transport.stop", json!({})).unwrap();
-    wait(&mut shell, "the return", |e| e.insert_marker == Ticks::ZERO);
+    wait(&control, &mut shell, "the return", |e| e.insert_marker == Ticks::ZERO);
     assert_eq!(shell.arrangement().insert_marker(), Ticks::ZERO);
     shell.audio_mut().stop();
 }
@@ -469,24 +477,24 @@ fn a_click_in_the_arrangement_moves_the_insert_marker_and_playback_carries_on() 
 #[test]
 fn a_device_change_keeps_the_song_where_it_was_stopped() {
     // Spec: control-bar-transport R16
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     shell
         .run("transport.locate", json!({ "position": BAR * 8 }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    wait(&mut shell, "playback", |e| {
+    wait(&control, &mut shell, "playback", |e| {
         e.playing && e.position > BAR * 8
     });
     shell
         .run("arrangement.set_insert_marker", json!({ "at": BAR * 3 }))
         .unwrap();
-    wait(&mut shell, "the marker", |e| e.insert_marker == BAR * 3);
+    wait(&control, &mut shell, "the marker", |e| e.insert_marker == BAR * 3);
     shell
         .run("audio.configure", json!({ "buffer_size": 128 }))
         .unwrap();
     let moved = shell.audio_mut().transport_state();
     assert!(moved.position > BAR * 8, "{moved:?}");
-    let back = wait(&mut shell, "the new engine's first block", |e| e.clock > 0);
+    let back = wait(&control, &mut shell, "the new engine's first block", |e| e.clock > 0);
     assert!(!back.playing, "stopped after the restart");
     assert_eq!(back.insert_marker, BAR * 3);
     // Within a block of where the old engine last showed it.
@@ -495,7 +503,7 @@ fn a_device_change_keeps_the_song_where_it_was_stopped() {
         "{moved:?} then {back:?}"
     );
     shell.run("transport.continue", json!({})).unwrap();
-    let resumed = wait(&mut shell, "Continue", |e| e.playing);
+    let resumed = wait(&control, &mut shell, "Continue", |e| e.playing);
     assert!(resumed.position >= back.position);
     shell.audio_mut().stop();
 }
@@ -503,14 +511,14 @@ fn a_device_change_keeps_the_song_where_it_was_stopped() {
 #[test]
 fn a_new_set_starts_stopped_at_the_start() {
     // Spec: control-bar-transport R16
-    let mut shell = shell();
+    let (mut shell, control) = shell();
     shell
         .run("transport.locate", json!({ "position": BAR * 5 }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    wait(&mut shell, "playback", |e| e.playing);
+    wait(&control, &mut shell, "playback", |e| e.playing);
     shell.run("set.new", json!({})).unwrap();
-    let fresh = wait(&mut shell, "the stop", |e| {
+    let fresh = wait(&control, &mut shell, "the stop", |e| {
         !e.playing && e.position == Ticks::ZERO && e.insert_marker == Ticks::ZERO
     });
     assert_eq!(fresh.insert_marker, shell.arrangement().insert_marker());

@@ -52,7 +52,6 @@ crates/shell/src/browser/index.rs # a timeout on the index's thread
 crates/shell/src/recording.rs # a timeout on a recording's thread
 crates/shell/tests/au_editor.rs # waits for a real Audio Unit's window
 crates/shell/tests/audio_settings.rs # a device's status changes on the system's clock
-crates/shell/tests/automation_record.rs # a timeout on the engine
 crates/shell/tests/browser.rs # a timeout on the browser's index
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/device_input.rs # a timeout on the engine's input
@@ -65,13 +64,6 @@ crates/shell/tests/plugins.rs # waits for a real CLAP plug-in
 crates/shell/tests/plugins_au.rs # waits for a real Audio Unit
 crates/shell/tests/processed_files.rs # a timeout on a processed file's write
 crates/shell/tests/realtime.rs # tests real-time safety under load
-crates/shell/tests/recording.rs # a timeout on a take
-crates/shell/tests/scene_tempo.rs # a timeout on a launch
-crates/shell/tests/session_automation.rs # a timeout on an automation pass
-crates/shell/tests/session_launch.rs # a timeout on a launch grid
-crates/shell/tests/session_recording.rs # a timeout on a recording
-crates/shell/tests/session_to_arrangement.rs # a timeout on an arrangement pass
-crates/shell/tests/transport.rs # a timeout on the transport
 crates/ui/tests/accessibility.rs # a timeout on the UI's layout
 crates/ui/tests/agent_settings.rs # a timeout on the agent server
 crates/ui/tests/browser.rs # a timeout on the browser's index

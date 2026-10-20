@@ -3,14 +3,14 @@
 //! Main column, the Create menu, and agents drive them (D17). The behaviour
 //! is in the session view spec, R20 to R25.
 
-use std::time::{Duration, Instant};
-
+use bl_audio_io::NullControl;
 use bl_core::time::{Bpm, TimeSignature};
 use bl_engine::SlotState;
 use bl_model::{SceneId, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
+use bl_shell::testing;
 use serde_json::json;
 
 fn scenes(shell: &Shell) -> Vec<SceneId> {
@@ -40,17 +40,16 @@ fn steps(shell: &Shell) -> usize {
     shell.editor().undo_history().len()
 }
 
-/// Polls the engine until `done` holds of the Session slots it publishes.
-fn wait_for(shell: &mut Shell, what: &str, done: impl Fn(&[bl_engine::SlotStatus]) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        shell.poll_engine();
-        if done(shell.session_states()) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("{what}: {:?}", shell.session_states());
+/// Waits until the Session slots the engine publishes satisfy `done`. The
+/// shell's null device is paced by hand (T199), so this lands on the same
+/// frames however busy the machine is.
+fn wait_for(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&[bl_engine::SlotStatus]) -> bool,
+) {
+    testing::wait_for(control, shell, what, |shell| done(shell.session_states()));
 }
 
 // Spec: session-view R20, R21. Each setting is one undo step and reads back.
@@ -129,7 +128,7 @@ fn capture_with_nothing_playing_inserts_an_empty_scene_after_the_selected_one() 
 // after the one launched last, and play on in the copies.
 #[test]
 fn capture_copies_the_playing_clips_and_the_clips_play_on_in_the_copies() {
-    let mut shell = Shell::headless();
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     assert!(shell.audio().engine_running());
     let track = a_midi_track(&shell);
@@ -149,17 +148,14 @@ fn capture_copies_the_playing_clips_and_the_clips_play_on_in_the_copies() {
     shell
         .run("session.launch_scene", json!({ "scene": launched }))
         .unwrap();
-    wait_for(&mut shell, "the scene plays", |slots| {
+    wait_for(&control, &mut shell, "the scene plays", |slots| {
         slots
             .iter()
             .any(|slot| slot.scene == launched && slot.state == SlotState::Playing)
     });
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while shell.scene_override().tempo.is_none() {
-        assert!(Instant::now() < deadline, "the scene's tempo never applied");
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    testing::wait_for(&control, &mut shell, "the scene's tempo to apply", |shell| {
+        shell.scene_override().tempo.is_some()
+    });
     assert_eq!(shell.current_tempo(), Bpm::new(100.0).unwrap());
     // A selection elsewhere doesn't matter once a scene has launched.
     shell
@@ -187,7 +183,7 @@ fn capture_copies_the_playing_clips_and_the_clips_play_on_in_the_copies() {
         Some(shell.current_tempo()),
         "the scene holds the tempo in force"
     );
-    wait_for(&mut shell, "the copy plays on", |slots| {
+    wait_for(&control, &mut shell, "the copy plays on", |slots| {
         slots.len() == 1 && slots[0].scene == new && slots[0].state == SlotState::Playing
     });
 }
@@ -275,7 +271,7 @@ fn the_scene_fields_show_the_sets_values_until_the_scene_has_its_own() {
 // Automation gives the set's own back.
 #[test]
 fn re_enable_automation_gives_back_the_sets_tempo() {
-    let mut shell = Shell::headless();
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     assert!(shell.audio().engine_running());
     let scene = scenes(&shell)[0];
@@ -285,19 +281,13 @@ fn re_enable_automation_gives_back_the_sets_tempo() {
     shell
         .run("session.launch_scene", json!({ "scene": scene }))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while shell.scene_override().tempo.is_none() {
-        assert!(Instant::now() < deadline, "the scene's tempo never applied");
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    testing::wait_for(&control, &mut shell, "the scene's tempo to apply", |shell| {
+        shell.scene_override().tempo.is_some()
+    });
     assert_eq!(shell.current_tempo(), Bpm::new(80.0).unwrap());
     shell.run("automation.re_enable", json!({})).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !shell.scene_override().is_none() {
-        assert!(Instant::now() < deadline, "the override never cleared");
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    testing::wait_for(&control, &mut shell, "the override to clear", |shell| {
+        shell.scene_override().is_none()
+    });
     assert_eq!(shell.current_tempo(), Bpm::new(120.0).unwrap());
 }

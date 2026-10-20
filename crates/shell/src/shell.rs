@@ -6839,14 +6839,22 @@ impl Shell {
                 let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
             }
             let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+            // The plug-in hosts, without borrowing the whole shell: the
+            // export may render in real time, which needs the audio host.
+            let hosts = bl_plugin_host::Hosts {
+                clap: Some(&self.plugins),
+                vst3: Some(&self.vst3),
+                au: Some(&self.au),
+            };
             return crate::export::run_command(
                 self.editor.document(),
                 media,
-                self.plugin_hosts(),
+                hosts,
                 self.arrangement.time_selection(),
                 self.arrangement.selected_tracks(),
                 engine_rate,
                 &args,
+                Some(&mut self.audio),
             )
             .map(|result| to_value(&result));
         }

@@ -455,6 +455,7 @@ impl AuHost {
         let (descriptors, _, _) = describe(&unit);
         let found = AuType {
             device_type: DeviceType {
+                external_output: false,
                 kind: kind(&id),
                 name,
                 role,

@@ -134,6 +134,9 @@ pub struct EngineProgram {
     /// The tracks that play on the device's channels instead of into Main
     /// (Audio To set to Ext. Out), in display order.
     pub(crate) ext_outs: Vec<ExtOut>,
+    /// The external effects in the program, with their slots and the
+    /// interface's outputs they send to (WP-5.35).
+    pub(crate) external_effects: Vec<(u32, Channel)>,
     /// The task that sums the cue-switched tracks, in Cue mode (WP-3.18):
     /// the last of `ext_outs`, and no track of the set's, so it has no
     /// meters.
@@ -448,6 +451,12 @@ pub(crate) struct NodeSlot {
     /// For an external instrument (WP-5.34): the interface inputs its sound
     /// comes back on, which the program maps into the block it is given.
     pub(crate) external: Option<Channel>,
+    /// For an external effect (WP-5.35): the interface outputs it sends
+    /// its signal to.
+    pub(crate) external_to: Option<Channel>,
+    /// For an external effect (WP-5.35): the buffer in `tap_pool` it writes
+    /// the signal it sends to the interface into.
+    pub(crate) external_out: Option<u32>,
     /// For a device with extra audio outputs (WP-5.45): its buffers in
     /// `tap_pool`, one per output in the order the device declares them,
     /// which the program hands it to render into. Empty for a device with
@@ -643,6 +652,7 @@ fn map_device_input(
     channel: Channel,
     channels: usize,
     stride: usize,
+    offset: usize,
     frames: usize,
 ) {
     let (left, right) = match channel {
@@ -657,7 +667,9 @@ fn map_device_input(
             .filter(|&index| index < device_channels)
         {
             Some(index) => {
-                let from = &input[index * stride..index * stride + frames];
+                // The interface's input for this part of the block, which
+                // starts at the part's first frame.
+                let from = &input[index * stride + offset..index * stride + offset + frames];
                 to.copy_from_slice(from);
             }
             None => to.fill(0.0),
@@ -1181,6 +1193,7 @@ impl EngineProgram {
                     tempo: &self.tempo,
                     sidechain: None,
                     external: None,
+                    external_out: None,
                     outputs: None,
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
@@ -1233,6 +1246,7 @@ impl EngineProgram {
                 device.channel,
                 channels,
                 stride,
+                from as usize,
                 frames,
             );
             if let Some(Instance::Route(route)) = turn.slot(device.route).node.as_mut() {
@@ -1343,6 +1357,7 @@ impl EngineProgram {
                 tempo: &self.tempo,
                 sidechain: None,
                 external: None,
+                external_out: None,
                 outputs: None,
                 notes: &[],
                 notes_out: None,
@@ -1521,22 +1536,87 @@ impl EngineProgram {
     }
 
     /// Task `task`'s channel `c` from the last run, `frames` long.
-    fn task_output(&self, task: u32, c: usize, frames: usize) -> &[f32] {
+    pub(crate) fn task_output(&self, task: u32, c: usize, frames: usize) -> &[f32] {
         let start = task as usize * self.channels * self.max_frames + c * self.max_frames;
         &self.pool[start..start + frames.min(self.max_frames)]
+    }
+
+    /// The task a track's signal is in, for a real-time render's capture
+    /// (WP-5.35).
+    pub(crate) fn task_of(&self, track: bl_model::TrackId) -> Option<u32> {
+        self.tasks
+            .iter()
+            .position(|task| task.track == track)
+            .and_then(|at| u32::try_from(at).ok())
     }
 
     /// How many device channels the Ext. Out tracks reach: one past the
     /// highest.
     pub(crate) fn ext_width(&self) -> usize {
-        self.ext_outs
+        let tracks = self
+            .ext_outs
             .iter()
             .map(|e| match e.channel {
                 Channel::Mono(c) => usize::from(c),
                 Channel::Pair(c) => usize::from(c) + 1,
             })
             .max()
-            .unwrap_or(0)
+            .unwrap_or(0);
+        // Spec: external-devices R18. An external effect sends its signal to
+        // the interface's outputs too.
+        let effects = self
+            .external_effects
+            .iter()
+            .map(|(_, channel)| match channel {
+                Channel::Mono(c) => usize::from(*c),
+                Channel::Pair(c) => usize::from(*c) + 1,
+            })
+            .max()
+            .unwrap_or(0);
+        tracks.max(effects)
+    }
+
+    /// Adds the external effects' signals from the last run onto `out`,
+    /// which holds `width` device channels `stride` apart, `length` frames
+    /// from `offset`. A pair plays left and right on its two channels, a
+    /// single channel takes both added and 6 dB down (the manual, 17.2.1);
+    /// a channel past `width` is the device's absence and plays nothing.
+    /// Spec: external-devices R18.
+    pub(crate) fn mix_external_effects(
+        &self,
+        out: &mut [f32],
+        width: usize,
+        stride: usize,
+        offset: usize,
+        length: usize,
+    ) {
+        let size = self.channels * self.max_frames;
+        for (slot, channel) in &self.external_effects {
+            let Some(buffer) = self.slots[*slot as usize].external_out else {
+                continue;
+            };
+            let at = buffer as usize * size;
+            let data = &self.tap_pool[at..at + size];
+            let left = &data[..length.min(self.max_frames)];
+            let right = &data[self.max_frames..self.max_frames + length.min(self.max_frames)];
+            let mut add = |channel: usize, gain_l: f32, gain_r: f32| {
+                // Channels count from 1; 0 names nothing.
+                let Some(channel) = channel.checked_sub(1).filter(|&c| c < width) else {
+                    return;
+                };
+                let to = channel * stride + offset;
+                for (i, sample) in out[to..to + length].iter_mut().enumerate() {
+                    *sample += left[i] * gain_l + right[i] * gain_r;
+                }
+            };
+            match channel {
+                Channel::Mono(c) => add(usize::from(*c), 0.5, 0.5),
+                Channel::Pair(c) => {
+                    add(usize::from(*c), 1.0, 0.0);
+                    add(usize::from(*c) + 1, 0.0, 1.0);
+                }
+            }
+        }
     }
 
     /// Adds the Ext. Out tracks from the last run onto `out`, which holds
@@ -1964,17 +2044,24 @@ impl EngineProgram {
                     audio_from,
                     channels,
                     stride,
+                    block.from as usize,
                     frames,
                 );
                 returned = Some(&pass.device[..channels * stride]);
             }
             let outputs = turn.slot(slot).outputs;
             let output_tapped = outputs.start != outputs.end;
+            // Spec: external-devices R18. An external effect writes the
+            // signal it sends to the interface into a buffer of its own.
+            let external_out = turn.slot(slot).external_out;
             if bypass {
                 // A switched-off device renders nothing: its extra outputs
                 // carry silence (WP-5.45).
                 if output_tapped {
                     turn.outputs(outputs).fill(0.0);
+                }
+                if let Some(at) = external_out {
+                    turn.keep(at).fill(0.0);
                 }
                 node.flush(pass.scratch);
                 // Spec: device-framework R32. A device switched off ends
@@ -2002,6 +2089,7 @@ impl EngineProgram {
                 tempo: &self.tempo,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
                 external: returned,
+                external_out: external_out.map(|at| turn.keep(at)),
                 outputs: output_tapped.then(|| turn.outputs(outputs)),
                 notes: heard_notes.unwrap_or_else(|| in_buf.notes()),
                 notes_out: Some(out_buf),
@@ -2246,6 +2334,7 @@ impl EngineProgram {
             modulation: turn.bus(frames),
             rows: None,
             external: None,
+            external_out: None,
             outputs: None,
         });
         turn.selects_mut(rack)[..frames].copy_from_slice(selector.values(frames));
@@ -2433,6 +2522,7 @@ impl EngineProgram {
                     tempo: &self.tempo,
                     sidechain: None,
                     external: None,
+                    external_out: None,
                     outputs: None,
                     notes: &[],
                     notes_out: None,

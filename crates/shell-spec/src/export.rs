@@ -155,6 +155,20 @@ pub struct ExportArgs {
     /// exactly the range long. Off unless given.
     #[serde(default, skip_serializing_if = "is_false")]
     pub render_as_loop: bool,
+    /// How long the render waits before it starts, in seconds, so the
+    /// hardware's last sound dies away: 10 unless given, and longer if the
+    /// seconds are given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_seconds: Option<u32>,
+    /// Whether the render starts again when a dropout spoils it: on unless
+    /// told otherwise. With it off, the render carries on and the dropouts
+    /// are listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_restart: Option<bool>,
+    /// The most times the render may start again after a dropout: no limit
+    /// when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
 }
 
 /// Where an export's range came from.
@@ -214,11 +228,33 @@ pub struct ExportResult {
     /// Media that clips name and that couldn't be found, by content hash:
     /// those clips are silent in the export.
     pub missing_media: Vec<String>,
-    /// The devices that work with hardware (an external instrument), by the
-    /// name their title bar shows and their ID: they send nothing to
-    /// hardware in an offline render and bring back silence.
+    /// The devices that work with hardware (an external instrument or an
+    /// external effect), by the name their title bar shows and their ID:
+    /// they send nothing to hardware in an offline render and bring back
+    /// silence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub silenced_external_devices: Vec<String>,
+    /// Whether the export rendered in real time, on the running engine,
+    /// because its path runs through external hardware.
+    #[serde(default)]
+    pub real_time: bool,
+    /// How many times the render started: more than one when a dropout
+    /// spoiled it and it started again.
+    #[serde(default)]
+    pub attempts: u32,
+    /// The dropouts the render found, each with the song position it
+    /// happened at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropouts: Vec<Dropout>,
+}
+
+/// A dropout a real-time render found.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Dropout {
+    /// The song position it happened at, in ticks from 1.1.1.
+    pub position: Ticks,
+    /// What it was: the device's report, or a ring too full.
+    pub kind: String,
 }
 
 /// Adds the export commands to a registry.
@@ -249,7 +285,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  converted down. Files are written under temporary names and appear only when \
                  complete. Existing files are refused unless `replace` is true. Playback stops \
                  first, and plug-in devices render through the plug-ins the engine plays, lent to \
-                 the export and handed back afterwards. Changes nothing in the set.",
+                 the export and handed back afterwards. An export whose path runs through external \
+                 hardware renders in real time, on the running engine, after waiting \
+                 `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; \
+                 `auto_restart` (on unless told otherwise) starts it again when a dropout spoils \
+                 it, up to `max_attempts` times, and with it off the dropouts are listed. \
+                 Changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)

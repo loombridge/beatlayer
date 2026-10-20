@@ -1,5 +1,6 @@
 //! The audio thread's side of the engine.
 
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
@@ -21,6 +22,7 @@ use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
 use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
 use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
+use crate::render::RenderPlan;
 use crate::sched::{Lane, Pool};
 use crate::session::{
     Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
@@ -264,6 +266,9 @@ pub struct Processor {
     recording: bool,
     /// What to record: the shell's plan, whose rings close when it goes.
     plan: Option<Owned<RecordingPlan>>,
+    /// What to capture while the song plays a range in real time
+    /// (WP-5.35): the shell's plan, whose rings close when it goes.
+    rendering: Option<Owned<RenderPlan>>,
     /// The take being captured, if playback is running under recording.
     take: Option<Take>,
     /// The Session recording under way or waiting for the grid (WP-3.11).
@@ -336,6 +341,7 @@ impl Processor {
             punch_frames: PunchFrames::default(),
             recording: false,
             plan: None,
+            rendering: None,
             take: None,
             session_take: None,
             last_take: None,
@@ -688,6 +694,9 @@ impl Processor {
                 Message::Record(plan) => {
                     self.last_take = None;
                     self.plan = Some(plan);
+                }
+                Message::Render(plan) => {
+                    self.rendering = Some(plan);
                 }
                 Message::OutputLatency(frames) => self.output_latency = frames,
             }
@@ -1598,6 +1607,9 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        // The song frame this part starts at, for a real-time render's
+        // range (WP-5.35).
+        let song = self.position;
         // Every device channel, so a count-in or a part that plays fewer
         // of them leaves no earlier block's Ext. Out behind.
         for c in 0..self.config.output_channels {
@@ -1651,6 +1663,16 @@ impl Processor {
                 // Spec: routing R3. A channel the device lacks plays nothing.
                 self.ext_width = program.ext_width().min(self.config.output_channels);
                 program.mix_external(&mut self.ext_output, self.ext_width, stride, offset, length);
+                // Spec: external-devices R18. An external effect sends its
+                // signal to the interface's outputs, where it adds to
+                // whatever else plays there.
+                program.mix_external_effects(
+                    &mut self.ext_output,
+                    self.ext_width,
+                    stride,
+                    offset,
+                    length,
+                );
             }
             None => {
                 self.ext_width = 0;
@@ -1698,6 +1720,52 @@ impl Processor {
                 self.position = region.start;
             }
         }
+        // Spec: external-devices R24. A real-time render captures the
+        // outputs it renders while the song plays the range, and the
+        // transport stops at the range's end.
+        if self.rendering.is_some() {
+            self.capture_render(song, length);
+        }
+    }
+
+    /// Copies the part of the block the real-time render's range covers
+    /// into its rings, and stops the song at the range's end. Real-time
+    /// safe: copies into rings made when the engine was, no locks.
+    fn capture_render(&mut self, position: Frames, frames: usize) {
+        if !self.playing || frames == 0 {
+            return;
+        }
+        let mut plan = match self.rendering.take() {
+            Some(plan) => plan,
+            None => return,
+        };
+        if let Some(program) = self.program.as_mut() {
+            let program = program.get_mut();
+            // A ring too full for the part counts the frames it dropped
+            // (R25); the shell sees the count and restarts the render.
+            let _ = crate::render::capture(
+                plan.get_mut(),
+                program,
+                position,
+                frames,
+                self.config.channels,
+            );
+        }
+        let done = {
+            let plan = plan.get_mut();
+            let frames = plan.frames;
+            plan.outputs
+                .iter()
+                .all(|output| output.captured.load(Relaxed) >= frames)
+        };
+        if done {
+            // The range is rendered: the song stops at its end and stays
+            // stopped.
+            self.playing = false;
+            self.metronome.stop();
+            self.position = plan.get_mut().end();
+        }
+        self.rendering = Some(plan);
     }
 
     /// Copies this part of the block's device input into the recording

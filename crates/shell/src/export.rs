@@ -40,8 +40,8 @@ use bl_model::{ContentHash, DeviceId, Document, TrackId};
 pub use bl_plugin_host::Hosts;
 use bl_shell_spec::editing::Position;
 use bl_shell_spec::export::{
-    AUDIO, Dither as SpecDither, ExportArgs, ExportResult, FileType as SpecFileType, RangeSource,
-    RenderedTrack,
+    AUDIO, Dither as SpecDither, Dropout as SpecDropout, ExportArgs, ExportResult,
+    FileType as SpecFileType, RangeSource, RenderedTrack,
 };
 
 use crate::ShellError;
@@ -295,8 +295,42 @@ pub fn export_multi(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Vec<Report>, ExportError> {
+    let (reports, partials) = render_multi(renders, media, plugins, cancel, progress)?;
+    let destinations: Vec<PathBuf> = renders.iter().map(|(_, job)| job.path.clone()).collect();
+    promote(&partials, &destinations)?;
+    progress(1.0);
+    Ok(reports)
+}
+
+/// Moves the finished files into place, one by one. If a rename fails, the
+/// files already moved remain in place while the rest are deleted.
+fn promote(partials: &[PathBuf], destinations: &[PathBuf]) -> Result<(), ExportError> {
+    for (partial, destination) in partials.iter().zip(destinations) {
+        if let Err(error) = fs::rename(partial, destination) {
+            for p in partials {
+                let _ = fs::remove_file(p);
+            }
+            return Err(ExportError::Failed(format!(
+                "{}: {error}",
+                destination.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Renders the exports to the hidden files beside their destinations,
+/// without moving them into place: the caller may render more before the
+/// files are complete (WP-5.35). Returns the reports and the partial files.
+pub fn render_multi(
+    renders: &[(&Document, &Job)],
+    media: Arc<dyn MediaLibrary>,
+    plugins: Hosts<'_>,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+) -> Result<(Vec<Report>, Vec<PathBuf>), ExportError> {
     if renders.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     for (_, job) in renders {
         check(job)?;
@@ -349,23 +383,7 @@ pub fn export_multi(
         return Err(error);
     }
 
-    // Spec: export R10. Only complete files reach their destinations.
-    // Files are renamed into place one by one. If a rename fails, the files
-    // already moved remain in place while remaining partial files are deleted.
-    for ((_, job), partial) in renders.iter().zip(&partials) {
-        if let Err(error) = fs::rename(partial, &job.path) {
-            for p in &partials {
-                let _ = fs::remove_file(p);
-            }
-            return Err(ExportError::Failed(format!(
-                "{}: {error}",
-                job.path.display()
-            )));
-        }
-    }
-
-    progress(1.0);
-    Ok(reports)
+    Ok((reports, partials))
 }
 
 /// Checks a job before anything is rendered or written.
@@ -680,11 +698,6 @@ pub fn render(
 
 /// Where an export's render goes: straight to the writer, or, with
 /// Normalize, to the scratch file for a second pass.
-enum Out {
-    Writer(AudioWriter),
-    Scratch(BufWriter<File>, Vec<u8>),
-}
-
 fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
     samples.clear();
     for frame in 0..output.frames() {
@@ -692,20 +705,17 @@ fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
     }
 }
 
-fn run(
-    document: &Document,
-    media: Arc<dyn MediaLibrary>,
-    plugins: Hosts<'_>,
-    job: &Job,
-    (partial, scratch): (&Path, &Path),
-    cancel: &AtomicBool,
-    progress: &mut dyn FnMut(f64),
-) -> Result<Report, ExportError> {
-    let began = Instant::now();
-    let failed = |what: &Path, error: &dyn std::fmt::Display| {
-        ExportError::Failed(format!("{}: {error}", what.display()))
-    };
-    let spec = EncodeSpec {
+pub(crate) enum Out {
+    /// The file itself: the writer that encodes and rounds.
+    Writer(AudioWriter),
+    /// The scratch file the normalise pass reads: the raw samples.
+    Scratch(BufWriter<File>, Vec<u8>),
+}
+
+/// How a file is encoded: its type, its bits, its dither, its rate, and
+/// its channels.
+pub(crate) fn encode_spec(job: &Job) -> Result<EncodeSpec, ExportError> {
+    Ok(EncodeSpec {
         file_type: job.file_type,
         bit_depth: job.bit_depth,
         dither: if job.bit_depth.is_integer() {
@@ -722,7 +732,137 @@ fn run(
             job.block,
         )
         .channels as u16,
+    })
+}
+
+/// Opens the file a job writes: the writer for the finished file, or the
+/// scratch file the normalise pass reads.
+pub(crate) fn open(
+    job: &Job,
+    (partial, scratch): (&Path, &Path),
+    spec: EncodeSpec,
+) -> Result<Out, ExportError> {
+    let failed = |what: &Path, error: &dyn std::fmt::Display| {
+        ExportError::Failed(format!("{}: {error}", what.display()))
     };
+    if job.normalize {
+        let file = File::create(scratch).map_err(|error| failed(scratch, &error))?;
+        Ok(Out::Scratch(BufWriter::with_capacity(1 << 16, file), Vec::new()))
+    } else {
+        let writer =
+            AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
+        Ok(Out::Writer(writer))
+    }
+}
+
+/// Writes samples into the file: the writer, or the scratch file.
+pub(crate) fn write(out: &mut Out, samples: &[f32]) -> Result<(), ExportError> {
+    match out {
+        Out::Writer(writer) => writer
+            .write(samples)
+            .map_err(|error| ExportError::Failed(error.to_string())),
+        Out::Scratch(file, bytes) => {
+            bytes.clear();
+            for sample in samples {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+            file.write_all(bytes)
+                .map_err(|error| ExportError::Failed(format!("the scratch file: {error}")))
+        }
+    }
+}
+
+/// Finishes a render's file: with Normalize, the scratch file through the
+/// gain to a new writer for the finished file (the export spec, R8);
+/// without it, the writer itself. `head` is the loop render's head, in
+/// the file's rate, and `total` the frames the scratch file holds.
+/// Returns the writer, the gain, and the peak of what was written.
+pub(crate) fn finish(
+    out: Out,
+    spec: EncodeSpec,
+    partial: &Path,
+    scratch: &Path,
+    head: &mut [f32],
+    total: u64,
+    peak: f32,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+) -> Result<(AudioWriter, f64, f32), ExportError> {
+    let failed = |what: &Path, error: &dyn std::fmt::Display| {
+        ExportError::Failed(format!("{}: {error}", what.display()))
+    };
+    let Out::Scratch(file, _) = out else {
+        return Err(ExportError::Failed(
+            "the render has no scratch file to normalise".to_owned(),
+        ));
+    };
+    let mut gain = 1.0;
+    if peak > 0.0 {
+        gain = 1.0 / f64::from(peak);
+    }
+    file.into_inner()
+        .map_err(|error| failed(scratch, &error.error().to_string()))?;
+    let mut writer = AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
+    let channels = usize::from(spec.channels);
+    let mut reader = BufReader::with_capacity(
+        1 << 16,
+        File::open(scratch).map_err(|error| failed(scratch, &error))?,
+    );
+    let chunk_frames = 8192;
+    let mut bytes = vec![0u8; chunk_frames * channels * 4];
+    let mut chunk = Vec::with_capacity(chunk_frames * channels);
+    let mut read = 0u64;
+    let mut peak = 0.0f32;
+    for sample in head.iter_mut() {
+        *sample = (f64::from(*sample) * gain) as f32;
+        peak = peak.max(sample.abs());
+    }
+    writer
+        .write(head)
+        .map_err(|error| failed(partial, &error))?;
+    while read < total {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ExportError::Cancelled);
+        }
+        let take = (chunk_frames as u64).min(total - read) as usize;
+        let bytes = &mut bytes[..take * channels * 4];
+        reader
+            .read_exact(bytes)
+            .map_err(|error| failed(scratch, &error))?;
+        chunk.clear();
+        chunk.extend(
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| (f64::from(f32::from_le_bytes(*b)) * gain) as f32),
+        );
+        for sample in &chunk {
+            peak = peak.max(sample.abs());
+        }
+        writer
+            .write(&chunk)
+            .map_err(|error| failed(partial, &error))?;
+        read += take as u64;
+        progress(read as f64 / total.max(1) as f64);
+    }
+    Ok((writer, gain, peak))
+}
+
+fn run(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    plugins: Hosts<'_>,
+    job: &Job,
+    (partial, scratch): (&Path, &Path),
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Report, ExportError> {
+    let began = Instant::now();
+    let failed = |what: &Path, error: &dyn std::fmt::Display| {
+        ExportError::Failed(format!("{}: {error}", what.display()))
+    };
+    let spec = encode_spec(job)?;
     // Spec: export R26. A loop's head can't be written before the tail is
     // known, so it waits in memory, the first TAIL_SECONDS of the file at
     // most (the tail is no longer); the rest goes to the scratch file.
@@ -803,62 +943,20 @@ fn run(
 
     // Pass two, with Normalize or Render as Loop: the head and the scratch
     // file through the gain to the writer. Spec: export R8.
-    let mut gain = 1.0;
-    let writer = match out {
-        Out::Writer(writer) => writer,
-        Out::Scratch(file, _) => {
-            file.into_inner()
-                .map_err(|error| failed(scratch, &error.error().to_string()))?;
-            if job.normalize && peak > 0.0 {
-                gain = 1.0 / f64::from(peak);
-            }
-            let mut writer =
-                AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
-            let mut reader = BufReader::with_capacity(
-                1 << 16,
-                File::open(scratch).map_err(|error| failed(scratch, &error))?,
-            );
-            let chunk_frames = 8192;
-            let mut bytes = vec![0u8; chunk_frames * channels * 4];
-            let mut chunk = Vec::with_capacity(chunk_frames * channels);
-            let total = rendered.frames - (head.len() / channels) as u64;
-            let mut read = 0u64;
-            peak = 0.0;
-            for sample in &mut head {
-                *sample = (f64::from(*sample) * gain) as f32;
-                peak = peak.max(sample.abs());
-            }
-            writer
-                .write(&head)
-                .map_err(|error| failed(partial, &error))?;
-            while read < total {
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(ExportError::Cancelled);
-                }
-                let take = (chunk_frames as u64).min(total - read) as usize;
-                let bytes = &mut bytes[..take * channels * 4];
-                reader
-                    .read_exact(bytes)
-                    .map_err(|error| failed(scratch, &error))?;
-                chunk.clear();
-                chunk.extend(
-                    bytes
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|b| (f64::from(f32::from_le_bytes(*b)) * gain) as f32),
-                );
-                for sample in &chunk {
-                    peak = peak.max(sample.abs());
-                }
-                writer
-                    .write(&chunk)
-                    .map_err(|error| failed(partial, &error))?;
-                read += take as u64;
-                progress(0.5 + read as f64 / total as f64 / 2.0);
-            }
-            writer
-        }
+    let total = rendered.frames - (head.len() / channels) as u64;
+    let (writer, gain, peak) = match out {
+        Out::Writer(writer) => (writer, 1.0, peak),
+        out @ Out::Scratch(_, _) => finish(
+            out,
+            spec,
+            partial,
+            scratch,
+            &mut head,
+            total,
+            peak,
+            cancel,
+            &mut |share| progress(0.5 + share / 2.0),
+        )?,
     };
     if cancel.load(Ordering::Relaxed) {
         return Err(ExportError::Cancelled);
@@ -1069,6 +1167,7 @@ pub fn run_command(
     selected_tracks: &[TrackId],
     engine_rate: u32,
     args: &ExportArgs,
+    audio: Option<&mut crate::audio::AudioHost>,
 ) -> Result<ExportResult, ShellError> {
     let invalid = |message: String| ShellError::InvalidArgs {
         command: AUDIO.to_owned(),
@@ -1137,10 +1236,11 @@ pub fn run_command(
         block: BLOCK,
     };
 
-    let (renders, written_paths): (Vec<(Document, Job)>, Vec<PathBuf>) = match rendered_choice {
+    let (renders, written_paths): (Vec<(Option<TrackId>, Document, Job)>, Vec<PathBuf>) =
+        match rendered_choice {
         RenderedTrack::Main => {
             let job = make_job(path.clone());
-            (vec![(document.clone(), job)], vec![path.clone()])
+            (vec![(None, document.clone(), job)], vec![path.clone()])
         }
         RenderedTrack::Track(id) => {
             if id == document.main_id() {
@@ -1155,7 +1255,7 @@ pub fn run_command(
                 prepare_document_for_track(document, id, args.include_return_and_main_effects)
                     .map_err(invalid)?;
             let job = make_job(path.clone());
-            (vec![(transformed, job)], vec![path.clone()])
+            (vec![(Some(id), transformed, job)], vec![path.clone()])
         }
         RenderedTrack::AllTracks => {
             let tracks: Vec<&bl_model::Track> = document
@@ -1178,7 +1278,7 @@ pub fn run_command(
                     args.include_return_and_main_effects,
                 )
                 .map_err(invalid)?;
-                renders.push((transformed, make_job(dest.clone())));
+                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
             }
             (renders, dest_paths)
         }
@@ -1209,21 +1309,25 @@ pub fn run_command(
                     args.include_return_and_main_effects,
                 )
                 .map_err(invalid)?;
-                renders.push((transformed, make_job(dest.clone())));
+                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
             }
             (renders, dest_paths)
         }
     };
 
-    let render_refs: Vec<(&Document, &Job)> = renders.iter().map(|(d, j)| (d, j)).collect();
-    let reports = export_multi(
-        &render_refs,
-        media,
-        plugins,
-        &AtomicBool::new(false),
-        &mut |_| {},
-    )
-    .map_err(|error| match error {
+    // Spec: external-devices R22. The outputs whose path runs through
+    // external hardware render in real time; the others render offline, as
+    // before.
+    let mut live: Vec<(Option<TrackId>, &Document, &Job)> = Vec::new();
+    let mut offline: Vec<(&Document, &Job)> = Vec::new();
+    for (track, document, job) in &renders {
+        if crate::realtime::needs_real_time(document, *track) {
+            live.push((*track, document, job));
+        } else {
+            offline.push((document, job));
+        }
+    }
+    let failed = |error: ExportError| match error {
         ExportError::Invalid(message) => invalid(message),
         ExportError::Exists(_) => ShellError::Unavailable {
             command: AUDIO.to_owned(),
@@ -1233,7 +1337,49 @@ pub fn run_command(
             command: AUDIO.to_owned(),
             message: error.to_string(),
         },
-    })?;
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (mut reports, partials) = render_multi(&offline, media, plugins, &cancel, &mut |_| {})
+        .map_err(failed)?;
+    let mut outcome = crate::realtime::Outcome::default();
+    if !live.is_empty() {
+        // Spec: external-devices R22, R26. Without a running audio device,
+        // an export that needs real time is refused before anything renders.
+        let Some(audio) = audio else {
+            return Err(invalid(
+                "the export needs the hardware, and no audio device is open".to_owned(),
+            ));
+        };
+        let jobs: Vec<(Option<TrackId>, Job)> = live
+            .iter()
+            .map(|(track, _, job)| (*track, (*job).clone()))
+            .collect();
+        let (live_reports, live_outcome) = crate::realtime::render(
+            audio,
+            &jobs,
+            document,
+            start,
+            Length::To(end),
+            std::time::Duration::from_secs(u64::from(args.wait_seconds.unwrap_or(10))),
+            args.auto_restart.unwrap_or(true),
+            args.max_attempts,
+            &cancel,
+            &mut |_| {},
+        )
+        .map_err(failed)?;
+        reports.extend(live_reports);
+        outcome = live_outcome;
+        let live_partials: Vec<PathBuf> = jobs
+            .iter()
+            .map(|(_, job)| hidden_beside(&job.path, "partial"))
+            .collect();
+        let destinations: Vec<PathBuf> = jobs.iter().map(|(_, job)| job.path.clone()).collect();
+        promote(&live_partials, &destinations).map_err(failed)?;
+        let _ = partials;
+    } else {
+        let destinations: Vec<PathBuf> = offline.iter().map(|(_, job)| job.path.clone()).collect();
+        promote(&partials, &destinations).map_err(failed)?;
+    }
 
     let canonical_path = fs::canonicalize(&path).unwrap_or(path);
     let files: Vec<String> = written_paths
@@ -1296,13 +1442,26 @@ pub fn run_command(
         missing_media,
         // Spec: external-devices R16. An offline export reaches no hardware.
         silenced_external_devices: document.external_devices(),
+        // Spec: external-devices R26, R27. The export says whether it
+        // rendered in real time, how many attempts it took, and the
+        // dropouts it found.
+        real_time: !live.is_empty(),
+        attempts: outcome.attempts,
+        dropouts: outcome
+            .dropouts
+            .iter()
+            .map(|dropout| SpecDropout {
+                position: dropout.position,
+                kind: dropout.kind.clone(),
+            })
+            .collect(),
     })
 }
 
 /// Converts a render down to the file's rate as it arrives, a chunk at a
 /// time, exactly as [`RateConverter::convert`] converts it whole: the
 /// converter's delay dropped, and `ceil(frames × to ÷ from)` frames out.
-struct Downsampler {
+pub(crate) struct Downsampler {
     converter: RateConverter,
     channels: usize,
     /// Input waiting for a whole chunk, one buffer per channel.
@@ -1316,7 +1475,12 @@ struct Downsampler {
 }
 
 impl Downsampler {
-    fn new(from: u32, to: u32, channels: usize, frames: u64) -> Result<Self, ExportError> {
+    pub(crate) fn new(
+        from: u32,
+        to: u32,
+        channels: usize,
+        frames: u64,
+    ) -> Result<Self, ExportError> {
         let converter = RateConverter::new(from, to, channels)
             .map_err(|error| ExportError::Failed(error.to_string()))?;
         let room = converter.output_frames_max();
@@ -1332,7 +1496,7 @@ impl Downsampler {
         })
     }
 
-    fn push(
+    pub(crate) fn push(
         &mut self,
         samples: &[f32],
         sink: &mut dyn FnMut(&[f32]) -> Result<(), ExportError>,
@@ -1348,7 +1512,7 @@ impl Downsampler {
         Ok(())
     }
 
-    fn finish(
+    pub(crate) fn finish(
         &mut self,
         sink: &mut dyn FnMut(&[f32]) -> Result<(), ExportError>,
     ) -> Result<(), ExportError> {

@@ -70,6 +70,10 @@ pub struct DeviceType {
     /// the sound comes back on, and a Hardware Latency
     /// ([`bl_model::External`]).
     pub external: bool,
+    /// Whether its devices send their audio to the interface's outputs and
+    /// hear it back (WP-5.35): an external effect, with an Audio To beside
+    /// its Audio From.
+    pub external_output: bool,
     /// Whether its devices have a MIDI sidechain input (WP-5.27): the
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
@@ -96,6 +100,7 @@ impl DeviceType {
             description: DeviceDescription::default(),
             sidechain: false,
             external: false,
+            external_output: false,
             midi_sidechain: false,
             outputs: Vec::new(),
         }
@@ -119,6 +124,15 @@ impl DeviceType {
     #[must_use]
     pub fn with_external(mut self) -> Self {
         self.external = true;
+        self
+    }
+
+    /// The same device type, sending its audio to the interface and hearing
+    /// it back: an external effect (WP-5.35).
+    #[must_use]
+    pub fn with_external_output(mut self) -> Self {
+        self.external = true;
+        self.external_output = true;
         self
     }
 
@@ -148,6 +162,9 @@ impl DeviceType {
         }
         if self.external {
             device = device.with_external();
+        }
+        if self.external_output {
+            device = device.with_external_output();
         }
         if self.midi_sidechain {
             device = device.with_midi_sidechain();

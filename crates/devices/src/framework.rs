@@ -209,6 +209,27 @@ impl<'a> Audio<'_, 'a> {
         self.block.external(channel).map(|data| &data[range])
     }
 
+    /// The stretch's samples on `channel`, and the buffer an external
+    /// effect writes the signal it sends to the audio interface's outputs
+    /// into (WP-5.35). The second is `None` for a device that isn't an
+    /// external effect.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    pub fn channel_with_external_out(
+        &mut self,
+        channel: usize,
+    ) -> (&mut [f32], Option<&mut [f32]>) {
+        let range = self.range.clone();
+        let block = &mut *self.block;
+        let (data, out) = block.channel_with_external_out(channel);
+        (
+            &mut data[range.clone()],
+            out.map(|out| &mut out[range]),
+        )
+    }
+
     /// Sends a note on from the stretch, at `note.offset` frames after its
     /// first frame (clamped into it): the notes go out in order of offset,
     /// note-offs before note-ons on one frame (spec: device-framework R30).

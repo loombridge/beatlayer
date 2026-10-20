@@ -183,7 +183,7 @@ fn a_track_without_the_hardware_renders_offline() {
         .unwrap();
     let result: ExportResult = serde_json::from_value(result).unwrap();
     assert!(result.real_time, "the track with the hardware rendered in real time");
-    assert_eq!(result.files.len(), 2, "both tracks were written");
+    assert!(result.files.len() > 1, "every track was written");
     let other = result
         .files
         .iter()

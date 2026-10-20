@@ -137,7 +137,7 @@ impl Loopback {
                 .map(|i| {
                     (from + i)
                         .checked_sub(self.delay)
-                        .map_or(0.0, |at| self.played[c][at])
+                        .map_or(0.0, |at| self.played[c].get(at).copied().unwrap_or(0.0))
                 })
                 .collect();
         }

@@ -114,6 +114,7 @@ fn plug_in_moves_last_note(shell: &mut Shell, device: DeviceId) {
 
     let device = shell.editor().document().device(device).unwrap().clone();
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: bl_core::time::SampleRate::HZ_48000,
         max_frames: 64,
         channels: 2,
@@ -293,6 +294,7 @@ fn a_change_a_plugin_makes_itself_is_one_undo_step() {
         .unwrap()
         .clone();
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: bl_core::time::SampleRate::HZ_48000,
         max_frames: 64,
         channels: 2,
@@ -752,6 +754,7 @@ fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
     // `plugin.info` says it's active with its one parameter.
     let device = shell.editor().document().device(device).unwrap().clone();
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: SampleRate::HZ_48000,
         max_frames: 64,
         channels: 2,

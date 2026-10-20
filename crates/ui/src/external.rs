@@ -126,6 +126,7 @@ pub fn draw(
         midi_to: midi_to_chooser,
         channel: channel_chooser,
         audio_from: audio_from_chooser,
+        audio_to: _,
     }) = routing::external_choosers(shell.editor().document(), device, &shell.interface())
     else {
         return;

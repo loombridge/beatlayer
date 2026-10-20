@@ -317,8 +317,9 @@ fn samples_are_named_and_placed_in_the_project() {
     // A 32-bit float WAV of the note and the tail, at the engine's rate.
     let bytes = std::fs::read(path).unwrap();
     assert_eq!(&bytes[0..4], b"RIFF");
+    // The float format, in the extensible header's subformat GUID.
     assert_eq!(
-        u16::from_le_bytes([bytes[20], bytes[21]]),
+        u16::from_le_bytes([bytes[44], bytes[45]]),
         3,
         "IEEE float"
     );
@@ -478,6 +479,7 @@ fn cancel_deletes_the_files_and_changes_nothing() {
     let mut shell = saved_shell(&scratch);
     let device = polysynth(&mut shell);
     let before = shell.editor().document().clone();
+    let history = shell.editor().undo_history().len();
     // The run starts, and one sample is made.
     shell
         .run(
@@ -507,5 +509,9 @@ fn cancel_deletes_the_files_and_changes_nothing() {
         before.top_level().count(),
         "no track"
     );
-    assert_eq!(shell.editor().undo_history().len(), 0, "no undo step");
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        history,
+        "no undo step"
+    );
 }

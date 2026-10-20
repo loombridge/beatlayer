@@ -643,3 +643,33 @@ fn the_command_runs_by_id_and_reports_the_track() {
         before.tracks().count()
     );
 }
+
+// Spec: slice-to-midi R6; audio clip editing R20. The warped render is the
+// clip's audio before the track's devices and mixer, as Consolidate renders
+// it: a track muted or turned down doesn't come out silent in the slices.
+#[test]
+fn the_warped_render_runs_before_the_tracks_devices_and_mixer() {
+    let scratch = Scratch::new("before-devices");
+    let (mut shell, track, clip) = loop_clip(&scratch);
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    shell
+        .run("mixer.set_mute", json!({ "track": track, "mute": true }))
+        .unwrap();
+    shell
+        .run("mixer.set_volume", json!({ "track": track, "volume": 0.0 }))
+        .unwrap();
+    let cut = slice(&mut shell, clip, json!({ "by": "quarter" }));
+    let rendered = render_track(
+        &mut shell,
+        &scratch,
+        cut.track,
+        "sliced.wav",
+        Ticks::WHOLE.get() * 4,
+    );
+    assert!(
+        rendered.iter().any(|sample| sample.abs() > 1e-6),
+        "the slices hold the clip's audio, not the track's silence"
+    );
+}

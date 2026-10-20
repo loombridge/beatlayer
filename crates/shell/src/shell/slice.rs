@@ -105,7 +105,13 @@ impl Shell {
                 self.slice_dialog = None;
                 Ok(to_value(&self.slice_status()))
             }
-            ids::SLICE => self.slice_to_midi(id, args),
+            ids::SLICE => {
+                // Spec: R1. The dialog's OK runs the command and closes the
+                // dialog; a refusal leaves it open on the slice to fix.
+                let result = self.slice_to_midi(id, args)?;
+                self.slice_dialog = None;
+                Ok(result)
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
     }
@@ -995,31 +1001,17 @@ fn slice_notes(
 }
 
 /// A document holding only `clip`, for a slicing's render (R6): its track
-/// alone, at unity gain and without its fades, as Consolidate renders it.
+/// alone, through Consolidate's own preparation (audio clip editing R20),
+/// at unity gain and without its fades.
 ///
 /// # Errors
 ///
 /// A message if the document refuses one of the steps.
 fn slice_document(document: &Document, track: TrackId, clip: ClipId) -> Result<Document, String> {
-    let mut doc = document.clone();
-    let main = doc.main_id();
-    if doc.parent(track).is_some() {
-        doc.apply(&Command::MoveTrack {
-            track,
-            parent: None,
-            index: 0,
-        })
-        .map_err(|error| error.to_string())?;
-    }
-    let others: Vec<TrackId> = doc
-        .track_order()
-        .into_iter()
-        .filter(|id| *id != track && *id != main)
-        .collect();
-    for other in others {
-        doc.apply(&Command::DeleteTrack { track: other })
-            .map_err(|error| error.to_string())?;
-    }
+    // Spec: R6. The clip's audio reaches Main alone, before the track's
+    // devices and mixer, as Consolidate renders it (audio clip editing
+    // R20).
+    let mut doc = super::audio_editing::consolidate_document(document, track)?;
     let extra: Vec<ClipId> = doc
         .track(track)
         .map(|track| {

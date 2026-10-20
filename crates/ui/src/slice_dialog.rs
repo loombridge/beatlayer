@@ -6,6 +6,7 @@
 //! The choices are the dialog's own until OK sends them in
 //! `clip.slice_to_midi_track`.
 
+use bl_model::{ClipData, ClipId};
 use bl_shell::Shell;
 use bl_shell::slice_commands::{self as ids, SliceBy, SliceDialogStatus};
 use egui::{Context, Id, Ui};
@@ -14,12 +15,30 @@ use serde_json::json;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
-/// The dialog's choices, kept between frames.
+/// The dialog's choices, kept between frames: the clip they were made for,
+/// so a dialog opening on another clip starts at R2's defaults.
 #[derive(Clone, Debug)]
 struct Choices {
+    clip: Option<ClipId>,
     by: SliceBy,
     preset: String,
     preserve: bool,
+}
+
+impl Choices {
+    /// R2's defaults for `dialog`.
+    fn defaults(dialog: &SliceDialogStatus) -> Self {
+        Self {
+            clip: dialog.clip,
+            by: SliceBy::Sixteenth,
+            preset: dialog
+                .presets
+                .first()
+                .cloned()
+                .unwrap_or_else(|| ids::DRUM_RACK_PRESET.to_owned()),
+            preserve: true,
+        }
+    }
 }
 
 fn choices_id() -> Id {
@@ -45,31 +64,45 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
             );
         });
         ui.add_space(8.0);
-        choices(ui, &dialog, events);
+        choices(ui, shell, &dialog, events);
     });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         invoke(events, ids::CLOSE, json!({}));
     }
 }
 
+/// Whether the dialog's clip is a warped audio clip: Warp Markers isn't
+/// offered for an unwarped clip (R2).
+fn warped(shell: &Shell, dialog: &SliceDialogStatus) -> bool {
+    dialog
+        .clip
+        .and_then(|clip| shell.editor().document().clip(clip))
+        .is_some_and(|clip| match &clip.data {
+            ClipData::Audio(audio) => audio.warp,
+            ClipData::Midi(_) => false,
+        })
+}
+
 /// The dialog's controls, in R2's order.
-fn choices(ui: &mut Ui, dialog: &SliceDialogStatus, events: &mut Vec<UiEvent>) {
+fn choices(ui: &mut Ui, shell: &Shell, dialog: &SliceDialogStatus, events: &mut Vec<UiEvent>) {
+    let warped = warped(shell, dialog);
     let mut state: Choices = ui
         .ctx()
         .data(|d| d.get_temp(choices_id()))
-        .unwrap_or_else(|| Choices {
-            by: SliceBy::Sixteenth,
-            preset: dialog
-                .presets
-                .first()
-                .cloned()
-                .unwrap_or_else(|| ids::DRUM_RACK_PRESET.to_owned()),
-            preserve: true,
-        });
+        .unwrap_or_else(|| Choices::defaults(dialog));
+    if state.clip != dialog.clip {
+        state = Choices::defaults(dialog);
+    }
+    if !warped && state.by == SliceBy::WarpMarkers {
+        state.by = SliceBy::Sixteenth;
+    }
     ui.label("Slice By");
     // The divisions, then Transients, then Warp Markers (R2).
     ui.horizontal_wrapped(|ui| {
         for choice in SliceBy::ALL {
+            if choice == SliceBy::WarpMarkers && !warped {
+                continue;
+            }
             let selected = state.by == choice;
             if ui.selectable_label(selected, choice.label()).clicked() {
                 state.by = choice;

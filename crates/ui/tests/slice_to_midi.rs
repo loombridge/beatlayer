@@ -124,7 +124,6 @@ fn the_slicing_dialog_offers_divisions_transients_and_warp_markers() {
         "1/16",
         "1/32",
         "Transients",
-        "Warp Markers",
         "Drum Rack",
         "One Sampler",
         "Preserve warped timing",
@@ -133,6 +132,11 @@ fn the_slicing_dialog_offers_divisions_transients_and_warp_markers() {
     ] {
         assert!(shown.iter().any(|l| l == label), "{label} in {shown:?}");
     }
+    // R2: Warp Markers isn't offered for an unwarped clip.
+    assert!(
+        !shown.iter().any(|l| l == "Warp Markers"),
+        "no Warp Markers for an unwarped clip: {shown:?}"
+    );
     // Preserve warped timing is on in a new dialog (R2).
     let nodes = Harness::nodes(&output);
     let preserve = nodes
@@ -144,4 +148,23 @@ fn the_slicing_dialog_offers_divisions_transients_and_warp_markers() {
     let presets = h.shell.slice_dialog().unwrap().presets;
     assert_eq!(presets.first().unwrap(), "Drum Rack");
     assert!(presets.contains(&"One Sampler".to_owned()), "{presets:?}");
+
+    // A warped clip is offered Warp Markers (R2).
+    h.shell
+        .run(
+            "clip.set_warp",
+            serde_json::json!({ "clip": clip, "warp": true }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "clip.open_slice_dialog",
+            serde_json::json!({ "clip": clip }),
+        )
+        .unwrap();
+    let shown = labels(&h.settle());
+    assert!(
+        shown.iter().any(|l| l == "Warp Markers"),
+        "Warp Markers for a warped clip: {shown:?}"
+    );
 }

@@ -63,14 +63,9 @@ crates/shell/tests/plugins.rs # waits for a real CLAP plug-in
 crates/shell/tests/plugins_au.rs # waits for a real Audio Unit
 crates/shell/tests/processed_files.rs # a timeout on a processed file's write
 crates/shell/tests/realtime.rs # measures the callback under real-time pacing
-crates/ui/tests/accessibility.rs # a timeout on the UI's layout
-crates/ui/tests/agent_settings.rs # a timeout on the agent server
-crates/ui/tests/browser.rs # a timeout on the browser's index
-crates/ui/tests/drum_racks.rs # waits for a real plug-in's UI
-crates/ui/tests/midi_input.rs # stamps keyboard input with the system's clock
+crates/ui/tests/accessibility.rs # waits for a real plug-in's editor to load
+crates/ui/tests/agent_settings.rs # measures the Settings window's frame cost itself
+crates/ui/tests/browser.rs # waits for the browser's index thread to read the disk
+crates/ui/tests/midi_input.rs # waits for the MIDI output thread and its indicator's timed fade
 crates/ui/tests/plugin_panel.rs # waits for a real plug-in's UI
-crates/ui/tests/rack_view.rs # a timeout on the rack's meters
-crates/ui/tests/sample_editor.rs # a timeout on a decoded waveform
-crates/ui/tests/session_view.rs # a timeout on a launched clip
-crates/ui/tests/settings_window.rs # a timeout on the device status
-crates/ui/tests/transport.rs # a timeout on the transport
+crates/ui/tests/transport.rs # measures the drawn playhead against a real-time engine

@@ -25,7 +25,7 @@ pub fn rig() -> (Shell, NullControl) {
             pacing: Pacing::Manual,
             ..NullOptions::default()
         },
-        &[("null", "Null")],
+        &[("null", "Null device")],
     );
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],

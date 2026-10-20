@@ -1145,21 +1145,10 @@ fn the_zone_editor_moves_resizes_and_fades_a_zone() {
     assert_eq!(Harness::node(&nodes, "Hide").role, Role::Button);
 }
 
-/// Runs frames, at a display's pace, until `done` holds, for up to five
-/// seconds.
+/// Runs frames until `done` holds: the engine advances with them on the
+/// manually paced null stream.
 fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        h.frame(vec![]);
-        if done(h) {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < until,
-            "timed out waiting for {what}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(4));
-    }
+    h.wait(what, done);
 }
 
 // Spec: racks R37
@@ -1167,7 +1156,7 @@ fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
 fn auto_select_follows_the_notes() {
     use bl_core::time::Ticks;
     use bl_model::{Clip, ClipData, Command, MidiData, Note};
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     h.settle();
     let midi: TrackId = h.shell.editor().document().top_level().next().unwrap();
     h.shell

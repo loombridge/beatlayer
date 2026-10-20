@@ -90,8 +90,8 @@ pub fn description() -> &'static DeviceDescription {
     &DESCRIPTION
 }
 
-/// One macro's saved settings beside its value (macros spec, R10, R14 and
-/// R16). A macro's value is a parameter of its rack, in `Device::params`.
+/// One macro's saved settings beside its value (macros spec, R10, R14, R16
+/// and R30). A macro's value is a parameter of its rack, in `Device::params`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Macro {
     /// The name Rename gave it; empty for its default name (R10).
@@ -106,6 +106,9 @@ pub struct Macro {
     /// Whether Randomize leaves it alone (R16).
     #[serde(default, skip_serializing_if = "is_off")]
     pub randomize_excluded: bool,
+    /// Whether a variation launch leaves it alone (R30).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub variation_excluded: bool,
 }
 
 /// A parameter a macro drives: a device's parameter inside the rack, or a
@@ -159,8 +162,18 @@ impl MacroMapping {
     }
 }
 
-/// A rack's macros' settings and mappings (macros spec, R17). The values
-/// themselves are the rack's parameters.
+/// One stored macro variation (macros spec, R25 to R31): its name and the
+/// value of each of the 16 macros, in number order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Variation {
+    /// Its name, "Variation N" until Rename changes it.
+    pub name: String,
+    /// Each macro's value from 0 to 1, in number order.
+    pub values: Vec<f64>,
+}
+
+/// A rack's macros' settings, mappings and variations (macros spec, R17 and
+/// R31). The values themselves are the rack's parameters.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RackMacros {
     /// Each macro's settings, in macro order; a macro left off keeps the
@@ -170,13 +183,16 @@ pub struct RackMacros {
     /// The mappings, in the order they were made (R9).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mappings: Vec<MacroMapping>,
+    /// The variations, in the order they were made (R25, R31).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variations: Vec<Variation>,
 }
 
 impl RackMacros {
-    /// Whether the rack has no settings or mappings to save.
+    /// Whether the rack has no settings, mappings or variations to save.
     #[must_use]
     pub fn is_default(&self) -> bool {
-        self.settings.is_empty() && self.mappings.is_empty()
+        self.settings.is_empty() && self.mappings.is_empty() && self.variations.is_empty()
     }
 
     /// Macro `number`'s settings, as it starts if it has none.
@@ -187,6 +203,7 @@ impl RackMacros {
             colour: None,
             info: String::new(),
             randomize_excluded: false,
+            variation_excluded: false,
         };
         self.settings
             .get(usize::from(number.saturating_sub(1)))
@@ -219,6 +236,48 @@ impl RackMacros {
     #[must_use]
     pub fn has_mappings(&self, number: u8) -> bool {
         self.mappings.iter().any(|m| m.macro_number == number)
+    }
+
+    /// The name a new variation takes (macros spec, R26): "Variation N", N one
+    /// more than the highest number among the variations already named that
+    /// way, or 1 when there are none.
+    #[must_use]
+    pub fn next_variation_name(&self) -> String {
+        let highest = self
+            .variations
+            .iter()
+            .filter_map(|variation| variation.name.strip_prefix("Variation "))
+            .filter_map(|number| number.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        format!("Variation {}", highest + 1)
+    }
+
+    /// Stores `values` as a new variation at the end of the list (macros
+    /// spec, R26), returning its place.
+    pub fn store_variation(&mut self, values: Vec<f64>) -> usize {
+        let name = self.next_variation_name();
+        self.variations.push(Variation { name, values });
+        self.variations.len() - 1
+    }
+
+    /// Replaces every value the variation at `place` holds, keeping its name
+    /// and place (macros spec, R28).
+    ///
+    /// # Errors
+    ///
+    /// [`ModelError::InvalidInput`] if the rack has no such variation.
+    pub fn overwrite_variation(
+        &mut self,
+        place: usize,
+        values: Vec<f64>,
+    ) -> Result<(), ModelError> {
+        let variation = self
+            .variations
+            .get_mut(place)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))?;
+        variation.values = values;
+        Ok(())
     }
 }
 
@@ -485,6 +544,8 @@ impl ChainZones {
 pub enum RackView {
     /// The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).
     Macros,
+    /// The Macro Variations (macros spec, R25).
+    Variations,
     /// The chain list.
     ChainList,
     /// The selected chain's devices.
@@ -501,27 +562,31 @@ pub enum RackView {
     AutoSelect,
 }
 
-/// Which of a rack's views are shown (racks spec, R19): all of them in a new
-/// rack. It's view state kept beside the set's document ([`RackViewMap`]), so
-/// changing it is never an undo step. A drum rack has more (drum racks spec,
-/// R11, R21): the pad view, which notes it shows, and the switches that
-/// choose the chain list's columns and its return section.
+/// Which of a rack's views are shown (racks spec, R19): the Macro Controls,
+/// the chain list and the devices in a new rack, and the Macro Variations
+/// hidden (macros spec, R25). It's view state kept beside the set's document
+/// ([`RackViewMap`]), so changing it is never an undo step. A drum rack has
+/// more (drum racks spec, R11, R21): the pad view, which notes it shows, and
+/// the switches that choose the chain list's columns and its return section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
-    description = "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` \
-                   and `devices` (the selected chain's devices). All on in a new rack. A drum \
-                   rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the \
-                   lowest note it shows, a multiple of 4, 36 in a new rack), and the switches \
-                   `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its \
-                   send sliders) and `returns` (the return chains' section), all off in a new \
-                   rack. Every rack has `zone_editor` (`key`, `velocity` or `select`, none in a \
-                   new rack; not a drum rack) and `auto_select` (the chain list follows the \
-                   notes, off in a new rack)."
+    description = "Which views of a rack are shown: `macros` (the Macro Controls), `variations` \
+                   (the Macro Variations, off in a new rack), `chain_list` and `devices` (the \
+                   selected chain's devices), the last three on in a new rack. A drum rack also \
+                   has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note \
+                   it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` \
+                   (each chain's Preview, Receive, Play and Choke), `send` (its send sliders) and \
+                   `returns` (the return chains' section), all off in a new rack. Every rack has \
+                   `zone_editor` (`key`, `velocity` or `select`, none in a new rack; not a drum \
+                   rack) and `auto_select` (the chain list follows the notes, off in a new rack)."
 )]
 pub struct RackViews {
     /// The Macro Controls.
     #[serde(default = "on")]
     pub macros: bool,
+    /// The Macro Variations (macros spec, R25): hidden in a new rack.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub variations: bool,
     /// The chain list.
     #[serde(default = "on")]
     pub chain_list: bool,
@@ -589,6 +654,7 @@ impl Default for RackViews {
     fn default() -> Self {
         Self {
             macros: true,
+            variations: false,
             chain_list: true,
             devices: true,
             zone_editor: None,
@@ -609,6 +675,7 @@ impl RackViews {
     pub fn shown(self, view: RackView) -> bool {
         match view {
             RackView::Macros => self.macros,
+            RackView::Variations => self.variations,
             RackView::ChainList => self.chain_list,
             RackView::Devices => self.devices,
             RackView::Pads => self.pads,
@@ -624,6 +691,7 @@ impl RackViews {
     pub fn with(mut self, view: RackView, shown: bool) -> Self {
         match view {
             RackView::Macros => self.macros = shown,
+            RackView::Variations => self.variations = shown,
             RackView::ChainList => self.chain_list = shown,
             RackView::Devices => self.devices = shown,
             RackView::Pads => self.pads = shown,
@@ -641,7 +709,7 @@ impl RackViews {
     /// chain list shows.
     #[must_use]
     pub fn all_hidden(self) -> bool {
-        !(self.macros || self.chain_list || self.devices)
+        !(self.macros || self.variations || self.chain_list || self.devices)
     }
 }
 
@@ -1027,6 +1095,20 @@ impl Device {
             DeviceKind::Rack { kind } => Some(kind),
             _ => None,
         }
+    }
+
+    /// The value of each of the rack's 16 macros, in number order (macros
+    /// spec, R26).
+    #[must_use]
+    pub fn macro_values(&self) -> Vec<f64> {
+        (1..=MACROS)
+            .map(|number| {
+                self.params
+                    .get(&macro_param(number))
+                    .copied()
+                    .unwrap_or(0.0)
+            })
+            .collect()
     }
 
     /// This device and every device inside it, at any depth, in signal
@@ -1419,6 +1501,20 @@ fn check_macros(rack: &Device) -> Result<(), ModelError> {
             crate::command::check_value("macro colour", f64::from(colour), colour < CHAIN_COLOURS)?;
         }
     }
+    for variation in &macros.variations {
+        if variation.values.len() != usize::from(MACROS) {
+            return Err(ModelError::InvalidInput(
+                "a macro variation holds all 16 macros",
+            ));
+        }
+        for value in &variation.values {
+            crate::command::check_value(
+                "variation value",
+                *value,
+                value.is_finite() && (0.0..=1.0).contains(value),
+            )?;
+        }
+    }
     for (i, mapping) in macros.mappings.iter().enumerate() {
         crate::command::check_value(
             "macro number",
@@ -1487,4 +1583,57 @@ fn check_zones(kind: RackKind, chain: &Chain) -> Result<(), ModelError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The macros' values with only the first one set, as a variation holds.
+    fn values(one: f64) -> Vec<f64> {
+        let mut values = vec![0.0; usize::from(MACROS)];
+        values[0] = one;
+        values
+    }
+
+    // Spec: macros R26
+    #[test]
+    fn new_stores_every_macro_as_the_next_numbered_variation() {
+        let mut macros = RackMacros::default();
+        assert_eq!(macros.next_variation_name(), "Variation 1");
+        let place = macros.store_variation(values(0.25));
+        assert_eq!(place, 0);
+        assert_eq!(macros.variations[0].name, "Variation 1");
+        assert_eq!(macros.variations[0].values.len(), usize::from(MACROS));
+        assert_eq!(macros.variations[0].values[0], 0.25);
+        macros.store_variation(values(0.5));
+        macros.store_variation(values(0.75));
+        assert_eq!(macros.variations[2].name, "Variation 3");
+        // The next number runs from the highest name still there, so a
+        // deletion in the middle doesn't reuse a number below the top.
+        macros.variations.remove(1);
+        macros.store_variation(values(1.0));
+        assert_eq!(macros.variations.last().unwrap().name, "Variation 4");
+        // A renamed variation doesn't count, so it keeps numbering its own.
+        let mut macros = RackMacros::default();
+        macros.store_variation(values(0.0));
+        macros.variations[0].name = "Quiet".to_owned();
+        assert_eq!(macros.next_variation_name(), "Variation 1");
+    }
+
+    // Spec: macros R28
+    #[test]
+    fn overwrite_replaces_a_variations_values_in_place() {
+        let mut macros = RackMacros::default();
+        macros.store_variation(values(0.25));
+        macros.store_variation(values(0.5));
+        macros.overwrite_variation(0, values(0.75)).unwrap();
+        assert_eq!(macros.variations[0].name, "Variation 1");
+        assert_eq!(macros.variations[0].values[0], 0.75);
+        assert_eq!(
+            macros.variations[1].values[0], 0.5,
+            "the other keeps its own"
+        );
+        assert!(macros.overwrite_variation(9, values(0.0)).is_err());
+    }
 }

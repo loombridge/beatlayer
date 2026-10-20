@@ -1,0 +1,123 @@
+# Scales: each clip's scale, the set's current scale, scale-aware devices, and the scale in the MIDI Note Editor
+
+- **Status:** draft
+- **Work packages:** WP-6.7 (the scale list, each clip's scale, the set's current scale and the Control Bar's scale controls: R1 to R14), WP-6.7b (the scale in the Clip View: the Main Properties panel's scale controls, the piano ruler's scale keys, Highlight Scales, Fold to Scale and note spelling: R19 to R25), WP-6.8 (what every scale-aware device shares: its current scale, its Use Current Scale switch, held notes and per-note bends: R15 to R18; each device's own rules are in its spec). Tuning systems and their effect on scales are [tunings.md](tunings.md)'s; the Pitch and Time Utilities and the MIDI Tools that work in scale degrees are WP-6.12 to WP-6.16's; Find and Select Notes' Scale filter is WP-6.4's; editing several clips at once and Focus Mode are WP-6.6's
+- **Parity-matrix row:** MIDI editing: Scale Mode per clip, MIDI and audio; MIDI editing: Fold to scale, scale highlighting; Racks and device features: "Use Current Scale" on devices (the rules every device shares)
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.10, 12.2 and 12.4; the UI parity reference rows L-CTRL-011, L-CLIP-003, L-CLIP-004, L-CLIP-010, L-CLIP-012, L-DEV-004, M-VIEW-040, M-OPT-019, C-NOTE, C-KEYS, S-NOTE-035 and S-NOTE-039
+
+## The behaviour
+
+Every clip, MIDI or audio, carries a scale: a Scale Mode switch, a root note and a scale name. A clip's scale never changes what it plays. It tells the rest of the set which notes belong: the MIDI Note Editor marks the scale's keys and can fold away the others, the pitch tools and MIDI Tools count in scale degrees, and scale-aware devices on the clip's track keep their notes in the scale. An audio clip's scale does nothing to its audio; it is there for the scale-aware devices on its track.
+
+The set has a current scale, which the Control Bar's Scale Mode switch and its Root Note and Scale Name choosers show. Selecting a clip makes its scale the current one, and so does a clip that starts playing. Changing the Control Bar's controls changes the selected clips' scales, and with nothing selected, the scale new clips will take. A new clip starts with the current scale.
+
+A scale-aware device (Arpeggiator, Chord, Pitch, Random and Scale) has a Use Current Scale switch in its title bar. With it on, the device's pitch controls count degrees of its current scale: the scale of the clip playing on its track, or the set's current scale when none plays. Each device's spec says what its controls do in degrees; this spec holds what they share, and the scale arithmetic every user of scales cites.
+
+In the Clip View, the Main Properties panel holds the clip's scale controls. With Scale Mode on, the piano ruler marks the scale's keys; Highlight Scales (K) shades the scale's rows across the note area too, and Fold to Scale (G) hides the rows outside the scale that hold no notes. The piano ruler's context menu chooses how notes are spelled.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 3 "Live Concepts", sections 3.1 "The Control Bar" and 3.13 "Scale Awareness" | The Control Bar's scale settings show the selected clip's; a change there applies to the selected clip or slot and to clips made afterwards. Scale Mode is switched in the Control Bar or the Clip View, with a root and a scale beside it; with no clip selected the settings apply to clips made later; the Control Bar sets one scale across several selected clips. With Scale Mode on, the note editor offers Fold to Scale and Highlight Scale, which colours the scale's key tracks. The pitch controls of MIDI Tools and the Pitch and Time Utilities use the active scale. Arpeggiator, Chord, Pitch, Random and Scale have a Use Current Scale switch in their title bars, which applies the clip's scale and sets their pitch controls in scale degrees |
+| S2 | Manual | Same manual, chapter 8 "Clip View", section 8.2.4 "Clip Scale" | The Main Properties panel has a Scale switch for Scale Mode and Root Note and Scale Name choosers. On an audio clip the scale doesn't change playback and is passed to the scale-aware devices on its track; on a MIDI clip it marks the scale's keys on the piano ruler |
+| S3 | Manual | Same manual, chapter 10 "Editing MIDI", sections 10.1 "The MIDI Note Editor Layout", 10.6 "Folding and Scales", 10.8 "Multi-Clip Editing" and 10.8.1 "Focus Mode" | The header's left side holds the folding and scale-highlighting buttons, the scale ones only while the clip has a scale on. With Scale Mode on, the piano ruler highlights the scale's keys. Highlight Scales also highlights the scale's key tracks across the editor and the root more strongly on the ruler; it is the Highlight Scale button, K with the editor focused, or the Highlight Scales item in the Options and context menus, and it applies to every clip. Fold to Scale, available with a scale on, hides the key tracks outside the scale, keeping any that hold notes; it is the Scale button, G, or the View menu. New MIDI clips take the scale of the clip selected last, inactive if its Scale Mode is off; of several selected clips, the one in front decides. The piano ruler's context menu spells notes with flats, sharps or both, by an Auto setting from the root's place on the circle of fifths, or as MIDI note numbers; with Scale Mode on the choice affects only notes outside the scale. Scale settings can be edited for all selected clips at once; without Focus Mode the root and scale show only where the selected clips agree, and an asterisk otherwise |
+| S4 | Manual | Same manual, section 10.5.9 "Pitch and Time Utilities" (10.5.9.1 "Transpose", 10.5.9.2 "Fit to Scale"); chapter 8, sections 8.5.1 "Pitch Tools" and 8.6 | With a clip scale active, Transpose and Interval Size count scale degrees; Fit to Scale moves each note to the nearest scale degree, the lower one on a tie, and is unavailable without a scale; MIDI Tools' pitch controls count scale degrees and generators keep to the scale |
+| S5 | Manual | Same manual, chapter 30 "Live MIDI Effect Reference", its introduction | Every MIDI effect with pitch controls is scale-aware: with Use Current Scale on in its title bar, its pitch controls are set in scale degrees instead of semitones |
+| S6 | Release notes | Live 12 release notes, 12.0 (March 2024), "Scale Awareness", "MIDI effects" and "Clip View" | The Control Bar's scale controls select and change clip scales and update when clips with different scales play; a selection whose clips differ shows asterisks or a partly filled Scale Mode switch, and a change applies to all of them. Highlight Scale colours the scale's key tracks and Fold to Scale shows only those, with Fold to Scale added to the View menu. Arpeggiator, Chord, Pitch and Random transform per-note pitch bend so it stays in the scale |
+| S7 | Release notes | Live 12 release notes, 12.0.5 (the set's Scale Mode as a property of the set; "Chromatic" as the current scale's name when no scale is active), 12.1 (scales on audio clips, passed to scale-aware devices without changing playback; tracks with Drum Racks can have a scale; devices start with the right scale when no clip plays on their track), 12.1.10 (per-note pitch bend of a note outside the scale in Pitch, Random and Arpeggiator), 12.2 (a set with a scale name Live doesn't know loads with a major scale in its place; Meld's chords use the set's scale) and 12.4 (changing a set's scale settings marks it as changed) | The set holds a scale of its own beside its clips'; what a device reads with no clip playing; the default scale; that scale changes are saved |
+| S8 | Beatlayer | The UI parity reference: [layout.md](../ui-parity/layout.md) L-CTRL-011 (Scale Mode switch, Root Note and Scale Name choosers in the Control Bar, reflecting the selected clip), L-CLIP-003 and L-CLIP-004 (the Main Properties panel ends with Scale Mode with root and scale), L-CLIP-010 (the editor toolbar's Fold, Scale and Highlight Scale), L-CLIP-012 (the piano ruler), L-DEV-004 (the device title bar); [menus.md](../ui-parity/menus.md) M-VIEW-040 (Fold to Scale, G, disabled in a new set), M-OPT-019 (Highlight Scales, K), and the note editor's and the piano ruler's context menus (C-NOTE, C-KEYS); [shortcuts.toml](../ui-parity/shortcuts.toml) S-NOTE-035 and S-NOTE-039 | Where the scale controls sit and the keys that reach them |
+| S9 | Beatlayer | [piano-roll.md](piano-roll.md) R12, R16 and R20; [device-framework.md](device-framework.md) R31 to R33; [midi-clips.md](midi-clips.md) | The note editor's rows and their names; Fold to Notes as view state saved with the set; transposing by arrow keys; a MIDI effect ends every note on the key it started it on and its expressions follow the notes it makes |
+| S10 | Beatlayer | [The architecture](../02-architecture.md), "The document", "Real-time rules" and decision D17; [the improvements](../05-improvements.md), rule G2 | Every edit is a command and one undo step; every action is a registered command with a schema, a description and a permission class, and what an agent sets it can read back; every device parameter can be automated; nothing on the audio thread allocates, locks or blocks |
+
+## Rules
+
+**The scale list (WP-6.7)**
+
+- **R1.** A scale is a root, one of the twelve pitch classes C to B, and a scale name from the scale list; its notes are the root and the steps above it that the list gives, in every octave. The list holds these scales, in this order (the names, order and steps are Beatlayer's own), and `song.scales` (`read`) reports it with each scale's steps: (S1, S3)
+
+  | Scale | Steps above the root, in semitones |
+  |---|---|
+  | Major | 0 2 4 5 7 9 11 |
+  | Minor | 0 2 3 5 7 8 10 |
+  | Dorian | 0 2 3 5 7 9 10 |
+  | Mixolydian | 0 2 4 5 7 9 10 |
+  | Lydian | 0 2 4 6 7 9 11 |
+  | Phrygian | 0 1 3 5 7 8 10 |
+  | Locrian | 0 1 3 5 6 8 10 |
+  | Harmonic Minor | 0 2 3 5 7 8 11 |
+  | Melodic Minor | 0 2 3 5 7 9 11 |
+  | Harmonic Major | 0 2 4 5 7 8 11 |
+  | Major Pentatonic | 0 2 4 7 9 |
+  | Minor Pentatonic | 0 3 5 7 10 |
+  | Minor Blues | 0 3 5 6 7 10 |
+  | Whole Tone | 0 2 4 6 8 10 |
+  | Whole-Half Diminished | 0 2 3 5 6 8 9 11 |
+  | Half-Whole Diminished | 0 1 3 4 6 7 9 10 |
+
+- **R2.** A scale's notes from key 0 to key 127, in order, are its degrees. A key in the scale moved by d degrees lands on the scale note d places above it in that order, or below it for a negative d. A key outside the scale moves by as many semitones as the scale note below it does, so it keeps its distance above that note (Beatlayer's own). The scale note nearest a key is the one fewest semitones away, the lower of two equally near. The chromatic scale holds all twelve notes, so a degree of it is a semitone; it is what a device or tool reads where no scale is active. A move that would leave keys 0 to 127 is off the keyboard, and each device or tool says what it does then. (S4, S5, S7)
+
+**A clip's scale (WP-6.7)**
+
+- **R3.** Every clip, MIDI or audio, in the Arrangement or in a Session slot, a Drum Rack track's included, has a scale: Scale Mode (on or off), a root and a scale name. A clip made in a set that has never had a scale is off, at C, Major (C is Beatlayer's own). (S2, S7)
+- **R4.** A clip's scale doesn't change what it plays: its notes play on their own keys, and an audio clip's audio is untouched. It reaches the rest of the set only through the set's current scale (R9 to R11), the devices on its track (R15) and the tools that read it. (S2, S7)
+- **R5.** `clip.set_scale` (`edit`) sets any of Scale Mode, root and scale name on one or more clips, named or, left out, the selected ones, and leaves the values it isn't given; it is one undo step, `Change Clip Scale` (Beatlayer's own name), however many clips it sets. A scale name the list doesn't hold, or a root outside C to B, is refused and changes nothing. The query tool's `clip` reads a clip's scale in its `scale` field, the readback. (S1, S10)
+- **R6.** With several clips selected, a scale control shows a value where every selected clip has it, and an asterisk where they differ; the Scale Mode switch shows partly filled where some are on and some off. Changing a control sets that value on every selected clip and leaves their other scale values as they were, in one undo step. (S3, S6)
+- **R7.** A new clip takes the set's current scale (R9): its Scale Mode, root and name. That holds for every clip a command makes from nothing: an empty MIDI clip inserted or drawn, a clip recorded or captured, a MIDI file imported, an audio file dropped or loaded. A copy keeps its source's scale: a duplicated, pasted or split clip, and a consolidated clip, which takes the scale of the first clip it was made from (the list and the consolidation rule are Beatlayer's own). (S1, S3)
+- **R8.** The set saves each clip's scale with the clip, and saves nothing for a clip that is off, at C, Major, so a set saved before scales loads with every clip off, at C, Major. A clip whose saved scale name the list doesn't hold loads with Major in its place, keeping its root and Scale Mode. (S7)
+
+**The set's current scale (WP-6.7)**
+
+- **R9.** The set has a current scale, a Scale Mode, root and scale name of its own, saved with the set; a new set's is off, at C, Major. The Control Bar's Scale Mode switch, Root Note chooser and Scale Name chooser (L-CTRL-011) show it, the choosers listing the twelve roots from C and the scale list in R1's order. (S1, S7, S8)
+- **R10.** Selecting a clip, in either view, makes its scale the current scale; with several selected, the clip the Clip View shows decides. A change to that clip's scale (R5, R6) changes the current scale with it. (S1, S3)
+- **R11.** While the transport runs, a clip that starts playing makes its scale the current scale: a Session clip on its launch frame, and an Arrangement clip when the playhead enters it on a track that plays the Arrangement. It holds until the next selection or start; of clips that start on one frame, the one on the track furthest left in the Session View decides (Beatlayer's own). (S6)
+- **R12.** Changing a Control Bar control with clips selected runs `clip.set_scale` on the selected clips (R5, R6), and the current scale follows (R10). With no clip selected it runs `song.set_scale` (`edit`), which sets the current scale alone, for the clips made next (R7). Each is one undo step, `Change Scale` for `song.set_scale` (Beatlayer's own name). The current scale following a selection or a clip that starts (R10, R11) isn't an undo step, though it marks the set as changed. (S1, S7, S10)
+- **R13.** The query tool's `song` reads the current scale in its `scale` field, the readback for `song.set_scale`; `song.scales` reads the list. Both, with `clip.set_scale`, are registered commands with schemas, descriptions and permission classes, run by ID through the agent API. (S10)
+- **R14.** The Control Bar's three scale controls take the keyboard focus with the rest of the Control Bar (Navigate ▸ Control Bar), and assistive technology reads the switch as a switch with its state and each chooser with its value, an asterisk read as "mixed". (S8, S10)
+
+**Devices and the current scale (WP-6.8)**
+
+- **R15.** A device's current scale is the scale of the clip playing on its track: the Session clip playing in the track's slot, or, while the track plays the Arrangement and the transport runs, the Arrangement clip under the playhead. When no clip plays on its track, it is the set's current scale (R9). A clip or a current scale whose Scale Mode is off gives the chromatic scale (R2). The device's current scale changes on the frame a clip starts or stops, at any block size. (S1, S5, S7)
+- **R16.** A scale-aware device (Arpeggiator, Chord, Pitch, Random and Scale) has a Use Current Scale switch in its title bar (L-DEV-004), off in a new device. It is one of the device's parameters: `device.set_param` sets it, `device.parameters` reads it, a change is one undo step, and it can be automated and modulated (G2). With it on, the device's pitch controls count degrees of its current scale (R2, R15), as its own spec says. (S1, S5, S10)
+- **R17.** A change of a device's current scale, or of its Use Current Scale switch, while a note is held doesn't move the note: its note-off and its expressions go to the key its note-on went to ([device-framework.md](device-framework.md) R31, R33). Reading the current scale allocates, locks and blocks nothing on the audio thread. (S9, S10)
+- **R18.** With Use Current Scale on, a device carries the per-note pitch bend of a note it moved or made in scale degrees: where the bend would take the source note to the scale note d degrees from it, it takes the device's note to the scale note d degrees from that note, and between two scale notes it moves in proportion, in semitones, between the two notes those degrees give it. A bend of ±1 counts as ±48 semitones, MPE's per-note range (Beatlayer's own law); a note outside the scale bends as the scale note below it does (R2). (S6, S7)
+
+**The scale in the Clip View (WP-6.7b)**
+
+- **R19.** The Main Properties panel (L-CLIP-004, [clip-properties.md](clip-properties.md) R2), on MIDI and audio clips, ends with the clip's Scale Mode switch, Root Note chooser and Scale Name chooser, showing the scale of the clip or clips the Clip View shows as R6 says; changing one runs `clip.set_scale` on those clips. (S2, S3, S8)
+- **R20.** The editor toolbar's Scale button (Fold to Scale) and Highlight Scale button (L-CLIP-010) show while the clip the editor shows has Scale Mode on, and are hidden while it is off. (S3, S8)
+- **R21.** With the clip's Scale Mode on, the piano ruler (L-CLIP-012) marks the keys of its scale in the theme's scale colour (the look is Beatlayer's own); with it off, no key is marked. (S2, S3)
+- **R22.** Highlight Scales (`view.highlight_scales`; K in the note editor, S-NOTE-035; Options ▸ Highlight Scales, M-OPT-019, ticked while on; the toolbar's Highlight Scale button; the same item in the note editor's context menu, C-NOTE) also shades the scale's rows across the note area and marks the root more strongly than the scale's other keys on the piano ruler, in every clip with Scale Mode on. It is one switch for all clips, kept between launches and off in a new install (Beatlayer's own), not part of the set and not an undo step; `view.state` reads it in `highlight_scales`. (S3, S6, S8)
+- **R23.** Fold to Scale (`view.fold_scale`; G in the note editor, S-NOTE-039; View ▸ Fold to Scale, M-VIEW-040; the toolbar's Scale button) shows only the rows of the clip's scale and the rows that hold notes, one under the next; every note keeps its pitch. It is enabled only while the clip's Scale Mode is on, and turning Scale Mode off shows every row until it is on again. As Fold to Notes is ([piano-roll.md](piano-roll.md) R16), it is view state saved with the set for each clip, not an undo step; folded, a drag moves a note row by row and a click in Draw Mode lands on a row that shows. With Fold to Notes on too, a row shows only if each fold that is on shows it (Beatlayer's own). `view.state` reads which clips are folded to their scale. (S3, S6, S8, S9)
+- **R24.** The piano ruler's context menu (C-KEYS) chooses how notes are spelled (`view.note_spelling`): Sharps, Flats, Sharps and Flats, Auto or MIDI Note Numbers (the labels are Beatlayer's own), one choice for every editor, kept between launches and Sharps in a new install (Beatlayer's own default, as the rows read today). Auto spells with flats when the root is F or a root reached by fifths below it (B♭, E♭, A♭, D♭, G♭) and with sharps otherwise (the split is Beatlayer's own). With the clip's Scale Mode on, a scale of seven notes spells its notes with one letter each, from the root's letter up, and the choice applies only to the keys outside the scale. The rows' names (piano-roll R12), the choosers' roots and the Status Bar follow the choice. `view.state` reads it in `note_spelling`. (S3, S9)
+- **R25.** `view.fold_scale` (`read`), `view.highlight_scales` and `view.note_spelling` (`edit`, as preferences) are registered commands with schemas and descriptions; the keys, the menu items and the toolbar buttons run them, and the keymap reaches K and G in the note editor. Assistive technology reads each piano ruler key with its name, and whether it is in the scale and the root. (S8, S10)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.7 | |
+| R2 | to be written in WP-6.7 | |
+| R3 | to be written in WP-6.7 | |
+| R4 | to be written in WP-6.7 | |
+| R5 | to be written in WP-6.7 | |
+| R6 | to be written in WP-6.7 | |
+| R7 | to be written in WP-6.7 | |
+| R8 | to be written in WP-6.7 | |
+| R9 | to be written in WP-6.7 | |
+| R10 | to be written in WP-6.7 | |
+| R11 | to be written in WP-6.7 | |
+| R12 | to be written in WP-6.7 | |
+| R13 | to be written in WP-6.7 | |
+| R14 | to be written in WP-6.7 | |
+| R15 | to be written in WP-6.8 | |
+| R16 | to be written in WP-6.8 | |
+| R17 | to be written in WP-6.8 | |
+| R18 | to be written in WP-6.8 | |
+| R19 | to be written in WP-6.7b | |
+| R20 | to be written in WP-6.7b | |
+| R21 | to be written in WP-6.7b | |
+| R22 | to be written in WP-6.7b | |
+| R23 | to be written in WP-6.7b | |
+| R24 | to be written in WP-6.7b | |
+| R25 | to be written in WP-6.7b | |

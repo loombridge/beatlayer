@@ -205,6 +205,7 @@ impl DeviceView {
             value,
             text: self.macro_text(doc, value, &mappings),
             randomize_excluded: settings.randomize_excluded,
+            variation_excluded: settings.variation_excluded,
             mappings: rows,
         }
     }
@@ -223,6 +224,15 @@ impl DeviceView {
             count,
             macros: (1..=bl_model::MACROS)
                 .map(|number| self.macro_info(doc, device, number))
+                .collect(),
+            variations: device
+                .macros
+                .variations
+                .iter()
+                .map(|variation| bl_shell_spec::devices::VariationInfo {
+                    name: variation.name.clone(),
+                    values: variation.values.clone(),
+                })
                 .collect(),
         })
     }

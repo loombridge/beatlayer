@@ -1,7 +1,7 @@
 # VST3 hosting
 
-- **Status:** partial (loading, processing, and the component's and the controller's state, latency, restarts and the changes from the plug-in's own controller are built; the plug-in's own editor is WP-2.10's; the scanner reads VST3 plug-ins, with WP-2.9)
-- **Work packages:** WP-2.7 (parts 1 and 2: this spec's rules; part 3: the scanner, with WP-2.9). The rule numbers mirror [the CLAP hosting spec](clap-hosting.md)'s, so the plug-in's own editor (R13) is WP-2.10's; delay compensation, which the latency rules feed, is WP-2.11's; offline renders (export, agents' previews) running plug-ins are WP-2.6b's for CLAP and WP-4.21's for VST3, which lends its instances as [offline plug-in renders](offline-plugin-renders.md) say (built).
+- **Status:** partial (loading, processing, and the component's and the controller's state, latency, restarts and the changes from the plug-in's own controller are built; the plug-in's own editor is WP-2.10's; the scanner reads VST3 plug-ins, with WP-2.9; per-note expression and MPE, R19 to R21, are WP-6.17b's)
+- **Work packages:** WP-2.7 (parts 1 and 2: this spec's rules; part 3: the scanner, with WP-2.9). The rule numbers mirror [the CLAP hosting spec](clap-hosting.md)'s, so the plug-in's own editor (R13) is WP-2.10's; delay compensation, which the latency rules feed, is WP-2.11's; offline renders (export, agents' previews) running plug-ins are WP-2.6b's for CLAP and WP-4.21's for VST3, which lends its instances as [offline plug-in renders](offline-plugin-renders.md) say (built). WP-6.17b adds per-note expression and MPE (R19 to R21, with [MPE](mpe.md) R14 to R21).
 - **Parity-matrix row:** Plug-in formats: VST3
 - **Checked against:** the VST3 SDK's headers through the `vst3` crate 0.3 (Coupler)'s generated bindings — `ipluginbase.h`, `ivstaudioprocessor.h`, `ivsteditcontroller.h`, `ivstevents.h`, `vstprocess.h`, and the module documentation: each side's state through `IBStream` (`getState`/`setState`, with `setComponentState` telling the controller what the component's means), the component handler's `beginEdit`/`performEdit`/`endEdit` and its `restartComponent` ask, and `getLatencySamples`; [the architecture](../02-architecture.md), "Plug-in hosting" and "Real-time rules"; [the CLAP hosting spec](clap-hosting.md), which VST3 hosting mirrors wherever the formats allow
 
@@ -25,6 +25,8 @@ This part loads, describes, activates and processes, saves and restores the comp
 | S4 | Specification | The VST3 SDK's `vstprocess.h`, `ivstevents.h` | A process block is `ProcessData`: bus buffers, input and output `IParameterChanges`, input and output event lists, and a process context; each parameter point and each event carries a sample offset; processing starts with `setupProcessing`, `setActive(true)` and `setProcessing(true)` |
 | S5 | Specification | The VST3 SDK's `ivsteditcontroller.h` (`ParameterInfo`) | Parameters are normalized from 0 to 1; the controller maps between normalized and plain values, and reports each parameter's title, steps, default and flags |
 | S6 | Beatlayer | `crates/test-vst3` (the test plug-in) and the CLAP host's tests | A plug-in built from source exercises the host's rules |
+| S7 | Specification | The VST3 SDK's `ivstnoteexpression.h`, `ivstphysicalui.h` and `ivstevents.h`, through the `vst3` crate's bindings | A controller that implements `INoteExpressionController` takes and sends `NoteExpressionValueEvent`s for a note ID, the tuning type's normalized value being 0.5 plus the semitones over 240; `INoteExpressionPhysicalUIMapping` names the note expression type a key's Y movement and its pressure drive; `PolyPressureEvent` carries one note's pressure |
+| S8 | Beatlayer | [MPE](mpe.md) R5, R6, R14 to R17 and R20 | A note's per-note pitch, slide and pressure; a plug-in device's MPE Mode; MPE MIDI's layout |
 
 ## Rules
 
@@ -44,6 +46,12 @@ This part loads, describes, activates and processes, saves and restores the comp
 - **R16.** `plugin.load` and `plugin.info` are the registered commands agents run for a VST3 device: `plugin.load` is External, like any load, and `plugin.info` is a read. `plugin.info` reports the device's class ID, its file, whether it's active and for which settings, its latency, what went wrong if anything, its controller's parameter values in plain units, and that it has no editor until WP-2.10. (S1)
 - **R17.** Nothing the node does on the audio thread allocates, locks, or blocks: its buffers, parameter queues and event lists are made with it, and a change or event past their room is dropped and counted. (S1)
 - **R18.** A control change, pitch bend or channel pressure reaches a plug-in through its controller's MIDI mapping (`IMidiMapping`), as VST3 has hosts do it: the parameter the controller maps the message's controller to (bus 0, the message's channel, the controller's number, 128 for channel pressure and 129 for pitch bend) takes the message's value, normalized (the value over 127, a bend over 16,383), on the message's frame. The mapping is asked once, when the plug-in is activated. A message the controller doesn't map is ignored. A parameter's queue holds 64 points in a block; a message past that is dropped and counted. (S6)
+
+**Per-note expression and MPE (WP-6.17b)**
+
+- **R19.** While the device's MPE Mode is off ([MPE](mpe.md) R14, R15), a note's per-note pressure reaches the plug-in as a `PolyPressureEvent` for the note's channel, pitch and note ID, on its frame; its per-note pitch and slide don't reach it. (S7, S8)
+- **R20.** While MPE Mode is on, a plug-in whose controller implements `INoteExpressionController` gets the note's expressions as `NoteExpressionValueEvent`s for its note ID, on their frames: the pitch as the tuning type, normalized as 0.5 plus its semitones over 240; the slide and the pressure as the types its `INoteExpressionPhysicalUIMapping` gives a key's Y movement and its pressure; the pressure as a `PolyPressureEvent` where it maps none to pressure, and the slide not at all where it maps none to Y movement. A plug-in whose controller has no note expression gets MPE MIDI ([MPE](mpe.md) R17) through its MIDI mapping: each note on its member channel, and that channel's pitch bend, controller 74 and channel pressure setting the parameters the mapping assigns for that channel, as R18 says. (S5, S7, S8; preferring note expression to the MIDI mapping is Beatlayer's own)
+- **R21.** While MPE Mode is on, the note expression values a plug-in sends out go on from its node as per-note expressions of the notes it sent: tuning as a bend of its semitones over 48, and the types its physical mapping gives Y movement and pressure as slide and pressure ([MPE](mpe.md) R6, R20). (S7, S8)
 
 ## Tests
 
@@ -67,3 +75,6 @@ The test plug-in, Test Gain Echo, is built from source in `crates/test-vst3` and
 | R16 | `crates/agent/tests/plugin_vst3.rs`, `a_vst3_plugin_loads_by_path_through_the_agent_api`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands`; `crates/plugin-host/tests/vst3.rs`, `audio_runs_through_the_plugin_and_a_change_lands_on_its_frame` (the host's report) | unit |
 | R17 | every block in `crates/plugin-host/tests/vst3.rs` runs as a real-time section under the allocation trap | real-time trap |
 | R18 | `crates/plugin-host/tests/vst3.rs`, `channel_messages_set_the_parameters_the_controller_maps_them_to` | unit, real-time trap |
+| R19 | to be written in WP-6.17b | unit, real-time trap |
+| R20 | to be written in WP-6.17b | unit, real-time trap |
+| R21 | to be written in WP-6.17b | unit, real-time trap |

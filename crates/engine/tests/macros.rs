@@ -184,6 +184,62 @@ fn a_hidden_macro_still_drives_its_parameters() {
     assert!((settled(&mut rig, 64) - 1.0).abs() < 1e-6);
 }
 
+// Spec: macros R27
+#[test]
+fn launching_a_variation_moves_every_macro_on_one_frame() {
+    for size in SIZES {
+        let mut rig = Rig::new(4096);
+        let audio = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, audio, 1.0);
+        let (rack, chains) = rack(&mut rig.editor, audio, RackKind::AudioEffect, 2);
+        let gains: Vec<DeviceId> = chains
+            .iter()
+            .map(|chain| effect_in(&mut rig.editor, *chain, GAIN_DESCRIBED, &[]))
+            .collect();
+        // Macro 1 drives the first chain's gain, macro 2 the second's.
+        for (number, gain) in [(1u8, gains[0]), (2, gains[1])] {
+            rig.apply(Command::MapMacro {
+                rack,
+                macro_number: number,
+                target: MacroTarget::Device {
+                    device: gain,
+                    param: GAIN_PARAM,
+                },
+            });
+        }
+        // Macro 2 is left out of variations.
+        rig.apply(Command::SetMacroVariationExcluded {
+            rack,
+            macro_number: 2,
+            excluded: true,
+        });
+        // A variation of both macros at 0, then both macros raised.
+        rig.apply(Command::StoreVariation { rack });
+        rig.apply(Command::SetDeviceParam {
+            device: rack,
+            param: macro_param(1),
+            value: 1.0,
+        });
+        rig.apply(Command::SetDeviceParam {
+            device: rack,
+            param: macro_param(2),
+            value: 1.0,
+        });
+        rig.sync();
+        assert!(
+            (settled(&mut rig, size) - 4.0).abs() < 1e-6,
+            "both gains at 2, block {size}"
+        );
+        // The launch sets macro 1 back to 0 and leaves excluded macro 2 alone.
+        rig.apply(Command::LaunchVariation { rack, index: 0 });
+        rig.sync();
+        assert!(
+            (settled(&mut rig, size) - 2.0).abs() < 1e-6,
+            "one gain left, block {size}"
+        );
+    }
+}
+
 // Spec: macros R4
 #[test]
 fn a_macro_drives_a_chains_mixer_control() {

@@ -135,7 +135,11 @@ fn settings(
     });
     ui.horizontal(|ui| {
         ui.label("Step");
-        ui.add(egui::DragValue::new(&mut choices.step).range(1..=12).speed(1));
+        ui.add(
+            egui::DragValue::new(&mut choices.step)
+                .range(1..=12)
+                .speed(1),
+        );
         ui.label("Velocity Layers");
         ui.add(
             egui::DragValue::new(&mut choices.velocity_layers)
@@ -198,7 +202,8 @@ fn settings(
         ui.add_space(4.0);
     }
     ui.horizontal(|ui| {
-        let start = ui.add_enabled(plan.samples.len() > 0, egui::Button::new("Autosample"));        if start.clicked() {
+        let start = ui.add_enabled(!plan.samples.is_empty(), egui::Button::new("Autosample"));
+        if start.clicked() {
             let args = AutosampleArgs {
                 device: Some(device),
                 lowest: Some(settings.lowest),
@@ -218,16 +223,12 @@ fn settings(
             invoke(events, ids::AUTOSAMPLE_CANCEL, json!({}));
         }
     });
-    ui.ctx().data_mut(|data| data.insert_temp(choices_id(device), choices));
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(choices_id(device), choices));
 }
 
 /// The run's progress, the note it is on, and Cancel.
-fn running(
-    ui: &mut Ui,
-    theme: &Theme,
-    status: &AutosampleStatus,
-    events: &mut Vec<UiEvent>,
-) {
+fn running(ui: &mut Ui, theme: &Theme, status: &AutosampleStatus, events: &mut Vec<UiEvent>) {
     let note = status.note.map_or_else(String::new, bl_model::note_name);
     ui.label(format!(
         "Sampling {note} ({}/{})",
@@ -239,8 +240,10 @@ fn running(
     } else {
         status.done as f32 / status.total as f32
     };
-    let (rect, response) =
-        ui.allocate_exact_size(egui::Vec2::new(ui.available_width(), 10.0), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::Vec2::new(ui.available_width(), 10.0),
+        egui::Sense::hover(),
+    );
     let painter = ui.painter_at(rect);
     let colors = &theme.colors;
     painter.rect_filled(rect, theme.sizes.corner, colors.control.0);

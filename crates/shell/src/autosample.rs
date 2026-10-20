@@ -199,7 +199,14 @@ pub fn file_name(settings: &Settings, sample: &Planned) -> String {
 
 /// A layer for a sample, with the zones the plan gives it (R66, R69).
 #[must_use]
-pub fn layer(sample: &Planned, name: &str, media: bl_model::ContentHash, length: u64, rate: u32, channels: u8) -> Layer {
+pub fn layer(
+    sample: &Planned,
+    name: &str,
+    media: bl_model::ContentHash,
+    length: u64,
+    rate: u32,
+    channels: u8,
+) -> Layer {
     let mut layer = Layer::new(bl_model::LayerId(0), name, media, length, rate, channels);
     layer.key = sample.key;
     layer.velocity = sample.velocity_zone;
@@ -293,7 +300,10 @@ mod tests {
         assert_eq!((first.velocity_zone.low, first.velocity_zone.high), (1, 64));
         let second = &plan.samples[1];
         assert_eq!(second.velocity, 127);
-        assert_eq!((second.velocity_zone.low, second.velocity_zone.high), (65, 127));
+        assert_eq!(
+            (second.velocity_zone.low, second.velocity_zone.high),
+            (65, 127)
+        );
         // The key zones run halfway to the neighbours, so every key plays.
         assert_eq!((first.key.low, first.key.high), (0, 37));
         let middle = &plan.samples[2];

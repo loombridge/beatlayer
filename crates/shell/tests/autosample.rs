@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use bl_model::{DeviceId, DeviceRole, Layer, TrackId, TrackKind};
+use bl_shell::Shell;
 use bl_shell::autosample::Settings;
 use bl_shell::autosampler_commands::{self as ids, Autosampled};
 use bl_shell::export::{self, Length, Render};
-use bl_shell::Shell;
 use serde_json::{Value, json};
 
 /// A folder of its own under the system's temporary folder, removed when
@@ -22,7 +22,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("bl-autosample-{}-{name}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("bl-autosample-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -161,9 +162,14 @@ fn render(
     settings: &Settings,
     block: usize,
 ) -> (Vec<f32>, u64) {
-    let document =
-        bl_shell::autosample::render_document(shell.editor().document(), device, note, velocity, settings)
-            .unwrap();
+    let document = bl_shell::autosample::render_document(
+        shell.editor().document(),
+        device,
+        note,
+        velocity,
+        settings,
+    )
+    .unwrap();
     let rate = 48_000;
     let frames = (settings.sample_seconds() * f64::from(rate)).round() as u64;
     let mut samples: Vec<f32> = Vec::new();
@@ -318,11 +324,7 @@ fn samples_are_named_and_placed_in_the_project() {
     let bytes = std::fs::read(path).unwrap();
     assert_eq!(&bytes[0..4], b"RIFF");
     // The float format, in the extensible header's subformat GUID.
-    assert_eq!(
-        u16::from_le_bytes([bytes[44], bytes[45]]),
-        3,
-        "IEEE float"
-    );
+    assert_eq!(u16::from_le_bytes([bytes[44], bytes[45]]), 3, "IEEE float");
     assert_eq!(u16::from_le_bytes([bytes[22], bytes[23]]), 2, "stereo");
     assert_eq!(
         u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
@@ -400,7 +402,14 @@ fn three_octaves_and_two_layers_match_the_synth() {
     // source plays, 60 dB below the source's level.
     for file in result.files.iter().take(4) {
         let (source, _) = render(&shell, device, file.note, file.velocity, &settings, 512);
-        let (sampled, _) = render(&shell, multisampler, file.note, file.velocity, &settings, 512);
+        let (sampled, _) = render(
+            &shell,
+            multisampler,
+            file.note,
+            file.velocity,
+            &settings,
+            512,
+        );
         let level: f64 = source[..held * 2]
             .iter()
             .map(|sample| f64::from(*sample) * f64::from(*sample))
@@ -509,9 +518,5 @@ fn cancel_deletes_the_files_and_changes_nothing() {
         before.top_level().count(),
         "no track"
     );
-    assert_eq!(
-        shell.editor().undo_history().len(),
-        history,
-        "no undo step"
-    );
+    assert_eq!(shell.editor().undo_history().len(), history, "no undo step");
 }

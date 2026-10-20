@@ -81,9 +81,7 @@ impl Shell {
     /// Whether the autosampler's commands can run.
     pub(super) fn can_autosampler(&self, id: &str, _args: &Value) -> bool {
         match id {
-            ids::AUTOSAMPLE_CANCEL => {
-                self.autosample.is_some() || self.autosample_dialog.is_some()
-            }
+            ids::AUTOSAMPLE_CANCEL => self.autosample.is_some() || self.autosample_dialog.is_some(),
             _ => self.autosample.is_none(),
         }
     }
@@ -281,8 +279,7 @@ impl Shell {
             return Ok(false);
         };
         let frames = self.render_sample(id, device, sample.note, sample.velocity, &settings)?;
-        let (path, media, length, channels) =
-            self.write_sample(id, &settings, &sample, &frames)?;
+        let (path, media, length, channels) = self.write_sample(id, &settings, &sample, &frames)?;
         let mut layer = autosample::layer(
             &sample,
             &autosample::file_name(&settings, &sample),
@@ -365,7 +362,9 @@ impl Shell {
         settings: &Settings,
     ) -> Result<Vec<f32>, ShellError> {
         let rate = self.engine_rate();
-        let frames = (settings.sample_seconds() * f64::from(rate)).round().max(1.0) as u64;
+        let frames = (settings.sample_seconds() * f64::from(rate))
+            .round()
+            .max(1.0) as u64;
         let document = self.render_document(id, device, note, velocity, settings)?;
         let mut samples: Vec<f32> = Vec::with_capacity(frames as usize * 2);
         let spec = crate::export::Render {

@@ -4,7 +4,6 @@
 # deletes their entries. `cargo xtask test-clock` fails on a file that isn't
 # listed and on an entry that no longer needs to be.
 
-crates/agent/tests/engine_host.rs # a timeout on the engine's own thread
 crates/agent/tests/http.rs # a timeout on the agent server and its client
 crates/agent/tests/perception.rs # a timeout on the engine's playback
 crates/agent/tests/plugin_vst3.rs # a timeout on a real VST3 host
@@ -52,7 +51,7 @@ crates/shell/src/browser/index.rs # a timeout on the index's thread
 crates/shell/src/recording.rs # a timeout on a recording's thread
 crates/shell/tests/au_editor.rs # waits for a real Audio Unit's window
 crates/shell/tests/audio_settings.rs # a device's status changes on the system's clock
-crates/shell/tests/browser.rs # a timeout on the browser's index
+crates/shell/tests/browser.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
@@ -63,7 +62,7 @@ crates/shell/tests/offline_vst3_au.rs # waits for a real VST3 or AU render
 crates/shell/tests/plugins.rs # waits for a real CLAP plug-in
 crates/shell/tests/plugins_au.rs # waits for a real Audio Unit
 crates/shell/tests/processed_files.rs # a timeout on a processed file's write
-crates/shell/tests/realtime.rs # tests real-time safety under load
+crates/shell/tests/realtime.rs # measures the callback under real-time pacing
 crates/ui/tests/accessibility.rs # a timeout on the UI's layout
 crates/ui/tests/agent_settings.rs # a timeout on the agent server
 crates/ui/tests/browser.rs # a timeout on the browser's index

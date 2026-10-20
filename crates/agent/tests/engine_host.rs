@@ -8,74 +8,82 @@
 //! on the frames their bars and beats fall on, as `bl-cli`'s engine
 //! harness plays them offline.
 
-use std::time::{Duration, Instant};
-
 use bl_agent::client::{Client, InProcess};
 use bl_agent::{Agent, QuestionKind};
 use bl_core::time::{SampleRate, Ticks};
-use bl_shell::Shell;
+use bl_audio_io::NullControl;
+use bl_shell::testing;
 use serde_json::{Value, json};
 
 const BAR: i64 = Ticks::WHOLE.get();
 
-/// The app's agent API on a shell playing through the null device, the
-/// agent `conductor` allowed.
-fn host() -> Client<InProcess> {
-    let mut shell = Shell::headless();
+/// The app's agent API on a shell playing through the null device paced by
+/// hand (T199), the agent `conductor` allowed, and the control that runs its
+/// blocks.
+fn host() -> (Client<InProcess>, NullControl) {
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     assert!(shell.audio().engine_running(), "{:?}", shell.audio());
     let mut client = Client::new(InProcess::new(Agent::for_app(), shell));
     client.transport().answer = Box::new(|q| matches!(q.kind, QuestionKind::Connect { .. }));
     client.initialize("conductor").unwrap();
-    pump(&mut client);
-    client
+    pump(&control, &mut client);
+    (client, control)
 }
 
-/// What the app's event loop does after every event.
-fn pump(client: &mut Client<InProcess>) {
+/// What the app's event loop does after every event, and the block the
+/// hand-paced null device runs for it.
+fn pump(control: &NullControl, client: &mut Client<InProcess>) {
     let host = client.transport();
     host.agent.sync_engine(&mut host.shell);
     while host.agent.resume(&mut host.shell).is_some() {}
+    // With the audio engine switched off there is no stream to run.
+    if host.shell.audio().is_running() {
+        testing::advance(control, &mut host.shell, testing::STEP_MS);
+    }
 }
 
 /// A tool call, as the app serves it: the engine hears what it asked at
 /// once.
-fn call(client: &mut Client<InProcess>, tool: &str, args: Value) -> Value {
+fn call(control: &NullControl, client: &mut Client<InProcess>, tool: &str, args: Value) -> Value {
     let result = client
         .call(tool, args)
         .unwrap()
         .ok()
         .unwrap_or_else(|e| panic!("{tool}: {e}"));
-    pump(client);
+    pump(control, client);
     result
 }
 
-/// Pumps until `done` holds, for up to ten seconds.
-fn wait(client: &mut Client<InProcess>, what: &str, done: impl Fn(&mut Client<InProcess>) -> bool) {
-    let until = Instant::now() + Duration::from_secs(10);
-    loop {
-        pump(client);
+/// Pumps until `done` holds, for up to about ten seconds of test time.
+fn wait(
+    control: &NullControl,
+    client: &mut Client<InProcess>,
+    what: &str,
+    done: impl Fn(&mut Client<InProcess>) -> bool,
+) {
+    for _ in 0..2_000 {
+        pump(control, client);
         if done(client) {
             return;
         }
-        assert!(Instant::now() < until, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(2));
     }
+    panic!("timed out waiting for {what}");
 }
 
-fn status(client: &mut Client<InProcess>) -> Value {
-    call(client, "transport", json!({ "action": "status" }))
+fn status(control: &NullControl, client: &mut Client<InProcess>) -> Value {
+    call(control, client, "transport", json!({ "action": "status" }))
 }
 
-fn scheduled(client: &mut Client<InProcess>) -> Vec<Value> {
-    call(client, "schedule", json!({ "action": "list" }))["scheduled"]
+fn scheduled(control: &NullControl, client: &mut Client<InProcess>) -> Vec<Value> {
+    call(control, client, "schedule", json!({ "action": "list" }))["scheduled"]
         .as_array()
         .unwrap()
         .clone()
 }
 
-fn all_fired(client: &mut Client<InProcess>) -> bool {
-    scheduled(client)
+fn all_fired(control: &NullControl, client: &mut Client<InProcess>) -> bool {
+    scheduled(control, client)
         .iter()
         .all(|entry| entry["state"] == "fired")
 }
@@ -90,8 +98,8 @@ fn frame_of(client: &mut Client<InProcess>, at: &str) -> i64 {
     settings.tempo.ticks_to_frames(ticks, rate).get()
 }
 
-fn audio_track(client: &mut Client<InProcess>) -> u64 {
-    call(client, "query", json!({ "path": "track \"3 Audio\"" }))["id"]
+fn audio_track(control: &NullControl, client: &mut Client<InProcess>) -> u64 {
+    call(control, client, "query", json!({ "path": "track \"3 Audio\"" }))["id"]
         .as_u64()
         .unwrap()
 }
@@ -99,11 +107,11 @@ fn audio_track(client: &mut Client<InProcess>) -> u64 {
 #[test]
 fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_undo_steps() {
     // Spec: agent-permissions R10.
-    let mut client = host();
-    let before = status(&mut client);
+    let (mut client, control) = host();
+    let before = status(&control, &mut client);
     assert_eq!(before["engine_plays_here"], true, "{before}");
     assert_eq!(before["playing"], false);
-    let track = audio_track(&mut client);
+    let track = audio_track(&control, &mut client);
     for (at, command, args) in [
         (
             "1.2.1",
@@ -117,6 +125,7 @@ fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_un
         ),
     ] {
         let added = call(
+            &control,
             &mut client,
             "schedule",
             json!({ "action": "add", "at": at, "command": command, "args": args }),
@@ -130,11 +139,11 @@ fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_un
             "{added}"
         );
     }
-    call(&mut client, "transport", json!({ "action": "play" }));
-    wait(&mut client, "both to fire", all_fired);
+    call(&control, &mut client, "transport", json!({ "action": "play" }));
+    wait(&control, &mut client, "both to fire", |c| all_fired(&control, c));
 
     // Each fired on the frame its bar and beat falls on.
-    let entries = scheduled(&mut client);
+    let entries = scheduled(&control, &mut client);
     for entry in &entries {
         let at = entry["at"].as_str().unwrap();
         assert_eq!(
@@ -159,33 +168,34 @@ fn scheduled_commands_fire_in_the_app_s_engine_on_their_frames_as_the_agent_s_un
     assert!(mixer.mute);
     assert_eq!(mixer.volume, 0.5);
     // The agent sees the engine's transport.
-    let now = status(&mut client);
+    let now = status(&control, &mut client);
     assert_eq!(now["playing"], true, "{now}");
     assert!(
         now["position"]["ticks"].as_i64().unwrap() >= BAR / 2,
         "{now}"
     );
-    call(&mut client, "transport", json!({ "action": "stop" }));
-    wait(&mut client, "the stop", |c| status(c)["playing"] == false);
+    call(&control, &mut client, "transport", json!({ "action": "stop" }));
+    wait(&control, &mut client, "the stop", |c| status(&control, c)["playing"] == false);
 }
 
 #[test]
 fn the_agent_s_and_the_person_s_transport_commands_share_one_queue_in_order() {
     // Spec: agent-permissions R10; control-bar-transport R12.
-    let mut client = host();
+    let (mut client, control) = host();
     // The person plays, from the Control Bar.
     client
         .transport()
         .shell
         .invoke("transport.play", json!({}))
         .unwrap();
-    wait(&mut client, "the person's play", |c| {
-        status(c)["playing"] == true
+    wait(&control, &mut client, "the person's play", |c| {
+        status(&control, c)["playing"] == true
     });
     // The agent jumps to bar 9, and straight after the person stops: the
     // engine takes them in that order, so the song stops at bar 9, not
     // where it was.
     call(
+        &control,
         &mut client,
         "transport",
         json!({ "action": "locate", "at": "9.1.1" }),
@@ -195,8 +205,8 @@ fn the_agent_s_and_the_person_s_transport_commands_share_one_queue_in_order() {
         .shell
         .invoke("transport.stop", json!({}))
         .unwrap();
-    wait(&mut client, "the stop", |c| status(c)["playing"] == false);
-    let stopped = status(&mut client);
+    wait(&control, &mut client, "the stop", |c| status(&control, c)["playing"] == false);
+    let stopped = status(&control, &mut client);
     let position = stopped["position"]["ticks"].as_i64().unwrap();
     assert!(
         (8 * BAR..9 * BAR).contains(&position),
@@ -214,9 +224,10 @@ fn the_agent_s_and_the_person_s_transport_commands_share_one_queue_in_order() {
 #[test]
 fn a_new_engine_gets_the_commands_still_scheduled_and_none_plays_without_one() {
     // Spec: agent-permissions R10.
-    let mut client = host();
-    let track = audio_track(&mut client);
+    let (mut client, control) = host();
+    let track = audio_track(&control, &mut client);
     call(
+        &control,
         &mut client,
         "schedule",
         json!({ "action": "add", "at": "1.2.1", "command": "mixer.set_mute",
@@ -228,8 +239,8 @@ fn a_new_engine_gets_the_commands_still_scheduled_and_none_plays_without_one() {
         .shell
         .invoke("audio.toggle_engine", json!({}))
         .unwrap();
-    pump(&mut client);
-    assert_eq!(status(&mut client)["engine_plays_here"], false);
+    pump(&control, &mut client);
+    assert_eq!(status(&control, &mut client)["engine_plays_here"], false);
     let refused = client
         .call("transport", json!({ "action": "play" }))
         .unwrap();
@@ -240,11 +251,11 @@ fn a_new_engine_gets_the_commands_still_scheduled_and_none_plays_without_one() {
         .shell
         .invoke("audio.toggle_engine", json!({}))
         .unwrap();
-    pump(&mut client);
-    assert_eq!(status(&mut client)["engine_plays_here"], true);
-    call(&mut client, "transport", json!({ "action": "play" }));
-    wait(&mut client, "the mute", all_fired);
-    let entries = scheduled(&mut client);
+    pump(&control, &mut client);
+    assert_eq!(status(&control, &mut client)["engine_plays_here"], true);
+    call(&control, &mut client, "transport", json!({ "action": "play" }));
+    wait(&control, &mut client, "the mute", |c| all_fired(&control, c));
+    let entries = scheduled(&control, &mut client);
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0]["detail"]["song_frame"].as_i64().unwrap(),
@@ -263,22 +274,23 @@ fn a_new_engine_gets_the_commands_still_scheduled_and_none_plays_without_one() {
 fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
     // Spec: agent-permissions R5, R10. The engine changes the sound on its
     // frame; the set follows once the person lets go.
-    let mut client = host();
-    let track = audio_track(&mut client);
+    let (mut client, control) = host();
+    let track = audio_track(&control, &mut client);
     call(
+        &control,
         &mut client,
         "schedule",
         json!({ "action": "add", "at": "1.2.1", "command": "mixer.set_mute",
                 "args": { "track": track, "mute": true } }),
     );
-    call(&mut client, "transport", json!({ "action": "play" }));
+    call(&control, &mut client, "transport", json!({ "action": "play" }));
     // The person drags a fader on another track meanwhile.
     let shell = &mut client.transport().shell;
     shell.begin_gesture("Change volume");
     shell
         .run("mixer.set_volume", json!({ "track": 4, "volume": 0.25 }))
         .unwrap();
-    wait(&mut client, "the engine to fire", |c| {
+    wait(&control, &mut client, "the engine to fire", |c| {
         c.transport().agent.holds_calls()
     });
     let muted = |c: &mut Client<InProcess>| {
@@ -293,7 +305,7 @@ fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
     };
     assert!(!muted(&mut client), "the set waits for the drop");
     client.transport().shell.end_gesture();
-    pump(&mut client);
+    pump(&control, &mut client);
     assert!(muted(&mut client));
     let history: Vec<String> = client
         .transport()
@@ -310,7 +322,7 @@ fn a_scheduled_command_that_fires_mid_drag_lands_after_the_drop() {
             "Change volume"
         ]
     );
-    call(&mut client, "transport", json!({ "action": "stop" }));
+    call(&control, &mut client, "transport", json!({ "action": "stop" }));
 }
 
 #[test]
@@ -320,9 +332,9 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
     // that has never been saved can't hold an armed audio track's file, and
     // the shell says so. Starting a recording asks first; the person allows
     // it.
-    let mut client = host();
+    let (mut client, control) = host();
     client.transport().answer = Box::new(|_| true);
-    let track = audio_track(&mut client);
+    let track = audio_track(&control, &mut client);
     for (command, args) in [
         (
             "routing.set_input",
@@ -333,12 +345,13 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
         ("transport.set_recording", json!({ "recording": true })),
     ] {
         call(
+            &control,
             &mut client,
             "run",
             json!({ "commands": [{ "command": command, "args": args }] }),
         );
     }
-    wait(&mut client, "the engine to record", |c| {
+    wait(&control, &mut client, "the engine to record", |c| {
         c.transport().shell.poll_engine().recording
     });
     let message = client
@@ -352,5 +365,5 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
             .is_some_and(|text| text.starts_with("the set has never been saved")),
         "{message:?}"
     );
-    call(&mut client, "transport", json!({ "action": "stop" }));
+    call(&control, &mut client, "transport", json!({ "action": "stop" }));
 }

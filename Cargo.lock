@@ -681,6 +681,7 @@ name = "bl-agent"
 version = "0.2.0"
 dependencies = [
  "bl-analysis",
+ "bl-audio-io",
  "bl-commands",
  "bl-core",
  "bl-devices",

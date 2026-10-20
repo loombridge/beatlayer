@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use bl_audio_io::{AudioBuffer, AudioBufferMut, AudioCallback as _, ProcessContext};
 use bl_shell::Shell;
+use bl_shell::testing;
 use bl_shell::audio::{EngineCallback, EngineShared, ToneSettings};
 use serde_json::json;
 
@@ -125,7 +126,7 @@ fn a_preview_through_the_null_stream_stays_off_the_heap() {
     }
     std::fs::write(&file, bytes).unwrap();
 
-    let mut shell = Shell::headless();
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     // The null device makes no sound; the volume is low anyway.
     shell
@@ -135,15 +136,24 @@ fn a_preview_through_the_null_stream_stays_off_the_heap() {
         shell
             .run("browser.preview", json!({ "path": file.to_string_lossy() }))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while shell.browser_preview().position_seconds <= 0.0 {
+        // The preview's buffer is loaded and pushed on another thread, and
+        // the callback renders it: poll and drive the blocks until it plays.
+        for _ in 0..2_000 {
             shell.poll();
-            assert!(Instant::now() < deadline, "the preview never played");
-            std::thread::sleep(Duration::from_millis(5));
+            if shell.browser_preview().position_seconds > 0.0 {
+                break;
+            }
+            testing::advance(&control, &mut shell, testing::STEP_MS);
         }
+        assert!(
+            shell.browser_preview().position_seconds > 0.0,
+            "the preview never played"
+        );
     }
     shell.run("browser.stop_preview", json!({})).unwrap();
-    let stats = wait_for_blocks(&shell, 40);
+    // The null device is paced by hand: run the blocks the statistics need.
+    control.run_blocks(40);
+    let stats = shell.audio().stats().expect("a stream is open");
     assert_eq!(stats.heap_operations, 0, "{stats:?}");
     shell.audio_mut().stop();
     let _ = std::fs::remove_dir_all(&dir);

@@ -1164,6 +1164,8 @@ fn an_agent_adds_drum_buss_sets_it_by_id_and_reads_it_back() {
     assert_eq!(find("Output")["text"], json!("0.00 dB"));
     assert_eq!(host.offline.heap_operations(), 0);
 }
+
+/// The transport after the transport spec, one frame at a time,
 /// apart from the engine's code: what each frame of the engine clock plays.
 struct TransportModel {
     tempo: TempoMap,

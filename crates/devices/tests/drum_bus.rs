@@ -14,6 +14,7 @@ use bl_devices::drum_bus::{
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::ParamId;
+use bl_model::param::db_to_gain;
 use common::{RATE, device, dft_at, node, noise, run};
 
 fn registry() -> Registry {
@@ -364,8 +365,11 @@ fn dry_wet_at_zero_is_the_input() {
 #[test]
 fn renders_are_bit_identical_at_any_block_size() {
     let input = noise(8_192);
+    // Gain parameters take a linear amplitude factor, so a dB setting is
+    // converted: `-3.0` alone would clamp to silence and the render below
+    // would compare zeros.
     let params = [
-        (TRIM, -3.0),
+        (TRIM, db_to_gain(-3.0)),
         (COMP, 1.0),
         (TYPE, 2.0),
         (DRIVE, 60.0),
@@ -376,7 +380,7 @@ fn renders_are_bit_identical_at_any_block_size() {
         (FREQ, 70.0),
         (DECAY, 300.0),
         (DRY_WET, 80.0),
-        (OUTPUT, -2.0),
+        (OUTPUT, db_to_gain(-2.0)),
     ];
     let render = |block: usize| -> Vec<f32> {
         let mut node = buss(&params, block);
@@ -386,6 +390,10 @@ fn renders_are_bit_identical_at_any_block_size() {
             .collect()
     };
     let reference = render(4_096);
+    assert!(
+        reference.iter().any(|s| s.abs() > 1e-3),
+        "the render isn't silence"
+    );
     for block in [1, 64, 512] {
         assert!(render(block) == reference, "block size {block}");
     }

@@ -4,7 +4,7 @@
 
 use bl_model::{DeviceId, TrackId};
 use bl_shell::device_commands::DeviceAdded;
-use bl_shell::{Area, Shell};
+use bl_shell::{Area, Effect, Shell};
 use serde_json::{Value, json};
 
 const UTILITY: &str = "beatlayer.utility";
@@ -397,4 +397,63 @@ fn the_macro_count_stays_in_range() {
             )
             .is_err()
     );
+}
+
+// Spec: macros R14. Rename names a selected macro; choosing another device
+// ends that selection, so Rename names the device again.
+#[test]
+fn choosing_a_device_takes_rename_back_from_a_macro() {
+    let mut set = set();
+    set.shell
+        .invoke(
+            "rack.select_macro",
+            json!({ "rack": set.rack, "macro_number": 1 }),
+        )
+        .unwrap();
+    set.shell.invoke("device.rename", json!({})).unwrap();
+    assert_eq!(
+        set.shell.take_effects(),
+        vec![Effect::RenameMacro(set.rack, 1)]
+    );
+    let added: DeviceAdded = serde_json::from_value(
+        set.shell
+            .invoke(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": { "native": { "device_type": UTILITY } },
+                        "name": "Second",
+                        "role": "audio_effect",
+                    },
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    set.shell.invoke("device.rename", json!({})).unwrap();
+    assert_eq!(
+        set.shell.take_effects(),
+        vec![Effect::RenameDevice(added.device)]
+    );
+}
+
+// Spec: macros R3, R14. A rack that's gone takes its Map mode and its
+// selected macro with it.
+#[test]
+fn deleting_a_rack_forgets_its_macro_and_its_map_mode() {
+    let mut set = set();
+    set.shell
+        .invoke(
+            "rack.select_macro",
+            json!({ "rack": set.rack, "macro_number": 3 }),
+        )
+        .unwrap();
+    set.shell
+        .invoke("rack.map_mode", json!({ "rack": set.rack, "on": true }))
+        .unwrap();
+    set.shell
+        .invoke("device.remove", json!({ "device": set.rack }))
+        .unwrap();
+    assert_eq!(set.shell.devices().map_mode(), None);
+    assert_eq!(set.shell.devices().macro_selected(), None);
 }

@@ -278,7 +278,15 @@ impl DeviceView {
     /// Selects `device` without changing which track the Device View
     /// shows, as bringing its floating window to the front does (WP-2.5b).
     pub fn select_only(&mut self, device: DeviceId) {
-        self.selected = Some(device);
+        self.choose(Some(device));
+    }
+
+    /// Chooses the device the Device View shows as selected, ending a macro's
+    /// selection with it (macros spec, R14): Rename acts on one selection, so
+    /// choosing a device takes Rename back from the macro it named.
+    fn choose(&mut self, device: Option<DeviceId>) {
+        self.selected = device;
+        self.macro_selected = None;
     }
 
     /// Whether a device is folded.
@@ -576,6 +584,11 @@ impl DeviceView {
     pub fn forget_missing(&mut self, doc: &Document) {
         let exists = |d: &DeviceId| doc.device(*d).is_some();
         self.selected = self.selected.filter(exists);
+        // Spec: macros R3, R14. A rack that's gone takes its Map mode and a
+        // macro selected in it with it, so the browser comes back and Rename
+        // names a device again.
+        self.map_mode = self.map_mode.filter(exists);
+        self.macro_selected = self.macro_selected.filter(|(rack, _)| exists(rack));
         self.hot_swap = self.hot_swap.filter(exists);
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
@@ -1562,7 +1575,7 @@ impl DeviceView {
                         select_track(arrangement, editor.document(), owner)?;
                     }
                 }
-                self.selected = device;
+                self.choose(device);
                 self.chain_list_focus = false;
                 if let Some(device) = device {
                     outcome.view_changed = self.reveal(editor, device);
@@ -2266,7 +2279,7 @@ impl DeviceView {
                 }
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: place.track,
@@ -2353,7 +2366,7 @@ impl DeviceView {
         if new_track {
             select_track(arrangement, editor.document(), track_id)?;
         }
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: track_id,
@@ -2455,7 +2468,7 @@ impl DeviceView {
                 map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track,
@@ -2501,7 +2514,7 @@ impl DeviceView {
                 map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: place.track,
@@ -3008,7 +3021,7 @@ impl DeviceView {
                 rack: Device::rack(rack, kind).with_chain(Chain::new(chain, first)),
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(rack);
+        self.choose(Some(rack));
         Ok(Grouped { rack, chain })
     }
 
@@ -3067,7 +3080,7 @@ impl DeviceView {
                 Ok::<_, bl_model::EditError>(())
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(inner);
+        self.choose(Some(inner));
         Ok(Grouped {
             rack: inner,
             chain: outer,
@@ -3097,7 +3110,7 @@ impl DeviceView {
         editor
             .apply(Command::UngroupDevice { device: rack })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = devices.first().copied();
+        self.choose(devices.first().copied());
         Ok(Ungrouped { devices })
     }
 }

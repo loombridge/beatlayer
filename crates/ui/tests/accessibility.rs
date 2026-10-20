@@ -2096,6 +2096,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  focused column into view",
             )),
         ),
+        // The fold button in a track's title bar (racks spec, R27): Live
+        // names the button (25.8) but its key isn't observed yet, and its
+        // place in the Tab order with it (the racks spec's open question
+        // 19).
+        (
+            "mixer_view.fold_chains",
+            Exception(Unobserved(
+                "the fold button in the track's title bar: Live's own key for it isn't observed \
+                 yet, and its place in the mixers' Tab order with it",
+            )),
+        ),
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),

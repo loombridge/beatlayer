@@ -11,7 +11,7 @@
 mod common;
 
 use bl_model::{SceneId, TrackId};
-use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout};
+use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::session_view::slot_id;
 use common::{Harness, Node, Window, command};
@@ -51,7 +51,7 @@ impl Grid {
         let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
         let layout = MixerLayout::compute(
             session.slots,
-            columns.len(),
+            &vec![TrackColumn::track(); columns.len()],
             returns.len(),
             Sections::DEFAULT,
             0.0,

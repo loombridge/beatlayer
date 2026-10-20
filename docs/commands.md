@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-541 commands in 37 areas.
+542 commands in 37 areas.
 
 ## Permission classes
 
@@ -351,6 +351,7 @@ Each command has:
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
+| [`mixer_view.fold_chains`](#mixer_viewfold_chains) | Fold Rack Chains | `read` |  |  |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
@@ -6353,6 +6354,23 @@ Default keys:
 | S-ARR-035 | `Option+Shift+M` | `Alt+Shift+M` | `arrangement` | Move focus to the mixer | runs it |
 
 Arguments: none (send `{}`).
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.fold_chains`
+
+**Fold Rack Chains**. Permission: `read`. Contexts: `global`.
+
+Folds a rack's chains out in the mixers as strips after the track's, as the fold button in the track's title bar does, or folds them back in. `rack` is the rack: a rack of more than one chain, on a track or inside another rack's chain. A track's fold button is for the instrument or drum rack it holds; a chain's is for the rack inside it. A rack of one chain has no chains to fold out. Switches unless `shown` says which. Changes only the view, and isn't saved with the set; the chains it shows read back in `mixer_view.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack whose chains fold out. |
+| `shown` | boolean or null | no | Show them (true) or hide them (false); switches them if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -12929,6 +12947,113 @@ A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), taken af
   "required": [
     "to",
     "level"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ChainStrip`
+
+A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack the chain belongs to. |
+| `rack_name` | string | yes | The rack's name. |
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | The chain's name. |
+| `volume` | number | yes | The chain's Volume as linear gain: 1 is 0 dB. |
+| `pan` | number | yes | The chain's Pan, from −1 to 1. |
+| `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
+| `enabled` | boolean | yes | Whether the chain's activator is on. |
+| `solo` | boolean | yes | Whether the chain is soloed. |
+| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "colour": {
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "enabled": {
+      "description": "Whether the chain's activator is on.",
+      "type": "boolean"
+    },
+    "has_mixer": {
+      "description": "Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The chain's name.",
+      "type": "string"
+    },
+    "nested": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RackFold"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains."
+    },
+    "pan": {
+      "description": "The chain's Pan, from −1 to 1.",
+      "format": "double",
+      "type": "number"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack the chain belongs to."
+    },
+    "rack_name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "solo": {
+      "description": "Whether the chain is soloed.",
+      "type": "boolean"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    },
+    "volume": {
+      "description": "The chain's Volume as linear gain: 1 is 0 dB.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "rack_name",
+    "chain",
+    "name",
+    "volume",
+    "pan",
+    "has_mixer",
+    "enabled",
+    "solo"
   ],
   "type": "object"
 }
@@ -20924,10 +21049,12 @@ What `mixer_view.state` and the other view commands return.
 | `in_out` | boolean | yes | Whether the In/Out section shows, in both mixers. |
 | `sends` | boolean | yes | Whether the Sends section shows. |
 | `volume` | boolean | yes | Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
-| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
+| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
+| `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20939,13 +21066,27 @@ What `mixer_view.state` and the other view commands return.
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Arrangement View's mixer."
     },
+    "chains": {
+      "description": "The chains folded out as strips, in the mixers' column order (racks spec, R27).",
+      "items": {
+        "$ref": "#/$defs/ChainStrip"
+      },
+      "type": "array"
+    },
     "crossfader": {
-      "description": "Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set.",
+      "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
       "type": "boolean"
     },
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
       "type": "boolean"
+    },
+    "racks": {
+      "description": "The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out.",
+      "items": {
+        "$ref": "#/$defs/RackFold"
+      },
+      "type": "array"
     },
     "return_tracks": {
       "description": "Whether the return tracks' columns show.",
@@ -23618,6 +23759,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RackFold`
+
+A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `name` | string | yes | The rack's name. |
+| `folded` | boolean | yes | Whether its chains are folded out as strips now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.",
+  "properties": {
+    "folded": {
+      "description": "Whether its chains are folded out as strips now.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "name",
+    "folded"
+  ],
+  "type": "object"
 }
 ```
 

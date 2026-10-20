@@ -151,6 +151,41 @@ pub struct ZoneEditorRects {
     pub rows: Vec<(ChainId, Rect)>,
 }
 
+/// One shown macro's places in the Macro Controls (macros spec, R20).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MacroItem {
+    /// Its number, from 1.
+    pub number: u8,
+    /// Its whole slot.
+    pub slot: Rect,
+    /// The knob's face.
+    pub knob: Rect,
+    /// Where its name reads.
+    pub name: Rect,
+    /// Where its value reads.
+    pub value: Rect,
+    /// Its Map button, shown in Map mode (R3).
+    pub map_button: Rect,
+}
+
+/// The Macro Controls' controls (macros spec, R20): the Show More, Show
+/// Fewer, Map and Rand buttons, and a slot per shown macro.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MacroLayout {
+    /// The whole area.
+    pub area: Rect,
+    /// Show More.
+    pub show_more: Rect,
+    /// Show Fewer.
+    pub show_fewer: Rect,
+    /// The Map switch.
+    pub map_switch: Rect,
+    /// The Rand button.
+    pub rand: Rect,
+    /// The shown macros, in number order.
+    pub items: Vec<MacroItem>,
+}
+
 /// Where each part of a rack sits in its frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RackLayout {
@@ -158,6 +193,8 @@ pub struct RackLayout {
     pub selectors: Vec<(RackView, Rect)>,
     /// The Macro Controls' place, while it's shown.
     pub macros: Option<Rect>,
+    /// The Macro Controls' controls, while it's shown (macros spec, R20).
+    pub macro_items: Option<MacroLayout>,
     /// A drum rack's pad view, while it's shown.
     pub pads: Option<crate::drum_view::PadLayout>,
     /// The chain list, while it's shown.
@@ -247,6 +284,167 @@ pub fn drop_area_id(rack: DeviceId) -> Id {
     Id::new(("chain-drop-area", rack))
 }
 
+/// The target selected in the mappings list, if one is.
+fn listed_target(ctx: &egui::Context) -> Option<(DeviceId, bl_model::MacroTarget)> {
+    ctx.data(|d| {
+        d.get_temp::<Option<(DeviceId, bl_model::MacroTarget)>>(Id::new("mappings-list-target"))
+    })
+    .flatten()
+}
+
+/// Draws the mappings list in the browser's place while a rack's Map mode is
+/// on (macros spec, R3 and R9): one row per mapping with the macro, the
+/// device and parameter, and the range, whose number boxes set it; a row's
+/// context menu inverts its range or deletes it, as the Delete key does.
+pub fn mappings_list(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rect: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    ui.painter()
+        .rect_filled(rect, 0.0, c.window.0.gamma_multiply(0.7));
+    let Some(rack) = shell.devices().map_mode() else {
+        return;
+    };
+    let doc = shell.editor().document();
+    let count = shell.devices().views_of(rack).macro_count;
+    let Some(state) = shell.devices().macros_of(doc, rack, count) else {
+        return;
+    };
+    let head = Rect::from_min_size(rect.min, vec2(rect.width(), 22.0));
+    ui.painter().text(
+        pos2(head.left() + 8.0, head.center().y),
+        Align2::LEFT_CENTER,
+        "Mappings",
+        theme.small_font(),
+        c.text.0,
+    );
+    let title = doc
+        .device(rack)
+        .map_or_else(String::new, |d| d.title().to_owned());
+    ui.painter().text(
+        pos2(head.right() - 8.0, head.center().y),
+        Align2::RIGHT_CENTER,
+        title,
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    let mut rows = Vec::new();
+    for macro_info in &state.macros {
+        for mapping in &macro_info.mappings {
+            rows.push((macro_info, mapping));
+        }
+    }
+    let selected = listed_target(ui.ctx());
+    let row_h = 22.0;
+    let mut y = head.bottom();
+    for (macro_info, mapping) in rows {
+        let row = Rect::from_min_size(pos2(rect.left() + 2.0, y), vec2(rect.width() - 4.0, row_h));
+        y += row_h;
+        if !rect.contains_rect(row) {
+            break;
+        }
+        let here = selected == Some((rack, mapping.target));
+        let id = Id::new(("mapping-row", rack, mapping.target));
+        let response = ui.interact(row, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        ui.painter().rect_filled(
+            row,
+            theme.sizes.corner,
+            if here { c.control_hover.0 } else { c.panel.0 },
+        );
+        if response.clicked() {
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(
+                    Id::new("mappings-list-target"),
+                    Some((rack, mapping.target)),
+                )
+            });
+        }
+        let macro_name = Rect::from_min_size(row.min, vec2(row.width() * 0.22, row.height()));
+        let device = Rect::from_min_max(
+            pos2(macro_name.right(), row.top()),
+            pos2(row.right() - 120.0, row.bottom()),
+        );
+        ui.painter().text(
+            pos2(macro_name.left() + 4.0, row.center().y),
+            Align2::LEFT_CENTER,
+            &macro_info.name,
+            theme.small_font(),
+            c.text.0,
+        );
+        ui.painter().text(
+            pos2(device.left() + 4.0, row.center().y),
+            Align2::LEFT_CENTER,
+            format!("{} · {}", mapping.device, mapping.param),
+            theme.small_font(),
+            c.text_dim.0,
+        );
+        // Min and Max, as percentages of the parameter's travel.
+        for (at, value) in [
+            (row.right() - 116.0, mapping.min_position),
+            (row.right() - 58.0, mapping.max_position),
+        ] {
+            let box_rect =
+                Rect::from_min_size(pos2(at, row.top() + 3.0), vec2(52.0, row.height() - 6.0));
+            let mut shown = (value * 100.0).round() / 100.0;
+            let changed = ui
+                .put(
+                    box_rect,
+                    egui::DragValue::new(&mut shown)
+                        .speed(0.01)
+                        .range(0.0..=1.0),
+                )
+                .changed();
+            if changed {
+                let (min, max) = if at == row.right() - 116.0 {
+                    (shown, mapping.max_position)
+                } else {
+                    (mapping.min_position, shown)
+                };
+                invoke(
+                    events,
+                    "rack.set_mapping_range",
+                    json!({ "rack": rack, "target": mapping.target, "min": min, "max": max }),
+                );
+            }
+        }
+        response.context_menu(|ui| {
+            if ui.button("Invert Range").clicked() {
+                invoke(
+                    events,
+                    "rack.invert_mapping",
+                    json!({ "rack": rack, "target": mapping.target }),
+                );
+                ui.close();
+            }
+            if ui.button("Delete").clicked() {
+                invoke(
+                    events,
+                    "rack.unmap_macro",
+                    json!({ "rack": rack, "target": mapping.target }),
+                );
+                ui.close();
+            }
+        });
+    }
+    // A row's Delete key unmaps it (R9).
+    let selected = listed_target(ui.ctx());
+    if let Some((rack, target)) = selected
+        && shell.devices().map_mode() == Some(rack)
+        && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete))
+    {
+        invoke(
+            events,
+            "rack.unmap_macro",
+            json!({ "rack": rack, "target": target }),
+        );
+    }
+}
+
 /// Where a rack's view selectors sit when it's a strip (every view hidden):
 /// under the activator.
 fn strip_selectors(rect: Rect, views: &[RackView]) -> Vec<(RackView, Rect)> {
@@ -274,6 +472,7 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
             selectors: strip_selectors(rect, views_of(rack)),
             pads: None,
             macros: None,
+            macro_items: None,
             chain_list: None,
             zone_editor: None,
             devices: None,
@@ -342,11 +541,78 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         selectors,
         pads,
         macros,
+        macro_items: macros.map(|area| macro_layout(area, rack.views.macro_count)),
         chain_list,
         zone_editor,
         devices,
         device_frames,
         bracket,
+    }
+}
+
+/// Where the Macro Controls' buttons and each shown macro's slot sit in
+/// `area` (macros spec, R20).
+fn macro_layout(area: Rect, count: u8) -> MacroLayout {
+    let row = Rect::from_min_max(
+        pos2(area.left() + 3.0, area.top() + 3.0),
+        pos2(area.right() - 3.0, area.top() + 3.0 + 14.0),
+    );
+    let half = (row.width() - 3.0) / 2.0;
+    let show_fewer = Rect::from_min_size(row.min, vec2(half * 0.5 - 1.0, row.height()));
+    let show_more = Rect::from_min_size(
+        pos2(show_fewer.right() + 2.0, row.top()),
+        vec2(half * 0.5 - 1.0, row.height()),
+    );
+    let rand = Rect::from_min_size(
+        pos2(show_more.right() + 2.0, row.top()),
+        vec2(half * 0.5 - 1.0, row.height()),
+    );
+    let map_switch = Rect::from_min_size(
+        pos2(rand.right() + 2.0, row.top()),
+        vec2(half * 0.5 - 1.0, row.height()),
+    );
+    let columns = 2;
+    let rows = usize::from(count).div_ceil(columns);
+    let slot_w = (area.width() - 6.0) / columns as f32;
+    let grid_top = row.bottom() + 3.0;
+    let slot_h = ((area.bottom() - grid_top - 3.0) / rows.max(1) as f32).min(56.0);
+    let mut items = Vec::new();
+    for number in 1..=count {
+        let index = usize::from(number - 1);
+        let (col, r) = (index % columns, index / columns);
+        let slot = Rect::from_min_size(
+            pos2(
+                area.left() + 3.0 + col as f32 * slot_w,
+                grid_top + r as f32 * slot_h,
+            ),
+            vec2(slot_w - 2.0, slot_h - 2.0),
+        );
+        let name = Rect::from_min_max(slot.min, pos2(slot.right(), slot.top() + 11.0));
+        let value = Rect::from_min_max(pos2(slot.left(), slot.bottom() - 11.0), slot.max);
+        let knob = Rect::from_min_max(
+            pos2(slot.left() + 2.0, name.bottom()),
+            pos2(slot.right() - 2.0, value.top()),
+        );
+        let map_button = Rect::from_min_size(
+            pos2(slot.left() + 2.0, value.bottom() - 12.0),
+            vec2(slot.width() - 4.0, 12.0),
+        );
+        items.push(MacroItem {
+            number,
+            slot,
+            knob,
+            name,
+            value,
+            map_button,
+        });
+    }
+    MacroLayout {
+        area,
+        show_more,
+        show_fewer,
+        map_switch,
+        rand,
+        items,
     }
 }
 
@@ -662,6 +928,71 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
+/// A small button of the Macro Controls (macros spec, R20).
+#[expect(clippy::too_many_arguments, reason = "the button's inputs")]
+fn macro_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: Id,
+    text: &str,
+    name: &str,
+    lit: bool,
+    enabled: bool,
+) -> bool {
+    let c = &theme.colors;
+    let response = ui.interact(
+        rect,
+        id,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    crate::focus::register(ui.ctx(), id, Area::Detail, None);
+    let pressed = enabled
+        && (response.clicked()
+            || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+    let face = if lit {
+        c.mapping.0
+    } else if response.hovered() && enabled {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    let ink = if lit {
+        c.accent_text.0
+    } else if enabled {
+        c.text.0
+    } else {
+        c.text_dim.0
+    };
+    ui.painter().rect_filled(rect, theme.sizes.corner, face);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.small_font(),
+        ink,
+    );
+    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+        ui.painter().rect_stroke(
+            rect.expand(1.5),
+            theme.sizes.corner,
+            Stroke::new(1.0, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    let name = name.to_owned();
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(name);
+        node.set_selected(lit);
+    });
+    pressed
+}
+
 /// How a click on a chain row changes the selection (racks spec, R22):
 /// Shift selects a range, Cmd (Ctrl) adds or removes one.
 #[must_use]
@@ -693,6 +1024,17 @@ pub(crate) struct ChainRenaming {
     pub focused: bool,
 }
 
+/// A macro being renamed in its Macro Controls slot (macros spec, R14).
+#[derive(Clone, Debug)]
+pub(crate) struct MacroRenaming {
+    pub rack: DeviceId,
+    pub number: u8,
+    /// The name being typed; `None` until the slot first shows, when it
+    /// starts from the name the macro has.
+    pub text: Option<String>,
+    pub focused: bool,
+}
+
 impl DeviceViewUi {
     /// Draws the body of `rack` in its frame at `rect`: the view column, and
     /// each view that's shown.
@@ -720,15 +1062,8 @@ impl DeviceViewUi {
         for (view, at) in &layout.selectors {
             self.view_selector(ui, theme, frame, rack, *view, *at, events);
         }
-        if let Some(area) = layout.macros {
-            // The Macro Controls' place (WP-5.4 fills it).
-            let id = Id::new(("rack-macros", frame.id));
-            ui.interact(area, id, Sense::hover());
-            painter.rect_filled(area.shrink(1.0), 0.0, c.window.0.gamma_multiply(0.5));
-            ui.ctx().accesskit_node_builder(id, |node| {
-                node.set_role(Role::Group);
-                node.set_label("Macro Controls".to_owned());
-            });
+        if let (Some(_), Some(controls)) = (layout.macros, &layout.macro_items) {
+            self.macro_controls(ui, shell, theme, frame, rack, controls, events);
         }
         if let (Some(pads), Some(at)) = (&rack.pads, &layout.pads) {
             self.pad_view(ui, shell, theme, frame, pads, at, events);
@@ -1401,6 +1736,363 @@ impl DeviceViewUi {
 
     /// Up and Down step the selection while the chain list has the focus
     /// (racks spec, R22).
+    /// The Macro Controls (macros spec, R2, R3 and R20): Show More, Show
+    /// Fewer, Rand and the Map switch, and a knob per shown macro with its
+    /// name above and its value below; in Map mode, a Map button under each.
+    #[expect(clippy::too_many_arguments, reason = "the controls' inputs")]
+    fn macro_controls(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rack: &RackFrame,
+        layout: &MacroLayout,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let painter = ui.painter_at(layout.area);
+        painter.rect_filled(layout.area.shrink(1.0), 0.0, c.window.0.gamma_multiply(0.5));
+        let group = Id::new(("rack-macros", frame.id));
+        ui.interact(layout.area, group, Sense::hover());
+        ui.ctx().accesskit_node_builder(group, |node| {
+            node.set_role(Role::Group);
+            node.set_label("Macro Controls".to_owned());
+        });
+        let map_mode = shell.devices().map_mode() == Some(frame.id);
+        let selected = shell
+            .devices()
+            .macro_selected()
+            .filter(|(rack, _)| *rack == frame.id)
+            .map(|(_, number)| number);
+        let count = rack.views.macro_count;
+        let press =
+            |ui: &mut Ui, rect: Rect, id: Id, text: &str, name: &str, lit: bool, enabled: bool| {
+                macro_button(ui, theme, rect, id, text, name, lit, enabled)
+            };
+        if press(
+            ui,
+            layout.show_fewer,
+            Id::new(("macros-fewer", frame.id)),
+            "-",
+            "Show Fewer Macros",
+            false,
+            count > 1,
+        ) {
+            invoke(
+                events,
+                "rack.set_macro_count",
+                json!({ "rack": frame.id, "count": count - 1 }),
+            );
+        }
+        if press(
+            ui,
+            layout.show_more,
+            Id::new(("macros-more", frame.id)),
+            "+",
+            "Show More Macros",
+            false,
+            count < bl_model::MACROS,
+        ) {
+            invoke(
+                events,
+                "rack.set_macro_count",
+                json!({ "rack": frame.id, "count": count + 1 }),
+            );
+        }
+        if press(
+            ui,
+            layout.rand,
+            Id::new(("macros-rand", frame.id)),
+            "Rand",
+            "Randomize Macros",
+            false,
+            true,
+        ) {
+            invoke(events, "rack.randomize_macros", json!({ "rack": frame.id }));
+        }
+        if press(
+            ui,
+            layout.map_switch,
+            Id::new(("macros-map-switch", frame.id)),
+            "Map",
+            "Map Mode",
+            map_mode,
+            true,
+        ) {
+            invoke(
+                events,
+                "rack.map_mode",
+                json!({ "rack": frame.id, "on": !map_mode }),
+            );
+        }
+        for item in &layout.items {
+            self.macro_slot(
+                ui, shell, theme, frame, rack, item, map_mode, selected, events,
+            );
+        }
+    }
+
+    /// One macro's slot: its name, knob and value, and its Map button in Map
+    /// mode.
+    #[expect(clippy::too_many_arguments, reason = "the slot's inputs")]
+    fn macro_slot(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rack: &RackFrame,
+        item: &MacroItem,
+        map_mode: bool,
+        selected: Option<u8>,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let info = rack
+            .macros
+            .as_ref()
+            .and_then(|state| state.macros.iter().find(|m| m.number == item.number));
+        let name = info.map_or_else(|| format!("Macro {}", item.number), |m| m.name.clone());
+        let value = info.map_or(0.0, |m| m.value);
+        let text = info.map_or_else(|| "0".to_owned(), |m| m.text.clone());
+        let painter = ui.painter_at(item.slot);
+        let here = selected == Some(item.number);
+        painter.rect_filled(
+            item.slot,
+            theme.sizes.corner,
+            if here { c.control_hover.0 } else { c.panel.0 },
+        );
+        // Rename types the name in place; Return runs the command, Esc
+        // cancels (R14).
+        let renaming = self
+            .renaming_macro
+            .as_mut()
+            .filter(|r| r.rack == frame.id && r.number == item.number);
+        if let Some(renaming) = renaming {
+            let mut text = renaming.text.take().unwrap_or_else(|| name.clone());
+            let edit = ui.put(
+                item.name,
+                egui::TextEdit::singleline(&mut text)
+                    .id(Id::new(("macro-name", frame.id, item.number)))
+                    .font(theme.small_font())
+                    .margin(vec2(2.0, 0.0)),
+            );
+            if !renaming.focused {
+                edit.request_focus();
+                renaming.focused = true;
+            }
+            let (enter, escape) =
+                ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+            if edit.lost_focus() || enter || escape {
+                if enter || (edit.lost_focus() && !escape) {
+                    invoke(
+                        events,
+                        "rack.rename_macro",
+                        json!({
+                            "rack": frame.id,
+                            "macro_number": item.number,
+                            "name": text,
+                        }),
+                    );
+                }
+                self.renaming_macro = None;
+            } else {
+                if let Some(renaming) = self.renaming_macro.as_mut() {
+                    renaming.text = Some(text);
+                }
+            }
+            return;
+        }
+        let ink = if frame.enabled {
+            c.text.0
+        } else {
+            c.text_dim.0
+        };
+        painter.text(
+            item.name.center(),
+            Align2::CENTER_CENTER,
+            &name,
+            theme.small_font(),
+            ink,
+        );
+        let id = Id::new(("macro-knob", frame.id, item.number));
+        let response = ui.interact(item.knob, id, Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let param = bl_model::macro_param(item.number);
+        if response.drag_started() {
+            events.push(UiEvent::BeginNamedGesture(format!("Change \"{name}\"")));
+        }
+        if response.dragged() {
+            let delta = f64::from(response.drag_delta().y) / 100.0;
+            let moved = (value - delta).clamp(0.0, 1.0);
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": frame.id, "param": param, "value": moved }),
+            );
+        }
+        if response.drag_stopped() {
+            events.push(UiEvent::EndGesture);
+        }
+        if response.double_clicked() {
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": frame.id, "param": param, "value": 0.0 }),
+            );
+        }
+        if response.clicked() {
+            invoke(
+                events,
+                "rack.select_macro",
+                json!({ "rack": frame.id, "macro_number": item.number }),
+            );
+        }
+        let colour = info
+            .and_then(|m| m.colour)
+            .map_or(c.accent.0, |index| swatch(theme, index));
+        let centre = item.knob.center();
+        let radius = (item.knob.height().min(item.knob.width()) / 2.0 - 2.0).max(4.0);
+        let (from, sweep) = (
+            std::f32::consts::PI * 0.5 + std::f32::consts::PI / 6.0,
+            std::f32::consts::PI * 5.0 / 3.0,
+        );
+        let arc = |to: f32| -> Vec<egui::Pos2> {
+            let steps = 24;
+            (0..=steps)
+                .map(|i| {
+                    let a = from + sweep * to * i as f32 / steps as f32;
+                    centre + vec2(a.cos(), a.sin()) * radius
+                })
+                .collect()
+        };
+        painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
+        if value > 0.0 {
+            painter.add(Shape::line(arc(value as f32), Stroke::new(2.0, colour)));
+        }
+        let a = from + sweep * value as f32;
+        painter.line_segment(
+            [centre, centre + vec2(a.cos(), a.sin()) * radius],
+            Stroke::new(1.5, c.text.0),
+        );
+        painter.text(
+            item.value.center(),
+            Align2::CENTER_CENTER,
+            &text,
+            theme.small_font(),
+            ink,
+        );
+        if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+            ui.painter().rect_stroke(
+                item.knob.expand(1.5),
+                theme.sizes.corner,
+                Stroke::new(1.0, c.focus.0),
+                StrokeKind::Outside,
+            );
+        }
+        response.widget_info(|| WidgetInfo::slider(true, value, &name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Slider);
+            node.set_label(name.clone());
+            node.set_value(text.clone());
+            node.set_numeric_value(value);
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(1.0);
+            node.add_action(egui::accesskit::Action::Increment);
+            node.add_action(egui::accesskit::Action::Decrement);
+        });
+        response.context_menu(|ui| {
+            if ui.button("Rename").clicked() {
+                self.renaming_macro = Some(MacroRenaming {
+                    rack: frame.id,
+                    number: item.number,
+                    text: None,
+                    focused: false,
+                });
+                ui.close();
+            }
+            let excluded = info.is_some_and(|m| m.randomize_excluded);
+            let label = if excluded {
+                "Include in Randomization"
+            } else {
+                "Exclude Macro from Randomization"
+            };
+            if ui.button(label).clicked() {
+                invoke(
+                    events,
+                    "rack.set_macro_randomize_excluded",
+                    json!({
+                        "rack": frame.id,
+                        "macro_number": item.number,
+                        "excluded": !excluded,
+                    }),
+                );
+                ui.close();
+            }
+            ui.menu_button("Colour", |ui| {
+                for index in 0..PALETTE_COLUMNS as u8 {
+                    let at = Rect::from_min_size(ui.cursor().min, vec2(14.0, 14.0));
+                    let response = ui.allocate_rect(at, Sense::click());
+                    ui.painter()
+                        .rect_filled(at.shrink(1.0), 0.0, swatch(theme, index));
+                    if response.clicked() {
+                        invoke(
+                            events,
+                            "rack.set_macro_colour",
+                            json!({
+                                "rack": frame.id,
+                                "macro_number": item.number,
+                                "colour": index,
+                            }),
+                        );
+                        ui.close();
+                    }
+                }
+            });
+            if ui.button("None").clicked() {
+                invoke(
+                    events,
+                    "rack.set_macro_colour",
+                    json!({
+                        "rack": frame.id,
+                        "macro_number": item.number,
+                        "colour": null,
+                    }),
+                );
+                ui.close();
+            }
+            if !info.is_some_and(|m| m.mappings.is_empty()) {
+                ui.separator();
+            }
+        });
+        if map_mode {
+            let pressed = macro_button(
+                ui,
+                theme,
+                item.map_button,
+                Id::new(("macro-map", frame.id, item.number)),
+                "Map",
+                &format!("Map Macro {}", item.number),
+                false,
+                true,
+            );
+            if pressed && let Some((device, param)) = crate::mapping::macro_target(ui.ctx()) {
+                invoke(
+                    events,
+                    "rack.map_macro",
+                    json!({
+                        "rack": frame.id,
+                        "macro_number": item.number,
+                        "target": { "type": "device", "device": device, "param": param },
+                    }),
+                );
+                crate::mapping::set_macro_target(ui.ctx(), None);
+            }
+        }
+        let _ = shell;
+    }
+
     fn chain_keys(&self, ui: &Ui, shell: &Shell, rack: &RackFrame, events: &mut Vec<UiEvent>) {
         if !rack.chain_list_focused
             || shell.focused_area() != Area::Detail

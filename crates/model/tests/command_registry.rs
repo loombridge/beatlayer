@@ -13,10 +13,10 @@ use bl_model::{
     Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash,
     CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, ExternalPort,
     FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency, Input, LaunchMode,
-    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
-    Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap,
-    TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode,
-    WarpPoint,
+    LaunchQuantization, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam,
+    ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve, RackKind, SceneId,
+    SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom,
+    WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        187,
+        197,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -74,8 +74,11 @@ fn every_document_command_is_registered() {
          four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
 WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
          set_configured_params, WP-4.13 the two for Crop Clip, WP-5.36 seven for track \
-         delay, the pan mode, each split side, and the two latency switches, and WP-4.11 \
-         four for tempo leaders, stretching and sliding"
+         delay, the pan mode, each split side, and the two latency switches, WP-4.11 \
+         four for tempo leaders, stretching and sliding, and WP-5.4 ten \
+         for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
+         rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
+         set_macro_randomize_excluded and set_mapped_value"
     );
 
     for op in &ops {
@@ -1837,6 +1840,68 @@ fn every_command_runs_by_id() {
     };
     assert_eq!(audio.start, 0.0, "the markers begin at the region's start");
 
+    // Macros: mapping, its range, naming, randomising and the mapped value
+    // (WP-5.4).
+    let rack: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": drums, "index": 0, "device": {
+            "id": rack, "name": "Rack", "role": "audio_effect", "enabled": true, "params": [],
+            "kind": { "rack": { "kind": "audio_effect" } },
+        } }),
+    );
+    let chain: ChainId = agent.new_id();
+    agent.run(
+        "chain.add",
+        json!({ "rack": rack, "index": 0, "chain": { "id": chain, "name": "Chain", "devices": [] } }),
+    );
+    let utility: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert_in_chain",
+        json!({ "chain": chain, "index": 0, "device": {
+            "id": utility, "name": "Utility", "role": "audio_effect", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.utility" } },
+        } }),
+    );
+    let target = json!({ "type": "device", "device": utility, "param": 6 });
+    agent.run(
+        "rack.map_macro",
+        json!({ "rack": rack, "macro_number": 1, "target": target }),
+    );
+    agent.run(
+        "rack.set_mapping_range",
+        json!({ "rack": rack, "target": target, "min": 0.25, "max": 0.75 }),
+    );
+    agent.run(
+        "rack.invert_mapping",
+        json!({ "rack": rack, "target": target }),
+    );
+    agent.run(
+        "rack.rename_macro",
+        json!({ "rack": rack, "macro_number": 1, "name": "Width" }),
+    );
+    agent.run(
+        "rack.set_macro_colour",
+        json!({ "rack": rack, "macro_number": 1, "colour": 2 }),
+    );
+    agent.run(
+        "rack.set_macro_info_text",
+        json!({ "rack": rack, "macro_number": 1, "info": "Opens it up" }),
+    );
+    agent.run(
+        "rack.set_macro_randomize_excluded",
+        json!({ "rack": rack, "macro_number": 1, "excluded": true }),
+    );
+    agent.run("rack.randomize_macros", json!({ "rack": rack, "seed": 3 }));
+    agent.run(
+        "rack.set_mapped_value",
+        json!({ "target": target, "value": 120.0 }),
+    );
+    agent.run(
+        "rack.unmap_macro",
+        json!({ "rack": rack, "target": target }),
+    );
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -1871,6 +1936,8 @@ fn schemas_match_what_commands_serialise() {
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
+    let rack = DeviceId(fresh());
+    let chain = ChainId(fresh());
     let fresh_id = fresh();
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
@@ -3219,6 +3286,98 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSceneTimeSignature {
                 scene,
                 signature: Some(TimeSignature::new(3, 4).unwrap()),
+            },
+        ),
+        (
+            "rack.map_macro",
+            Command::MapMacro {
+                rack,
+                macro_number: 1,
+                target: MacroTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+            },
+        ),
+        (
+            "rack.unmap_macro",
+            Command::UnmapMacro {
+                rack,
+                target: MacroTarget::Chain {
+                    chain,
+                    param: MixerParam::Volume,
+                },
+            },
+        ),
+        (
+            "rack.set_mapping_range",
+            Command::SetMappingRange {
+                rack,
+                target: MacroTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+                min: 0.25,
+                max: 0.75,
+            },
+        ),
+        (
+            "rack.invert_mapping",
+            Command::InvertMapping {
+                rack,
+                target: MacroTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+            },
+        ),
+        (
+            "rack.rename_macro",
+            Command::RenameMacro {
+                rack,
+                macro_number: 1,
+                name: "Width".to_owned(),
+            },
+        ),
+        (
+            "rack.set_macro_colour",
+            Command::SetMacroColour {
+                rack,
+                macro_number: 1,
+                colour: Some(2),
+            },
+        ),
+        (
+            "rack.set_macro_info_text",
+            Command::SetMacroInfo {
+                rack,
+                macro_number: 1,
+                info: "Opens it up".to_owned(),
+            },
+        ),
+        (
+            "rack.randomize_macros",
+            Command::RandomizeMacros {
+                rack,
+                seed: Some(7),
+            },
+        ),
+        (
+            "rack.set_macro_randomize_excluded",
+            Command::SetMacroRandomizeExcluded {
+                rack,
+                macro_number: 1,
+                excluded: true,
+            },
+        ),
+        (
+            "rack.set_mapped_value",
+            Command::SetMappedValue {
+                target: MacroTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+                value: 1.0,
             },
         ),
     ];

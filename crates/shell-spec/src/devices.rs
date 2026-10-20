@@ -17,8 +17,8 @@ use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Regis
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
     ChainId, ChainZones, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind,
-    DeviceLayout, DeviceRole, ParamDescriptor, ParamId, RackKind, RackView, RackViews, Tap,
-    TrackId, TrackKind, WindowFrame, ZoneKind,
+    DeviceLayout, DeviceRole, MacroTarget, ParamDescriptor, ParamId, RackKind, RackView, RackViews,
+    Tap, TrackId, TrackKind, WindowFrame, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -116,6 +116,17 @@ pub const RACK_SET_VIEW: &str = "rack.set_view";
 pub const RACK_SET_ZONE_EDITOR: &str = "rack.set_zone_editor";
 /// `rack.set_auto_select`: switch a rack's Auto Select (WP-5.3).
 pub const RACK_SET_AUTO_SELECT: &str = "rack.set_auto_select";
+/// `rack.set_macro_count`: how many macros a rack's Macro Controls show
+/// (WP-5.4).
+pub const RACK_SET_MACRO_COUNT: &str = "rack.set_macro_count";
+/// `rack.map_mode`: turn a rack's Map mode on or off (WP-5.4).
+pub const RACK_MAP_MODE: &str = "rack.map_mode";
+/// `rack.macros`: a rack's macros and mappings, the readback of its macro
+/// commands (WP-5.4).
+pub const RACK_MACROS: &str = "rack.macros";
+/// `rack.select_macro`: select a macro in a rack's Macro Controls, so
+/// Rename can name it (WP-5.4).
+pub const RACK_SELECT_MACRO: &str = "rack.select_macro";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -177,6 +188,10 @@ pub const IDS: &[&str] = &[
     RACK_SET_VIEW,
     RACK_SET_ZONE_EDITOR,
     RACK_SET_AUTO_SELECT,
+    RACK_SET_MACRO_COUNT,
+    RACK_MAP_MODE,
+    RACK_MACROS,
+    RACK_SELECT_MACRO,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -682,6 +697,10 @@ pub struct RackFrame {
     /// than six (R7).
     #[serde(default)]
     pub can_add_return: bool,
+    /// The rack's macros and mappings (macros spec, R19); left out for a
+    /// rack that isn't described.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macros: Option<MacroState>,
 }
 
 impl RackFrame {
@@ -927,6 +946,10 @@ pub struct DeviceViewState {
     /// control maps it to the slot (WP-5.10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub armed_map: Option<ArmedMap>,
+    /// The rack whose Map mode is on, if one is (WP-5.4): the Macro
+    /// Controls tint mappable parameters and show the mappings list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_mode: Option<DeviceId>,
 }
 
 /// A lit Map button.
@@ -1252,6 +1275,102 @@ pub struct SetAutoSelectArgs {
     /// Switch on (true) or off (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+}
+
+/// Arguments of `rack.set_macro_count`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMacroCountArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// How many macros show, from 1 to 16.
+    pub count: u8,
+}
+
+/// Arguments of `rack.map_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MapModeArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// Turn Map mode on (true) or off (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `rack.macros`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RackMacrosArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+}
+
+/// Arguments of `rack.select_macro`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectMacroArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The macro, numbered from 1; null, or left out, selects none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_number: Option<u8>,
+}
+
+/// What `rack.macros` reports (macros spec, R19).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MacroState {
+    /// The rack.
+    pub rack: DeviceId,
+    /// How many macros the Macro Controls show.
+    pub count: u8,
+    /// Each of the 16 macros, in number order.
+    pub macros: Vec<MacroInfo>,
+}
+
+/// One macro as `rack.macros` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MacroInfo {
+    /// Its number, from 1.
+    pub number: u8,
+    /// Its name: Rename's, its one parameter's, or "Macro N" (macros spec,
+    /// R10).
+    pub name: String,
+    /// Its colour: a swatch of the palette of 5 rows of 14, or null.
+    pub colour: Option<u8>,
+    /// Its value, from 0 to 1.
+    pub value: f64,
+    /// How it reads: its parameter's value and unit, 0 to 127, or a shared
+    /// unit (R10).
+    pub text: String,
+    /// Whether Randomize leaves it alone (R16).
+    pub randomize_excluded: bool,
+    /// What it drives, in the order the mappings were made (R9).
+    pub mappings: Vec<MacroMappingInfo>,
+}
+
+/// One mapping as `rack.macros` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MacroMappingInfo {
+    /// What it maps.
+    pub target: MacroTarget,
+    /// The device's or chain's name.
+    pub device: String,
+    /// The parameter's name.
+    pub param: String,
+    /// The bottom of the range, in the parameter's own units.
+    pub min: f64,
+    /// The top of the range, in the parameter's own units.
+    pub max: f64,
+    /// The bottom of the range as a position on the parameter's travel, 0 to
+    /// 1.
+    pub min_position: f64,
+    /// The top of the range as a position on the parameter's travel.
+    pub max_position: f64,
 }
 
 /// Arguments of `chain.paste`.
@@ -2026,6 +2145,49 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<SetAutoSelectArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(RACK_SET_MACRO_COUNT, "Show More or Fewer Macros")
+            .description(
+                "Sets how many of a rack's 16 macros its Macro Controls show, from 1 to 16, \
+                 always the lowest-numbered ones, as Show More and Show Fewer do. It changes \
+                 only the view: it isn't an undo step, and the set keeps the count.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetMacroCountArgs>()
+            .result::<MacroState>(),
+        CommandSpec::new(RACK_MAP_MODE, "Map Mode")
+            .description(
+                "Turns a rack's Map mode on or off, the selected device's or `rack`'s: with it \
+                 on, every parameter the rack can map is tinted, a Map button shows under each \
+                 shown macro, and the mappings list takes the browser's place. Turning on \
+                 another rack's Map mode turns this one's off. Map mode is view state: it isn't \
+                 an undo step and the set doesn't keep it.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<MapModeArgs>()
+            .result::<MacroState>(),
+        CommandSpec::new(RACK_MACROS, "Rack Macros")
+            .description(
+                "Reports a rack's macros and mappings: each macro's number, name, colour, value \
+                 from 0 to 1, how it reads, and whether Randomize leaves it alone, with each \
+                 mapping's target, device and parameter names and its range in the \
+                 parameter's units and as positions on its travel, and how many macros show. \
+                 The query tool's `device` reports the same in its `macros` field.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<RackMacrosArgs>()
+            .result::<MacroState>(),
+        CommandSpec::new(RACK_SELECT_MACRO, "Select Macro")
+            .description(
+                "Selects a macro in a rack's Macro Controls, or none, so Rename names it. It \
+                 changes only the view: it isn't an undo step and the set doesn't keep it.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SelectMacroArgs>()
+            .result::<MacroState>(),
         CommandSpec::new(DISPLAY, "Device Display")
             .description(
                 "Reports what a device's display shows now, read from the display data its \

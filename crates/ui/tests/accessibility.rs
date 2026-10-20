@@ -2560,6 +2560,72 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "rack.set_auto_select",
             main(a_rack, device_view, "Auto Select", Key::Enter),
         ),
+        // Spec: macros R14, R15 and R19. The Macro Controls' buttons, the
+        // macros' knobs, and their context menus reach these with the
+        // pointer; their keys wait for a later package.
+        (
+            "rack.set_macro_count",
+            Exception(Equivalent("Show More and Show Fewer")),
+        ),
+        (
+            "rack.map_mode",
+            Exception(Equivalent("the macro view's Map switch")),
+        ),
+        (
+            "rack.select_macro",
+            Exception(Equivalent("a click on a macro's knob")),
+        ),
+        (
+            "rack.map_macro",
+            Exception(Equivalent("Map mode's Map button")),
+        ),
+        (
+            "rack.set_mapping_range",
+            Exception(Equivalent("the mappings list's Min and Max boxes")),
+        ),
+        (
+            "rack.invert_mapping",
+            Exception(Equivalent("the mappings list's Invert Range")),
+        ),
+        (
+            "rack.unmap_macro",
+            Exception(Equivalent("the mappings list's Delete")),
+        ),
+        (
+            "rack.randomize_macros",
+            Exception(Equivalent("the Rand button")),
+        ),
+        (
+            "rack.rename_macro",
+            Exception(Equivalent("Rename on a macro's context menu")),
+        ),
+        (
+            "rack.set_macro_colour",
+            Exception(Equivalent("Colour on a macro's context menu")),
+        ),
+        (
+            "rack.set_macro_info_text",
+            Exception(Gap(
+                "a macro's info text has no UI yet; M-EDIT-025 (Edit Info Text) adds the menu \
+                 item",
+            )),
+        ),
+        (
+            "rack.set_macro_randomize_excluded",
+            Exception(Equivalent(
+                "Exclude Macro from Randomization on a macro's context menu",
+            )),
+        ),
+        (
+            "rack.set_mapped_value",
+            Exception(Equivalent("the macro commands' own step")),
+        ),
+        (
+            "rack.macros",
+            Exception(Equivalent(
+                "what the Macro Controls and the mappings list show",
+            )),
+        ),
         (
             "chain.select",
             main(a_rack, device_view, "Chain Pad", Key::Enter),
@@ -3575,6 +3641,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.snap_layer_markers",
             "device.sort_layers",
             "export.audio",
+            "rack.set_macro_info_text",
             "set.discard_recovery",
             "set.recover",
             "settings.set_continuous_save",

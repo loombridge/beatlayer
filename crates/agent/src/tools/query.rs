@@ -377,6 +377,16 @@ impl View<'_> {
                     .collect();
                 value["returns"] = json!(returns);
             }
+            // Spec: macros R19. The rack's macros and mappings, as
+            // `rack.macros` reports them.
+            let count = self.shell.devices().views_of(device.id).macro_count;
+            if let Some(macros) = self
+                .shell
+                .devices()
+                .macros_of(self.document, device.id, count)
+            {
+                value["macros"] = json!(macros);
+            }
         }
         value
     }

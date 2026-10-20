@@ -16,7 +16,7 @@ use crate::external::External;
 use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
-use crate::rack::{Chain, RackKind};
+use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::SampleEdit;
 use crate::track::Input;
 use crate::warp_settings::{WarpMode, WarpSettings};
@@ -150,6 +150,10 @@ pub struct Device {
     /// before racks load unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chains: Vec<Chain>,
+    /// A rack's macros' settings and mappings (WP-5.4; the macros spec,
+    /// R17). Left out of the saved set while it has neither.
+    #[serde(default, skip_serializing_if = "RackMacros::is_default")]
+    pub macros: RackMacros,
     /// Warp settings for devices that play warped media (WP-5.15b, Simpler).
     /// Left out of the saved set when default.
     #[serde(default, skip_serializing_if = "DeviceWarp::is_default")]
@@ -419,6 +423,7 @@ impl Device {
             mappings: Vec::new(),
             shape: None,
             chains: Vec::new(),
+            macros: RackMacros::default(),
             warp: DeviceWarp::default(),
             slices: Vec::new(),
         }

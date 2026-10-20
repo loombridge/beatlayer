@@ -137,9 +137,10 @@ pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound}
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
-    DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MAX_RETURN_CHAINS, RackKind, RackView, RackViewMap,
-    RackViews, Receive, description as rack_description, general_midi_drum, note_name,
-    receive_choices, receive_label,
+    DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACROS, MAX_RETURN_CHAINS, Macro,
+    MacroMapping, MacroTarget, RackKind, RackMacros, RackView, RackViewMap, RackViews, Receive,
+    SHOWN_MACROS, default_macro_name, description as rack_description, general_midi_drum,
+    macro_number, macro_param, note_name, receive_choices, receive_label,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};

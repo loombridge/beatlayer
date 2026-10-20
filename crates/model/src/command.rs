@@ -28,7 +28,10 @@ use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain, ChainSend, RackKind, Receive};
+use crate::rack::{
+    CHAIN_COLOURS, Chain, ChainSend, MACROS, Macro, MacroMapping, MacroTarget, RackKind, Receive,
+    macro_number,
+};
 use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
@@ -1957,6 +1960,100 @@ pub enum Command {
         /// The return track, or `null`.
         track: Option<TrackId>,
     },
+    /// Maps a parameter inside a rack to one of its macros (macros spec,
+    /// R5), moving a mapping it already has to this macro. A new mapping
+    /// runs the whole of the parameter's travel.
+    MapMacro {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// The parameter to map.
+        target: MacroTarget,
+    },
+    /// Unmaps a parameter from its rack's macro (macros spec, R9).
+    UnmapMacro {
+        /// The rack.
+        rack: DeviceId,
+        /// The parameter to unmap.
+        target: MacroTarget,
+    },
+    /// Sets a mapping's range as positions on the parameter's travel, 0 to 1
+    /// (macros spec, R9). Min above Max inverts the mapping.
+    SetMappingRange {
+        /// The rack.
+        rack: DeviceId,
+        /// The mapped parameter.
+        target: MacroTarget,
+        /// The bottom of the range.
+        min: f64,
+        /// The top of the range.
+        max: f64,
+    },
+    /// Swaps a mapping's Min and Max (macros spec, R9).
+    InvertMapping {
+        /// The rack.
+        rack: DeviceId,
+        /// The mapped parameter.
+        target: MacroTarget,
+    },
+    /// Gives a macro a name of its own; empty gives it its default name
+    /// (macros spec, R14).
+    RenameMacro {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// The name, or empty.
+        name: String,
+    },
+    /// Colours a macro with a swatch of the palette of 5 rows of 14 (0 to
+    /// 69), or `null` to clear it (macros spec, R14).
+    SetMacroColour {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
+    },
+    /// Sets a macro's info text (macros spec, R14). Empty clears it.
+    SetMacroInfo {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// The text.
+        info: String,
+    },
+    /// Sets every mapped macro that isn't excluded from Randomize to a random
+    /// position (macros spec, R15). With a `seed` the same values come back
+    /// each time.
+    RandomizeMacros {
+        /// The rack.
+        rack: DeviceId,
+        /// The seed; without one a new seed is picked.
+        seed: Option<u64>,
+    },
+    /// Leaves a macro out of Randomize, or puts it back (macros spec, R16).
+    SetMacroRandomizeExcluded {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// Whether it's left out.
+        excluded: bool,
+    },
+    /// Sets a parameter to the value a macro gives it (macros spec, R7),
+    /// without overriding the parameter's own automation envelope, which
+    /// waits while it's mapped (R11). The macro commands run it inside their
+    /// undo step.
+    SetMappedValue {
+        /// The mapped parameter.
+        target: MacroTarget,
+        /// The value, in the parameter's own units.
+        value: f64,
+    },
 }
 
 impl Command {
@@ -2204,6 +2301,17 @@ impl Command {
             Self::SetChainChoke { .. } => "Change Choke",
             Self::SetChainSend { .. } => "Change chain send",
             Self::SetChainAudioTo { .. } => "Change Audio To",
+            // WP-5.4: Beatlayer's own names; the law and the list are ours.
+            Self::MapMacro { .. } => "Map to Macro",
+            Self::UnmapMacro { .. } => "Unmap Macro",
+            Self::SetMappingRange { .. } => "Change Macro Mapping",
+            Self::InvertMapping { .. } => "Invert Macro Mapping",
+            Self::RenameMacro { .. } => "Rename Macro",
+            Self::SetMacroColour { .. } => "Change Macro Color",
+            Self::SetMacroInfo { .. } => "Change Macro Info Text",
+            Self::RandomizeMacros { .. } => "Randomize Macros",
+            Self::SetMacroRandomizeExcluded { .. } => "Exclude Macro from Randomization",
+            Self::SetMappedValue { .. } => "Change parameter",
         }
     }
 
@@ -2267,6 +2375,9 @@ impl Document {
         // The copy shares every node with `self` until it's edited.
         let mut next = self.clone();
         next.apply_in_place(command)?;
+        // Spec: macros R18. A device or chain that left its rack takes its
+        // mappings with it, in the same undo step.
+        next.prune_macro_mappings();
         *self = next;
         Ok(())
     }
@@ -3569,7 +3680,253 @@ impl Document {
                 self.edit_drum_chain(*chain, true, |c| c.audio_to = *track)?;
                 self.check_routing(self.chain_owner(*chain)?)
             }
+            Command::MapMacro {
+                rack,
+                macro_number,
+                target,
+            } => self.map_macro(*rack, *macro_number, *target),
+            Command::UnmapMacro { rack, target } => {
+                let current = self.device_ref(*rack)?;
+                if current.rack_kind().is_none() {
+                    return Err(ModelError::InvalidInput("only a rack has macros"));
+                }
+                let mut macros = current.macros.clone();
+                macros.mappings.retain(|m| m.target != *target);
+                if macros != self.device_ref(*rack)?.macros {
+                    self.device_mut(*rack)?.macros = macros;
+                }
+                Ok(())
+            }
+            Command::SetMappingRange {
+                rack,
+                target,
+                min,
+                max,
+            } => {
+                check_value(
+                    "mapping min",
+                    *min,
+                    min.is_finite() && (0.0..=1.0).contains(min),
+                )?;
+                check_value(
+                    "mapping max",
+                    *max,
+                    max.is_finite() && (0.0..=1.0).contains(max),
+                )?;
+                self.edit_mapping(*rack, *target, |m| (m.min, m.max) = (*min, *max))
+            }
+            Command::InvertMapping { rack, target } => {
+                self.edit_mapping(*rack, *target, |m| std::mem::swap(&mut m.min, &mut m.max))
+            }
+            Command::RenameMacro {
+                rack,
+                macro_number,
+                name,
+            } => self.edit_macro(*rack, *macro_number, |m| m.name.clone_from(name)),
+            Command::SetMacroColour {
+                rack,
+                macro_number,
+                colour,
+            } => {
+                if let Some(colour) = colour {
+                    check_value("macro colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                self.edit_macro(*rack, *macro_number, |m| m.colour = *colour)
+            }
+            Command::SetMacroInfo {
+                rack,
+                macro_number,
+                info,
+            } => self.edit_macro(*rack, *macro_number, |m| m.info.clone_from(info)),
+            Command::RandomizeMacros { rack, seed } => self.randomize_macros(*rack, *seed),
+            Command::SetMacroRandomizeExcluded {
+                rack,
+                macro_number,
+                excluded,
+            } => self.edit_macro(*rack, *macro_number, |m| m.randomize_excluded = *excluded),
+            Command::SetMappedValue { target, value } => {
+                check_value("mapped value", *value, value.is_finite())?;
+                match target {
+                    MacroTarget::Device { device, param } => {
+                        if self.device_ref(*device)?.params.get(param) != Some(value) {
+                            self.device_mut(*device)?.set_param(*param, *value);
+                        }
+                    }
+                    MacroTarget::Chain { chain, param } => {
+                        self.set_chain_mixer_quietly(*chain, *param, *value)?;
+                    }
+                }
+                Ok(())
+            }
         }
+    }
+
+    /// Sets a chain's mixer control without overriding its automation
+    /// envelope (macros spec, R11).
+    fn set_chain_mixer_quietly(
+        &mut self,
+        chain: ChainId,
+        param: MixerParam,
+        value: f64,
+    ) -> Result<(), ModelError> {
+        if self
+            .chain_rack(chain)
+            .and_then(Device::rack_kind)
+            .is_some_and(|kind| !kind.chains_have_volume_and_pan())
+            && matches!(param, MixerParam::Volume | MixerParam::Pan)
+        {
+            return Err(ModelError::ChainHasNoMixer(chain));
+        }
+        let mut mixer = self.chain_ref(chain)?.mixer;
+        let changed = match param {
+            MixerParam::Volume => {
+                if mixer.volume != value {
+                    mixer.volume = value;
+                    true
+                } else {
+                    false
+                }
+            }
+            MixerParam::Pan => {
+                if mixer.pan != value {
+                    mixer.pan = value;
+                    true
+                } else {
+                    false
+                }
+            }
+            MixerParam::Mute => {
+                let enabled = value < 0.5;
+                let changed = mixer.enabled != enabled;
+                mixer.enabled = enabled;
+                changed
+            }
+            MixerParam::SplitLeft | MixerParam::SplitRight => {
+                return Err(ModelError::ChainHasNoSplitPan(chain));
+            }
+        };
+        if changed {
+            self.chain_mut(chain)?.mixer = mixer;
+        }
+        Ok(())
+    }
+
+    /// Maps `target` inside `rack` to macro `number` (macros spec, R5),
+    /// moving a mapping it already has.
+    fn map_macro(
+        &mut self,
+        rack: DeviceId,
+        number: u8,
+        target: MacroTarget,
+    ) -> Result<(), ModelError> {
+        check_macro_number(number)?;
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        match target {
+            MacroTarget::Device { device, param } => {
+                if device == rack && macro_number(param).is_some() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can't map its own rack's macros",
+                    ));
+                }
+                if current.find(device).is_none() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can only map a device inside its rack",
+                    ));
+                }
+            }
+            MacroTarget::Chain { chain, param } => {
+                if current.find_chain(chain).is_none() {
+                    return Err(ModelError::InvalidInput(
+                        "a macro can only map a chain inside its rack",
+                    ));
+                }
+                if matches!(param, MixerParam::SplitLeft | MixerParam::SplitRight) {
+                    return Err(ModelError::ChainHasNoSplitPan(chain));
+                }
+            }
+        }
+        let mut macros = current.macros.clone();
+        macros.mappings.retain(|m| m.target != target);
+        macros.mappings.push(MacroMapping {
+            macro_number: number,
+            target,
+            min: 0.0,
+            max: 1.0,
+        });
+        self.device_mut(rack)?.macros = macros;
+        Ok(())
+    }
+
+    /// Changes the mapping of `target` in `rack` with `edit`.
+    fn edit_mapping(
+        &mut self,
+        rack: DeviceId,
+        target: MacroTarget,
+        edit: impl FnOnce(&mut MacroMapping),
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(rack)?;
+        let mut macros = current.macros.clone();
+        let mapping = macros
+            .mappings
+            .iter_mut()
+            .find(|m| m.target == target)
+            .ok_or(ModelError::InvalidInput("no such macro mapping"))?;
+        edit(mapping);
+        self.device_mut(rack)?.macros = macros;
+        Ok(())
+    }
+
+    /// Changes macro `number`'s settings with `edit`.
+    fn edit_macro(
+        &mut self,
+        rack: DeviceId,
+        number: u8,
+        edit: impl FnOnce(&mut Macro),
+    ) -> Result<(), ModelError> {
+        check_macro_number(number)?;
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        let mut macros = current.macros.clone();
+        edit(macros.setting_mut(number));
+        self.device_mut(rack)?.macros = macros;
+        Ok(())
+    }
+
+    /// Sets every mapped macro of `rack` that isn't excluded to a random
+    /// position (macros spec, R15), as a hand move on each.
+    fn randomize_macros(&mut self, rack: DeviceId, seed: Option<u64>) -> Result<(), ModelError> {
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        let mut state = seed.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos() as u64)
+        });
+        let values: Vec<(u8, f64)> = (1..=MACROS)
+            .filter(|number| current.macros.has_mappings(*number))
+            .filter(|number| !current.macros.setting(*number).randomize_excluded)
+            .map(|number| (number, next_unit(&mut state)))
+            .collect();
+        let owner = self.device_owner(rack)?;
+        for (number, value) in &values {
+            self.device_mut(rack)?
+                .set_param(crate::macro_param(*number), *value);
+        }
+        for (number, _) in &values {
+            self.track_mut(owner)?
+                .override_target(&AutomationTarget::Device {
+                    device: rack,
+                    param: crate::macro_param(*number),
+                });
+        }
+        Ok(())
     }
 
     /// Changes a multisampler's layers with `edit`, which either succeeds or
@@ -5516,6 +5873,44 @@ impl Document {
         Ok(())
     }
 
+    /// Takes every macro mapping whose target its rack no longer holds out
+    /// of that rack (macros spec, R18): a device or chain that left it takes
+    /// its mappings with it, in the same undo step.
+    pub(crate) fn prune_macro_mappings(&mut self) {
+        let racks: Vec<DeviceId> = self
+            .tracks()
+            .flat_map(|t| t.devices_deep())
+            .filter(|d| d.rack_kind().is_some())
+            .map(|d| d.id)
+            .collect();
+        for rack_id in racks {
+            let (kept, total) = {
+                let Some(rack) = self.device(rack_id) else {
+                    continue;
+                };
+                let kept: Vec<crate::MacroMapping> = rack
+                    .macros
+                    .mappings
+                    .iter()
+                    .filter(|mapping| match mapping.target {
+                        crate::MacroTarget::Device { device, param } => {
+                            !(device == rack_id && crate::macro_number(param).is_some())
+                                && rack.find(device).is_some()
+                        }
+                        crate::MacroTarget::Chain { chain, .. } => rack.find_chain(chain).is_some(),
+                    })
+                    .cloned()
+                    .collect();
+                (kept, rack.macros.mappings.len())
+            };
+            if kept.len() != total
+                && let Ok(device) = self.device_mut(rack_id)
+            {
+                device.macros.mappings = kept;
+            }
+        }
+    }
+
     pub(crate) fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;
@@ -5626,6 +6021,29 @@ pub(crate) fn check_value(what: &'static str, value: f64, ok: bool) -> Result<()
     } else {
         Err(ModelError::InvalidValue { what, value })
     }
+}
+
+/// Checks that `number` is one of a rack's macros, 1 to 16.
+fn check_macro_number(number: u8) -> Result<(), ModelError> {
+    if (1..=MACROS).contains(&number) {
+        Ok(())
+    } else {
+        Err(ModelError::InvalidInput(
+            "a rack's macros are numbered 1 to 16",
+        ))
+    }
+}
+
+/// The next number from a SplitMix64 generator, from 0 (inclusive) to 1
+/// (exclusive): Randomize's values, the same for the same seed (macros spec,
+/// R15).
+fn next_unit(state: &mut u64) -> f64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    (z >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// Checks the value of a clip envelope's breakpoint: a number, and for a MIDI

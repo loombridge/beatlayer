@@ -29,11 +29,12 @@ use bl_shell_spec::devices::{
     CreateChainArgs, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry,
     DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs,
     ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
-    HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MidiSidechainSection,
-    ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame, SaveChainPresetArgs,
-    SavePresetArgs, SelectChainArgs, SelectDeviceArgs, SelectSlotArgs, SetAutoSelectArgs,
-    SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection,
-    SoloChainArgs, Ungrouped,
+    HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MapModeArgs,
+    MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame,
+    RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs, SelectChainArgs, SelectDeviceArgs,
+    SelectMacroArgs, SelectSlotArgs, SetAutoSelectArgs, SetMacroCountArgs, SetRackViewArgs,
+    SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs,
+    Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -52,6 +53,8 @@ pub use rack_presets::is_chain_preset;
 
 mod drum;
 pub use drum::PadSample;
+
+mod macros;
 
 /// What the Device View shows besides the set: the selected device, the
 /// folded devices, the clipboard, and hot-swapping; and the device types
@@ -82,6 +85,13 @@ pub struct DeviceView {
     sidechains_shown: BTreeSet<DeviceId>,
     /// The lit Map button, if one is (WP-5.10).
     armed: Option<(DeviceId, u8)>,
+    /// The rack whose Map mode is on, if one is (WP-5.4): view state, never
+    /// saved and never an undo step.
+    map_mode: Option<DeviceId>,
+    /// The macro selected in a rack's Macro Controls, and the mapping
+    /// selected in its mappings list: view state (WP-5.4).
+    macro_selected: Option<(DeviceId, u8)>,
+    mapping_selected: Option<(DeviceId, bl_model::MacroTarget)>,
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
@@ -268,7 +278,15 @@ impl DeviceView {
     /// Selects `device` without changing which track the Device View
     /// shows, as bringing its floating window to the front does (WP-2.5b).
     pub fn select_only(&mut self, device: DeviceId) {
-        self.selected = Some(device);
+        self.choose(Some(device));
+    }
+
+    /// Chooses the device the Device View shows as selected, ending a macro's
+    /// selection with it (macros spec, R14): Rename acts on one selection, so
+    /// choosing a device takes Rename back from the macro it named.
+    fn choose(&mut self, device: Option<DeviceId>) {
+        self.selected = device;
+        self.macro_selected = None;
     }
 
     /// Whether a device is folded.
@@ -577,6 +595,11 @@ impl DeviceView {
     pub fn forget_missing(&mut self, doc: &Document) {
         let exists = |d: &DeviceId| doc.device(*d).is_some();
         self.selected = self.selected.filter(exists);
+        // Spec: macros R3, R14. A rack that's gone takes its Map mode and a
+        // macro selected in it with it, so the browser comes back and Rename
+        // names a device again.
+        self.map_mode = self.map_mode.filter(exists);
+        self.macro_selected = self.macro_selected.filter(|(rack, _)| exists(rack));
         self.hot_swap = self.hot_swap.filter(exists);
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
@@ -644,6 +667,7 @@ impl DeviceView {
                 })
                 .unwrap_or_default(),
             armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
+            map_mode: self.map_mode,
         }
     }
 
@@ -865,6 +889,7 @@ impl DeviceView {
                 .params
                 .get(&bl_model::FILTER_MIDI_CTRL)
                 .is_some_and(|v| *v >= 0.5),
+            macros: self.macro_state(doc, rack.id, self.views_of(rack.id).macro_count),
         }
     }
 
@@ -946,6 +971,65 @@ impl DeviceView {
     #[must_use]
     pub fn views_of(&self, rack: DeviceId) -> RackViews {
         self.rack_views.get(&rack).copied().unwrap_or_default()
+    }
+
+    /// `rack`'s macros as `rack.macros` reports them.
+    fn macros_state(&self, doc: &Document, rack: DeviceId) -> Value {
+        let count = self.views_of(rack).macro_count;
+        self.macro_state(doc, rack, count)
+            .map_or(Value::Null, |state| to_value(&state))
+    }
+
+    /// `rack`'s macros as `rack.macros` reports them (macros spec, R19), for
+    /// a host reading a rack without the Device View.
+    #[must_use]
+    pub fn macros_of(
+        &self,
+        doc: &Document,
+        rack: DeviceId,
+        count: u8,
+    ) -> Option<bl_shell_spec::devices::MacroState> {
+        self.macro_state(doc, rack, count)
+    }
+
+    /// The rack whose Map mode is on, if one is (macros spec, R3).
+    #[must_use]
+    pub fn map_mode(&self) -> Option<DeviceId> {
+        self.map_mode
+    }
+
+    /// The macro selected in a rack's Macro Controls, if one is.
+    #[must_use]
+    pub fn macro_selected(&self) -> Option<(DeviceId, u8)> {
+        self.macro_selected
+    }
+
+    /// Selects a macro in a rack's Macro Controls, or none.
+    pub fn select_macro(&mut self, macro_selected: Option<(DeviceId, u8)>) {
+        self.macro_selected = macro_selected;
+    }
+
+    /// The mapping selected in a rack's mappings list, if one is.
+    #[must_use]
+    pub fn mapping_selected(&self) -> Option<(DeviceId, bl_model::MacroTarget)> {
+        self.mapping_selected
+    }
+
+    /// Selects a mapping in a rack's mappings list, or none.
+    pub fn select_mapping(&mut self, selected: Option<(DeviceId, bl_model::MacroTarget)>) {
+        self.mapping_selected = selected;
+    }
+
+    /// The macro that holds `device`'s `param`, by name, if one does (macros
+    /// spec, R11).
+    #[must_use]
+    pub fn macro_holding(
+        &self,
+        doc: &Document,
+        device: DeviceId,
+        param: ParamId,
+    ) -> Option<String> {
+        self.mapped_hold(doc, device, param)
     }
 
     /// Where a device's window sits, if one has been placed: a floating
@@ -1374,6 +1458,15 @@ impl DeviceView {
                 .and_then(|d| doc.device(d))
                 .or_else(|| self.focus_rack(doc))
                 .is_some_and(|d| d.rack_kind().is_some()),
+            ids::RACK_SET_MACRO_COUNT
+            | ids::RACK_MAP_MODE
+            | ids::RACK_MACROS
+            | ids::RACK_SELECT_MACRO => args
+                .get("rack")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .and_then(|d| doc.device(d))
+                .or_else(|| self.focus_rack(doc))
+                .is_some_and(|d| d.rack_kind().is_some()),
             pad_ids::SWITCH_HOT_SWAP_TARGET => {
                 self.hot_swap_pad.is_some()
                     || self.hot_swap.is_some_and(|rack| {
@@ -1493,7 +1586,7 @@ impl DeviceView {
                         select_track(arrangement, editor.document(), owner)?;
                     }
                 }
-                self.selected = device;
+                self.choose(device);
                 self.chain_list_focus = false;
                 if let Some(device) = device {
                     outcome.view_changed = self.reveal(editor, device);
@@ -1917,6 +2010,49 @@ impl DeviceView {
                 self.rack_views.insert(rack, views);
                 outcome.view_changed = true;
             }
+            ids::RACK_SET_MACRO_COUNT => {
+                let SetMacroCountArgs { rack, count } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                if !(1..=bl_model::MACROS).contains(&count) {
+                    return Err(DeviceError::InvalidArgs(
+                        "a rack shows 1 to 16 macros".to_owned(),
+                    ));
+                }
+                let mut views = self.views_of(rack);
+                views.macro_count = count;
+                self.rack_views.insert(rack, views);
+                outcome.view_changed = true;
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
+            ids::RACK_MAP_MODE => {
+                let MapModeArgs { rack, on } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                let on = on.unwrap_or(self.map_mode != Some(rack));
+                self.map_mode = on.then_some(rack);
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
+            ids::RACK_MACROS => {
+                let RackMacrosArgs { rack } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
+            ids::RACK_SELECT_MACRO => {
+                let SelectMacroArgs { rack, macro_number } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                if let Some(number) = macro_number
+                    && !(1..=bl_model::MACROS).contains(&number)
+                {
+                    return Err(DeviceError::InvalidArgs(
+                        "a rack's macros are numbered 1 to 16".to_owned(),
+                    ));
+                }
+                self.macro_selected = macro_number.map(|number| (rack, number));
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
             ids::SAVE_PRESET => {
                 let SavePresetArgs { device, path } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -2154,7 +2290,7 @@ impl DeviceView {
                 }
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: place.track,
@@ -2241,7 +2377,7 @@ impl DeviceView {
         if new_track {
             select_track(arrangement, editor.document(), track_id)?;
         }
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: track_id,
@@ -2343,7 +2479,7 @@ impl DeviceView {
                 map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track,
@@ -2389,7 +2525,7 @@ impl DeviceView {
                 map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(id);
+        self.choose(Some(id));
         Ok(DeviceAdded {
             device: id,
             track: place.track,
@@ -2896,7 +3032,7 @@ impl DeviceView {
                 rack: Device::rack(rack, kind).with_chain(Chain::new(chain, first)),
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(rack);
+        self.choose(Some(rack));
         Ok(Grouped { rack, chain })
     }
 
@@ -2955,7 +3091,7 @@ impl DeviceView {
                 Ok::<_, bl_model::EditError>(())
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = Some(inner);
+        self.choose(Some(inner));
         Ok(Grouped {
             rack: inner,
             chain: outer,
@@ -2985,7 +3121,7 @@ impl DeviceView {
         editor
             .apply(Command::UngroupDevice { device: rack })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
-        self.selected = devices.first().copied();
+        self.choose(devices.first().copied());
         Ok(Ungrouped { devices })
     }
 }

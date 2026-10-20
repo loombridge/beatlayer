@@ -377,25 +377,19 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 })
                 .map_err(|error| format!("command 1 (`{}`): {error}", step.id))
         } else {
+            // Spec: macros R6, R7, R11 and R13. Edits go through the shell,
+            // as [`Shell::run`] does, so a macro's follow-ups are applied
+            // through the agent API too.
             let step_label = ctx.step_label(&label);
             let undo_label = step_label.clone();
-            ctx.shell.edit(|editor| {
-                editor.transact(step_label, |editor| {
-                    let start = editor.document().clone();
-                    let mut results = Vec::with_capacity(ready.len());
-                    for (index, step) in ready.iter().enumerate() {
-                        let changes =
-                            model::run(editor, &step.id, step.args.clone()).map_err(|error| {
-                                format!("command {} (`{}`): {error}", index + 1, step.id)
-                            })?;
-                        results.push(json!({ "command": step.id, "result": changes }));
-                    }
-                    // A batch that leaves the song as it was records no undo
-                    // step.
-                    let changed = !ChangeSet::between(&start, editor.document()).is_empty();
-                    Ok((results, changed.then_some(undo_label)))
-                })
-            })
+            let steps: Vec<(String, Value)> = ready
+                .iter()
+                .map(|step| (step.id.clone(), step.args.clone()))
+                .collect();
+            ctx.shell
+                .run_document_edits(&step_label, &steps)
+                .map(|(results, changed)| (results, changed.then_some(undo_label)))
+                .map_err(|error| error.to_string())
         };
     match outcome {
         Ok((results, undo_step)) => {

@@ -31,7 +31,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-use bl_model::{Device, DeviceRole, ParamId};
+use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, segments};
 use crate::registry::{DeviceType, Registry};
@@ -50,6 +50,8 @@ pub const DATA: &str = "test.data";
 pub const GAIN: &str = "test.gain";
 /// The pass-through node's device type.
 pub const THROUGH: &str = "test.through";
+/// The described gain's device type (WP-5.4).
+pub const GAIN_DESCRIBED: &str = "test.gain_described";
 /// The sidechain probe's device type.
 pub const KEY: &str = "test.key";
 /// The MIDI sidechain probe's device type (WP-5.27).
@@ -94,6 +96,24 @@ pub const MULTI_OUTPUT_NAMES: [&str; MULTI_OUTPUTS] = ["Output 2", "Output 3"];
 #[must_use]
 pub fn gain_type() -> DeviceType {
     DeviceType::native(GAIN, "Test Gain", DeviceRole::AudioEffect)
+}
+
+/// The test gain with a described parameter, for the macro and modulation
+/// tests (WP-5.4): Gain from 0 to 2, 1 in a new device.
+#[must_use]
+pub fn described_gain_type() -> DeviceType {
+    DeviceType::native(
+        GAIN_DESCRIBED,
+        "Test Described Gain",
+        DeviceRole::AudioEffect,
+    )
+    .with_description(DeviceDescription::new(vec![ParamDescriptor::continuous(
+        GAIN_PARAM,
+        "Gain",
+        (0.0, 2.0),
+        1.0,
+        ParamUnit::None,
+    )]))
 }
 
 /// The pass-through as a device type: an audio effect named "Test
@@ -215,6 +235,10 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     });
     let p = Arc::clone(probe);
     registry.add_device(gain_type(), move |device, _| {
+        Box::new(Gain::new(device, &p))
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(described_gain_type(), move |device, _| {
         Box::new(Gain::new(device, &p))
     });
     let p = Arc::clone(probe);

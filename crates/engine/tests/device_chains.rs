@@ -190,6 +190,7 @@ fn factories_offer_device_types_with_their_roles() {
         types,
         vec![
             testing::gain_type(),
+            testing::described_gain_type(),
             testing::through_type(),
             testing::key_type(),
             testing::hear_type(),

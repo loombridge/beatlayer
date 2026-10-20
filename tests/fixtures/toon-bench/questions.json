@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "53",
+    "answer": "59",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -216,7 +216,7 @@
     "question": "What is the label of the command clip.set_gain?"
   },
   {
-    "answer": "25",
+    "answer": "26",
     "fixture": "commands_clip",
     "id": "commands-set-prefix",
     "question": "How many command ids start with clip.set_?"

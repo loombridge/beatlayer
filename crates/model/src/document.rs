@@ -1,12 +1,12 @@
 //! The document: the whole song as an immutable, persistent tree.
 
 use bl_core::id::Id;
-use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
+use bl_core::time::{TempoMap, TempoSegment, Ticks, TimeSignatureMap};
 use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::clip::Clip;
+use crate::clip::{Clip, ClipData};
 use crate::device::Device;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::metronome::MetronomeSettings;
@@ -342,6 +342,131 @@ impl Document {
             copy.settings.time_signatures = time_signatures;
         }
         copy
+    }
+
+    /// The Arrangement clips that lead the tempo (the warping spec, R43): a
+    /// warped audio clip whose Lead/Follow switch is Lead, in display order,
+    /// the one lowest in the track list last. A deactivated (muted) clip
+    /// leads nothing. Each is `(clip, start, end)`.
+    pub(crate) fn tempo_leaders(&self) -> Vec<(&Clip, Ticks, Ticks)> {
+        self.track_order()
+            .into_iter()
+            .filter_map(|id| self.tracks.get(&id))
+            .flat_map(|track| track.clips())
+            .filter(|clip| !clip.mute)
+            .filter(|clip| match &clip.data {
+                ClipData::Audio(audio) => audio.warp && audio.tempo_leader,
+                ClipData::Midi(_) => false,
+            })
+            .map(|clip| (clip, clip.start, clip.end()))
+            .collect()
+    }
+
+    /// The spans of the Arrangement clips that lead the tempo (R43), in
+    /// display order: what the Main track's lane shows and where the tempo
+    /// commands refuse.
+    #[must_use]
+    pub fn tempo_leader_spans(&self) -> Vec<(Ticks, Ticks)> {
+        self.tempo_leaders()
+            .into_iter()
+            .map(|(_, start, end)| (start, end))
+            .collect()
+    }
+
+    /// Whether any Arrangement clip leads the set's tempo (R45): while one
+    /// does, the set's tempo is the clip's and `song.set_tempo` is refused.
+    #[must_use]
+    pub fn any_tempo_leader(&self) -> bool {
+        !self.tempo_leaders().is_empty()
+    }
+
+    /// Whether `at` falls inside a leading clip's span (R45), where the
+    /// tempo breakpoint commands are refused.
+    #[must_use]
+    pub fn tempo_leader_covers(&self, at: Ticks) -> bool {
+        self.tempo_leaders()
+            .into_iter()
+            .any(|(_, start, end)| start <= at && at < end)
+    }
+
+    /// The set's effective tempo map (R44, R48): the Main track's Song Tempo
+    /// envelope with each leading clip's tempo over its span, so a leader
+    /// plays as if unwarped and every follower follows it. Over a leader the
+    /// tempo is the clip's, stepping at each of its warp segments; where
+    /// active leaders overlap, the one on the track lowest in the track list
+    /// sets the tempo; outside every leader the Song Tempo envelope applies,
+    /// its own shape and all. This is what the engine plays, what exports and
+    /// previews use, and what the Main track's lane shows (R45).
+    #[must_use]
+    pub fn tempo_map(&self) -> TempoMap {
+        let song = &self.settings.tempo;
+        let leaders = self.tempo_leaders();
+        if leaders.is_empty() {
+            return song.clone();
+        }
+        // The ticks where the tempo can change: the Song Tempo envelope's own
+        // segment starts, and each leader's span and segment boundaries.
+        let mut ticks: Vec<Ticks> = song.segments().map(|segment| segment.start()).collect();
+        for (_, start, end) in &leaders {
+            ticks.push(*start);
+            ticks.push(*end);
+        }
+        for (clip, start, end) in &leaders {
+            let ClipData::Audio(audio) = &clip.data else {
+                continue;
+            };
+            let start_offset = (audio.start.round() as i64) - clip.start.get();
+            for marker in &audio.warp_markers {
+                let at = Ticks(marker.beat.get() + start_offset);
+                if at > *start && at < *end {
+                    ticks.push(at);
+                }
+            }
+        }
+        ticks.retain(|&at| at >= Ticks::ZERO);
+        ticks.sort_unstable();
+        ticks.dedup();
+        let mut segments = Vec::with_capacity(ticks.len() + 1);
+        for (index, &at) in ticks.iter().enumerate() {
+            // The last matching leader wins: the one lowest in the track list.
+            let leading = leaders
+                .iter()
+                .filter(|(_, start, end)| *start <= at && at < *end)
+                .filter_map(|(clip, start, _)| match &clip.data {
+                    ClipData::Audio(audio) => {
+                        let beat = audio.start + (at - *start).get() as f64;
+                        audio.segment_bpm_at(beat)
+                    }
+                    ClipData::Midi(_) => None,
+                })
+                .next_back();
+            let next = ticks.get(index + 1).copied();
+            match (leading, next) {
+                // A leader's tempo is steady between its warp segments.
+                (Some(bpm), _) => segments.push(TempoSegment::Constant { start: at, bpm }),
+                // Outside a leader the Song Tempo envelope's own shape holds.
+                (None, Some(next)) => {
+                    let (from, to) = (song.bpm_at(at), song.bpm_at(next));
+                    segments.push(if from == to {
+                        TempoSegment::Constant {
+                            start: at,
+                            bpm: from,
+                        }
+                    } else {
+                        TempoSegment::Ramp {
+                            start: at,
+                            from,
+                            to,
+                        }
+                    });
+                }
+                (None, None) => segments.push(TempoSegment::Constant {
+                    start: at,
+                    bpm: song.bpm_at(at),
+                }),
+            }
+        }
+        TempoMap::new(segments).unwrap_or_else(|_| song.clone())
     }
 
     /// The Main track's ID.

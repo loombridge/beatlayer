@@ -1601,6 +1601,67 @@ const ENTRIES: &[Entry] = &[
             changes nothing.",
     },
     Entry {
+        id: "clip.set_tempo_leader",
+        action: Action::Apply("set_tempo_leader"),
+        label: "Switch Lead/Follow",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Switches a warped Arrangement clip's Lead/Follow switch \
+            (`data.audio.tempo_leader`, off for a new clip). Set to Lead, the set takes its \
+            tempo from the clip's warp markers over the clip's span and the clip plays as if \
+            unwarped, while the Control Bar's tempo field is off and the tempo commands are \
+            refused there; every other clip follows that tempo. Any number of clips may lead, \
+            and where leaders overlap the one on the track lowest in the track list sets the \
+            tempo. Refused for a Session clip and for an unwarped clip; switching a leader's \
+            Warp off makes it a follower in the same undo step. `song.unfollow_tempo_automation` \
+            makes every leader a follower.",
+    },
+    Entry {
+        id: "song.unfollow_tempo_automation",
+        action: Action::Apply("unfollow_tempo_automation"),
+        label: "Unfollow Tempo Automation",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Makes every clip that leads the tempo a follower and writes the tempo \
+            they set into the Main track's Song Tempo envelope as ordinary breakpoints, so the \
+            song plays exactly as it did and the envelope becomes editable. One undo step, and \
+            changes nothing when no clip leads.",
+    },
+    Entry {
+        id: "clip.stretch",
+        action: Action::Apply("stretch"),
+        label: "Stretch Clip",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[Key::Runs("S-ARR-006")],
+        description: "Stretches a warped audio clip so its dragged `edge` (left or right) lands \
+            on the tick `at`, the other edge staying put. Its length becomes the dragged one \
+            and every beat in its contents - its warp markers, its Start and End markers and \
+            its loop brace - scales by the new length over the old about the beat at the fixed \
+            edge, so the same audio fills the new length and its tempo changes with it. \
+            Shift-dragging a warped clip's title-bar edge in the Arrangement runs it; \
+            Shift-dragging an unwarped clip's edge resizes it as a plain drag does. One undo \
+            step.",
+    },
+    Entry {
+        id: "clip.slide_contents",
+        action: Action::Apply("slide_contents"),
+        label: "Slide Clip Contents",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[Key::Runs("S-ARR-005")],
+        description: "Slides a warped audio clip's contents inside the clip, which stays where \
+            it is and keeps its length: `by` is how far the contents move in ticks, positive \
+            later. Its Start marker, its End marker and its loop brace move the other way \
+            through its contents by that much, so the same audio - its warp markers included - \
+            plays `by` ticks later (or earlier). Shift+Option-dragging a clip's contents in the \
+            Arrangement runs it, snapping to the grid unless Cmd is held as well. Refused for a \
+            clip that isn't warped, and for a slide that would take a marker out of the file. \
+            One undo step.",
+    },
+    Entry {
         id: "clip.set_legato",
         action: Action::Apply("set_clip_legato"),
         label: "Set Clip Legato",

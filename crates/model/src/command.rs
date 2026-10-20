@@ -10,7 +10,7 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::auto_warp::{FileBeats, LOOP_BARS, WarpFrom, WarpPoint, nearest_bars};
+use crate::auto_warp::{ClipEdge, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, nearest_bars};
 use crate::automation::{
     AutomationTarget, MixerParam, PointError, check_bend, entry, override_device,
 };
@@ -1009,6 +1009,46 @@ pub enum Command {
         /// The end of the part, in seconds, after `from`.
         #[schemars(range(min = 0.0))]
         to: f64,
+    },
+    /// Switches an Arrangement clip's Lead/Follow switch (the warping spec,
+    /// R43): a warped Arrangement audio clip can lead the set's tempo, so the
+    /// set takes its tempo from the clip's warp markers and the clip plays as
+    /// if unwarped. Refused for a Session clip and for an unwarped clip;
+    /// switching a leader's Warp off makes it a follower in the same step.
+    SetTempoLeader {
+        /// The warped Arrangement audio clip.
+        clip: ClipId,
+        /// Whether the clip leads, or follows, the set's tempo.
+        leader: bool,
+    },
+    /// Makes every leader a follower and writes the tempo they set into the
+    /// Main track's Song Tempo envelope as ordinary breakpoints (R46), so the
+    /// song plays exactly as it did. One undo step.
+    UnfollowTempoAutomation {},
+    /// Stretches a warped Arrangement clip (R47): the dragged edge goes to
+    /// `at`, the other stays put, and every beat in its contents — its warp
+    /// markers, its Start and End markers and its loop brace — scales about
+    /// the beat at the fixed edge, so the same audio fills the new length.
+    Stretch {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The edge being dragged.
+        edge: ClipEdge,
+        /// Where that edge goes, in ticks: 0 (1.1.1) or later, and past the
+        /// other edge.
+        at: Ticks,
+    },
+    /// Slides a clip's contents inside the clip, which stays where it is
+    /// (R54): its Start marker, its End marker and its loop brace each move
+    /// the other way through its contents by `by`, and its warp markers keep
+    /// their beats and their times in the file, so the same audio — its
+    /// markers and its waveform with it — plays `by` ticks later (or earlier)
+    /// while the clip keeps its place and length.
+    SlideContents {
+        /// The audio or MIDI clip.
+        clip: ClipId,
+        /// How far the contents move, in ticks: negative moves them earlier.
+        by: Ticks,
     },
     /// Sets a warped or unwarped audio clip's warp mode (WP-4.2).
     SetClipWarpMode {
@@ -2022,6 +2062,11 @@ impl Command {
             Self::SetClipWarpSettings { .. } => "Change Warp Settings",
             Self::SetClipRamMode { .. } => "Switch RAM Mode",
             Self::SetClipHighQuality { .. } => "Switch High Quality",
+            // WP-4.11. Live's undo names for these are to observe.
+            Self::SetTempoLeader { .. } => "Switch Lead/Follow",
+            Self::UnfollowTempoAutomation {} => "Unfollow Tempo Automation",
+            Self::Stretch { .. } => "Stretch clip",
+            Self::SlideContents { .. } => "Slide clip contents",
             // WP-3.4. Live's undo names for the Launch panel's controls are
             // to observe; Beatlayer's name the edit.
             Self::SetClipLegato { .. } => "Switch Legato",
@@ -2229,6 +2274,14 @@ impl Document {
     fn apply_in_place(&mut self, command: &Command) -> Result<(), ModelError> {
         match command {
             Command::SetTempo { tempo } => {
+                // Spec: warping R45. While any clip leads, the set's tempo is
+                // the clip's: the command is refused.
+                if self.any_tempo_leader() {
+                    return Err(ModelError::InvalidInput(
+                        "a clip leads the set's tempo: make it a follower, or use Unfollow Tempo \
+                         Automation, first",
+                    ));
+                }
                 if self.settings.tempo != *tempo {
                     self.settings.tempo = tempo.clone();
                 }
@@ -2240,9 +2293,18 @@ impl Document {
                 }
                 Ok(())
             }
-            Command::SetTempoBreakpoint { at, bpm } => self.set_tempo_breakpoint(*at, *bpm),
-            Command::MoveTempoBreakpoint { at, to } => self.move_tempo_breakpoint(*at, *to),
-            Command::DeleteTempoBreakpoint { at } => self.delete_tempo_breakpoint(*at),
+            Command::SetTempoBreakpoint { at, bpm } => {
+                self.check_outside_tempo_leaders(&[*at])?;
+                self.set_tempo_breakpoint(*at, *bpm)
+            }
+            Command::MoveTempoBreakpoint { at, to } => {
+                self.check_outside_tempo_leaders(&[*at, *to])?;
+                self.move_tempo_breakpoint(*at, *to)
+            }
+            Command::DeleteTempoBreakpoint { at } => {
+                self.check_outside_tempo_leaders(&[*at])?;
+                self.delete_tempo_breakpoint(*at)
+            }
             Command::SetTimeSignatureChange { at, signature } => {
                 self.set_time_signature_change(*at, *signature)
             }
@@ -2838,6 +2900,10 @@ impl Document {
             Command::ScaleTempo { clip, factor } => {
                 self.edit_markers_with(*clip, |audio| audio.with_tempo_scaled(*factor))
             }
+            Command::SetTempoLeader { clip, leader } => self.set_tempo_leader(*clip, *leader),
+            Command::UnfollowTempoAutomation {} => self.unfollow_tempo_automation(),
+            Command::Stretch { clip, edge, at } => self.stretch_clip(*clip, *edge, *at),
+            Command::SlideContents { clip, by } => self.slide_contents(*clip, *by),
             Command::SetOneOneOneHere { clip, at } => {
                 self.edit_markers_with(*clip, |audio| audio.with_1_1_1_here(at))
             }
@@ -4086,6 +4152,99 @@ impl Document {
         Ok(())
     }
 
+    /// Refuses positions that fall inside a leading clip's span (the warping
+    /// spec, R45), where the clip sets the tempo and the Song Tempo envelope
+    /// can't be edited.
+    fn check_outside_tempo_leaders(&self, at: &[Ticks]) -> Result<(), ModelError> {
+        if at.iter().any(|&at| self.tempo_leader_covers(at)) {
+            return Err(ModelError::InvalidInput(
+                "a clip leads the tempo here: make it a follower, or use Unfollow Tempo \
+                 Automation, first",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Switches an Arrangement clip's Lead/Follow switch (R43).
+    fn set_tempo_leader(&mut self, id: ClipId, leader: bool) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::InvalidInput(
+                "only an Arrangement clip can lead the tempo: a Session clip follows",
+            ));
+        }
+        self.edit_markers_with(id, |audio| audio.with_tempo_leader(leader))
+    }
+
+    /// Makes every leader a follower and writes the tempo they set into the
+    /// Main track's Song Tempo envelope as ordinary breakpoints (R46), so the
+    /// song plays exactly as it did.
+    fn unfollow_tempo_automation(&mut self) -> Result<(), ModelError> {
+        let leaders: Vec<ClipId> = self
+            .tempo_leaders()
+            .into_iter()
+            .map(|(clip, _, _)| clip.id)
+            .collect();
+        if leaders.is_empty() {
+            return Ok(());
+        }
+        let map = self.tempo_map();
+        self.settings.tempo = map;
+        for id in leaders {
+            self.edit_markers(id, |audio| audio.tempo_leader = false)?;
+        }
+        Ok(())
+    }
+
+    /// Stretches a warped clip (R47): the dragged edge goes to `at`, the
+    /// other stays put, and every beat of its contents scales about the beat
+    /// at the fixed edge, so the same audio fills the new length. An unwarped
+    /// clip resizes as a plain drag does.
+    fn stretch_clip(&mut self, id: ClipId, edge: ClipEdge, at: Ticks) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
+        let clip = self.clip_ref(id)?.clone();
+        let ClipData::Audio(audio) = &clip.data else {
+            return Err(ModelError::NotAudioClip(id));
+        };
+        let audio = audio.clone();
+        if !audio.warp {
+            return match edge {
+                ClipEdge::Left => self.trim_clip_start(id, at),
+                ClipEdge::Right => {
+                    let length = at.saturating_sub(clip.start);
+                    check_extent(clip.start, length)?;
+                    let mut next = clip;
+                    next.length = length;
+                    check_clip(&next)?;
+                    *self.clip_mut(id)? = next;
+                    Ok(())
+                }
+            };
+        }
+        let (start, length, anchor) = match edge {
+            // The left edge stays: every beat scales about the Start marker's
+            // beat, the clip's 1.1.1.
+            ClipEdge::Right => (clip.start, at.saturating_sub(clip.start), audio.start),
+            // The right edge stays: about the beat at the clip's end.
+            ClipEdge::Left => (
+                at,
+                clip.end().saturating_sub(at),
+                audio.start + clip.length.get() as f64,
+            ),
+        };
+        check_extent(start, length)?;
+        let factor = length.get() as f64 / clip.length.get() as f64;
+        let audio = audio.with_beats_scaled(anchor, factor)?;
+        let mut next = clip;
+        next.start = start;
+        next.length = length;
+        next.data = ClipData::Audio(audio);
+        check_clip(&next)?;
+        *self.clip_mut(id)? = next;
+        Ok(())
+    }
+
     /// Crops `clip` (the audio clip editing spec, R14 to R17): its data to
     /// `from`..`to` of its contents, in the form the clip shows, and, when
     /// `span` is given, its edges to that span of the song. An audio clip's
@@ -4136,6 +4295,30 @@ impl Document {
         check_extent(next.start, next.length)?;
         *self.clip_mut(id)? = next;
         Ok(())
+    }
+
+    /// Slides a warped clip's contents inside it, which stays put (R54): the
+    /// Start marker, the End marker and the loop brace move the other way
+    /// through its contents by `by`, so the same audio — its warp markers
+    /// included — plays `by` ticks later (or earlier).
+    fn slide_contents(&mut self, id: ClipId, by: Ticks) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
+        if by == Ticks::ZERO {
+            return Ok(());
+        }
+        self.edit_markers_with(id, |audio| {
+            audio.require_warp()?;
+            let shift = |value: f64| value - by.get() as f64;
+            Ok(AudioData {
+                start: shift(audio.start),
+                end: audio.end.map(shift),
+                loop_start: shift(audio.loop_start),
+                loop_end: audio.loop_end.map(shift),
+                ..audio.clone()
+            })
+        })
     }
 
     /// Crops `clip` to the span of song time `start`..`end` (R16): its edges

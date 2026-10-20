@@ -510,7 +510,9 @@ pub fn render(
     let render_hz = spec.sample_rate.max(spec.engine_rate);
     let render_rate = SampleRate::new(render_hz)
         .ok_or_else(|| ExportError::Invalid(format!("a rate of {render_hz} Hz")))?;
-    let tempo = &document.settings().tempo;
+    // The range is measured through the tempo map the set plays: the leading
+    // clips' tempo included (the warping spec, R48).
+    let tempo = &document.tempo_map();
     let first = tempo.ticks_to_frames(spec.start, render_rate).get();
     let frames = match spec.length {
         Length::Frames(frames) => frames,

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-514 commands in 37 areas.
+518 commands in 37 areas.
 
 ## Permission classes
 
@@ -198,11 +198,14 @@ Each command has:
 | [`clip.set_ram_mode`](#clipset_ram_mode) | Set Clip RAM Mode | `edit` |  |  |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
+| [`clip.set_tempo_leader`](#clipset_tempo_leader) | Switch Lead/Follow | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
 | [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
 | [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.slide_contents`](#clipslide_contents) | Slide Clip Contents | `edit` | `Shift+Option+drag` | `Shift+Alt+drag` |
+| [`clip.stretch`](#clipstretch) | Stretch Clip | `edit` | `Shift+drag the clip title bar` | `Shift+drag the clip title bar` |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | Warp as Loop | `edit` |  |  |
@@ -491,6 +494,7 @@ Each command has:
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | Set Tempo Breakpoint | `edit` |  |  |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | Set Time Signature Change | `edit` |  |  |
 | [`song.set_time_signatures`](#songset_time_signatures) | Set Time Signatures | `edit` |  |  |
+| [`song.unfollow_tempo_automation`](#songunfollow_tempo_automation) | Unfollow Tempo Automation | `edit` |  |  |
 | [`stems.cancel`](#stemscancel) | Cancel | `edit` |  |  |
 | [`stems.close`](#stemsclose) | Close Separate Stems | `read` |  |  |
 | [`stems.install`](#stemsinstall) | Download Required Packages Now | `external` |  |  |
@@ -3587,6 +3591,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_tempo_leader`
+
+**Switch Lead/Follow**. Permission: `edit`. Contexts: `arrangement`.
+
+Switches a warped Arrangement clip's Lead/Follow switch (`data.audio.tempo_leader`, off for a new clip). Set to Lead, the set takes its tempo from the clip's warp markers over the clip's span and the clip plays as if unwarped, while the Control Bar's tempo field is off and the tempo commands are refused there; every other clip follows that tempo. Any number of clips may lead, and where leaders overlap the one on the track lowest in the track list sets the tempo. Refused for a Session clip and for an unwarped clip; switching a leader's Warp off makes it a follower in the same undo step. `song.unfollow_tempo_automation` makes every leader a follower.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped Arrangement audio clip. |
+| `leader` | boolean | yes | Whether the clip leads, or follows, the set's tempo. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_velocity_amount`
 
 **Set Clip Velocity Amount**. Permission: `edit`. Contexts: `clip-view`.
@@ -3673,6 +3694,49 @@ Arguments:
 | `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
 | `marker` | integer, at least 0 | yes | The marker, by its place in the map, the first being 0. |
 | `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.slide_contents`
+
+**Slide Clip Contents**. Permission: `edit`. Contexts: `arrangement`.
+
+Slides a warped audio clip's contents inside the clip, which stays where it is and keeps its length: `by` is how far the contents move in ticks, positive later. Its Start marker, its End marker and its loop brace move the other way through its contents by that much, so the same audio - its warp markers included - plays `by` ticks later (or earlier). Shift+Option-dragging a clip's contents in the Arrangement runs it, snapping to the grid unless Cmd is held as well. Refused for a clip that isn't warped, and for a slide that would take a marker out of the file. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-005 | `Shift+Option+drag` | `Shift+Alt+drag` | `arrangement` | Slide a clip's contents inside the clip | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio or MIDI clip. |
+| `by` | [`Ticks`](#ticks) | yes | How far the contents move, in ticks: negative moves them earlier. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.stretch`
+
+**Stretch Clip**. Permission: `edit`. Contexts: `arrangement`.
+
+Stretches a warped audio clip so its dragged `edge` (left or right) lands on the tick `at`, the other edge staying put. Its length becomes the dragged one and every beat in its contents - its warp markers, its Start and End markers and its loop brace - scales by the new length over the old about the beat at the fixed edge, so the same audio fills the new length and its tempo changes with it. Shift-dragging a warped clip's title-bar edge in the Arrangement runs it; Shift-dragging an unwarped clip's edge resizes it as a plain drag does. One undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-006 | `Shift+drag the clip title bar` | `Shift+drag the clip title bar` | `arrangement` | Stretch a warped clip | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `edge` | [`ClipEdge`](#clipedge) | yes | The edge being dragged. |
+| `at` | [`Ticks`](#ticks) | yes | Where that edge goes, in ticks: 0 (1.1.1) or later, and past the other edge. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -8742,6 +8806,18 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `song.unfollow_tempo_automation`
+
+**Unfollow Tempo Automation**. Permission: `edit`. Contexts: `global`.
+
+Makes every clip that leads the tempo a follower and writes the tempo they set into the Main track's Song Tempo envelope as ordinary breakpoints, so the song plays exactly as it did and the envelope becomes editable. One undo step, and changes nothing when no clip leads.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ChangeSet`](#changeset).
+
 ### Area `stems`
 
 #### `stems.cancel`
@@ -9723,11 +9799,14 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_ram_mode`](#clipset_ram_mode) | the query tool's `clip` | `data.audio.ram` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.set_tempo_leader`](#clipset_tempo_leader) | the query tool's `clip` | `data.audio.tempo_leader` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.set_warp`](#clipset_warp) | the query tool's `clip` | `data.audio.warp` |
 | [`clip.set_warp_mode`](#clipset_warp_mode) | the query tool's `clip` | `data.audio.warp_mode` |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.slide_contents`](#clipslide_contents) | the query tool's `clip` | `data.audio.start` |
+| [`clip.stretch`](#clipstretch) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`clip.warp_as_loop`](#clipwarp_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.warp_from_here`](#clipwarp_from_here) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -9916,6 +9995,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`song.set_tempo_breakpoint`](#songset_tempo_breakpoint) | the query tool's `song` | `settings.tempo` |
 | [`song.set_time_signature_change`](#songset_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
 | [`song.set_time_signatures`](#songset_time_signatures) | the query tool's `song` | `settings.time_signatures` |
+| [`song.unfollow_tempo_automation`](#songunfollow_tempo_automation) | the query tool's `song` | `settings.tempo` |
 | [`stems.cancel`](#stemscancel) | `stems.status` | `separation` |
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
@@ -10679,6 +10759,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
 | `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
+| `tempo_leader` | boolean | no | The Lead/Follow switch (the warping spec, R43): whether this Arrangement clip leads the set's tempo instead of following it. Off unless given, a follower. Only a warped Arrangement clip can lead. |
 | `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
@@ -10773,6 +10854,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
         "number",
         "null"
       ]
+    },
+    "tempo_leader": {
+      "description": "The Lead/Follow switch (the warping spec, R43): whether this Arrangement clip leads the set's tempo instead of following it. Off unless given, a follower. Only a warped Arrangement clip can lead.",
+      "type": "boolean"
     },
     "transient_edits": {
       "$ref": "#/$defs/TransientEdits",
@@ -12851,6 +12936,37 @@ An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mo
     "gain"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ClipEdge`
+
+Which edge of a clip a stretch drag holds (the warping spec, R47): the dragged edge moves and the other stays put, and every beat of the clip's contents scales about the beat at the fixed edge.
+
+One of:
+
+- `"left"`: The left edge, so the right edge stays put.
+- `"right"`: The right edge, so the left edge stays put.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which edge of a clip a stretch drag holds (the warping spec, R47): the dragged edge moves and the other stays put, and every beat of the clip's contents scales about the beat at the fixed edge.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "The left edge, so the right edge stays put.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "The right edge, so the left edge stays put.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

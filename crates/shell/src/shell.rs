@@ -39,9 +39,9 @@ use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
     LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
-    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    SaveAsArgs, SampleEditorArgs, SampleEditorResult, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -89,6 +89,7 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 pub(crate) mod audio_editing;
+mod audio_panel;
 mod capture;
 mod multisampler;
 mod processed_files;
@@ -238,6 +239,9 @@ pub enum Effect {
     /// Ask for a folder, then run `settings.set_temporary_folder` with it
     /// (WP-4.20).
     PickTemporaryFolder,
+    /// Ask for a program, then run `settings.set_sample_editor` with it
+    /// (WP-4.10b).
+    PickSampleEditor,
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -453,6 +457,10 @@ pub struct Shell {
     analysis: Option<bl_analysis::cache::AnalysisCache>,
     /// The files whose analysis has been started this session.
     analysed: std::collections::HashSet<bl_media::ContentHash>,
+    /// The files opened in the external sample editor, and the content they
+    /// held then (WP-4.10b): the shell looks at them again when Beatlayer
+    /// comes to the front.
+    editing: Vec<audio_panel::Editing>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -846,6 +854,7 @@ impl Shell {
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
             analysed: std::collections::HashSet::new(),
+            editing: Vec::new(),
             registry,
             editor,
             saved,
@@ -1862,6 +1871,7 @@ impl Shell {
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
+                sample_editor: self.sample_editor().unwrap_or_default(),
             },
             launch: self.prefs.launch,
             record_session_automation_in: self.prefs.record_session_automation_in,
@@ -5828,6 +5838,10 @@ impl Shell {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
             }
+            ids::SETTINGS_SET_SAMPLE_EDITOR if !has("path") => {
+                self.effects.push(Effect::PickSampleEditor);
+                Ok(Value::Null)
+            }
             _ if self.is_sample_key(id, &args) => {
                 // Spec: sample-editor R10. A key or a menu item acts on what
                 // the Sample Editor has selected.
@@ -6815,6 +6829,9 @@ impl Shell {
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
         }
+        if bl_shell_spec::audio_panel::handles(id) {
+            return self.run_audio_panel(id, args);
+        }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
             return Ok(to_value(&crate::modulation::state(
@@ -7801,6 +7818,17 @@ impl Shell {
                 self.save_preferences();
                 Ok(to_value(&TemporaryFolderResult {
                     path: self.temporary_folder().to_string_lossy().into_owned(),
+                }))
+            }
+            ids::SETTINGS_SET_SAMPLE_EDITOR => {
+                let SampleEditorArgs { path } = Self::args(id, args)?;
+                let path = path
+                    .map(|path| path.trim().to_owned())
+                    .filter(|path| !path.is_empty());
+                self.prefs.sample_editor = path;
+                self.save_preferences();
+                Ok(to_value(&SampleEditorResult {
+                    path: self.sample_editor().unwrap_or_default(),
                 }))
             }
             ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES => {

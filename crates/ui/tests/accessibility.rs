@@ -1641,7 +1641,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
-    let audio_panel = LaterView("the Audio Utilities panel's warp controls (WP-4.10b)");
+    let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
     let auto_warp = LaterView(
         "the Sample Editor's context menu's Set 1.1.1 Here and Warp items, drawn disabled \
@@ -2298,6 +2298,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_follow_actions",
             Exception(Unobserved(
                 "the follow controls in the Launch Properties panel, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
+        ("clip.edit_sample", Exception(audio_panel)),
+        ("clip.replace_sample", Exception(Unobserved(
+            "a file dropped from the browser on the Clip View replaces the clip's sample (the \
+             sample editor spec, R18)",
+        ))),
+        (
+            "settings.set_sample_editor",
+            Exception(LaterView(
+                "the File & Folder page's Sample Editor Browse button, the second Browse on the \
+                 page (WP-4.10b)",
             )),
         ),
         ("clip.set_warp", Exception(audio_panel)),

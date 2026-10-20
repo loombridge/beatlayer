@@ -4817,3 +4817,126 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
         }
     }
 }
+
+/// Spec: sample-editor R14, R15, R18. An agent sets every control of the
+/// Clip View's Audio Utilities panel by command ID and reads each back in
+/// the query tool's `clip`.
+#[test]
+fn an_agent_sets_the_audio_utilities_panel_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Audio"}, "kind": "audio", "name": "Audio", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Audio")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Tone"}, "name": "Tone", "start": 0, "length": 4 * BAR,
+                  "mute": false, "data": { "audio": { "media": "cd".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        audio(client)
+    };
+
+    // The Warp switch.
+    let warp = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    assert_eq!(warp["warp"], true);
+    // The Warp Mode chooser, and the mode's own controls.
+    let mode = run(
+        &mut client,
+        "clip.set_warp_mode",
+        json!({ "clip": clip, "mode": "texture" }),
+    );
+    assert_eq!(mode["warp_mode"], "texture");
+    let settings = run(
+        &mut client,
+        "clip.set_warp_settings",
+        json!({ "clip": clip, "texture": { "grain_size": 40.0, "flux": 30.0 } }),
+    );
+    assert_eq!(
+        settings["warp_settings"],
+        json!({ "texture": { "grain_size": 40.0, "flux": 30.0 } })
+    );
+    // The BPM field, and ×2 and ÷2.
+    let bpm = run(
+        &mut client,
+        "clip.set_segment_bpm",
+        json!({ "clip": clip, "bpm": 140.0 }),
+    );
+    assert_eq!(bpm["tempo"], 140.0);
+    let scaled = run(
+        &mut client,
+        "clip.scale_tempo",
+        json!({ "clip": clip, "factor": 2.0 }),
+    );
+    assert_eq!(scaled["tempo"], 280.0);
+    // The Lead/Follow switch.
+    let leader = run(
+        &mut client,
+        "clip.set_tempo_leader",
+        json!({ "clip": clip, "leader": true }),
+    );
+    assert_eq!(leader["tempo_leader"], true);
+    // RAM and HiQ.
+    let ram = run(
+        &mut client,
+        "clip.set_ram_mode",
+        json!({ "clip": clip, "ram": true }),
+    );
+    assert_eq!(ram["ram"], true);
+    let hiq = run(
+        &mut client,
+        "clip.set_high_quality",
+        json!({ "clip": clip, "high_quality": false }),
+    );
+    assert_eq!(hiq["high_quality"], false);
+    // The Gain field, in decibels: the command takes a linear gain.
+    let gain = run(
+        &mut client,
+        "clip.set_gain",
+        json!({ "clip": clip, "gain": 0.5 }),
+    );
+    assert_eq!(gain["gain"], 0.5);
+}

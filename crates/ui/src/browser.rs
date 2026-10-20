@@ -1308,7 +1308,7 @@ impl BrowserUi {
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
-        (main_view, zone_editor): (Rect, Option<Rect>),
+        (main_view, zone_editor, clip_view): (Rect, Option<Rect>, Rect),
         events: &mut Vec<UiEvent>,
     ) {
         let ctx = ui.ctx().clone();
@@ -1336,6 +1336,11 @@ impl BrowserUi {
             return;
         }
         if pointer.is_some_and(|p| zone_editor.is_some_and(|editor| editor.contains(p))) {
+            return;
+        }
+        if pointer.is_some_and(|p| clip_view.contains(p)) {
+            // Spec: sample-editor R18. A file dropped on the Clip View
+            // replaces the clip's sample, which the Clip View does.
             return;
         }
         let view = shell.arrangement();

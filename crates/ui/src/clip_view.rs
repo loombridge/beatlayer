@@ -64,6 +64,8 @@ pub const EDGE_GRAB: f32 = 4.0;
 /// How tall the editor toolbar is, in points: the tabs and the grid chooser
 /// (L-CLIP-010).
 pub const TOOLBAR_HEIGHT: f32 = 16.0;
+/// How tall the clip title bar over the panels is, in points (L-CLIP-002).
+pub const TITLE_BAR_HEIGHT: f32 = 14.0;
 /// How wide a tab is, and how far apart their left edges are (L-CLIP-010's
 /// tabs sit 61 points apart).
 const TAB_WIDTH: f32 = 58.0;
@@ -164,6 +166,140 @@ fn end_tick(midi: &MidiData, length: Ticks) -> Ticks {
     midi.end.unwrap_or(midi.start + length)
 }
 
+/// How wide the Clip View's panels are: the left group, and the right group
+/// on an audio clip.
+#[must_use]
+pub fn panels_width(view: Rect, audio: bool) -> f32 {
+    let left = launch_panel::panel_width(view);
+    let right = if audio { crate::audio_panel::WIDTH } else { 0.0 };
+    (left + right).min(view.width())
+}
+
+/// The Clip View's panels: the title bar over them, and the panel groups
+/// under it.
+#[must_use]
+pub fn panels_rect(view: Rect) -> Rect {
+    Rect::from_min_max(
+        pos2(view.left(), view.top() + TITLE_BAR_HEIGHT),
+        pos2(view.left() + panels_width(view, true), view.bottom()),
+    )
+}
+
+/// The clip title bar over the panels (L-CLIP-002), `wide` points wide.
+#[must_use]
+pub fn title_bar_rect(view: Rect, wide: f32) -> Rect {
+    Rect::from_min_max(
+        view.min,
+        pos2(view.left() + wide, view.top() + TITLE_BAR_HEIGHT),
+    )
+}
+
+/// The Clip View's editor: the place beside the panels.
+#[must_use]
+pub fn editor_rect(view: Rect, audio: bool) -> Rect {
+    Rect::from_min_max(
+        pos2(view.left() + panels_width(view, audio), view.top()),
+        view.max,
+    )
+}
+
+/// The clip title bar over the panels (L-CLIP-002): the clip's name, and on
+/// an audio clip the Save Default Clip button, which runs `clip.save_default`
+/// for the clip or for each selected audio clip (R17).
+fn title_bar(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rect: Rect,
+    clip: ClipId,
+    events: &mut Vec<UiEvent>,
+) {
+    let doc = shell.editor().document();
+    let Some(value) = doc.clip(clip) else {
+        return;
+    };
+    let c = &theme.colors;
+    ui.painter().rect_filled(rect, 0.0, c.panel.0);
+    ui.painter().text(
+        pos2(rect.left() + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        &value.name,
+        theme.small_font(),
+        c.text.0,
+    );
+    // The Save Default Clip button.
+    let button = Rect::from_min_size(
+        pos2(rect.right() - 98.0, rect.top() + 1.0),
+        vec2(92.0, (rect.height() - 2.0).max(1.0)),
+    );
+    let id = Id::new("clip-save-default");
+    let response = ui.interact(button, id, Sense::click());
+    let painter = ui.painter_at(button.expand(3.0));
+    painter.rect_filled(
+        button,
+        theme.sizes.corner,
+        if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        },
+    );
+    painter.text(
+        button.center(),
+        Align2::CENTER_CENTER,
+        "Save Default Clip",
+        theme.small_font(),
+        c.text.0,
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Button, true, "Save Default Clip")
+    });
+    if response.clicked() {
+        // R17: the button saves the clip, or each selected audio clip.
+        let clips = crate::audio_panel::targets(shell, doc, clip);
+        for target in clips {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "clip.save_default",
+                json!({ "clip": target }),
+            )));
+        }
+    }
+}
+
+/// A file dropped from the browser on the Clip View replaces the shown
+/// clip's file (`clip.replace_sample`; R18, I-DROP-009).
+fn drop_sample(ui: &mut Ui, rect: Rect, clip: ClipId, events: &mut Vec<UiEvent>) {
+    let ctx = ui.ctx().clone();
+    let Some(payload) = egui::DragAndDrop::payload::<crate::browser::BrowserDrag>(&ctx) else {
+        return;
+    };
+    if payload.plugin.is_some() {
+        return;
+    }
+    let (released, pointer) = ctx.input(|i| {
+        (
+            i.pointer.any_released(),
+            i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()),
+        )
+    });
+    if !released {
+        return;
+    }
+    let Some(pointer) = pointer else {
+        return;
+    };
+    if !rect.contains(pointer) {
+        return;
+    }
+    let Some(path) = payload.paths.first() else {
+        return;
+    };
+    egui::DragAndDrop::clear_payload(&ctx);
+    events.push(UiEvent::Invoke(Invocation::new(
+        "clip.replace_sample",
+        json!({ "clip": clip, "path": path }),
+    )));
+}
 /// The loop brace's ends, in ticks: `loop_start`, and `loop_end` (`null`
 /// ending at the clip's end).
 fn loop_ticks(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
@@ -972,24 +1108,29 @@ impl ClipViewUi {
         let ClipData::Audio(audio) = &value.data else {
             return;
         };
-        // A Session clip's Launch Properties panel takes the left of the view.
-        let rect = if shell
+        // The panels' groups: the left group holds the Launch Properties
+        // panel (a Session clip), the right group the Audio Utilities panel
+        // (an audio clip). The clip title bar is over them (L-CLIP-002).
+        let session = shell
             .clip_view()
             .shown_session_clip(doc, shell.arrangement())
-            .is_some()
-        {
-            launch_panel::show(
-                ui,
-                shell,
-                theme,
-                launch_panel::panel_rect(rect),
-                clip,
-                events,
-            );
-            launch_panel::editor_rect(rect)
-        } else {
-            rect
-        };
+            .is_some();
+        let panels = panels_rect(rect);
+        title_bar(ui, shell, theme, title_bar_rect(rect, panels.width()), clip, events);
+        // The left group holds the Launch Properties panel, a Session clip's.
+        let left = Rect::from_min_size(
+            panels.min,
+            vec2(launch_panel::panel_width(rect), panels.height()),
+        );
+        if session {
+            launch_panel::show(ui, shell, theme, left, clip, events);
+        }
+        let right = crate::audio_panel::panel_rect(panels, left.right());
+        crate::audio_panel::show(ui, shell, theme, right, clip, events);
+        let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);
+        // A file dropped from the browser on the Clip View replaces the
+        // clip's sample (R18, I-DROP-009).
+        drop_sample(ui, rect, clip, events);
         if self.shown != Some(clip) {
             self.shown = Some(clip);
             self.drag = None;

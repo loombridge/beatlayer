@@ -41,6 +41,7 @@
 
 pub mod arrangement;
 pub mod assistant_panel;
+pub mod audio_panel;
 pub mod browser;
 pub mod clip_envelope;
 pub mod clip_view;

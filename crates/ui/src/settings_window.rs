@@ -1044,9 +1044,9 @@ fn theme_page(
     );
 }
 
-/// File & Folder (L-SET-015): the Temporary Folder row, with its Browse
-/// button and path (WP-4.20). The page's other rows come with later
-/// packages.
+/// File & Folder (L-SET-015): the Sample Editor and Temporary Folder rows,
+/// with their Browse buttons and paths (WP-4.10b and WP-4.20). The page's
+/// other rows come with later packages.
 fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mut Vec<UiEvent>) {
     rows.heading(ui, "Temporary Folder");
     let rect = rows.row(ui, "Temporary Folder", SettingsLayout::CHOOSER);
@@ -1059,6 +1059,18 @@ fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mu
     }
     let path = shell.temporary_folder();
     rows.copyable_row(ui, "Path", "temporary-folder", &path.to_string_lossy());
+
+    rows.heading(ui, "Sample Editor");
+    let rect = rows.row(ui, "Sample Editor", SettingsLayout::CHOOSER);
+    if ui.put(rect, egui::Button::new("Browse")).clicked() {
+        // No path: the host asks for a program.
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_SAMPLE_EDITOR,
+            json!({}),
+        )));
+    }
+    let path = shell.sample_editor().unwrap_or_default();
+    rows.copyable_row(ui, "Path", "sample-editor", &path);
 }
 
 /// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and

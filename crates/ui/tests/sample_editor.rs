@@ -161,16 +161,20 @@ impl Sample {
         self.h.shell.editor().undo_history().len()
     }
 
-    /// The Clip View's rectangle, from its accessible node.
+    /// The Clip View's editor, from its accessible node: the place left of
+    /// the panels.
     fn view(&mut self) -> Rect {
         let output = self.h.settle();
         let nodes = Harness::nodes(&output);
         let node = Harness::node(&nodes, "Clip View");
         let bounds = node.bounds.expect("the Clip View has bounds");
-        Rect::from_min_max(
+        let view = Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        )
+        );
+        // The Audio Utilities panel is in the panels' right group, so the
+        // editor starts after it (WP-4.10b).
+        bl_ui::clip_view::editor_rect(view, true)
     }
 
     /// Where the editor puts things now.
@@ -594,7 +598,13 @@ fn markers_transients_and_the_pseudo_warp_marker_are_drawn() {
     assert_eq!(
         nodes
             .iter()
-            .filter(|n| n.label.starts_with("Transient "))
+            // The Sample Editor's transient markers, and not the Audio
+            // Utilities panel's Transient Loop Mode and Transient Envelope
+            // controls (WP-4.10b).
+            .filter(|n| {
+                n.label.starts_with("Transient ")
+                    && n.label["Transient ".len()..].parse::<u32>().is_ok()
+            })
             .count(),
         times.len()
     );

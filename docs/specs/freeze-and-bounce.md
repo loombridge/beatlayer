@@ -1,6 +1,6 @@
 # Freeze and bounce: Freeze Track, Bounce Track in Place, Bounce to New Track, Bounce Group, and Paste Bounced Audio
 
-- **Status:** draft
+- **Status:** partial (freezing and unfreezing, WP-4.14; the bounces, WP-4.15, aren't built)
 - **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing)
 - **Parity-matrix row:** Audio clips and warping: Freeze Track; Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
@@ -75,32 +75,23 @@ This spec covers what each command renders, what it does to the tracks and clips
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/shell/tests/freeze.rs`, `freeze_takes_tracks_with_clips_and_refuses_main`; `crates/ui/tests/freeze.rs`, `the_item_reads_unfreeze_track_on_a_frozen_selection` | shell test, UI script |
-| R2 | `crates/shell/tests/freeze.rs`, `a_freeze_is_taken_after_the_devices_and_before_the_mixer` | shell test |
-| R3 | `crates/shell/tests/freeze.rs`, `an_arrangement_freeze_keeps_its_tails_as_regions`; `crates/cli/tests/freeze_goldens.rs`, `a_frozen_reverb_tail_rings_past_its_clip` | shell test, golden render |
-| R4 | `crates/shell/tests/freeze.rs`, `a_session_clip_freezes_two_cycles_at_the_values_of_1_1_1` | shell test |
-| R5 | `crates/shell/tests/freeze.rs`, `freeze_files_go_into_processed_freeze`, `a_mono_track_freezes_to_a_mono_file` | shell test |
-| R6 | `crates/cli/tests/freeze_goldens.rs`, `a_frozen_track_nulls_against_its_live_output` (at block sizes of 1, 61, 512, and 4,096), `a_frozen_track_follows_a_tempo_change`; `crates/engine/tests/freeze.rs`, `a_frozen_track_runs_none_of_its_devices` | golden render, engine test under the allocation trap |
-| R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_still_mixes_launches_and_moves_clips` | shell test |
-| R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming`; `crates/ui/tests/freeze.rs`, `the_device_and_clip_views_are_locked_on_a_frozen_track` | shell test, UI script |
-| R9 | `crates/shell/tests/freeze.rs`, `a_frozen_midi_clip_dragged_to_an_audio_track_plays_its_audio`, `a_frozen_clip_dropped_on_the_drop_area_makes_a_frozen_track` | shell test |
+| R1 | `crates/shell/tests/freeze.rs`, `main_and_a_track_without_clips_are_refused` | shell test |
+| R2 | not yet tested | shell test |
+| R3 | not yet tested | shell test |
+| R4 | not yet tested | shell test |
+| R5 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `a_mono_track_freezes_to_a_mono_file` | shell test |
+| R6 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |
+| R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming` | shell test |
+| R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming` | shell test |
+| R9 | not yet tested | shell test |
 | R10 | `crates/shell/tests/freeze.rs`, `unfreezing_keeps_edits_made_while_frozen` | shell test |
-| R11 | `crates/shell/tests/freeze.rs`, `a_track_whose_device_cant_render_offline_isnt_frozen`; `crates/shell/tests/offline_plugins.rs`, `freezing_a_clap_track_stops_the_transport_and_gives_the_plugin_back` | shell test |
-| R12 | `crates/shell/tests/freeze.rs`, `a_cancelled_freeze_leaves_the_track_and_the_disk_as_they_were`, `the_same_track_freezes_to_the_same_bytes_at_any_block_size` | shell test |
-| R13 | `crates/project/tests/round_trip.rs`, `a_frozen_track_reopens_frozen_without_rendering`; `crates/cli/tests/agent_freeze.rs`, `an_agent_freezes_and_unfreezes_a_track_and_reads_it_back`; `crates/model/tests/undo_properties.rs` (with `track.freeze` and `track.unfreeze`) | unit, agent test, property |
-| R14 | `crates/cli/tests/freeze_goldens.rs`, `a_frozen_group_nulls_against_its_tracks_and_feeds_its_returns`; `crates/shell/tests/freeze.rs`, `a_frozen_group_locks_its_tracks` | golden render, shell test |
-| R15 | `crates/cli/tests/freeze_goldens.rs`, `a_frozen_return_plays_its_render_in_time_with_the_arrangement` | golden render |
-| R16 | `crates/shell/tests/freeze.rs`, `a_track_inside_a_frozen_group_cant_be_frozen_alone` | shell test |
-| R17 | `crates/project/tests/round_trip.rs`, `a_frozen_group_and_return_reopen_frozen` | unit |
-| R18 | `crates/shell/tests/bounce.rs`, `a_bounce_is_taken_where_a_freeze_is_and_keeps_its_tails` | shell test |
-| R19 | `crates/cli/tests/bounce_goldens.rs`, `a_bounced_track_nulls_against_its_source` (Bounce in Place, to New Track, and Paste Bounced Audio) | golden render |
-| R20 | `crates/shell/tests/bounce.rs`, `a_mono_source_bounces_to_mono_and_the_channels_argument_overrides_it` | shell test |
-| R21 | `crates/shell/tests/bounce.rs`, `bounce_in_place_replaces_the_track_keeping_its_mixer_in_both_views` | shell test |
-| R22 | `crates/shell/tests/bounce.rs`, `bounce_to_new_track_makes_a_track_per_source_and_switches_the_source_off` | shell test |
-| R23 | `crates/cli/tests/bounce_goldens.rs`, `a_group_bounce_holds_its_returns_and_not_mains_devices` | golden render |
-| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off` | shell test |
-| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track` | shell test |
-| R26 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/agent/tests/permissions.rs`, `bounce_in_place_asks_first_and_paste_bounced_audio_over_clips_asks`; `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it` | unit, agent test |
-| R27 | `crates/shell/tests/bounce.rs`, `the_same_bounce_writes_the_same_bytes_at_any_block_size`; `rtsan/tests/freeze.rs`, `frozen_playback_passes_under_rtsan` | shell test, RealtimeSanitizer |
-| R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `crates/ui/tests/freeze.rs`, `freeze_and_bounce_items_enable_with_the_selection`; `xtask/src/keymap.rs` | unit, UI script, keymap test |
-| R29 | `crates/cli/tests/agent_bounce.rs`, `an_agent_freezes_one_track_and_bounces_another_headless` | agent test |
+| R11 | not yet tested | shell test |
+| R12 | not yet tested | shell test |
+| R13 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `the_clip_view_reports_a_frozen_track` | shell test |
+| R14 | not yet tested | shell test |
+| R15 | not yet tested | shell test |
+| R16 | not yet tested | shell test |
+| R17 | not yet tested | shell test |
+| R27 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |
+| R28 | `xtask/src/keymap.rs` (S-TRACK-017 bound) | shell test |
+| R29 | not yet tested | shell test |

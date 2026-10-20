@@ -239,6 +239,7 @@ impl View<'_> {
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "clips": track.clips().len(),
             "devices": track.devices().len(),
+            "frozen": track.frozen(),
             "tracks_inside": track.children().len(),
         })
     }

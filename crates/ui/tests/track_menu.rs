@@ -174,9 +174,12 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
             "{label} waits for a selection"
         );
     }
+    // WP-4.14: Freeze Track works, but this track holds no clips, so it waits
+    // (freeze-and-bounce R1).
+    let freeze = item(&nodes, "Freeze Track");
+    assert!(freeze.disabled, "Freeze Track waits for a track with clips");
     for (label, package) in [
         ("Edit Info Text", "WP-2.24"),
-        ("Freeze Track", "WP-4.14"),
         ("Bounce Track in Place", "WP-4.15"),
         ("Select Track Content", "not planned"),
         ("Save as Default MIDI Track", "not planned"),

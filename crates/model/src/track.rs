@@ -3,16 +3,49 @@
 use core::fmt;
 use std::collections::BTreeSet;
 
+use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
-use crate::clip::{Clip, EnvelopeKind, TakeLane};
+use crate::clip::{AudioData, Clip, ClipData, EnvelopeKind, TakeLane};
 use crate::device::Device;
+use crate::freeze::FrozenTrack;
 use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::rack::Chain;
 use crate::shared::Shared;
+
+/// A frozen group or return track's whole-Arrangement output as the clip
+/// its player runs (R14, R15).
+fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
+    let seconds = output.length.as_quarters() * 60.0 / output.tempo;
+    let mut audio = AudioData::new(output.media);
+    audio.end = Some(seconds);
+    audio.warp = false;
+    audio.tempo = Some(output.tempo);
+    audio.warp_markers = vec![
+        crate::warp::WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        },
+        crate::warp::WarpMarker {
+            time: seconds,
+            beat: output.length,
+        },
+    ];
+    Clip {
+        id: output.id,
+        name: String::new(),
+        start: output.start,
+        length: output.length,
+        offset: Ticks::ZERO,
+        mute: false,
+        data: ClipData::Audio(audio),
+        envelopes: Vec::new(),
+        launch: crate::launch::ClipLaunch::default(),
+    }
+}
 
 /// A track's pan mode (the mixer spec, manual 18.1): the default Stereo Pan
 /// Mode, where one control balances both channels, or Split Stereo Pan Mode,
@@ -734,6 +767,11 @@ pub struct Track {
     /// control of its mixer, one of its sends, or a parameter of a device in
     /// its chain.
     pub(crate) automation: TrackAutomation,
+    /// The track's frozen audio (WP-4.14): the files that play in place of
+    /// its clips and devices. A frozen track keeps its devices and clip
+    /// settings, so unfreezing plays them again (the freeze and bounce spec,
+    /// R10).
+    pub(crate) frozen: Option<FrozenTrack>,
 }
 
 impl Track {
@@ -754,7 +792,53 @@ impl Track {
             take_lanes: Vector::new(),
             children: Vector::new(),
             automation: TrackAutomation::new(),
+            frozen: None,
         }
+    }
+
+    /// The track's frozen audio, if it's frozen (WP-4.14).
+    #[must_use]
+    pub fn frozen(&self) -> Option<&FrozenTrack> {
+        self.frozen.as_ref()
+    }
+
+    /// Whether the track is frozen.
+    #[must_use]
+    pub fn is_frozen(&self) -> bool {
+        self.frozen.is_some()
+    }
+
+    /// The clips the engine plays: a frozen track's clips are the stretches
+    /// of its freeze files, warped in Beats mode to the beats they were
+    /// rendered at (R6); otherwise its own clips.
+    #[must_use]
+    pub fn playback_clips(&self) -> Vec<Clip> {
+        let Some(frozen) = &self.frozen else {
+            return self.clips.values().map(|clip| (**clip).clone()).collect();
+        };
+        if let Some(output) = frozen.output {
+            return vec![frozen_output_clip(output)];
+        }
+        // The freeze's audio already sits in the clips' own data, put there
+        // by the freeze command.
+        self.clips.values().map(|clip| (**clip).clone()).collect()
+    }
+
+    /// The Session slot clips the engine plays, as [`Track::playback_clips`].
+    #[must_use]
+    pub fn playback_slots(&self) -> Vec<(SceneId, Clip)> {
+        let Some(frozen) = &self.frozen else {
+            return self
+                .slots
+                .iter()
+                .map(|(scene, clip)| (*scene, (**clip).clone()))
+                .collect();
+        };
+        let _ = frozen;
+        self.slots
+            .iter()
+            .map(|(scene, clip)| (*scene, (**clip).clone()))
+            .collect()
     }
 
     /// The track's ID.

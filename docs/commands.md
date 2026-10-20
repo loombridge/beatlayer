@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-532 commands in 37 areas.
+536 commands in 37 areas.
 
 ## Permission classes
 
@@ -516,12 +516,16 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
+| [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
+| [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
 | [`transport.insert_marker_to_playhead`](#transportinsert_marker_to_playhead) | Move Insert Marker To Playhead | `read` | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
@@ -9180,6 +9184,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.clear_frozen`
+
+**Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Plays tracks through their devices and clips again, dropping their frozen audio and restoring the clip data the freeze kept. `tracks` names them. `track.unfreeze` is the command a person and an agent run.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks to unfreeze. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `track.create`
 
 **Insert Track**. Permission: `edit`. Contexts: `global`.
@@ -9242,6 +9262,26 @@ Arguments:
 
 Result: [`TracksDuplicated`](#tracksduplicated).
 
+#### `track.freeze`
+
+**Freeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and plays that instead of their devices: an audio or MIDI track's Arrangement from 1.1.1 to the end of its last tail, and each Session clip on its own, taken after the devices and before the mixer. `tracks` names them (left out, the selected tracks). A group renders its tracks through their mixers and devices and, for each return they send to, the sum of those sends; a return renders from 1.1.1 to the end of the set. The track keeps its mixer, and its clips keep their places; its devices and clip settings are locked while frozen. The freeze runs offline through the processed-file writer, one undo step when every file is whole. It's an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-TRACK-017 | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` | `track-headers` | Freeze or unfreeze the selected tracks | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
+
 #### `track.group`
 
 **Group Tracks**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
@@ -9300,6 +9340,38 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.set_frozen`
+
+**Set Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Marks tracks frozen with the files a freeze rendered, and makes their clips play those files instead of running the track's devices. `frozen` names each track and the audio its freeze rendered. `track.freeze` is the command a person and an agent run: it renders the files and applies this one. Used directly, it names files the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of pair of [`TrackId`](#trackid) and [`FrozenTrack`](#frozentrack) | yes | Each track and the audio its freeze rendered. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.unfreeze`
+
+**Unfreeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Plays the selected frozen tracks through their devices and clips again, from the set as it now is, so edits made while frozen stay. Their freeze files stay on disk, so undoing the unfreeze freezes them again without rendering. `tracks` names them (left out, the selected tracks). It's an edit.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
 
 #### `track.ungroup`
 
@@ -10271,12 +10343,16 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
+| [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
+| [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
 | [`transport.set_loop_enabled`](#transportset_loop_enabled) | `transport.state` | `loop_on` |
@@ -17384,6 +17460,304 @@ On a scene, `linked` is the Longest button: the time is the multiplier times the
       "$ref": "#/$defs/Ticks",
       "default": 2822400,
       "description": "The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `FreezeResult`
+
+What a freeze did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of [`TrackId`](#trackid) | yes | The tracks that were frozen. |
+| `files` | array of string | no | The files the freeze wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a freeze did.",
+  "properties": {
+    "files": {
+      "description": "The files the freeze wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "frozen": {
+      "description": "The tracks that were frozen.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "frozen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenClip`
+
+One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip in the set. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `start` | number | yes | Where the clip starts in the file, in seconds. |
+| `end` | number | yes | Where it ends in the file, in seconds. |
+| `tempo` | number | yes | The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6). |
+| `length` | [`Ticks`](#ticks) | yes | The clip's length in ticks, for the warp map. |
+| `cycle` | number or null | no | For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop. |
+| `original` | [`ClipData`](#clipdata) | no | The clip's own data before the freeze, kept so unfreezing plays it again (R10). |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot it belongs to; `null` for an Arrangement clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip in the set."
+    },
+    "cycle": {
+      "description": "For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The clip's length in ticks, for the warp map."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "original": {
+      "$ref": "#/$defs/ClipData",
+      "default": {
+        "midi": {
+          "notes": []
+        }
+      },
+      "description": "The clip's own data before the freeze, kept so unfreezing plays it again (R10)."
+    },
+    "scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Session slot it belongs to; `null` for an Arrangement clip."
+    },
+    "start": {
+      "description": "Where the clip starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6).",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "media",
+    "start",
+    "end",
+    "tempo",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenOutput`
+
+A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ClipId`](#clipid) | yes | The clip ID the frozen output plays under in the Arrangement. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `tempo` | number | yes | The tempo the render was taken at, in BPM. |
+| `start` | [`Ticks`](#ticks) | yes | The first song frame the file holds. |
+| `length` | [`Ticks`](#ticks) | yes | The song length the file covers. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip ID the frozen output plays under in the Arrangement."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The song length the file covers."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The first song frame the file holds."
+    },
+    "tempo": {
+      "description": "The tempo the render was taken at, in BPM.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "media",
+    "tempo",
+    "start",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTail`
+
+A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip the tail follows. |
+| `id` | [`ClipId`](#clipid) | yes | The ID the Arrangement gives the tail region. Tail regions aren't clips of the set. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts in the song. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `file_start` | number | yes | Where it starts in the file, in seconds. |
+| `file_end` | number | yes | Where it ends in the file, in seconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip the tail follows."
+    },
+    "file_end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "file_start": {
+      "description": "Where it starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The ID the Arrangement gives the tail region. Tail regions aren't clips of the set."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts in the song."
+    }
+  },
+  "required": [
+    "clip",
+    "id",
+    "start",
+    "length",
+    "media",
+    "file_start",
+    "file_end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTrack`
+
+A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`FrozenClip`](#frozenclip) | no | The stretch of frozen audio each clip plays, in clip order. |
+| `output` | [`FrozenOutput`](#frozenoutput) or null | no | A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track. |
+| `tails` | array of [`FrozenTail`](#frozentail) | no | The tails that follow the Arrangement clips (R3). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.",
+  "properties": {
+    "clips": {
+      "description": "The stretch of frozen audio each clip plays, in clip order.",
+      "items": {
+        "$ref": "#/$defs/FrozenClip"
+      },
+      "type": "array"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FrozenOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track."
+    },
+    "tails": {
+      "description": "The tails that follow the Arrangement clips (R3).",
+      "items": {
+        "$ref": "#/$defs/FrozenTail"
+      },
+      "type": "array"
     }
   },
   "type": "object"

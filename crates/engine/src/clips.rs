@@ -841,7 +841,10 @@ impl ClipList {
         let mut placed = Vec::new();
         let mut missing = Vec::new();
         sources.begin();
-        for clip in track.clips() {
+        // A frozen track plays its freeze files instead of its clips (WP-4.14,
+        // R6).
+        let clips = track.playback_clips();
+        for clip in &clips {
             let ClipData::Audio(audio) = &clip.data else {
                 continue;
             };
@@ -919,7 +922,8 @@ impl ClipList {
         }
         // The track's Session slot clips (WP-3.2): they play only when the
         // engine launches them, so they carry no Arrangement position.
-        for (scene, clip) in track.slots() {
+        let slots = track.playback_slots();
+        for (scene, clip) in &slots {
             let ClipData::Audio(audio) = &clip.data else {
                 continue;
             };
@@ -975,7 +979,7 @@ impl ClipList {
             placed.push((
                 PlacedClip {
                     id: clip.id,
-                    scene: Some(scene),
+                    scene: Some(*scene),
                     geometry,
                     carry,
                     gain: audio.gain,

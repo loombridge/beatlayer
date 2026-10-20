@@ -68,6 +68,7 @@ pub mod context_menus;
 pub mod devices;
 pub mod editing;
 pub mod export;
+pub mod freeze;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
@@ -122,5 +123,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     stems::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
+    freeze::register(registry)?;
     warping::register(registry)
 }

@@ -696,6 +696,13 @@ fn fixture() -> Project {
             signature: Some(TimeSignature::new(3, 4).unwrap()),
         },
     );
+    // WP-4.14: a frozen track, so the format writes `frozen`.
+    apply(
+        &mut editor,
+        Command::FreezeTracks {
+            frozen: vec![(vox, bl_model::FrozenTrack::default())],
+        },
+    );
     editor.clear_history().unwrap();
     Project::from_editor(&editor, Media::new()).with_launch(LaunchSettings {
         quantization: LaunchQuantization::Bars2,

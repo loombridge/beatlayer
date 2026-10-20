@@ -8,21 +8,22 @@ use bl_devices::stack::learn;
 #[derive(Debug, Default)]
 pub(crate) struct ChordLearn {
     held: Vec<u8>,
-    /// Whether the MIDI input is copying notes for it.
+    /// Whether the MIDI input is copying messages for it.
     pub(crate) tapping: bool,
-    /// Scratch for the messages read from the MIDI threads.
-    pub(crate) heard: Vec<MidiMessage>,
 }
 
 impl ChordLearn {
-    /// Takes what `heard` holds, and returns the shifts to set if the chord
-    /// changed. A chord begins with the first key down after all were up:
-    /// that key is the root.
-    pub(crate) fn listen(&mut self) -> Option<[i32; 6]> {
+    /// Reads the note messages in `heard` and returns the shifts to set if
+    /// the chord changed. A chord begins with the first key down after all
+    /// were up: that key is the root. Anything that isn't a note is skipped.
+    pub(crate) fn listen_from(&mut self, heard: &[MidiMessage]) -> Option<[i32; 6]> {
         let before = self.held.clone();
-        for message in self.heard.drain(..) {
+        for message in heard {
+            if !(message.is_note_on() || message.is_note_off()) {
+                continue;
+            }
             let key = message.data1();
-            if message.is_note_on() {
+            if message.is_note_on() && message.data2() > 0 {
                 if !self.held.contains(&key) {
                     self.held.push(key);
                 }
@@ -36,6 +37,5 @@ impl ChordLearn {
     /// Forgets the chord, as when Learn goes off.
     pub(crate) fn clear(&mut self) {
         self.held.clear();
-        self.heard.clear();
     }
 }

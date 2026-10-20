@@ -58,6 +58,7 @@ crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
 crates/shell/tests/midi_io.rs # stamps test messages with the system's clock
+crates/shell/tests/multi_output.rs # waits for a real CLAP plug-in
 crates/shell/tests/offline_plugins.rs # waits for a real CLAP render
 crates/shell/tests/offline_vst3_au.rs # waits for a real VST3 or AU render
 crates/shell/tests/plugins.rs # waits for a real CLAP plug-in

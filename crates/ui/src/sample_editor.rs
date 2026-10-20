@@ -64,14 +64,20 @@ const GRID_GAP: f32 = 6.0;
 #[must_use]
 pub fn header_rect(view: Rect) -> Rect {
     let top = view.top() + crate::clip_view::TOOLBAR_HEIGHT;
-    Rect::from_min_max(pos2(view.left(), top), pos2(view.right(), top + HEADER_HEIGHT))
+    Rect::from_min_max(
+        pos2(view.left(), top),
+        pos2(view.right(), top + HEADER_HEIGHT),
+    )
 }
 
 /// The ruler under the Clip View's toolbar.
 #[must_use]
 pub fn ruler_rect(view: Rect) -> Rect {
     let top = header_rect(view).bottom();
-    Rect::from_min_max(pos2(view.left(), top), pos2(view.right(), top + RULER_HEIGHT))
+    Rect::from_min_max(
+        pos2(view.left(), top),
+        pos2(view.right(), top + RULER_HEIGHT),
+    )
 }
 
 /// The marker strip under the ruler.
@@ -484,10 +490,13 @@ fn header(
     let name = marked(&names, info.name.as_str(), &info.name);
     let name_rect = Rect::from_min_size(
         rect.min + vec2(6.0, 1.0),
-        vec2((rect.width() * 0.4).max(40.0), (rect.height() - 2.0).max(1.0)),
+        vec2(
+            (rect.width() * 0.4).max(40.0),
+            (rect.height() - 2.0).max(1.0),
+        ),
     );
     let id = Id::new("sample-editor-file-name");
-    let response = ui.interact(name_rect, id.clone(), Sense::click());
+    let response = ui.interact(name_rect, id, Sense::click());
     painter.text(
         name_rect.left_center(),
         Align2::LEFT_CENTER,
@@ -537,10 +546,8 @@ fn header(
             theme.small_font(),
             colours.text_dim.0,
         );
-        let text_rect = Rect::from_min_size(
-            pos2(x - 2.0, rect.top()),
-            vec2(wide - 4.0, rect.height()),
-        );
+        let text_rect =
+            Rect::from_min_size(pos2(x - 2.0, rect.top()), vec2(wide - 4.0, rect.height()));
         header_value(ui, salt, name, text_rect, &text);
         x += wide;
     }

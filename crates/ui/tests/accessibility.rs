@@ -2301,10 +2301,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.edit_sample", Exception(audio_panel)),
-        ("clip.replace_sample", Exception(Unobserved(
-            "a file dropped from the browser on the Clip View replaces the clip's sample (the \
+        (
+            "clip.replace_sample",
+            Exception(Unobserved(
+                "a file dropped from the browser on the Clip View replaces the clip's sample (the \
              sample editor spec, R18)",
-        ))),
+            )),
+        ),
         (
             "settings.set_sample_editor",
             Exception(LaterView(

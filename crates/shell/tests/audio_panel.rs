@@ -19,7 +19,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("bl-audio-panel-{}-{name}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("bl-audio-panel-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -187,7 +188,9 @@ fn an_edited_file_reaches_every_clip_of_it_in_one_step() {
             json!({ "path": harmless_editor() }),
         )
         .unwrap();
-    let opened = shell.run("clip.edit_sample", json!({ "clip": clip })).unwrap();
+    let opened = shell
+        .run("clip.edit_sample", json!({ "clip": clip }))
+        .unwrap();
     assert!(
         opened["opened"].as_bool().unwrap_or(false),
         "the editor was started"

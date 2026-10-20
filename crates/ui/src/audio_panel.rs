@@ -140,7 +140,11 @@ fn switch(
     let response = ui.interact(
         rect,
         id,
-        if enabled { Sense::click() } else { Sense::hover() },
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
     );
     let c = &theme.colors;
     let (text, on) = match state {
@@ -468,10 +472,7 @@ pub fn show(
 
     // The BPM field, with ×2 and ÷2 (R15). With Warp off they are disabled.
     let marker = shell.clip_view().sample().markers().first().copied();
-    let bpms: Vec<f64> = data
-        .iter()
-        .filter_map(|d| segment_bpm(d, marker))
-        .collect();
+    let bpms: Vec<f64> = data.iter().filter_map(|d| segment_bpm(d, marker)).collect();
     let bpm = if bpms.is_empty() {
         Shared::One(0.0)
     } else {
@@ -599,7 +600,12 @@ pub fn show(
     // RAM and HiQ.
     let ram = shared(&data.iter().map(|d| d.ram).collect::<Vec<_>>());
     let at = row(&painter, "RAM");
-    crate::focus::register(ui.ctx(), Id::new(("switch", "audio-ram")), Area::Detail, None);
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("switch", "audio-ram")),
+        Area::Detail,
+        None,
+    );
     if let Some(on) = switch(
         ui,
         theme,
@@ -613,7 +619,12 @@ pub fn show(
     }
     let hq = shared(&data.iter().map(|d| d.high_quality).collect::<Vec<_>>());
     let at = row(&painter, "HiQ");
-    crate::focus::register(ui.ctx(), Id::new(("switch", "audio-hiq")), Area::Detail, None);
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("switch", "audio-hiq")),
+        Area::Detail,
+        None,
+    );
     if let Some(on) = switch(
         ui,
         theme,
@@ -623,7 +634,11 @@ pub fn show(
         hq,
         true,
     ) {
-        each(events, "clip.set_high_quality", json!({ "high_quality": on }));
+        each(
+            events,
+            "clip.set_high_quality",
+            json!({ "high_quality": on }),
+        );
     }
 
     // Gain, in decibels, down to −∞ dB (rule G1).
@@ -954,7 +969,10 @@ fn mode_controls(
 
 /// A number box in the panel, showing what the clips share or the range they
 /// span.
-#[expect(clippy::too_many_arguments, reason = "a number box has this many parts")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a number box has this many parts"
+)]
 fn number(
     ui: &mut Ui,
     theme: &Theme,

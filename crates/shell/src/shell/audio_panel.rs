@@ -10,9 +10,7 @@ use std::path::PathBuf;
 
 use bl_media::ContentHash;
 use bl_model::{ClipData, ClipId, Command};
-use bl_shell_spec::audio_panel::{
-    EditSampleArgs, EditedSample, ReplaceSampleArgs, ReplacedSample,
-};
+use bl_shell_spec::audio_panel::{EditSampleArgs, EditedSample, ReplaceSampleArgs, ReplacedSample};
 use serde_json::Value;
 
 use super::*;
@@ -96,7 +94,9 @@ impl Shell {
                 opened: false,
             }));
         };
-        let hash = self.clip_media(clip).unwrap_or_else(|| ContentHash::from_bytes([0; 32]));
+        let hash = self
+            .clip_media(clip)
+            .unwrap_or_else(|| ContentHash::from_bytes([0; 32]));
         // The editor is a command line: the program, its arguments, and the
         // file as the last one.
         let mut parts = editor.split_whitespace();
@@ -137,10 +137,13 @@ impl Shell {
         let ReplaceSampleArgs { clip, path } = Self::args(id, args)?;
         let clip = self.audio_clip(id, clip)?;
         let path = PathBuf::from(path);
-        let media = self.media.import(&path).map_err(|error| ShellError::Failed {
-            command: id.to_owned(),
-            message: format!("couldn't read {}: {error}", path.display()),
-        })?;
+        let media = self
+            .media
+            .import(&path)
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("couldn't read {}: {error}", path.display()),
+            })?;
         self.replace_media(id, clip, media)?;
         Ok(to_value(&ReplacedSample {
             clip,

@@ -171,7 +171,11 @@ fn end_tick(midi: &MidiData, length: Ticks) -> Ticks {
 #[must_use]
 pub fn panels_width(view: Rect, audio: bool) -> f32 {
     let left = launch_panel::panel_width(view);
-    let right = if audio { crate::audio_panel::WIDTH } else { 0.0 };
+    let right = if audio {
+        crate::audio_panel::WIDTH
+    } else {
+        0.0
+    };
     (left + right).min(view.width())
 }
 
@@ -251,9 +255,7 @@ fn title_bar(
         theme.small_font(),
         c.text.0,
     );
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, true, "Save Default Clip")
-    });
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Save Default Clip"));
     if response.clicked() {
         // R17: the button saves the clip, or each selected audio clip.
         let clips = crate::audio_panel::targets(shell, doc, clip);
@@ -1116,7 +1118,14 @@ impl ClipViewUi {
             .shown_session_clip(doc, shell.arrangement())
             .is_some();
         let panels = panels_rect(rect);
-        title_bar(ui, shell, theme, title_bar_rect(rect, panels.width()), clip, events);
+        title_bar(
+            ui,
+            shell,
+            theme,
+            title_bar_rect(rect, panels.width()),
+            clip,
+            events,
+        );
         // The left group holds the Launch Properties panel, a Session clip's.
         let left = Rect::from_min_size(
             panels.min,

@@ -154,7 +154,16 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
         all.iter().any(|n| n.label == "Audio Utilities"),
         "the Audio Utilities panel shows"
     );
-    for name in ["Warp", "Warp Mode", "BPM", "Lead/Follow", "Edit", "RAM", "HiQ", "Gain"] {
+    for name in [
+        "Warp",
+        "Warp Mode",
+        "BPM",
+        "Lead/Follow",
+        "Edit",
+        "RAM",
+        "HiQ",
+        "Gain",
+    ] {
         assert!(
             all.iter().any(|n| n.label == name),
             "the panel holds {name}"

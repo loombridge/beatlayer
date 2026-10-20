@@ -1111,6 +1111,60 @@ fn an_agent_adds_the_eqs_and_dynamics_sets_them_by_id_and_keys_them_from_another
     assert_eq!(host.offline.heap_operations(), 0);
 }
 
+// Spec: drum-bus R1, device-framework R14 (WP-5.22b): an agent adds Drum Buss
+// by its type, sets its parameters by ID and reads them back.
+#[test]
+fn an_agent_adds_drum_buss_sets_it_by_id_and_reads_it_back() {
+    use bl_devices::drum_bus::{BOOM, DRUM_BUSS, FREQ, TYPE};
+
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(256, registry);
+    host.call(
+        "run",
+        json!({ "label": "Build", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Drums"}, "kind": "audio", "name": "Drums", "index": 0 } },
+            { "command": "device.insert",
+              "args": { "track": {"$ref": "Drums"}, "index": 0,
+                        "device": { "id": {"$new": "Drums buss"}, "name": "Drum Buss",
+                                    "kind": { "native": { "device_type": DRUM_BUSS } },
+                                    "enabled": true, "params": [] } } } ] }),
+    );
+    let device = json!({ "$ref": "Drums buss" });
+    host.call(
+        "run",
+        json!({ "label": "Set", "commands": [
+            { "command": "device.set_param",
+              "args": { "device": device, "param": TYPE.0, "value": 2.0 } },
+            { "command": "device.set_param",
+              "args": { "device": device, "param": FREQ.0, "value": 90.0 } },
+            { "command": "device.set_param",
+              "args": { "device": device, "param": BOOM.0, "value": 50.0 } } ] }),
+    );
+    let reply = host.call(
+        "run",
+        json!({ "label": "Read", "commands": [
+            { "command": "device.parameters", "args": { "device": device } } ] }),
+    );
+    let params = reply["results"][0]["result"]["params"].clone();
+    assert_eq!(params.as_array().unwrap().len(), 14);
+    let find = |name: &str| {
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {name} in {params}"))
+    };
+    assert_eq!(find("Type")["text"], json!("Hard"));
+    assert_eq!(find("Freq")["value"], json!(90.0));
+    assert_eq!(find("Boom")["value"], json!(50.0));
+    assert_eq!(find("Output")["text"], json!("0.00 dB"));
+    assert_eq!(host.offline.heap_operations(), 0);
+}
+
 /// The transport after the transport spec, one frame at a time,
 /// apart from the engine's code: what each frame of the engine clock plays.
 struct TransportModel {

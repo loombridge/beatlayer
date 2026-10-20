@@ -915,6 +915,31 @@ fn the_saturation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: drum-bus R1, R15
+#[test]
+fn drum_buss_passes_under_rtsan() {
+    use bl_devices::drum_bus::*;
+    run_lo_fi_device(
+        DRUM_BUSS,
+        &[
+            (TRIM, &[0.0, 0.5, 1.0]),
+            (COMP, &[0.0, 1.0]),
+            (TYPE, &[0.0, 1.0, 2.0]),
+            (DRIVE, &[0.0, 60.0, 100.0]),
+            (CRUNCH, &[0.0, 100.0]),
+            (DAMP, &[0.0, 50.0, 100.0]),
+            (TRANSIENTS, &[-100.0, 0.0, 100.0]),
+            (BOOM, &[0.0, 50.0, 100.0]),
+            (FREQ, &[20.0, 60.0, 200.0]),
+            (FORCE_TO_NOTE, &[0.0, 1.0]),
+            (DECAY, &[10.0, 200.0, 2_000.0]),
+            (BOOM_AUDITION, &[0.0, 1.0]),
+            (DRY_WET, &[0.0, 100.0]),
+            (OUTPUT, &[0.0, 1.0]),
+        ],
+    );
+}
+
 /// Multiband Dynamics (WP-5.22) on a track that plays, with its sidechain unused, while
 /// its band switches, detector, knee, Time, Amount, solos and thresholds
 /// change.

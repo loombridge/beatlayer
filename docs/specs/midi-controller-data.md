@@ -1,7 +1,7 @@
 # MIDI controller data in clips: MIDI Ctrl envelopes, per-note pressure, and recording them
 
-- **Status:** implemented (WP-2.29: R1 to R9; WP-2.29b: R10 to R16); the items under "To observe in Live" stay open
-- **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9; playback reaches devices through WP-5.44's path for channel messages, and MIDI To's output comes with WP-5.34) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16)
+- **Status:** partial (WP-2.29: R1 to R9; WP-2.29b: R10 to R16, each with a passing test; R2's per-note pressure as the Pressure envelope is WP-6.17's)
+- **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9; playback reaches devices through WP-5.44's path for channel messages, and MIDI To's output comes with WP-5.34) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16); WP-6.17 makes each note's pressure its Pressure envelope ([MPE](mpe.md) R1, R2), R2 and R7 as they read now
 - **Parity-matrix row:** Clips and launching: MIDI controller clip envelopes (MIDI Ctrl)
 - **Checked against:** Live 12.4.3 on macOS, 17 October 2026
 
@@ -9,7 +9,7 @@
 
 A MIDI clip holds the controller data that was played into it, as well as notes. Each continuous controller (CC), pitch bend and channel pressure is an envelope of the clip under the Envelopes tab's "MIDI Ctrl" entry. Polyphonic pressure belongs to a note instead: each note carries its own pressure over its length. While the clip plays, its controller envelopes reach the track's devices as MIDI messages, just as the same messages played live would. A step sends one message on its frame, and a slope sends a stream of values along it. Recording an armed MIDI track keeps what its input sent, controllers as well as notes. This applies to Arrangement Record, a Session slot, a Session overdub and Capture MIDI. The clip has no MIDI channel: messages on any channel go into the same envelopes, and play out on the channel the track sends on.
 
-This spec covers what a clip holds, how it plays and saves, the commands that edit it, the Envelopes tab's MIDI Ctrl entry, and how each kind of recording writes controller data. It leaves to other documents: the clip envelopes of devices and the mixer ([clip envelopes](clip-envelopes.md)); notes in recording ([recording](recording.md) R6 to R8, [session recording](session-recording.md)); which slot Capture MIDI uses and the tempo it sets ([capture MIDI](capture-midi.md)); and the MPE tab's per-note editing, and MPE input with a channel per note (MPE lanes, M6).
+This spec covers what a clip holds, how it plays and saves, the commands that edit it, the Envelopes tab's MIDI Ctrl entry, and how each kind of recording writes controller data. It leaves to other documents: the clip envelopes of devices and the mixer ([clip envelopes](clip-envelopes.md)); notes in recording ([recording](recording.md) R6 to R8, [session recording](session-recording.md)); which slot Capture MIDI uses and the tempo it sets ([capture MIDI](capture-midi.md)); and the MPE tab, MPE input and per-note pitch and slide ([MPE](mpe.md)).
 
 ## Sources
 
@@ -24,16 +24,17 @@ This spec covers what a clip holds, how it plays and saves, the commands that ed
 | S7 | Observation | As S1, the Envelopes tab's control chooser for "MIDI Ctrl" | The list starts with Pitch Bend, then Channel Pressure, then numbered controllers by their General MIDI names: 1 Modulation Wheel, 2 Breath Controller, 3 to 31, then 33 to 63 as "LSB for CC n", then 64 Sustain Pedal onward; 74 is "MPE Slide (Sound Controller 5)". 0 and 32 (bank select) aren't listed. The list was read as far as 76. |
 | S8 | Beatlayer | [clip-envelopes.md](clip-envelopes.md) R1 to R11, [midi-io.md](midi-io.md) R12 to R15, [recording.md](recording.md) R6 to R8, [session-recording.md](session-recording.md) R1 to R8, and the architecture's real-time rules and D17 | Clip envelopes' breakpoints, linking, editing commands, saving and the Envelopes tab; how an input's messages reach a track's devices on the sample; how armed MIDI tracks record notes; real-time safety; every action a registered command. |
 | S9 | Standard | The MIDI 1.0 specification | Controllers 0 and 32 are bank select (MSB and LSB), and controller numbers 120 to 127 are channel mode messages (All Sound Off, Reset All Controllers, Local Control, All Notes Off and the mode messages). |
+| S10 | Beatlayer | [MPE](mpe.md) R1, R2 and R9 | Each note's Pitch, Slide and Pressure envelopes; pressure points saved before them load as a stepped Pressure envelope that plays as they did; how the envelopes save |
 
 ## Rules
 
 - **R1.** A MIDI clip carries MIDI controller envelopes, at most one per controller: each continuous controller 1 to 31 and 33 to 119 (values 0 to 127; 0 and 32 select banks, and 120 to 127 are MIDI's channel mode messages, not controllers), pitch bend (−8192 to 8191, 0 at rest) and channel pressure (0 to 127). Each is a clip envelope as [clip-envelopes.md](clip-envelopes.md) R1 and R2 define it: breakpoints with bends, linked or not. The clip and its envelopes hold no MIDI channel. (S1, S3, S7, S8, S9)
-- **R2.** A note carries per-note pressure: a list of (offset from the note's start, value 0 to 127) points over its length, played as steps. A note with none plays no pressure. (S1)
+- **R2.** A note carries per-note pressure as its Pressure envelope ([MPE](mpe.md) R1), and a set saved with pressure points loads them as [MPE](mpe.md) R2 says. A note with none plays no pressure. (S1, S10)
 - **R3.** While its clip plays, a controller envelope reaches the track's device chain as MIDI messages on the exact frame, through the path a live input's messages take, and a track without devices sends them out on the channel its MIDI To names ([midi-io.md](midi-io.md) R12, R15). A step sends one message on its breakpoint's frame, before any note-on on that frame. A flat stretch sends nothing. A sloped or curved segment sends a stream of values along it, a new message at least every 5 ms while the value changes. A per-note pressure point sends a polyphonic pressure message for its note on its frame. (S6, S8)
 - **R4.** Stopping a clip or the transport sends no controller back to rest: controllers hold the last value sent. (S6)
 - **R5.** Reading a controller envelope or per-note pressure on the audio thread allocates nothing, takes no lock, and its work per block is bounded by the block's frames and the clip's breakpoints in it. A render is the same in any block size. (S8)
 - **R6.** The commands of [clip-envelopes.md](clip-envelopes.md) R5 edit controller envelopes, naming the controller instead of a parameter (`midi.cc` with its number 1 to 31 or 33 to 119, `midi.pitch_bend` or `midi.channel_pressure`), with the same refusals, each one undo step. A value outside the controller's range is refused, and a controller envelope on an audio clip is refused. (S8)
-- **R7.** The set saves each controller envelope with its clip, and each note's pressure points with the note. A set saved before this package loads with none. A loaded controller envelope that breaks R1, or pressure that breaks R2, doesn't load. (S8)
+- **R7.** The set saves each controller envelope with its clip, and each note's Pressure envelope with the note ([MPE](mpe.md) R9). A set saved before this package loads with none. A loaded controller envelope that breaks R1, or pressure that breaks R2, doesn't load. (S8, S10)
 - **R8.** The Envelopes tab's device chooser lists "MIDI Ctrl" first for a MIDI clip, before the Mixer. Its control chooser lists Pitch Bend, Channel Pressure, then the controllers in number order by their General MIDI names (S7's list), and marks with a dot each one that has an envelope in the clip. Choosing MIDI Ctrl shows the first control that has an envelope, else Pitch Bend. The editor draws a controller envelope on its own range, pitch bend centred. (S1, S7, S8)
 - **R9.** A clip's controller envelopes and per-note pressure are read back through the clip query, as its device envelopes and notes are. (S8)
 - **R10.** While the transport records, an armed MIDI track's input is recorded with its controllers: each control change for R1's controllers, pitch bend and channel pressure message, and each polyphonic pressure message, stamped with the song frame it landed on, into the same lock-free ring as its notes ([recording.md](recording.md) R6), whether the track monitors it or not. Messages on every channel are recorded alike, without their channel. (S3, S4, S8)
@@ -44,21 +45,12 @@ This spec covers what a clip holds, how it plays and saves, the commands that ed
 - **R15.** Capture MIDI keeps controllers as R11 says, except that only messages up to the last note-off are kept, and with no notes in its buffer Capture MIDI is disabled, controllers or not. Captured into a playing clip, each captured controller value is added as a breakpoint at its own time, and the clip's existing breakpoints for that controller stay. A controller new to the clip gets an envelope, as R14 says. (S1, S2)
 - **R16.** Recording controllers adds no command and no undo step: each recording's existing step (`Recorded Clip`, `Record`, the Session and Capture MIDI steps) holds the controller data with the notes. (S8)
 
-## To observe in Live
-
-- The MIDI Ctrl control chooser past controller 76.
-- What a controller envelope does while the same controller also arrives live on the track's input.
-- Whether a clip's launch or loop wrap sends each envelope's value there when no breakpoint falls on it (S6's clips had one at the start).
-- Polyphonic pressure for a key with no note held, while recording.
-- A Session slot recording that receives controllers and no notes.
-- What MIDI Arrangement Overdub does to the clip's notes and other envelopes outside the recorded controllers when the take's range becomes a new clip (S5).
-
 ## Tests
 
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/model/tests/midi_controller_data.rs`, `controller_envelopes_are_edited_by_command_id_one_undo_step_each`, `a_controller_or_value_that_breaks_the_rules_is_refused`; `crates/model/src/repr.rs`, `controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back` | unit |
-| R2 | `crates/model/tests/midi_controller_data.rs`, `a_notes_pressure_points_must_lie_in_order_inside_the_note`; `crates/engine/tests/midi_controllers.rs`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note` | unit, golden render |
+| R2 | `crates/model/tests/midi_controller_data.rs`, `a_notes_pressure_points_must_lie_in_order_inside_the_note`; `crates/engine/tests/midi_controllers.rs`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note`; the Pressure envelope's, to be written in WP-6.17 | unit, golden render |
 | R3 | `crates/engine/tests/midi_controllers.rs`, `a_step_reaches_the_device_on_its_frame_before_the_note_on_there`, `a_flat_stretch_sends_nothing`, `a_slope_sends_a_stream_at_least_every_five_milliseconds`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note`, `an_unlinked_envelope_runs_once_from_the_clip_start_while_the_loop_repeats` | golden render |
 | R4 | `crates/engine/tests/midi_controllers.rs`, `stopping_sends_no_controller_back_to_rest` | golden render |
 | R5 | `crates/engine/tests/midi_controllers.rs`, every test (block sizes 1, 100, 512 and 4,096 give the same messages; every block runs under the allocation trap) | golden render |

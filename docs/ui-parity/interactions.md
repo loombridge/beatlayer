@@ -4,7 +4,7 @@ How Live 12 responds to the mouse, to modifier keys held during a gesture, and t
 
 Modifier names: **Cmd** and **Option** on macOS, **Ctrl** and **Alt** on Windows. Where Live uses a different modifier on each platform, both are given (macOS first). On macOS, Ctrl-click is the same as right-click.
 
-Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless the row gives another Live version and date; `man N` is a section of the Live 12 manual, paraphrased.
+Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless the row gives another Live version and date; `man N` is a section of the Live 12 manual, paraphrased; `release notes N` the Live 12 release notes for version N; `Beatlayer` a gesture of Beatlayer's own.
 
 ## Clicks and double-clicks (I-CLICK)
 
@@ -17,7 +17,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-005 | Any clip | Double-click | Opens it in the Clip View | man 3.9, 8 |
 | I-CLICK-006 | Track title bar | Double-click | Opens the track's Device View | man 3.11, 23.1 |
 | I-CLICK-007 | Device title bar | Double-click | Folds or unfolds the device | man 23.1 |
-| I-CLICK-008 | Clip title bar (Clip View) | Double-click | Folds or unfolds the clip panels | man 8.1.2 |
+| I-CLICK-008 | Clip title bar (Clip View) | Double-click | Folds or unfolds the clip panels. Beatlayer: folded, the title bar stays and the editor takes the Clip View's width ([detail views](../specs/detail-views.md) R23) | man 8.1.2 |
 | I-CLICK-009 | Scene launch button (Main track) | Click | Launches every clip in the scene | man 7.2 |
 | I-CLICK-010 | Scene tempo or signature field | Double-click | Turns the field off | man 7.2.1 |
 | I-CLICK-011 | Arrangement background | Click | Places the insert marker; on a track lane it also selects the track. With snapping on, the marker goes to the nearest bar. Not an undo step | obs, man 6.9 |
@@ -47,6 +47,21 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-CLICK-035 | Hot-Swap Presets button (device title bar) | Click | The button turns orange and the browser shows the hot-swap bar (L-BRW-015); closing the bar ends hot-swapping | obs (Live 12.4.6, 12 October 2026) |
 | I-CLICK-036 | Scene number (Main track column) | Double-click | Opens the Scene View in the detail area (L-SES-011) | obs (Live 12, 15 October 2026) |
 | I-CLICK-037 | Crossfader A or B assign button | Click | Assigns the track to that side and switches the other side off; the two are exclusive | obs (Live 12, 15 October 2026) |
+| I-CLICK-038 | Piano ruler key | Click; Shift-click | Selects that key track's notes; adds them to the selection or removes them | man 10.5.2, 10.5.12.1 |
+| I-CLICK-039 | MIDI note | Shift-click | Adds it to the selection or removes it | man 10.5.2 |
+| I-CLICK-040 | Audition Take Lane button (take lane header) | Click | Auditions the lane, or stops auditioning it (S-COMP-003) | man 21.5 |
+| I-CLICK-041 | Linked-track indicator | Click; hover | Selects the tracks of its link group; highlights them | man 6.14.1 |
+| I-CLICK-042 | Take lane inside a time selection on its track's main lane, Draw Mode on | Click | Copies that take lane's material in the time selection to the main lane | man 21.6 |
+| I-CLICK-043 | Show/Hide Take Lanes toggle | Click | Shows or hides the track's take lanes | man 21.1 |
+| I-CLICK-044 | Automation segment | Click within a few points of it but not on it; Shift-click on it | Selects the segment: its two breakpoints | man 25.5.2 |
+| I-CLICK-045 | Expression envelope segment of a selected note (MPE tab) | Click | Adds a breakpoint on it | man 12.2 |
+| I-CLICK-046 | Expression envelope breakpoint (MPE tab) | Click | Deletes it | man 12.2 |
+| I-CLICK-047 | Expression envelope segment (MPE tab) | Click near it; Shift-click on it | Selects the segment | man 12.2 |
+| I-CLICK-048 | MPE tab's lane triangle, under the lanes' selector toggles | Click; Option/Alt-click | Hides the shown lanes or shows them again; with the modifier, or with every toggle off, shows all four | man 12.1; release notes 12.0 |
+| I-CLICK-049 | Piano ruler key, while the Generate panel shows Rhythm, Seed, Shape or Stacks | Option-click (Alt-click); Option-drag (Alt-drag) | Sets Rhythm's Pitch or the selected Stacks chord's root, or a one-key range for Seed and Shape; dragging sets Seed's and Shape's range to the keys dragged over | man 11.3.1 to 11.3.4; release notes 12.1 |
+| I-CLICK-050 | Browser | The mouse's back and forward buttons | Browse Back and Browse Forward (S-BRW-011, S-BRW-012) | release notes 12.4 |
+| I-CLICK-051 | Quick Tags tag | Double-click | Searches for the tag | release notes 12.3 |
+| I-CLICK-052 | Peak level readout (mixer strip), with the extended meters shown | Click | Resets it to the current peak (L-MIX-008) | man 18.1.1 |
 
 ## Drags (I-DRAG)
 
@@ -71,7 +86,7 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-DRAG-017 | Fade handles (shown on hover) | Drag a fade handle; drag the curve handle; drag past the neighbour's edge | Sets the fade length; shapes the curve; creates a crossfade | man 6.8 |
 | I-DRAG-018 | Track's lower edge (split line) | Drag; Option/Alt-drag | Sets the track's height; with the modifier, every track's | man 6.9 |
 | I-DRAG-019 | Loop brace | Drag an edge; drag the bar | Moves that end; moves the whole loop | man 6.6 |
-| I-DRAG-020 | Locator | Drag | Moves it | man 6.4 |
+| I-DRAG-020 | Locator, time-signature marker | Drag | Moves it | man 6.4, 6.5 |
 | I-DRAG-021 | Any drag on a grid | Hold Cmd (macOS) / Alt (Windows) | Ignores snapping; if the grid is off, snaps instead (S-EDIT-013) | man 6.10 |
 | I-DRAG-022 | Value controls | Drag up or down; Shift-drag | Changes the value; in finer steps (S-VAL-003) | man 42.6 |
 | I-DRAG-023 | Automation segment | Option/Alt-drag | Curves the segment (S-ENV-003) | man 42.7 |
@@ -79,14 +94,37 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-DRAG-025 | MIDI notes | Cmd-drag (macOS) / Alt-drag (Windows) up or down | Changes velocity (S-NOTE-016) | man 42.12 |
 | I-DRAG-026 | MIDI notes | Hold E and click or drag | Splits notes where clicked (S-NOTE-006) | man 10.5.8 |
 | I-DRAG-027 | Browser divider, right edge, bottom edge | Drag | Splits the sidebar and content pane; widens the browser; extends it down (closing the Info View and detail view) | man 4 |
-| I-DRAG-028 | Clip View's top edge | Drag; drag to the bottom | Resizes the detail area; closes it | man 8 |
-| I-DRAG-029 | Clip panels' right edge | Drag left; drag right | Stacks the panels vertically; back to side by side | man 8.1.2 |
-| I-DRAG-030 | Mixer's top edge | Drag up | Makes the mixer taller and adds the extended meters | man 18.1.1 |
+| I-DRAG-028 | Clip View's top edge | Drag; drag to the bottom | Resizes the detail area; closes it. Beatlayer's limits: [detail views](../specs/detail-views.md) R10 | man 8 |
+| I-DRAG-029 | Clip panels' right edge | Drag left; drag right | Stacks the panels vertically; back to side by side. Beatlayer switches past half the right group's panel width ([detail views](../specs/detail-views.md) R21) | man 8.1.2 |
+| I-DRAG-030 | Mixer's top edge, or the strip section's top border | Drag up; drag down | Makes the mixer taller and adds the extended meters; shorter too, to 64 pt ([mixer view](../specs/mixer-view.md) R32) | man 18.1.1; release notes 12.0.5, 12.3 |
 | I-DRAG-031 | Device title bar | Drag | Reorders the device, or moves it to another track | man 23.2 |
 | I-DRAG-032 | Volume fader (mixer strip) | Drag; click away from the handle | Relative: a drag moves the handle one point per point of the pointer's movement along the meter's scale, and a click away from the handle leaves the value as it was. While it moves the Status Bar shows `Track Volume: -21.0 dB` | obs (Live 12.4.6, 11 October 2026) |
 | I-DRAG-033 | Pan knob (mixer strip) | Drag up or down; Shift-drag | Moves pan linearly, 0.8 steps per point of vertical drag (62.5 points from C to 50R or 50L), up to the right; with Shift about three times finer | obs (Live 12.4.6, 11 October 2026) |
 | I-DRAG-034 | Device knob | Drag | Relative, 0.8 % of the range per point (about 125 points for the whole range), the same rate as the pan knob | obs (Live 12.4.6, 12 October 2026) |
 | I-DRAG-035 | Crossfader | Drag | The Status Bar shows `Crossfade: <n>A` or `Crossfade: <n>B`, from 50A at the left end to 50B at the right end, the centre between them | obs (Live 12, 15 October 2026) |
+| I-DRAG-036 | Expression-lane marker | Drag; Cmd-drag (Ctrl-drag on Windows) in the Velocity lane; double-click in the Velocity lane | Changes its note's value, or every selected note's by the same amount; sets the velocity deviation; sets the deviation to 0 | man 10.5.12, 10.5.13 |
+| I-DRAG-037 | Expression lane, Draw Mode on | Drag; Option-drag (Alt-drag); with Shift too | Draws the values over the grid steps passed; a straight line; a level line | man 10.5.12.1 |
+| I-DRAG-038 | Split above or between the expression lanes | Drag; Option-wheel (Alt-wheel) or pinch | Resizes the lanes, hiding one dragged to nothing | man 10.1 |
+| I-DRAG-039 | Selected notes | E held with Option (Ctrl on Windows), or Cmd and E, and drag up or down; with Shift too | Chops them into more or fewer equal parts; by powers of two (S-NOTE-004, S-NOTE-005) | man 10.5.8.2, 42.12; release notes 12.0 |
+| I-DRAG-040 | Note stretch marker (L-CLIP-020) | Drag sideways; Cmd-drag (Alt-drag); drag the pseudo marker | Scales the notes about the other marker; without snapping; stretches the notes on either side | man 10.5.6 |
+| I-DRAG-041 | Multi-clip loop bar (L-CLIP-021) | Drag a marker; Cmd-click (Ctrl-click); Shift-click; drag just above the title bar | Changes its clip's loop; adds the bar to the selection or removes it; selects the bars between; makes the bars taller or shorter | man 10.8 |
+| I-DRAG-042 | Note area, with the note filters shown | Shift-drag sideways | Sets the Time filter's range | man 10.5.3 |
+| I-DRAG-043 | Take lane, Draw Mode on | Drag, then release | Selects the stretch dragged over and copies it to the main lane on release | man 21.6 |
+| I-DRAG-044 | Source highlight's edge, where two comp parts meet | Drag | Moves the comp boundary | man 21.7 |
+| I-DRAG-045 | Take lane header | Drag up or down | Moves the selected take lanes within their track | man 21.2 |
+| I-DRAG-046 | Take lane's lower edge | Drag | Sets the selected take lanes' height | man 21.2 |
+| I-DRAG-047 | Automation lane background | Drag; Shift-drag | Selects time on the lanes dragged across; extends the selection | man 25.5.2 |
+| I-DRAG-048 | Selected automation breakpoints | Drag any one; with Shift | Moves them all, a breakpoint passed over being removed; keeps to one axis | man 25.5.2 |
+| I-DRAG-049 | Time selection's handles in an automation lane, shown on hover | Drag the top or bottom centre; the left or right centre; a corner; with Option (Alt) | Stretches the values; stretches the time (Shift takes the breakpoints beyond with it, Cmd/Alt bypasses the grid); skews; moves the opposite handle the opposite way | man 25.5.3 |
+| I-DRAG-050 | Expression envelope breakpoint, or a selected segment (MPE tab) | Drag | Moves it and every selected breakpoint in time and value, a neighbour passed in time being removed; a segment moves in value | man 12.2 |
+| I-DRAG-051 | Expression envelope's background (MPE tab) | Drag | Selects the breakpoints it encloses | man 12.2 |
+| I-DRAG-052 | Expression envelope segment (MPE tab) | Option-drag (Alt-drag); Option-double-click (Alt-double-click) | Curves it; straightens it | man 12.2 |
+| I-DRAG-053 | Pitch envelope breakpoint (MPE tab) | Cmd-drag (Alt-drag on Windows) | With the grid off, snaps the value to the nearest semitone; with it on, bypasses the grid | man 12.2, 12.3 |
+| I-DRAG-054 | Outside a note, over its highlighted Slide, Pressure, Velocity or Release Velocity (MPE tab) | Drag up or down | Scales that value over the note's whole length, for every selected note | man 12.2 |
+| I-DRAG-055 | Split line under an MPE lane | Drag | Resizes the lane | man 12.1 |
+| I-DRAG-056 | Tag Editor tag or group, Library or saved label, nested collection's label | Drag | Moves it within its list (nested collections are Beatlayer's own, IMP-07) | release notes 12.0.5, 12.1 |
+| I-DRAG-057 | Column name in the browser's content pane | Drag; click | Moves the column; sorts by it | man 4.1 |
+| I-DRAG-058 | Any area that scrolls | Drag with the middle mouse button (the wheel) held | Pans it, selecting and moving nothing | release notes 12.0 |
 
 ## Scrolling and zooming (I-SCROLL)
 
@@ -97,6 +135,8 @@ Source: `obs` means observed in Live 12.4.3 on macOS on 10 October 2026, unless 
 | I-SCROLL-003 | Arrangement | Cmd-scroll (macOS) / Ctrl-scroll (Windows) | Zooms around the selection | man 6.2 |
 | I-SCROLL-004 | Arrangement track lane | Option/Alt-scroll; Option/Alt-pinch | Changes the track's height (every selected track's if time is selected) | man 6.2, 6.9 |
 | I-SCROLL-005 | Session track columns | Scroll sideways | With more tracks than fit, the Session View scrolls sideways continuously, so a column can be partly in view; the returns and Main stay pinned at the right | obs (Live 12.4.6, 11 October 2026) |
+| I-SCROLL-006 | Take lanes | Option-scroll (Alt-scroll) | Resizes the selected take lanes | man 21.2 |
+| I-SCROLL-007 | Knob, slider, fader, number box, with Adjust Values with Mouse Wheel on | Scroll; Shift-scroll | Beatlayer addition (IMP-36): moves it a step a notch, as Up and Down do; in finer steps ([view options](../specs/view-options.md) R11) | Beatlayer |
 
 ## Drop targets (I-DROP)
 
@@ -114,15 +154,21 @@ What happens when something is dropped, by target.
 | I-DROP-008 | Device View | Device; sample onto a MIDI track | Inserts it at the drop point; creates a sampler instrument with the sample | man 23.2 |
 | I-DROP-009 | Clip View | Sample | Replaces the clip's sample | man 8.12 |
 | I-DROP-010 | Groove Pool | Clip; groove file | Extracts a groove; loads the groove | man 14.1, 14.2.1 |
-| I-DROP-011 | Browser, User Library or a Places folder | Session clip; track title bar | Saves a clip file; saves the track as a new set | man 3.21, 18.2 |
-| I-DROP-012 | File Manager, missing-file row | File from the browser | Relinks the missing file | man 5.6.1 |
+| I-DROP-011 | Browser, User Library or a Places folder | Session clip; Arrangement clip; several Session clips; track title bars | Saves a clip file; a clip file; a new set; a new set | man 3.21, 5.3, 5.4.4, 5.7.1, 18.2 |
+| I-DROP-012 | File Manager, a missing file's row or any Manage Set row | File from the browser | Relinks or replaces the file | man 5.4.6, 5.6.1 |
 | I-DROP-013 | Browser Tuning section | Tuning file (.scl, .ascl) | Loads the tuning into the set | man 15.1 |
 | I-DROP-014 | Session or Arrangement view selector | Clips dragged over it | Switches views so the clips can be dropped in the other view | man 7.5 |
-| I-DROP-015 | The other window (with the second window open) | Clips | Moves or copies them between Session and Arrangement | man 7.5 |
+| I-DROP-015 | The other window (with the second window open) | Clips | Moves or copies them between Session and Arrangement. Beatlayer copies; the source stays ([second window](../specs/second-window.md) R20, R21) | man 7.5 |
 | I-DROP-016 | Take lane | Samples | Inserts them as takes | man 21.4 |
 | I-DROP-017 | MIDI track | Groove from the browser or Groove Pool | Creates a MIDI clip of the groove's notes for editing | man 14.2 |
 | I-DROP-018 | Arrangement lane of a MIDI track | Standard MIDI File | Places the file's clip on that track at the drop position, and the track keeps its own name. If the file holds tempo or time-signature events, Live first asks "Import tempo and time signature data into Arrangement?" with No, Yes, and a "Don't show again" check box, for every such file wherever it is dropped | obs (Live 12, 15 October 2026) |
 | I-DROP-019 | Arrangement drop area under the tracks | Type 1 Standard MIDI File | Makes one new MIDI track for each track chunk that has notes, all clips at the same drop position; a chunk with no notes (a conductor track of tempo and time signature, or a chunk with only a name) makes none. The new tracks get Live's default names ("5 MIDI", "6 MIDI"); only the clips carry the chunks' names | obs (Live 12, 15 October 2026) |
+| I-DROP-020 | Take lane | Several samples or MIDI files, Cmd (Ctrl) held while dragging | Puts each on a track of its own, from the one dropped on down, on the take lane at the same place in each track | man 21.4 |
+| I-DROP-021 | Track title bar, or either view's drop area | A set file from the browser | Adds the set's tracks except its return tracks and Main | man 5.4.3 |
+| I-DROP-022 | Track, or a drop area | A track, a group or a Devices row from a set opened in the browser | Adds it; a Devices row's chain comes without its automation | man 5.4.3; release notes 12.0 |
+| I-DROP-023 | Main window | A pack | Asks where to unpack it, then unpacks it | man 5.9 |
+| I-DROP-024 | Nested collection's label | Browser items | Beatlayer addition (IMP-07): puts them in it ([browser tags](../specs/browser-tags.md) R46) | Beatlayer |
+| I-DROP-025 | Main window | .dawproject file | Beatlayer addition: imports it as a new set, after asking whether to save changes ([dawproject](../specs/dawproject.md) R85) | Beatlayer |
 
 ## Keyboard focus (I-FOCUS)
 

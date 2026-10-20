@@ -1,7 +1,7 @@
 # The one-shot drum sampler
 
-- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; similar-sample swapping, Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet")
-- **Work packages:** WP-5.18
+- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; similar-sample swapping, Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet"; R25, tuning systems, is WP-6.9's)
+- **Work packages:** WP-5.18; WP-6.9 (tuning systems: R25)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.4 "Drum Sampler" (31.4.1 to 31.4.5), read 17 October 2026
 
@@ -33,6 +33,8 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 | S8 | Beatlayer | [The sampler spec](sampler.md), R11, and [the audio import spec](audio-import.md) | A sample is named in the set by its content hash and held by the media store; the engine gets it decoded at its own rate; `device.load_sample` loads it and a drop on the device does the same |
 | S9 | Beatlayer | [The polysynth spec](polysynth.md) and [the MIDI clips spec](midi-clips.md) | A per-note expression (bend from −1 to 1 of the instrument's range, slide from 0 to 1) moves only the note it names; a note is told from another on its key by its note ID |
 | S10 | Beatlayer | [The architecture](../02-architecture.md), "Device chains", "Parameters, automation, and modulation" and "Real-time rules"; decision D17 | Nothing on the audio thread allocates, locks or blocks; a render is the same at any block size; every action is a registered command with a headless test and a readback |
+| S11 | Manual | Live 12 reference manual, chapter 15 "Using Tuning Systems", its introduction; the Live 12 release notes, 12.0 and 12.1 | Built-in instruments play a loaded tuning, and Drum Racks bypass it; one step of per-note pitch bend is one step of the tuning |
+| S12 | Beatlayer | [tunings.md](tunings.md) R12 to R14 | How a native instrument plays a key's tuned pitch, which tracks play the tuning, and per-note bends under a tuning |
 
 ## Rules
 
@@ -60,6 +62,7 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 - **R22.** A sample comes into Drum Sampler through `device.load_sample`, as into Simpler (the sampler spec, R11): a file imported into the media store by content hash, kept by the device, saved with the set and played when it is reopened. Dropping a file on Drum Sampler's frame in the Device View does the same. Drum Sampler's descriptors and commands are reachable by ID through the agent API, each with its readback. (S7, S8, S10)
 - **R23.** Drum Sampler's context menu follows the common items with its two switches, ticked while on and turned over as parameter changes in one undo step (S5, S7), then Swap to Simpler (`device.swap_to_snapshot`), which replaces the device at the same place in the chain with Simpler in One-Shot mode, carrying the sample, the on or off state, Start and Length, in one undo step named Swap to Simpler and selecting the new device, and then Save as Default Pad, disabled and naming the Drum Rack's pads until they exist. Any other device refuses the swap. (S5)
 - **R24.** Every parameter is automatable and modulatable (rule G2), and every change a control makes is one undo step named for the parameter (the device framework spec, R3 and R18), saved with the set. (S6, S7)
+- **R25.** On a track that plays the set's tuning ([tunings.md](tunings.md) R12, R14; a Drum Rack's track never does), a voice plays at the pitch R2 gives with its key's tuned pitch in place of the key, C3's twelve-step pitch still playing the sample at its own pitch, Transpose and Detune adding to it; the playback effects that follow the note's pitch (R12 to R15) and Envelope Follows Pitch follow the tuned pitch, and a per-note bend (R19) moves the note by steps of the tuning ([tunings.md](tunings.md) R13). (S11, S12)
 
 ## Tests
 
@@ -89,6 +92,7 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 | R22 | `crates/devices/tests/drum_sampler.rs`, `the_engine_plays_the_sample_the_set_names`; `crates/shell/tests/drum_sampler.rs`, `loading_a_sample_keeps_it_by_hash_through_a_save_and_undoes_as_one_step`; `crates/ui/tests/drum_sampler.rs`, `a_dropped_sample_loads_into_strike_under_the_pointer`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R23 | `crates/shell/tests/drum_sampler.rs`, `swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step`, `a_strike_inside_a_rack_chain_swaps_in_place`; `crates/ui/tests/drum_sampler.rs`, `the_menu_ends_with_strikes_own_items_and_they_run_their_commands`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R24 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame` | real-time trap |
+| R25 | to be written in WP-6.9 | |
 
 ## Not built yet
 

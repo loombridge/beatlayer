@@ -541,7 +541,7 @@ milestone = "M1"
 mac = ["Cmd+Shift+R"]
 win = ["Ctrl+Shift+R"]
 status = "pending"
-package = "WP-1.12"
+package = "WP-6.71"
 
 [[shortcut]]
 id = "S-FILE-008"
@@ -1059,7 +1059,7 @@ milestone = "M1"
 mac = ["F"]
 win = ["F"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.51"
 
 [[shortcut]]
 id = "S-ENV-005"
@@ -1648,7 +1648,7 @@ context = "note-editor"
 kind = "mouse"
 trigger = "held"
 milestone = "M6"
-mac = ["Cmd+E (hold) and drag"]
+mac = ["Cmd+E (hold) and drag", "Option+E (hold) and drag"]
 win = ["Ctrl+E (hold) and drag"]
 status = "pending"
 
@@ -1659,7 +1659,7 @@ context = "note-editor"
 kind = "mouse"
 trigger = "held"
 milestone = "M6"
-mac = ["Cmd+Shift+E (hold) and drag"]
+mac = ["Cmd+Shift+E (hold) and drag", "Option+Shift+E (hold) and drag"]
 win = ["Ctrl+Shift+E (hold) and drag"]
 status = "pending"
 
@@ -1839,7 +1839,7 @@ kind = "key"
 trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+F"]
-win = ["Ctrl+Shift+F"]
+win = ["Alt+Shift+F"]
 status = "pending"
 
 [[shortcut]]
@@ -2592,7 +2592,7 @@ milestone = "M1"
 mac = ["Cmd+Option+F"]
 win = ["Ctrl+Alt+F"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.51"
 
 [[shortcut]]
 id = "S-ARR-009"
@@ -2604,7 +2604,7 @@ milestone = "M1"
 mac = ["Cmd+Option+Delete"]
 win = ["Ctrl+Alt+Backspace"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.51"
 
 [[shortcut]]
 id = "S-ARR-010"
@@ -2616,7 +2616,7 @@ milestone = "M1"
 mac = ["F"]
 win = ["F"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.51"
 
 [[shortcut]]
 id = "S-ARR-011"
@@ -4516,3 +4516,201 @@ mac = ["Ctrl+Cmd+Space"]
 win = []
 status = "system"
 handler = "macOS's Emoji & Symbols item, which the system adds to the Edit menu (M-EDIT-040)"
+
+[[shortcut]]
+id = "S-NOTE-045"
+action = "Move the insert marker one grid step earlier or later"
+context = "note-editor"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Left", "Right"]
+win = ["Left", "Right"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-046"
+action = "Move the time selection's end to the next or previous note start or end"
+context = "note-editor"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Option+Shift+Left", "Option+Shift+Right"]
+win = ["Alt+Shift+Left", "Alt+Shift+Right"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-047"
+action = "After a chop, while Cmd stays held, chop the same notes into one part more or fewer, or with Shift into the next or previous power of two"
+context = "note-selection"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Up", "Cmd+Down", "Cmd+Shift+Up", "Cmd+Shift+Down"]
+win = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Shift+Up", "Ctrl+Shift+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-048"
+action = "Add the held notes at the insert marker and step on, or lengthen the notes just added"
+context = "note-editor"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Right"]
+win = ["Right"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-049"
+action = "Shorten, then remove, the notes just added, and step back"
+context = "note-editor"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Left"]
+win = ["Left"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-050"
+action = "Change the selected notes' velocity or release velocity by 10, or by 1 with Shift"
+context = "note-selection"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Up", "Cmd+Down", "Cmd+Shift+Up", "Cmd+Shift+Down"]
+win = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Shift+Up", "Ctrl+Shift+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-051"
+action = "Change the selected notes' chance by 10 %, or by 1 % with Shift"
+context = "note-selection"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Up", "Down", "Shift+Up", "Shift+Down"]
+win = ["Up", "Down", "Shift+Up", "Shift+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-052"
+action = "Choose the previous or next chord in Stacks' Chord Selector Pad"
+context = "clip-view"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Up", "Cmd+Down"]
+win = ["Ctrl+Up", "Ctrl+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-053"
+action = "Select every breakpoint of the focused expression envelope"
+context = "envelope"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+A"]
+win = ["Ctrl+A"]
+status = "pending"
+
+[[shortcut]]
+id = "S-LOOP-012"
+action = "Duplicate Loop: double the loop and copy its notes into the new half"
+context = "loop-brace"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+D"]
+win = ["Ctrl+D"]
+status = "pending"
+
+[[shortcut]]
+id = "S-COMP-007"
+action = "Go from a take lane to its track's main lane and fold the take lanes"
+context = "take-lanes"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Left"]
+win = ["Left"]
+status = "pending"
+
+[[shortcut]]
+id = "S-COMP-008"
+action = "Move the selected take lanes up or down"
+context = "take-lanes"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Up", "Cmd+Down"]
+win = ["Ctrl+Up", "Ctrl+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-A11Y-028"
+action = "Cycle the automated parameters in the Clip View's Envelope Editor"
+context = "envelope"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Option+Up", "Option+Down"]
+win = ["Alt+Up", "Alt+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-A11Y-029"
+action = "Cycle all of the clip's device parameters in the Clip View's Envelope Editor"
+context = "envelope"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Shift+Option+Up", "Shift+Option+Down"]
+win = ["Shift+Alt+Up", "Shift+Alt+Down"]
+status = "pending"
+
+[[shortcut]]
+id = "S-A11Y-030"
+action = "Move the selected breakpoint in time by the grid"
+context = "envelope"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Left", "Right"]
+win = ["Left", "Right"]
+status = "pending"
+
+[[shortcut]]
+id = "S-BRW-015"
+action = "Move the focus to Quick Tags' Add field"
+context = "browser"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+E"]
+win = ["Ctrl+E"]
+status = "pending"
+
+[[shortcut]]
+id = "S-MENU-007"
+action = "Open the command search"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Shift+P"]
+win = ["Ctrl+Shift+P"]
+status = "pending"
+
+[[shortcut]]
+id = "S-FOCUS-015"
+action = "Open the track search"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Shift+O"]
+win = ["Ctrl+Shift+O"]
+status = "pending"

@@ -1501,7 +1501,7 @@ impl Shell {
     /// whether the set changed.
     fn learn_midi(&mut self) -> bool {
         use bl_devices::midi_cc::{
-            CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_type_for, dial_cc, dial_value,
+            CC_CONTROL, DIALS, LEARN as CC_LEARN, cc_is_listed, cc_type_for, dial_cc, dial_value,
         };
         use bl_devices::stack::{LEARN as CHORD_LEARN, STACK, shift};
         use bl_model::{Command, DeviceId, DeviceKind, ParamId};
@@ -1568,9 +1568,11 @@ impl Shell {
             });
             changed = true;
         }
+        // Spec: midi-cc-sender R6. A controller the CC Type list leaves out
+        // (bank select and the channel mode messages) isn't learned.
         let learned: Vec<(u8, f64)> = heard
             .iter()
-            .filter(|message| message.status() & 0xF0 == 0xB0)
+            .filter(|message| message.status() & 0xF0 == 0xB0 && cc_is_listed(message.data1()))
             .map(|message| (message.data1(), f64::from(message.data2())))
             .collect();
         if !senders.is_empty() && !learned.is_empty() {

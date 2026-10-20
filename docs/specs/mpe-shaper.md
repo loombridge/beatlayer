@@ -37,7 +37,7 @@ This spec covers the device only. What MPE expressions are is [editing MPE](http
 - **R10.** A source switched off passes its data through unchanged. (S1)
 - **R11.** With Smooth on, a source's output moves toward its new value over its Rise time when rising and its Fall time when falling, as an exponential approach: after one time constant it has covered 63 %. (S1; the manual states no law, so this is Beatlayer's own.)
 - **R12.** With Press's Default on, a note that carries no pressure gets the Press default value on its frame. (S1)
-- **R13.** With Slide's Default on, a note that carries no slide gets the Slide default value on its frame; in Slide's Ons mode, slide is updated only when a note starts, and smoothing doesn't apply. (S1)
+- **R13.** With Slide's Default on, a note that carries no slide gets the Slide default value on its frame; in Slide's Ons mode, a note takes the first slide message that reaches it and the later ones are ignored, so its slide is set at its onset, and smoothing doesn't apply. (S1)
 - **R14.** A channel message that reaches the device passes through unchanged. (S3)
 - **R15.** Slide's Rel mode starts each note in the middle and moves by how far the finger has swept since: the first slide value sets where it began. (S1)
 - **R16.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/MPE Control/`. (S4)
@@ -76,7 +76,7 @@ For `docs/evidence/spec-notes/mpe-shaper.md`:
 | R10 | `crates/devices/tests/midi_mpe.rs`, `a_source_that_is_off_passes_through` | real-time trap |
 | R11 | `crates/devices/tests/midi_mpe.rs`, `smoothing_moves_over_the_rise_time` | real-time trap |
 | R12 | `crates/devices/tests/midi_mpe.rs`, `press_default_gives_a_note_pressure` | real-time trap |
-| R13 | `crates/devices/tests/midi_mpe.rs`, `slide_defaults_on_note_on` | real-time trap |
+| R13 | `crates/devices/tests/midi_mpe.rs`, `slide_defaults_on_note_on`, `slide_ons_sends_the_first_slide_once` | real-time trap |
 | R14 | `crates/devices/tests/midi_mpe.rs`, `a_channel_message_passes_through` | real-time trap |
 | R15 | `crates/devices/tests/midi_mpe.rs`, `slide_rel_starts_in_the_middle` | real-time trap |
 | R16 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |

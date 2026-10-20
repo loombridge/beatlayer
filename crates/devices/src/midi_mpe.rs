@@ -279,6 +279,9 @@ struct Held {
     value: [f64; SOURCES as usize],
     time: [i64; SOURCES as usize],
     seeded: [bool; SOURCES as usize],
+    /// Whether Ons mode has sent this note its one slide (the MPE shaper
+    /// spec, R13).
+    ons_sent: bool,
 }
 
 /// One value's move along a time constant: the fraction of the way from
@@ -371,6 +374,7 @@ impl MpeControl {
             value: [0.0; SOURCES as usize],
             time: [0; SOURCES as usize],
             seeded: [false; SOURCES as usize],
+            ons_sent: false,
         }
     }
 
@@ -447,17 +451,6 @@ impl NativeDevice for MpeControl {
                             });
                         }
                     }
-                    // Ons mode sends slide once, on the note's frame.
-                    if slide_mode == 2 && sources[SLIDE].on {
-                        let value = self.notes[at].value[SLIDE];
-                        audio.send(NoteEvent {
-                            kind: NoteKind::Expression {
-                                expression: NoteExpression::Slide,
-                                value: value as f32,
-                            },
-                            ..note
-                        });
-                    }
                 }
                 NoteKind::Off | NoteKind::Choke => {
                     audio.send(note);
@@ -473,10 +466,16 @@ impl NativeDevice for MpeControl {
                         audio.send(note);
                         continue;
                     }
-                    if s == SLIDE && slide_mode == 2 {
-                        continue;
-                    }
                     let at = self.entry(channel, key);
+                    // Spec: mpe-shaper R13. In Ons mode a note takes the
+                    // first slide that reaches it and keeps it: the later
+                    // ones are ignored.
+                    if s == SLIDE && slide_mode == 2 {
+                        if self.notes[at].ons_sent {
+                            continue;
+                        }
+                        self.notes[at].ons_sent = true;
+                    }
                     let raw = f64::from(value);
                     let time = self.clock + i64::from(note.offset);
                     let relative = s == SLIDE && slide_mode == 1;
@@ -493,7 +492,10 @@ impl NativeDevice for MpeControl {
                         raw
                     };
                     let target = sources[s].apply(t);
-                    let shaped = if sources[s].smooth && !relative {
+                    // Spec: mpe-shaper R13. Ons mode deactivates smoothing.
+                    let smooths =
+                        sources[s].smooth && !relative && !(s == SLIDE && slide_mode == 2);
+                    let shaped = if smooths {
                         let last = self.notes[at].value[s];
                         let dt = (time - self.notes[at].time[s]).max(0) as f64;
                         let constant = if target >= last {

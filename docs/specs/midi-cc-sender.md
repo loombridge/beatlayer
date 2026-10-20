@@ -31,7 +31,7 @@ This spec covers the device only. Where a message goes on the wire is [midi I/O]
 - **R3.** Custom A starts on CC 64; every Custom dial starts with no controller. (S1; the manual doesn't state the defaults.)
 - **R4.** Pitch Bend's value runs from −8192 to 8191, 0 at the wheel's centre, and is sent as a pitch bend; Pressure's and the others' run from 0 to 127. (S1)
 - **R5.** When Send turns on, every assigned control sends its current value once, on that frame. (S1)
-- **R6.** While Learn is on, each control change an incoming MIDI source sends is handed to the next Custom dial without a controller, setting that dial's CC Type to the controller and its value to the message's; a control message also passes through unchanged. A device that already has every dial assigned takes nothing. (S1, S2)
+- **R6.** While Learn is on, each control change an incoming MIDI source sends is handed to the next Custom dial without a controller, setting that dial's CC Type to the controller and its value to the message's; a control message also passes through unchanged. A controller the CC Type list leaves out (0, 32, and 120 to 127) is ignored. A device that already has every dial assigned takes nothing. (S1, S2, S6)
 - **R7.** Each change Learn makes is one undo step named "Learn CC Control". (S1, S4)
 - **R8.** A control's message reaches the next device in the chain, on its frame, at block sizes 1, 100, 512 and 4,096 alike, allocating nothing. (S2, S3, S5)
 - **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/CC Control/`. (S4)
@@ -63,7 +63,7 @@ For `docs/evidence/spec-notes/midi-cc-sender.md`:
 | R3 | `crates/devices/tests/midi_cc.rs`, `a_dial_sends_on_its_own_controller`; `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | real-time trap, MCP script |
 | R4 | `crates/devices/tests/midi_cc.rs`, `pitch_bend_and_pressure_send_their_kinds` | real-time trap |
 | R5 | `crates/devices/tests/midi_cc.rs`, `send_sends_every_assigned_control` | real-time trap |
-| R6 | `crates/devices/tests/midi_cc.rs`, `learn_names_the_next_free_dial` | real-time trap |
+| R6 | `crates/devices/tests/midi_cc.rs`, `learn_names_the_next_free_dial`; `crates/shell/tests/midi_io.rs`, `learn_assigns_an_incoming_controller_to_a_dial` | real-time trap, shell |
 | R7 | `crates/shell/tests/midi_io.rs`, `learn_assigns_an_incoming_controller_to_a_dial` | shell |
 | R8 | `crates/devices/tests/midi_cc.rs`, `a_dial_reaches_the_next_device_on_its_frame` (block sizes 1, 100, 512 and 4,096, under the allocation trap) | real-time trap |
 | R9 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |

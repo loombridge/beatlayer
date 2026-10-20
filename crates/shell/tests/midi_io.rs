@@ -806,7 +806,7 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     assert_eq!(shifts(&rig), fixed);
 }
 
-// Spec: midi-cc-sender R7
+// Spec: midi-cc-sender R6, R7
 #[test]
 fn learn_assigns_an_incoming_controller_to_a_dial() {
     use bl_devices::midi_cc::{CC_CONTROL, DIALS, LEARN, dial_cc, dial_value};
@@ -856,6 +856,13 @@ fn learn_assigns_an_incoming_controller_to_a_dial() {
     rig.run("edit.undo", json!({}));
     assert_eq!(rig.shell.editor().undo_history().count(), steps - 1);
     assert_eq!(dial(&rig, 1), (None, None));
+
+    // A controller the CC Type list leaves out takes no dial: All Notes Off
+    // (CC 123) and bank select (CC 0) are channel mode and bank messages.
+    rig.play("Keys A", [0xB0, 123, 0]);
+    rig.play("Keys A", [0xB0, 0, 5]);
+    rig.shell.poll();
+    assert_eq!(dial(&rig, 1), (None, None), "the next dial is still free");
 
     // Switching Learn off stops it.
     rig.run(

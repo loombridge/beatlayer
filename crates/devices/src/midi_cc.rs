@@ -82,6 +82,14 @@ pub fn cc_type_for(controller: u8) -> f64 {
     f64::from(controller)
 }
 
+/// Whether a controller has a CC Type in [`cc_names`]: 1 to 119. Controllers
+/// 0 and 32 (bank select) and 120 to 127 (channel mode) aren't listed, so
+/// Learn leaves them alone.
+#[must_use]
+pub fn cc_is_listed(controller: u8) -> bool {
+    (1..=119).contains(&controller)
+}
+
 /// CC Control's device type.
 #[must_use]
 pub fn cc_control_type() -> DeviceType {

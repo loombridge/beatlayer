@@ -263,6 +263,43 @@ fn slide_defaults_on_note_on() {
     assert!((value.unwrap() - 0.75).abs() < 1e-6, "{out:?}");
 }
 
+// Spec: mpe-shaper R13. Slide's Ons mode sends the first slide a note
+// receives and ignores the later ones, and invents no slide of its own.
+#[test]
+fn slide_ons_sends_the_first_slide_once() {
+    let out = shape_run(
+        &[(SLIDE_MODE, 2.0)],
+        &[
+            expression(0, NoteExpression::Slide, 0.25),
+            expression(48, NoteExpression::Slide, 0.75),
+        ],
+    );
+    let values: Vec<f32> = out
+        .iter()
+        .filter_map(|event| match event.kind {
+            NoteKind::Expression {
+                expression: NoteExpression::Slide,
+                value,
+            } => Some(value),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(values.len(), 1, "{out:?}");
+    assert!((values[0] - 0.25).abs() < 1e-6, "{values:?}");
+    // A note that receives no slide gets none.
+    let none = shape_run(&[(SLIDE_MODE, 2.0)], &[]);
+    assert!(
+        !none.iter().any(|event| matches!(
+            event.kind,
+            NoteKind::Expression {
+                expression: NoteExpression::Slide,
+                ..
+            }
+        )),
+        "{none:?}"
+    );
+}
+
 // Spec: mpe-shaper R15. Slide's Rel mode starts each note in the middle and
 // moves by how far the finger has swept.
 #[test]

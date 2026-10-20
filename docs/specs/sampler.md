@@ -1,7 +1,7 @@
 # The sampler
 
-- **Status:** partial (slicing playback chooser, filter circuit models/morph and velocity wait)
-- **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO), WP-5.15 (the sample display, IMP-28), WP-5.15b (the warp controls, manual slicing, and the pitch envelope)
+- **Status:** partial (slicing playback chooser, filter circuit models/morph and velocity wait; R21, tuning systems, is WP-6.9's)
+- **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO), WP-5.15 (the sample display, IMP-28), WP-5.15b (the warp controls, manual slicing, and the pitch envelope); WP-6.9 (tuning systems: R21)
 - **Parity-matrix row:** Devices: Simpler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.11 "Simpler" (31.11.1 "Playback Modes", including 31.11.1.3 "Slicing Playback Mode"; 31.11.2 "Warp Controls"; 31.11.3 "Filter"; 31.11.4 "Envelopes"; 31.11.5 "LFO"; 31.11.6 "Global Parameters"), read October 2026
 
@@ -32,6 +32,8 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 | S9 | Manual | Live 12 reference manual, section 31.11.5 "LFO" | Waveforms sine, square, triangle, sawtooth down, sawtooth up and random; free-running at 0.01 to 30 Hz or synced to divisions of the Set's tempo; an LFO per voice; an Attack time to full intensity; an R switch for Retrigger, which resets the phase to the Offset value on each note, Offset having no effect while Retrigger is off; Key scales a voice's rate in proportion to the played pitch; Volume, Pitch, Pan and Filter sliders set how far the LFO moves each |
 | S10 | Manual | Live 12 reference manual, section 31.11.2 "Warp Controls" | Simpler's warp switch enables warping to sync playback with the song tempo regardless of played pitch; warp modes and settings behave as audio clips' warp modes; the sample tempo in BPM can be set, and ÷2 and ×2 buttons halve or double the playback speed |
 | S11 | Manual | Live 12 reference manual, section 31.11.4 "Envelopes" | Simpler contains a pitch envelope ADSR with an Amount control, moving pitch by up to 48 semitones |
+| S12 | Manual | Live 12 reference manual, chapter 15 "Using Tuning Systems", its introduction; the Live 12 release notes, 12.0 and 12.1 | Built-in instruments play a loaded tuning, and Drum Racks bypass it; one step of per-note pitch bend is one step of the tuning |
+| S13 | Beatlayer | [tunings.md](tunings.md) R12 to R14 | How a native instrument plays a key's tuned pitch, which tracks play the tuning, and per-note bends under a tuning |
 
 ## Rules
 
@@ -55,6 +57,7 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 - **R18.** Simpler provides Warp controls: a Warp toggle switch (off by default), the Warp Mode chooser (Beats, Tones, Texture, Re-Pitch, Complex, Complex Pro; default Beats), mode-specific settings (Beats preserve division and loop mode, Tones grain size, Texture grain size and flux, Complex Pro formants and envelope), the sample tempo in BPM (1 to 1000 BPM, default 120), and scale tempo (×2 and ÷2). When Warp is on, the sample plays at the set's tempo through its warp map — one marker at its start, on the sample's tempo the BPM control sets, until auto-warp's map ([warping](warping.md) R33 to R35) replaces it — following the tempo map from the note's start as a launched Session clip does, so a held note follows a tempo change. Every warp mode merged so far plays as Re-Pitch does, as they do for a launched Session clip ([warp modes](warp-modes.md)); when Warp is off, the sample plays conventionally at its own rate. Each warp setting is saved with the set and is one undo step. (S10)
 - **R19.** The pitch envelope shapes each voice's pitch modulation through an ADSR envelope: Attack (0 to 20 s, default 0), Decay (0 to 20 s, default 0), Sustain (0 to 100 %, default 100) and Release (0 to 20 s, default 0.1 s). Its Amount (−48 to +48 semitones, default 0) scales how far the envelope moves the pitch from the note's base pitch: at +48 the peak pitch is shifted up by four octaves. Each parameter is automatable and modulatable (rule G2). (S1, S11)
 - **R20.** Slices can be managed by hand in the sample display in Slice mode: double-clicking the waveform adds a slice at the clicked frame; double-clicking an existing slice removes it; pressing Delete or Backspace removes the selected slice; and dragging a slice moves it to a new frame. Each action is one undo step. Manual slices are drawn in `c.accent.0` and automatic slices in `c.text_dim.0`. In Slice mode, manual slices play chromatically from C3 in order. (S7, S10)
+- **R21.** On a track that plays the set's tuning ([tunings.md](tunings.md) R12, R14), a Classic or One-Shot voice reads the sample at the pitch R2 gives with its key's tuned pitch in place of the key, C3's twelve-step pitch still playing the sample at its own pitch; Transpose, Detune, Glide (R9), the LFO's Pitch (R17) and the pitch envelope (R19) add to it as they add to a key without a tuning. In Slice mode the key chooses the slice (R13) and the tuning changes nothing. The filter's Key (R16) and the LFO's Key (R17) follow the tuned pitch (Beatlayer's own). (S12, S13)
 
 ## Tests
 
@@ -80,6 +83,7 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 | R18 | `crates/devices/tests/sampler.rs`, `warped_sample_plays_at_tempo_matching_warped_clip_golden_render`, `held_warped_note_follows_tempo_change` | unit, real-time trap |
 | R19 | `crates/devices/tests/sampler.rs`, `pitch_envelope_moves_pitch_by_amount_rule_by_rule` | unit, real-time trap |
 | R20 | `crates/devices/tests/sampler.rs`, `manual_slices_play_chromatically_from_c3`; `crates/ui/tests/sample_display.rs`, `manual_slice_gestures_add_move_and_delete` | unit, real-time trap; UI script |
+| R21 | to be written in WP-6.9 | |
 
 ## Not built yet
 

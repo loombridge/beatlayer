@@ -1,0 +1,96 @@
+# Merging sets, saving clips and tracks as sets, and packing a project
+
+- **Status:** draft
+- **Work packages:** WP-6.35, a set opened in the browser, merging its tracks, device chains and clips into the open set, and saving tracks or Session clips as a new set (R1 to R9 and R11 to R15); WP-6.20, a set's grooves in the browser (R10); WP-6.35b, packing a project into one file and unpacking it (R16 to R24). Clip files are [clip files](clip-files.md)'; Collect Files on Export is [file management](file-management.md)'s (R7 to R9); the File Manager's views are [file management](file-management.md)'s
+- **Parity-matrix row:** Files and export: Pack a project into one archive, export Session clips as a new set, merge sets
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.3; the UI parity reference's rows I-DROP-002, 006 and 011, M-FILE-005, L-OTH-002 and C-BROWSER-014
+
+## The behaviour
+
+Any saved set is a source for the open one. In the browser a set file opens like a folder: its tracks, a group's tracks inside it, its return tracks and Main, each track's Session clips and its chain of devices. Dragging the whole set onto a track's title bar or into a drop area brings every one of its tracks but the return tracks into the open set, with their clips, devices and automation; dragging one track brings that one; dragging a track's chain of devices brings just the devices; and a set's Session clips behave as clip files, to preview and place. The other way, dragging selected Session clips, or tracks' title bars, onto a folder in the browser saves them as a new set there.
+
+A whole project packs into one file, a pack, from the File Manager's Manage Project view, to send or keep, and unpacks again into a project folder with Install Pack... from the File menu, or by dropping the pack on the window. The pack's format is Beatlayer's own; the files inside it come back byte for byte, so the sets in it open with all their samples.
+
+This spec covers the set in the browser, merging, saving tracks and clips as a set, and packs. It leaves clip files to [clip files](clip-files.md), copying samples on export to [file management](file-management.md) R7 to R9, and the File Manager itself to [file management](file-management.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 5 "Managing Files and Sets", section 5.4.3 "Merging Sets" | A set dragged from the browser onto a track's title bar or a drop area brings all its tracks but its return tracks into the open set, with their Session and Arrangement clips, devices and automation. A set opens in the browser to bring single tracks, or only a track's devices by its Devices item; group tracks, nested ones too, come the same way; a set's saved grooves show as a folder in it; and its Session clips can be browsed, previewed and brought in as clip files are |
+| S2 | Manual | Same chapter, section 5.4.4 "Exporting Session Clips as New Sets" | Several Session clips, selected by dragging or with Shift or Cmd (Ctrl), dragged into the Current Project or a folder of the person's, are saved as a new set, whose suggested name can be kept or changed |
+| S3 | Manual | Same chapter, section 5.7.1 "Collect Files on Export" | Several tracks at once can be moved into a browser folder, and become a set file; when the files they use are copied, a project folder with its subfolders is made too. After saving, the new item is selected with its name ready to change, and Enter confirms it |
+| S4 | Manual | Same manual, chapter 4 "Working with the Browser", section 4.7.7 "Current Project" | The Current Project lists the project's files, among them its sets' tracks with their clips and devices, the return tracks and Main |
+| S5 | Manual | Same chapter 5, section 5.9 "Packing Projects into Packs" | Create Pack, in the Packing section of the File Manager's Manage Project view, asks where to save, then packs the project folder with all its sets into one file. Files the project uses from outside its folder aren't included, so they should be collected first. A notification says when it's done. Compression is lossless and leaves the project unchanged. Install Pack in the File menu, a double-click on a pack, or dropping it on Live, unpacks the whole project folder, after asking where to put it, the pack's own folder being suggested |
+| S6 | Manual | Same chapter, section 5.5.3 "Managing Files in a Project" | The File Manager's Manage Project view, opened from the File Manager or a project folder's context menu in the browser, deals with the project's missing, external and unused files and with packing |
+| S7 | Release notes | Live 12 release notes, 12.0 | A set opened in the browser shows its tracks, return tracks, Main track and device chains; a chain dragged or double-clicked into the open set keeps its devices' settings, but not recorded automation |
+| S8 | Release notes | Live 12 release notes, 12.2 and 12.3 | 12.2: tracks dragged from the browser into a set keep their send levels and automation. 12.3: group tracks dragged from the browser into a set |
+| S9 | Reference | [interactions.md](../ui-parity/interactions.md) I-DROP-002, I-DROP-006, I-DROP-011; [menus.md](../ui-parity/menus.md) M-FILE-005, C-BROWSER-014; [layout.md](../ui-parity/layout.md) L-OTH-002 | The Session's and the Arrangement's drop areas; a Session clip or a track's title bar dropped on a browser folder is saved, a track as a new set; File ▸ Install Pack...; Manage Project in a project folder's context menu; the File Manager in the detail area's place |
+| S10 | Beatlayer | [The architecture](../02-architecture.md), "Project files and interop"; [the app shell](app-shell.md) R17 and R20; [file management](file-management.md) R4 and R6 to R9; [clip files](clip-files.md) R1 to R13; [crash recovery](crash-recovery.md), the journal; [audio import](audio-import.md) R9; [the browser spec](browser.md) R13 and R16; [the Session View](session-view.md) R15 | A project is a folder holding its sets and samples; a set's media table names each file by content hash, size and path relative to the project folder; saves are atomic; a set saved outside a project folder gets a project folder of its own, numbered when the name is taken; external files are collected into `Samples/Imported`; missing files are found by content; a set's journal is a hidden file beside it; the drop areas; every action is a registered command with a permission class |
+
+## Rules
+
+**A set in the browser (WP-6.35)**
+
+- **R1.** A set file in the browser opens like a folder, by Right, its triangle or `browser.open_folder`: it lists its tracks in the set's order, a group track holding its tracks (openable in turn), then its return tracks and Main. An audio or MIDI track opens to list its Session clips, by scene, and a Devices row for its chain of devices; a group, a return track and Main list a Devices row only. The set is read on a background thread, checked as an opened set is; a set from a later version of Beatlayer, or a damaged one, opens to a line saying why and offers nothing to drag. A set in a project's `Backup` folder opens the same way. (S1, S4, S7)
+- **R2.** A Session clip listed in an opened set is a clip as a clip file holds one, with its track's chain of devices and the files they play ([clip files](clip-files.md) R1, R2): it previews, drags and loads with Enter as a clip file does ([clip files](clip-files.md) R7 to R13), its files found from the opened set's project folder. (S1)
+
+**Merging (WP-6.35)**
+
+- **R3.** Dragging a set file onto a track's title bar, in the Session View or the Arrangement, or into either view's drop area (I-DROP-021), adds all its tracks except its return tracks and Main to the open set: after the track dropped on, at its level (inside its group when it's in one), or after the last track for a drop area. A drag highlights where the tracks would go, as a drop of files does (browser R13). A set that can't be read changes nothing. (S1, S9)
+- **R4.** Dragging tracks from an opened set adds them the same way (I-DROP-022): one track, a group with every track inside it, or several selected together, in the opened set's order. Enter or a double-click on a track in an opened set adds it after the selected track, or after the last track when none is selected (Beatlayer's own). (S1, S8)
+- **R5.** An added track keeps everything it had in its set: its kind, name, colour, mixer and sends' levels, its chain with every device's state, its Arrangement clips, its Session clips, its take lanes, and its automation, with new IDs throughout. Its Session clips go in the open set's scenes at the positions they had (the first scene's clip in the first scene, and so on), and the open set gets empty scenes at its end when it has fewer (Beatlayer's own). The open set's tempo, time signature, scenes and loop are unchanged. A track added from another set is copied as a track is copied within a set ([track context menu](track-context-menu.md) R13), the two sharing one copy; only references to tracks outside it are settled differently (R6). (S1, S8)
+- **R6.** What an added track refers to outside what's added is settled as it lands (Beatlayer's own): a send goes to the open set's return track in the same position (the first return's send to the open set's first return), and a send past the open set's last return is left out; an input or output naming a track that isn't added goes back to the track kind's default (its input to the default input, its output to Main); a sidechain or other source on a track that isn't added becomes none; links to a track that isn't added are dropped. References between the tracks added come with them, to their new IDs. (S1, S8)
+- **R7.** The audio files the added tracks and their devices play are registered in the open set's media store and media table from the paths the opened set's media table gives, relative to its project folder; a file missing there is found by its content as [file management](file-management.md) R6 says, and one still missing is listed as missing. Merging copies no file: files outside the open set's project are external until Collect All and Save ([file management](file-management.md) R4) collects them. (S1, S10)
+- **R8.** Dragging a Devices row (I-DROP-022), or Enter or a double-click on it, adds that chain of devices with every device's state and without its automation: onto a track of a kind that takes it, after the track's own devices, as devices dropped there are ([device chains](device-chains.md) R12); into a drop area, on a new track of the chain's kind (a MIDI track for a chain with an instrument or MIDI effects, an audio track otherwise); with Enter or a double-click, onto the selected track, or a new track when none is selected. (S1, S7)
+- **R9.** Each addition by R3, R4 or R8 is one undo step: "Import Tracks" for tracks, "Insert Device" for a chain (Beatlayer's own names for the first). (S10)
+- **R10.** A set that holds grooves lists them in a Grooves folder after its tracks when it's opened in the browser; a groove dragged from there goes into the open set's Groove Pool as a groove file from the browser does. (S1)
+
+**Saving tracks and clips as a set (WP-6.35)**
+
+- **R11.** Dragging the title bars of one or more selected tracks onto a browser folder, or a place's label, saves a new set there holding those tracks as R5 says they're added: whole, with their clips, chains, take lanes and automation, a group with the tracks inside it. The new set also holds the open set's return tracks with their devices, so the tracks' sends play as they did, and the open set's tempo, time signature and scenes (Beatlayer's own). (S3, S9)
+- **R12.** Dragging several selected Session clips onto a browser folder, or a place's label, saves a new set holding them: a track for each track they're on, in the open set's order, with its kind, name, colour, mixer and chain of devices but none of its other clips or automation; and each clip in the scene as far below the first selected clip's scene as it was in the open set, so the new set has as many scenes as run from the first selected clip to the last. It takes the open set's tempo and time signature (Beatlayer's own layout). (S2)
+- **R13.** The new set is named after the track when one track is saved, and after the open set otherwise, with " Clips" added for clips (Beatlayer's own names); it's placed as Save As places a set ([the app shell](app-shell.md) R17 and R20): in the folder when it's a project folder, and otherwise in a new "<name> Project" folder, numbered when the name is taken. It's written whole or not at all. The new row is then selected with its name ready to edit: typing and Enter rename the set, Esc keeps its name. The open set is unchanged and stays open, its file and undo history as they were. (S2, S3, S10)
+- **R14.** The audio files the new set uses are copied into its project folder's `Samples/Imported` folder, or left where they are with the set's media table naming them by path from its project folder, as Collect Files on Export says ([file management](file-management.md) R7 to R9), so with copying on the new project stands alone. (S3)
+- **R15.** Every action above is a registered command. `set.import` adds tracks, or one track's chain, from a set file to the open set (`path`, the tracks or chain by the opened set's rows, and where they go); it reads a file outside the project, so it's external, and reads back through the query tool's `song` and `track` objects. `set.export_tracks` and `set.export_clips` save tracks or Session clips as a new set in a folder, with a name, and return its path; they write outside the project, so they're external, and read back in `browser.state`. `browser.open_folder` opens a set's row, and the browser's rows name what each row of an opened set is (track, group, return track, Main, Session clip, devices, grooves). (S10)
+
+**Packs (WP-6.35b)**
+
+- **R16.** Create Pack, in the Packing section of the File Manager's Manage Project view (L-OTH-002), asks where to save the pack, the project's parent folder offered first (Beatlayer's own), and packs the project into one file there named after the project folder, with Beatlayer's own extension, `.blpack`. The Status Bar says when it's done and where the pack is; the project is unchanged. (S5, S6)
+- **R17.** A pack holds every file and folder in the project folder, each file byte for byte, under the project folder's name, except hidden files (among them sets' journals and saves under way, [crash recovery](crash-recovery.md)) and the `Backup` folder (Beatlayer's own). Files the project's sets use from outside its folder aren't in it; the result names them, and the Status Bar says how many were left out. (S5, S10)
+- **R18.** Create Pack refuses while the project's open set has unsaved changes or has never been saved, saying to save first (Beatlayer's own). (S10)
+- **R19.** A pack is a ZIP archive with ZIP64 records, so files over 4 GB and packs of any size keep their sizes. Its first entry is a manifest naming its format (`beatlayer-pack`), its schema version, the version of Beatlayer that wrote it, the project folder's name and its sets; then the files, each compressed with Deflate when that makes it smaller and stored as it is otherwise. Each file's checksum is in the pack. A pack is written to a hidden file beside where it goes and renamed into place, so a pack stopped at any point leaves no pack behind. (S5; the format is Beatlayer's own)
+- **R20.** Install Pack... in the File menu (M-FILE-005), dropping a pack on the main window (I-DROP-023), or opening one from Finder or Explorer asks for the folder to unpack into, the pack's own folder offered first, and makes the project folder there with every file in it. When a folder of that name is already there, the new one is named with " 2", " 3" and so on, as Save As names a project folder ([the app shell](app-shell.md) R20). Unpacking opens no set and changes nothing in the open set; the result and the Status Bar name the new folder and its sets, and the browser lists it when it lies in a place. (S5, S10)
+- **R21.** Unpacking checks the whole pack before it writes anything: a pack without the manifest, from a later version of Beatlayer, or with an entry whose name is absolute, climbs out of the project folder with `..`, is a link, or can't be a file name on this platform, is refused, and so is a pack that needs more space than the destination has. It then unpacks into a hidden folder beside the destination and renames it into place, so an unpack stopped at any point, or refused because a file's checksum doesn't match or a file unpacks larger than the pack says, leaves nothing behind. (S10; Beatlayer's own)
+- **R22.** The files a pack unpacks are byte for byte those packed, so a set from it opens with every file it used from inside its project found at the same paths, with the same content hashes ([audio import](audio-import.md) R9). (S5, S10)
+- **R23.** Packing and unpacking run on a background thread, reporting how far they've got, and either can be cancelled, leaving no pack and no unpacked folder. A pack the reader refuses never crashes Beatlayer; the reader is fuzzed. (S10)
+- **R24.** `set.create_pack` packs a project folder (the open set's when none is given) into a pack at a path, and returns the pack's path, how many files and bytes it holds and the external files it left out; `set.install_pack` unpacks a pack into a folder and returns the new project folder and its sets. Both read or write files outside the project, so they're external; each reads back in its result and in `browser.state` (the new file or folder). (S10)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.35 | |
+| R2 | to be written in WP-6.35 | |
+| R3 | to be written in WP-6.35 | |
+| R4 | to be written in WP-6.35 | |
+| R5 | to be written in WP-6.35 | |
+| R6 | to be written in WP-6.35 | |
+| R7 | to be written in WP-6.35 | |
+| R8 | to be written in WP-6.35 | |
+| R9 | to be written in WP-6.35 | |
+| R10 | to be written in WP-6.20 | |
+| R11 | to be written in WP-6.35 | |
+| R12 | to be written in WP-6.35 | |
+| R13 | to be written in WP-6.35 | |
+| R14 | to be written in WP-6.35 | |
+| R15 | to be written in WP-6.35 | |
+| R16 | to be written in WP-6.35b | |
+| R17 | to be written in WP-6.35b | |
+| R18 | to be written in WP-6.35b | |
+| R19 | to be written in WP-6.35b | |
+| R20 | to be written in WP-6.35b | |
+| R21 | to be written in WP-6.35b | |
+| R22 | to be written in WP-6.35b | |
+| R23 | to be written in WP-6.35b | |
+| R24 | to be written in WP-6.35b | |

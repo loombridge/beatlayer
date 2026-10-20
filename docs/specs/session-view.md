@@ -1,9 +1,9 @@
 # Session View: clip slots and scenes
 
-- **Status:** implemented
-- **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33)
-- **Parity-matrix row:** Views and workflow: Session View; Clips and launching
-- **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026.
+- **Status:** partial (R1 to R33 implemented; R34 and R35 are Phase 6's)
+- **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33); WP-6.38 (R34: the return tracks scrolling with the tracks, IMP-01); WP-6.49b (R35: panning with the middle button)
+- **Parity-matrix row:** Views and workflow: Session View; Clips and launching; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
+- **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026; for R34 and R35, the manual's chapter 18 and the Live 12 release notes, read 20 October 2026.
 
 ## The behaviour
 
@@ -27,6 +27,8 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | S8 | Reference | [accessibility.md](accessibility.md) R4 | A Session strip's Tab order: Track Title Bar, Clip Slot, Clip Stop, the In/Out choosers, the sends, Peak Level, Track Pan, Track Activator, Solo/Cue, Arm Recording, Track Volume (observed in Live 12.4.6 on macOS, 11 October 2026). |
 | S9 | Decision | The decisions of 17 October 2026, from the manual (S1) and S2 | A Session clip takes its track over on the frame it starts, and the track stays taken over after it stops; a stop on a track with no Session clip playing takes it over on the grid line; Back to Arrangement and a track's own return stop Session clips at once, drop launches and stops still queued, and give the Arrangement back from the playhead; stopping or locating the transport keeps the takeover; a new or loaded set has none. |
 | S10 | Decision | The decisions of 17 October 2026 on scene tempo and time signature, from the manual (S1) and S2 | Capture and Insert Scene with nothing playing inserts an empty scene with the current tempo and signature, after the scene launched last or, when none has launched since the set opened, after the selected scene, and launches nothing; a scene's signature applies at its launch point like its tempo, writes no marker into the set's time-signature map, and overrides it as the tempo overrides tempo automation; the override holds through clip stops, transport stop and restart until Re-Enable Automation or Back to Arrangement, which give back the set's maps at the playhead, and isn't saved; launching while the Arrangement plays does the same on the same frame; Duplicate Scene copies a scene's tempo and signature; the scene fields read typed values as the Control Bar's do. |
+| S11 | Beatlayer | [The improvements](../05-improvements.md), IMP-01; [mixer-view.md](mixer-view.md) R21 and R22; [interactions.md](../ui-parity/interactions.md) I-SCROLL-005 | A View option lets the return tracks scroll with the other tracks, off by default so they stay pinned at the right as in Live; the Session View's columns are the mixer's |
+| S12 | Release notes | Live 12 release notes, 12.0, "Feature Improvements", "Interface", read 20 October 2026, recorded in [interactions.md](../ui-parity/interactions.md) I-DRAG-058; [view-options.md](view-options.md) R1 | Holding the mouse wheel down pans views, the Session View among them |
 
 ## Rules
 
@@ -63,6 +65,8 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 - **R31.** The grid launches and stops through the commands. Clicking a slot's launch triangle runs `session.launch`, a scene's launch button runs `session.launch_scene`, and clicking a stop square (an empty slot that still has its stop button; one removed draws nothing) or a track's stop button in the status row runs `session.stop_track`; Stop All Clips at the Main column's left runs `session.stop_all`, and the Back to Arrangement button at its right runs `session.back_to_arrangement`. The triangle is grey while the slot is stopped, flashes white and green while a launch is queued, and is green while the clip plays; a track's stop button turns green while a stop is queued; the Back to Arrangement button lights while `session_over` lists any track. All of it is drawn from the states the engine published, and every button reaches AccessKit named with its track and scene, with its pressed state. The global follow-action switch is drawn at the right of Main's status row and runs `session.set_follow_actions_enabled` ([follow-actions.md](follow-actions.md) R8). (S1, S2, S3)
 - **R32.** `session.launch_selected` (Enter, S-SES-001) runs `session.launch` for each selected slot that holds a clip and `session.launch_scene` for each selected scene; a selected empty slot is skipped, and with nothing to launch it refuses. (S1, S3)
 - **R33.** Selecting a Session slot that holds a MIDI clip (`session.select` with a click, I-CLICK-002, or its keys) shows that clip in the Clip View, in place of the Arrangement's selection, and selecting a clip in the Arrangement shows that one instead: the Clip View follows the clip most recently selected, from either view ([piano-roll.md](piano-roll.md) R1). Selecting a slot again shows its clip again, and a slot that holds no MIDI clip leaves the Clip View as it was. (S1)
+- **R34.** While Return Tracks Scroll with Tracks is on ([mixer-view.md](mixer-view.md) R21), the return tracks' columns in the grid sit after the drop area and scroll sideways with the track columns, as the mixer's do (mixer-view R22), and only the Main column stays pinned at the right edge; the drop area between the last track and the first return is at least one column (94 points) wide. With the switch off, as on a new install, the returns stay pinned as R15 and I-SCROLL-005 say. (S11)
+- **R35.** Dragging with the middle mouse button held over the grid pans it, the content moving with the pointer, sideways through the columns and up and down through the scenes, within the limits the wheel and `session.scroll` keep ([view-options.md](view-options.md) R1); it selects nothing and launches nothing. (S12)
 ## Tests
 
 | Rule | Test | Kind |
@@ -100,13 +104,15 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R31 | `crates/ui/tests/session_view.rs`, `clicking_a_launch_triangle_queues_a_clip_and_a_stop_button_drops_it`, `the_stop_square_a_stop_button_and_stop_all_clips_stop_the_grid`, `a_scene_launch_button_launches_the_scene`, `back_to_arrangement_lights_while_a_clip_plays_over_the_arrangement`, `the_launch_buttons_reach_accesskit_with_their_track_and_scene` | UI script |
 | R32 | `crates/ui/tests/session_view.rs`, `enter_launches_the_selected_clip_and_scene`; `crates/shell/tests/session_launch.rs`, `launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id` | UI script, shell test |
 | R33 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
+| R34 | to be written in WP-6.38 | |
+| R35 | to be written in WP-6.49b | |
 ## Not built yet
 
 - The Arrangement's per-track and scrub-area Back to Arrangement buttons (L-ARR-007, L-ARR-019) aren't drawn yet; F10, both commands and the Main column's button (R25) work, and `Shell::session_over` gives the buttons their state.
 - A track's status display shows the playing clip's length in beats and nothing else: Live also counts up as the clip loops and draws a progress circle, which need the engine to publish the clip's position. How a queued-to-stop slot and the follow-action switch look on and off, and what Enter does on a selected empty slot with a stop button, aren't observed yet.
 - A playing Session clip doesn't close its track's input under Monitor Auto ([routing.md](routing.md) R11).
-- The slot, scene and Session-clip context menus (C-SLOT, C-SCENE, C-CLIP-SES), dragging scenes and tracks to reorder them (I-DRAG-006, S-SES-015, S-SES-016), and resizing a track's column (I-DRAG-004) are not built.
+- The slot, scene and Session-clip context menus (C-SLOT, C-SCENE, C-CLIP-SES; WP-6.56), dragging scenes and tracks to reorder them (I-DRAG-006, S-SES-015, S-SES-016), and resizing a track's column (I-DRAG-004; WP-6.65, [mixer-view.md](mixer-view.md) R36) are not built.
 - Selecting a slot shows a MIDI clip in the Clip View (R33), but a Session audio clip isn't shown there yet: the Sample Editor comes with its own package.
 - A slot doesn't draw its clip's name or waveform; the grid names every slot with its track and scene for assistive technology.
-- The scene tempo and signature fields aren't revealed by dragging the Main column's left edge (I-DRAG-005), and their Return to Default entry (C-SCENE-016) waits for the scene context menus; Delete and a double-click switch a field off. Selecting the Main track's title doesn't open the Scene View, and the Main column's scene launch buttons are WP-3.8's, so a scene launches by its command and keys.
+- The scene tempo and signature fields aren't revealed by dragging the Main column's left edge (I-DRAG-005; WP-6.65, [mixer-view.md](mixer-view.md) R36), and their Return to Default entry (C-SCENE-016) waits for the scene context menus; Delete and a double-click switch a field off. Selecting the Main track's title doesn't open the Scene View, and the Main column's scene launch buttons are WP-3.8's, so a scene launches by its command and keys.
 - Transport commands queued for a clock frame keep their frames across a launched scene's tempo change.

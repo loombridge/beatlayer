@@ -325,6 +325,11 @@ impl MainWindowUi {
                 // slot.
                 self.devices.start_macro_rename(*rack, *number);
             }
+            Effect::RenameVariation(rack, index) => {
+                // Spec: macros R29. Rename types the name in the variation's
+                // row.
+                self.devices.start_variation_rename(*rack, *index);
+            }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
                 backwards,

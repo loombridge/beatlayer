@@ -1,9 +1,9 @@
 # The Arrangement View: layout, navigation, Follow, and the editing grid
 
-- **Status:** implemented (R1 to R17 each have a passing test)
-- **Work packages:** WP-1.8a (this spec); WP-1.8b adds editing (clip selection, moving, resizing, splitting, the rest of the selection gestures: [arrangement-editing](arrangement-editing.md)); WP-1.5 the transport behind the playhead, the loop brace, and the scrub area; WP-1.6 and WP-1.9 the mixer controls in the track headers
-- **Parity-matrix row:** Views and workflow: Arrangement View; Interface placement and key bindings
-- **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day
+- **Status:** partial (R1 to R17 each have a passing test; R18 to R24 are Phase 6's)
+- **Work packages:** WP-1.8a (this spec); WP-1.8b adds editing (clip selection, moving, resizing, splitting, the rest of the selection gestures: [arrangement-editing](arrangement-editing.md)); WP-1.5 the transport behind the playhead, the loop brace, and the scrub area; WP-1.6 and WP-1.9 the mixer controls in the track headers. In Phase 6: WP-6.38 (R18: the return tracks scrolling with the tracks, IMP-01), WP-6.49b (R19: panning with the middle button), WP-6.64 (R20 to R24: hiding the Arrangement Track Controls' In/Out, Volume and Return Tracks)
+- **Parity-matrix row:** Views and workflow: Arrangement View; Interface placement and key bindings; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
+- **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day; for R18 to R24, the manual (online edition) and the Live 12 release notes, read 20 October 2026
 
 ## The behaviour
 
@@ -11,7 +11,7 @@ The Arrangement View shows the song along a timeline: tracks stacked top to bott
 
 You move around it by zooming (the + and − keys, Cmd with the wheel or a pinch, dragging up and down in the beat-time ruler or the Overview), by scrolling (the wheel, Shift with the wheel, dragging sideways in the rulers, Cmd-Option dragging), by zooming to the selection and back (Z and X), and by fitting everything in (H and W). With Follow on, the view turns the page as the playhead plays past its edge; scrolling by hand pauses that until playback starts or stops or a click lands in the lanes. Clicking a lane places the insert marker and selects the track; dragging selects time. The editing grid, zoom-adaptive or fixed, decides where clicks snap and is drawn across the lanes.
 
-This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, track heights and folding, and the insert marker and time selection the zoom commands work from. Everything in it changes only the view, never the set, and none of it is an undo step. Editing clips and the selection's other gestures are WP-1.8b's; playing from the scrub area, moving the loop brace, and the transport behind the playhead are WP-1.5's; the mixer controls are WP-1.6's and WP-1.9's.
+This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, track heights and folding, and the insert marker and time selection the zoom commands work from; and, from Phase 6, the return tracks scrolling with the tracks (IMP-01), panning with the middle button, and which of the Arrangement Track Controls show. Everything in it changes only the view, never the set, and none of it is an undo step. Editing clips and the selection's other gestures are WP-1.8b's; playing from the scrub area, moving the loop brace, and the transport behind the playhead are WP-1.5's; the mixer controls are WP-1.6's and WP-1.9's.
 
 ## Sources
 
@@ -29,6 +29,11 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | S10 | Manual | Chapter 2, section 2.3.1 "Display & Input" | A Follow Behavior setting chooses how the Arrangement follows playback (scrolling or paging); its default isn't given |
 | S11 | Beatlayer | [Architecture](../02-architecture.md), "UI"; ADR-001; the build plan's WP-1.8a | 60 fps with 200 tracks and 5,000 clips visible on an M1; dense views on Beatlayer's own wgpu pipelines in an egui paint callback (instanced rectangles, a waveform shader reading peak data); views stay virtualised and report their CPU time per frame against the benchmark scene |
 | S12 | Beatlayer | [Waveform peaks](waveform-peaks.md) R1, R5, R8 | Peaks build in the background and say when they're ready; a changed file's peaks are invalidated; the shader reads the peak data as is |
+| S13 | Beatlayer | [The improvements](../05-improvements.md), IMP-01; [mixer-view.md](mixer-view.md) R21 and R22 | A View option lets the return tracks scroll with the other tracks, off by default so they stay pinned as in Live; one switch for every view |
+| S14 | Release notes | Live 12 release notes, 12.0, "Feature Improvements", "Interface", read 20 October 2026, recorded in [interactions.md](../ui-parity/interactions.md) I-DRAG-058; [view-options.md](view-options.md) R1 | Holding the mouse wheel down pans views, the Arrangement View among them |
+| S15 | Release notes | Live 12 release notes, 12.0, "Mixer in Arrangement", read 20 October 2026 | The controls right of the Arrangement's track headers are called the Arrangement Track Controls; which of them show, and whether the return tracks show, is set in View ▸ Arrangement Track Controls; they have no shortcuts, which belong to the mixer's sections |
+| S16 | Manual | Live 12 reference manual, chapter 6, section 6.1 "Layout" (item 10) and section 6.15 "The Mixer in Arrangement View", read 20 October 2026 | The track headers' mixer controls (volume, pan, I/O and others) are the Arrangement Track Controls, and a View submenu chooses which show; their values are the mixer's |
+| S17 | Observation | Live 12.4.6 on macOS, 11 October 2026, recorded in [menus.md](../ui-parity/menus.md) M-VIEW-033 to M-VIEW-033d and [layout.md](../ui-parity/layout.md) L-ARR-006, L-ARR-009 and L-ARR-014 | Arrangement Track Controls holds In/Out, Volume, Track Options, a separator and Return Tracks, with no keys, disabled while the Session View is in front; In/Out, Volume and Return Tracks are ticked in a new set; the header column's title, In/Out, mixer and meter sub-columns; the mixer sub-column's rows (activator, Solo, Arm; volume, pan; sends); the pinned return rows |
 
 ## Rules
 
@@ -49,6 +54,22 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 - **R15.** Up and Down select the track above or below; clicking a title bar selects its track and title bar, so the track-header keys apply; Esc in the Arrangement goes to the highlighted track's title bar. (S8)
 - **R16.** Every action above is a registered command in the read class, with a schema and a description for a model, reachable headless through `Shell::run` (`arrangement.*` in [commands.md](../commands.md)); `arrangement.state` reports the view. (S11)
 - **R17.** A frame builds only what's on screen: the rows found by binary search over their tops and, on each, the clips overlapping the lanes' span, from per-track lists sorted by start that are rebuilt only when the document changes; a frame in which nothing the lanes show changed draws the last frame's instances again without building them. With the benchmark scene (200 tracks, 5,000 audio clips with waveforms) the view meets the architecture's 60 fps target. (S11)
+
+**Return tracks that scroll with the tracks (IMP-01, Beatlayer's own option; WP-6.38)**
+
+- **R18.** While Return Tracks Scroll with Tracks is on ([mixer-view.md](mixer-view.md) R21), the return tracks' rows come after the drop area under the last track and scroll with the tracks, each at the height its pinned row has, and only Main stays pinned under the lanes; the view scrolls as far as the last return (R7's limit moving with it). With the switch off, as on a new install, R2's pinned rows are unchanged. (S13)
+
+**Panning with the middle button (WP-6.49b)**
+
+- **R19.** Dragging with the middle mouse button held over the lanes pans the view both ways, the content moving with the pointer, as Cmd-Option (Ctrl-Alt) dragging does (R7), within R7's limits; it places no insert marker, selects nothing and moves no clip ([view-options.md](view-options.md) R1). (S14)
+
+**The Arrangement Track Controls (WP-6.64)**
+
+- **R20.** View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks (M-VIEW-033a, 033b, 033d) are switches, each ticked while its part shows and all three ticked in a new set; they run `arrangement.show_in_out`, `arrangement.show_volume` and `arrangement.show_return_tracks`, read-class commands that change only the Arrangement's track headers, never the mixer's sections ([mixer-view.md](mixer-view.md) R12), and are reported in `arrangement.state`. The submenu is disabled while the Session View is in front and its items have no keys. The switches are view state: not saved with the set and no undo step. (S15, S16, S17)
+- **R21.** With In/Out off, no track header shows its In/Out sub-column (L-ARR-006), pinned returns and Main included, and the title sub-column takes its width, so the header column keeps its 294 points and the lanes don't move. The way the freed width is used is Beatlayer's own. (S16, S17)
+- **R22.** With Volume off, no track header shows its mixer sub-column's second and third rows (L-ARR-009: the volume field and pan; the sends); the first row's activator, Solo and Arm, and the meter column, stay where they are. What stays is Beatlayer's own. (S16, S17)
+- **R23.** With Return Tracks off, the return tracks' rows aren't drawn in the lanes, pinned or scrolling (R18), Main's row stays, and the lanes take the height they leave; the returns play as before and the Arrangement's mixer still shows them as its own Return Tracks switch says. (S15, S17)
+- **R24.** A part that's hidden leaves the accessibility tree and the keyboard's Tab order, and its values stay reachable in the mixer and by command. At every interface zoom the parts that show keep their places (interface-zoom R1). (S11, S16)
 
 ## Tests
 
@@ -71,6 +92,13 @@ This spec covers what WP-1.8a builds: the view, navigation, Follow, the grid, tr
 | R15 | `crates/shell/tests/arrangement.rs`, `the_insert_marker_and_selection_are_view_state`; `crates/ui/tests/arrangement.rs`, `keys_run_the_view_commands`; `crates/ui/tests/keymap.rs`, `keys_resolve_to_commands_in_their_contexts` | unit, UI script |
 | R16 | `crates/shell/tests/arrangement.rs`, `every_view_command_is_registered_read_only_and_reachable`; `crates/shell-spec/src/arrangement.rs`, `every_listed_id_is_registered_and_complete`; `cargo xtask commands` | unit |
 | R17 | `crates/ui/tests/arrangement.rs`, `only_visible_clips_are_built_each_frame`; `cargo run --release -p bl-ui --example arrangement_bench` (CPU and GPU time per frame) | UI script, measurement |
+| R18 | to be written in WP-6.38 | |
+| R19 | to be written in WP-6.49b | |
+| R20 | to be written in WP-6.64 | |
+| R21 | to be written in WP-6.64 | |
+| R22 | to be written in WP-6.64 | |
+| R23 | to be written in WP-6.64 | |
+| R24 | to be written in WP-6.64 | |
 
 ## Not built yet
 

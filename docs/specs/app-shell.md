@@ -1,7 +1,7 @@
 # The app shell: start-up, sets, the Settings window's Audio page, and the CPU meter
 
-- **Status:** implemented (R1 to R22 each have a passing test)
-- **Work packages:** WP-1.7, WP-1.7b (project folders)
+- **Status:** partial (R1 to R23 each have a passing test; R24 comes with WP-6.27 to WP-6.30)
+- **Work packages:** WP-1.7, WP-1.7b (project folders), WP-6.27 to WP-6.30 (R24, what `view.state` and `settings.state` add for the detail views, the Undo History, the second window and the Theme & Colors page)
 - **Parity-matrix row:** Views and workflow: Control Bar, Status Bar; Mixing and routing: CPU meter, disk overload indicator; Interface placement and key bindings
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day
 
@@ -53,6 +53,7 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 - **R21.** When Save Set As puts the set in a different project folder, the paths in its media table are re-pointed from the new folder, so the set still uses the same files, in the old project until they're collected. A path that can't be re-pointed (on another drive) stays as it was, and the Status Bar says so. (S10, S11)
 - **R22.** The Save Set As dialog opens in the open set's project folder and suggests the set's name, so keeping the suggestion saves into the same project (R18); for a set that has never been saved it opens where the system left it. (S10)
 - **R23.** Two read-class queries, on no menu, read back what the set doesn't save. `settings.state` reports every preference the Settings window shows with a value, by page, in the form its own command takes it; tokens and API keys are never returned, only whether one is stored. `view.state` reports what the view commands switch (the main view, the browser, the Info View, full-screen mode, the zoom, the Clip View with Draw Mode, the lane and Fold, the assistant's panel, and whether plug-in windows show) without switching any of it.
+- **R24.** `view.state` also reports, beside what R23 lists: the detail area, under `detail` ([detail-views.md](detail-views.md) R17); whether the Undo History shows ([undo-history.md](undo-history.md) R10); the second window, under `second_window`, and which window has the focus ([second-window.md](second-window.md) R15). `settings.state` reports the Theme & Colors page's settings under `theme_colors` ([themes.md](themes.md) R12, R24, R30). Each still switches nothing. (S1, S2)
 
 ## Tests
 
@@ -81,3 +82,4 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 | R21 | `crates/shell/tests/project_folders.rs`, `save_as_to_another_project_keeps_using_the_same_media` | unit, through `Shell::run` on real folders |
 | R22 | `crates/shell/tests/project_folders.rs`, `the_save_dialog_opens_in_the_sets_project_folder` | unit; the app passes the folder to the system dialog |
 | R23 | `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state`, `settings_state_reports_secrets_only_as_stored_or_not`, `view_state_reads_back_the_view_toggles` | unit, through the agent API |
+| R24 | to be written in WP-6.27 to WP-6.30, each for its own fields | |

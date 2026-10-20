@@ -53,6 +53,7 @@ pub mod level_mod;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
+pub mod looper;
 pub mod midi_cc;
 mod midi_fx;
 pub mod midi_monitor;
@@ -112,6 +113,7 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use looper::{LOOPER, looper_type};
 pub use midi_cc::{CC_CONTROL, cc_control_type};
 pub use midi_monitor::{MIDI_MONITOR, midi_monitor_type};
 pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
@@ -190,6 +192,7 @@ pub fn display(
         )),
         TUNER => Some(tuner::display(device, description, values, data)),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
+        LOOPER => Some(looper::display(device, description, values, data)),
         _ => None,
     }
 }
@@ -248,6 +251,7 @@ pub fn register(registry: &mut Registry) {
     spectrum_analyser::register(registry);
     tuner::register(registry);
     oscilloscope::register(registry);
+    looper::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        197,
+        204,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -78,7 +78,10 @@ WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 
          four for tempo leaders, stretching and sliding, and WP-5.4 ten \
          for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
          rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
-         set_macro_randomize_excluded and set_mapped_value"
+         set_macro_randomize_excluded and set_mapped_value, and WP-5.5 seven \
+         for the macro variations: store_variation, launch_variation, \
+         overwrite_variation, rename_variation, duplicate_variation, \
+         delete_variation and set_macro_variation_excluded"
     );
 
     for op in &ops {
@@ -1902,6 +1905,32 @@ fn every_command_runs_by_id() {
         json!({ "rack": rack, "target": target }),
     );
 
+    // Macro variations: storing, launching, overwriting, naming, copying and
+    // deleting (WP-5.5).
+    agent.run("rack.store_variation", json!({ "rack": rack }));
+    agent.run(
+        "rack.set_macro_variation_excluded",
+        json!({ "rack": rack, "macro_number": 2, "excluded": true }),
+    );
+    agent.run("rack.launch_variation", json!({ "rack": rack, "index": 0 }));
+    agent.run(
+        "rack.overwrite_variation",
+        json!({ "rack": rack, "index": 0 }),
+    );
+    agent.run(
+        "rack.rename_variation",
+        json!({ "rack": rack, "index": 0, "name": "Quiet" }),
+    );
+    agent.run(
+        "rack.duplicate_variation",
+        json!({ "rack": rack, "index": 0 }),
+    );
+    agent.run("rack.delete_variation", json!({ "rack": rack, "index": 1 }));
+    let varied = agent.editor.document().device(rack).unwrap();
+    assert_eq!(varied.macros.variations.len(), 1);
+    assert_eq!(varied.macros.variations[0].name, "Quiet");
+    assert!(varied.macros.setting(2).variation_excluded);
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -3378,6 +3407,39 @@ fn schemas_match_what_commands_serialise() {
                     param: ParamId(7),
                 },
                 value: 1.0,
+            },
+        ),
+        ("rack.store_variation", Command::StoreVariation { rack }),
+        (
+            "rack.launch_variation",
+            Command::LaunchVariation { rack, index: 0 },
+        ),
+        (
+            "rack.overwrite_variation",
+            Command::OverwriteVariation { rack, index: 0 },
+        ),
+        (
+            "rack.rename_variation",
+            Command::RenameVariation {
+                rack,
+                index: 0,
+                name: "Quiet".to_owned(),
+            },
+        ),
+        (
+            "rack.duplicate_variation",
+            Command::DuplicateVariation { rack, index: 0 },
+        ),
+        (
+            "rack.delete_variation",
+            Command::DeleteVariation { rack, index: 0 },
+        ),
+        (
+            "rack.set_macro_variation_excluded",
+            Command::SetMacroVariationExcluded {
+                rack,
+                macro_number: 1,
+                excluded: true,
             },
         ),
     ];

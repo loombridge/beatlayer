@@ -199,6 +199,24 @@ fn record_starts_on_the_grid_line_while_the_song_plays_and_at_once_while_stopped
     );
 }
 
+// Spec: looper R5
+#[test]
+fn a_queued_transport_change_taken_back_before_its_grid_line_is_dropped() {
+    // Record is asked for, then Stop again before the bar line: nothing
+    // records, so every block is silent.
+    let mut rig = Rig::new(&choices(IO_REC_OVR, Q_BAR), true, STEP);
+    let record = rig.set(TRANSPORT, RECORD);
+    let stop = rig.set(TRANSPORT, STOP);
+    let mut events = vec![vec![record], vec![stop]];
+    events.extend((2..40).map(|_| Vec::new()));
+    let last = rig.run(40, 1.0, &events);
+    assert!(
+        last[0].iter().all(|s| *s == 0.0),
+        "the queued Record was taken back: {}",
+        last[0][0]
+    );
+}
+
 // Spec: looper R6, R18, R19
 #[test]
 fn a_fixed_record_length_ends_after_that_many_bars_and_switches_as_told() {
@@ -276,23 +294,61 @@ fn clear_in_overdub_keeps_the_length_and_elsewhere_resets_it() {
     let mut rig = recorded(&choices(IO_NEVER, Q_STEP), None);
     let event = rig.set(TRANSPORT, OVERDUB);
     let _ = rig.block(LAYER, &[event]);
+    // The Overdub asked for takes effect on the grid line, so the next block
+    // is the pass it makes.
+    let _ = rig.block(LAYER, &[]);
+    assert_eq!(
+        f64::from(rig.values()[0]),
+        OVERDUB,
+        "the pass is overdubbing"
+    );
     rig.send(Action::Clear);
     let cleared = rig.block(0.0, &[]);
     assert!(cleared[0].iter().all(|s| *s == 0.0), "the samples are gone");
     let values = rig.values();
     assert_eq!(
-        (values[7] as i64, values[8] as u32, values[9] as u32),
-        (0, 0, 0),
-        "the length is kept, so the loop still runs its length"
+        values[16], STEP as f32,
+        "the length is kept: the song plays"
+    );
+    assert_eq!(
+        f64::from(values[0]),
+        OVERDUB,
+        "and Overdub is still the state"
     );
     // Elsewhere Clear resets the length too.
     let event = rig.set(TRANSPORT, STOP);
     let _ = rig.block(0.0, &[event]);
     let _ = rig.block(0.0, &[]);
     rig.send(Action::Clear);
+    let _ = rig.block(0.0, &[]);
     let values = rig.values();
     assert_eq!(values[1], 1.0, "the buffer is empty again");
+    assert_eq!(values[16], 0.0, "the length is reset too");
     assert_eq!(f64::from(values[0]), STOP, "and Looper is stopped");
+}
+
+// Spec: looper R9
+#[test]
+fn clear_in_overdub_while_the_song_is_stopped_resets_the_length_too() {
+    let mut rig = recorded(&choices(IO_NEVER, Q_STEP), None);
+    // With the song stopped, the Overdub asked for acts at once.
+    rig.playing = false;
+    let event = rig.set(TRANSPORT, OVERDUB);
+    let _ = rig.block(LAYER, &[event]);
+    assert_eq!(
+        f64::from(rig.values()[0]),
+        OVERDUB,
+        "the pass is overdubbing"
+    );
+    rig.send(Action::Clear);
+    let cleared = rig.block(0.0, &[]);
+    assert!(cleared[0].iter().all(|s| *s == 0.0), "the samples are gone");
+    let values = rig.values();
+    assert_eq!(values[1], 1.0, "the buffer is empty");
+    assert_eq!(
+        values[16], 0.0,
+        "and the length is reset: the song is stopped"
+    );
 }
 
 // Spec: looper R10
@@ -381,7 +437,14 @@ fn reverse_plays_the_buffer_backwards_from_its_position() {
     let mut rig = recorded(&choices(IO_NEVER, Q_STEP), Some(shape));
     let event = rig.set(REVERSE, 1.0);
     let _ = rig.block(0.0, &[]);
-    let reversed = rig.block(0.0, &[event]);
+    // R14 through R5: engaging Reverse waits for the grid line.
+    let waiting = rig.block(0.0, &[event]);
+    assert!(
+        waiting[0][0] < 0.1,
+        "the change waits for the grid line: {}",
+        waiting[0][0]
+    );
+    let reversed = rig.block(0.0, &[]);
     assert!(
         reversed[0][0] > 0.9,
         "Reverse starts at the end of the recording: {}",

@@ -260,7 +260,11 @@ pub fn make(device: &Device, config: &NodeConfig) -> Looper {
         .params
         .get(&TRANSPORT)
         .map_or(STOP, |value| (*value as usize).min(STOP));
-    Looper::new(config, transport)
+    let reverse = device
+        .params
+        .get(&REVERSE)
+        .is_some_and(|value| *value >= 0.5);
+    Looper::new(config, transport, reverse)
 }
 
 /// What the main thread asks a Looper's node to do (the looper spec, R25):
@@ -303,6 +307,15 @@ pub struct Looper {
     /// A transport change waiting for its frame: the state and the song
     /// frame it acts on (R5).
     pending: Option<(State, i64)>,
+    /// The Reverse value last seen, which says when it changed.
+    seen_reverse: bool,
+    /// Whether the song was playing in the stretch last processed, which
+    /// Clear's rule (R9) and the quantisation grid (R5) read.
+    song_playing: bool,
+    /// A Reverse change waiting for its frame (R14, through R5).
+    pending_reverse: Option<(bool, i64)>,
+    /// The Reverse value in effect.
+    reverse: bool,
     /// Where a fixed-length recording ends, as a song frame (R6).
     record_end: Option<i64>,
     /// The song tick a recording began on, which the tempo rules use (R22).
@@ -320,7 +333,7 @@ pub struct Looper {
 }
 
 impl Looper {
-    fn new(config: &NodeConfig, transport: usize) -> Self {
+    fn new(config: &NodeConfig, transport: usize, reverse: bool) -> Self {
         let rate = config.sample_rate;
         let channels = config.channels.clamp(1, 2);
         let max_frames = (MAX_SECONDS * rate.as_f64()) as usize;
@@ -338,6 +351,10 @@ impl Looper {
             state: State::of(transport),
             seen: transport,
             pending: None,
+            seen_reverse: reverse,
+            song_playing: false,
+            pending_reverse: None,
+            reverse,
             record_end: None,
             record_start: Ticks::ZERO,
             record_tempo: 120.0,
@@ -365,8 +382,28 @@ impl Looper {
         }
     }
 
+    /// The song frame a change acts on (R5): the next line of the
+    /// quantisation grid while the song plays, and now while it is stopped.
+    fn due(
+        &self,
+        song: i64,
+        playing: bool,
+        tempo: &TempoMap,
+        params: &ParamBank,
+        signatures: &TimeSignatureMap,
+    ) -> i64 {
+        if playing {
+            let from = tempo.frames_to_ticks(Frames(song), self.rate);
+            let line = self.quantization(params).next_line(from, signatures);
+            tempo.ticks_to_frames(line, self.rate).get()
+        } else {
+            song
+        }
+    }
+
     /// Takes a transport change: while the song plays it waits for the next
-    /// grid line, and while it is stopped it acts at once (R5).
+    /// grid line, and while it is stopped it acts at once (R5). A change back
+    /// to the state in effect takes back a queued one.
     fn change(
         &mut self,
         wanted: State,
@@ -377,16 +414,30 @@ impl Looper {
         signatures: &TimeSignatureMap,
     ) {
         if wanted == self.state {
+            self.pending = None;
             return;
         }
-        let due = if playing {
-            let from = tempo.frames_to_ticks(Frames(song), self.rate);
-            let line = self.quantization(params).next_line(from, signatures);
-            tempo.ticks_to_frames(line, self.rate).get()
-        } else {
-            song
-        };
+        let due = self.due(song, playing, tempo, params, signatures);
         self.pending = Some((wanted, due));
+    }
+
+    /// Takes a Reverse change, which waits like a transport change (R14). A
+    /// change back to the value in effect takes back a queued one.
+    fn change_reverse(
+        &mut self,
+        wanted: bool,
+        song: i64,
+        playing: bool,
+        tempo: &TempoMap,
+        params: &ParamBank,
+        signatures: &TimeSignatureMap,
+    ) {
+        if wanted == self.reverse {
+            self.pending_reverse = None;
+            return;
+        }
+        let due = self.due(song, playing, tempo, params, signatures);
+        self.pending_reverse = Some((wanted, due));
     }
 
     /// Puts a transport change into effect on `song`, and asks the song for a
@@ -569,7 +620,9 @@ impl Looper {
     fn command(&mut self, action: Action) {
         match action {
             Action::Clear => {
-                let keep = self.state == State::Overdub;
+                // R9: the length and tempo are kept only in Overdub while
+                // the song plays.
+                let keep = self.state == State::Overdub && self.song_playing;
                 self.clear(keep);
             }
             Action::Undo => {
@@ -670,6 +723,7 @@ impl NativeDevice for Looper {
         }
         let rate = self.rate;
         let playing = audio.playing();
+        self.song_playing = playing;
         let tempo = audio.tempo();
         let signatures = audio.signatures();
         let song0 = audio.song_position().get();
@@ -706,10 +760,22 @@ impl NativeDevice for Looper {
                 record_length,
             );
         }
+        if let Some((value, due)) = self.pending_reverse
+            && (!playing || song0 >= due)
+        {
+            self.pending_reverse = None;
+            self.reverse = value;
+        }
         let wanted = (params.value(TRANSPORT_INDEX) as usize).min(STOP);
         if wanted != self.seen {
             self.seen = wanted;
             self.change(State::of(wanted), song0, playing, tempo, params, signatures);
+        }
+        // A Reverse change waits like a transport change (R14).
+        let wanted_reverse = params.value(REVERSE_INDEX) >= 0.5;
+        if wanted_reverse != self.seen_reverse {
+            self.seen_reverse = wanted_reverse;
+            self.change_reverse(wanted_reverse, song0, playing, tempo, params, signatures);
         }
 
         let mut input = [0.0f32; 2];
@@ -732,6 +798,13 @@ impl NativeDevice for Looper {
                     record_length,
                 );
             }
+            // A queued Reverse change acts on its frame too (R14).
+            if let Some((value, due)) = self.pending_reverse
+                && (song >= due || (!playing && i == 0))
+            {
+                self.pending_reverse = None;
+                self.reverse = value;
+            }
             // A fixed-length recording ends after its bars (R6).
             if self.state == State::Record {
                 if let Some(end) = self.record_end {
@@ -748,7 +821,7 @@ impl NativeDevice for Looper {
             }
 
             let speed = params.ramp(SPEED_INDEX)[i] as f64;
-            let reverse = params.value(REVERSE_INDEX) >= 0.5;
+            let reverse = self.reverse;
             let feedback = (params.ramp(FEEDBACK_INDEX)[i] as f64 / 100.0) as f32;
             let rate_now = if tempo_control == TEMPO_NONE || self.length == 0 {
                 speed
@@ -819,8 +892,6 @@ impl NativeDevice for Looper {
             }
         }
 
-        let song_end = song0 + frames as i64;
-        let _ = song_end;
         self.publish(signatures);
     }
 

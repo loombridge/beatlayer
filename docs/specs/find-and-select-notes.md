@@ -1,0 +1,64 @@
+# Find and Select Notes: the note filters and Invert Selection
+
+- **Status:** draft
+- **Work packages:** WP-6.4 (R1 to R15). The note editor's selection, insert marker and time selection are [piano-roll.md](piano-roll.md)'s; the clip's scale, which the Scale filter reads, is [scales.md](scales.md)'s (WP-6.7); filters over several clips at once are [multi-clip-editing.md](multi-clip-editing.md)'s; the MIDI Tools that act on the selection are WP-6.11's
+- **Parity-matrix row:** MIDI editing: Find and Select Notes
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.1, 12.1.5, 12.1.10 and 12.2; the UI parity reference's rows L-CLIP-010, L-CLIP-019, M-EDIT-010, S-NOTE-021, S-NOTE-034 and S-NOTE-037, recorded from Live 12.4.3 on macOS
+
+## The behaviour
+
+Find and Select Notes selects notes by what they are rather than by where they sit. The magnifier at the left of the MIDI Note Editor's toolbar, or Cmd-Shift-F, shows a bar of filters above the editor's ruler. A chooser picks which filter's controls show: Pitch, Time, Chance, Condition, Count, Duration, Scale or Velocity. Moving a filter's controls switches it on and selects, as the controls move, the notes that every switched-on filter lets through; each filter has an Invert switch that turns it round and a Select button that switches it back on. A dot in the chooser marks each filter that is on. A click in the note area switches every filter off and clears the selection, keeping their settings.
+
+Invert Selection (Cmd-Shift-A) swaps the selected and the unselected notes.
+
+This spec covers the filter bar, the eight filters, and Invert Selection. It leaves how a selection is made by hand, and the time selection, to [piano-roll.md](piano-roll.md), and the clip's scale to [scales.md](scales.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 10 "Editing MIDI", section 10.5.3 "Find and Select Notes" | The Find and Select Notes switch in the Clip View's header shows the filters above the time ruler; a chooser picks a filter, and filters combine. Each has an Invert switch, which selects the notes that don't match, and a Select button, which selects the matches again, as after the filter was switched off. Pitch: switches for pitch classes, in every octave. Time: Start, Length and Repeat, in beats. Chance: Min and Max probability. Condition: Active, Chance (below 100 %) and Velocity Deviation switches. Count: Every (each nth note or chord), Offset, and a Quantized switch that counts by grid steps, so with a 1/16 grid and Every at 3 every third sixteenth is selected. Duration: Min and Max. Scale: Use Clip Scale, or a root and a scale of its own. Velocity: Min and Max. Notes are selected as the controls move; a dot in the chooser marks a filter that is on; a click anywhere in the editor switches every filter off and deselects the notes. With the switch on, Shift-clicking a key adds its key track, and Shift-dragging sideways makes repeated, evenly spaced time selections. |
+| S2 | Manual | Same chapter, section 10.1 "The MIDI Note Editor Layout", items 4 and 5, and section 10.5.2 "Selecting Notes and Timespan" | The switch sits at the left of the editor's header with Fold and the scale buttons, and the filters show above the time ruler. Invert Selection, in the Edit menu, the editor's context menu and on Cmd-Shift-A, swaps the selected and the unselected notes. |
+| S3 | Release notes | Live 12 release notes, 12.1 (Find and Select Notes), 12.1.5, 12.1.10 and 12.2 (bug fixes) | Find and Select Notes is new in 12.1, with the eight filters, combinable, and Shift-clicking keys to select several pitches (12.1). The Scale filter works while the clip's Scale Mode is off (12.1.5). The Velocity and Chance filters select correctly while their values are fine-tuned (12.1.10). Clicking the filters' switches leaves the keyboard focus in the editor; notes the Pitch filter selected stay selected when another filter is chosen; the Time filter's Repeat goes back to its default (12.2). |
+| S4 | Release notes | Live 12 release notes, the bug fixes after 12.0 | Invert Selection updates the editor's time selection. |
+| S5 | Beatlayer | The UI parity reference: [layout.md](../ui-parity/layout.md) L-CLIP-010 and L-CLIP-019; [menus.md](../ui-parity/menus.md) M-EDIT-010 and the C-NOTE rows; [shortcuts.toml](../ui-parity/shortcuts.toml) S-NOTE-021, S-NOTE-034 and S-NOTE-037; [interactions.md](../ui-parity/interactions.md) I-DRAG-042 | Where the switch and the bar sit, the menu items, the keys (on Windows the manual gives Ctrl-Shift-F to the filters and to following playback), and the Shift-drag. |
+| S6 | Spec | [piano-roll.md](piano-roll.md) R3, R4 and R23 to R26; [scales.md](scales.md) R1 and R3; [note-editing.md](note-editing.md) R7 and R18 | How notes are named and which notes the editor shows; the insert marker, the time selection and selecting by hand; the scale list and each clip's scale; velocity deviation and deactivated notes. |
+| S7 | Beatlayer | [The architecture](../02-architecture.md), "Agent control", decision D17 | Every action is a registered command with a schema, a description and a permission class, and what an agent sets it can read back. |
+
+## Rules
+
+- **R1.** The Find and Select Notes switch, the magnifier at the left of the editor's toolbar (L-CLIP-010), and Cmd-Shift-F (Ctrl-Shift-F on Windows; S-NOTE-037) show and hide the filter bar, above the editor's ruler (L-CLIP-019). Showing or hiding it leaves the filters' settings, which filters are on, and the selection as they are, and leaves the keyboard focus in the editor. On Windows, Ctrl-Shift-F goes to the filters, not to following playback (S-NOTE-021). The bar is view state: no undo step, not saved with the set. (S1, S2, S3, S5; the Windows key and what hiding leaves are Beatlayer's own)
+- **R2.** The bar holds, from the left, the Filter chooser, listing Pitch, Time, Chance, Condition, Count, Duration, Scale and Velocity in that order, then the chosen filter's controls, then its Invert switch and its Select button. The chooser marks with a dot every filter that is on. Choosing another filter shows its controls and changes neither which filters are on nor the selection. (S1, S3; the order within the bar is Beatlayer's own)
+- **R3.** Changing any of a filter's controls, or its Invert switch, switches the filter on. While any filter is on, the selection is the notes in the clip's span ([piano-roll.md](piano-roll.md) R4) that every filter that is on lets through, worked out again each time a control moves, and the time selection follows it ([piano-roll.md](piano-roll.md) R24). A filter's Select button switches it on and selects again. A click anywhere in the note area or the lanes switches every filter off, keeping their settings, deselects the notes, and then does what a click there does ([piano-roll.md](piano-roll.md) R23). A change to the selection by hand ([piano-roll.md](piano-roll.md) R5, R25, R26) leaves the filters as they are. Selecting is never an undo step and changes nothing in the set. (S1, S3)
+- **R4.** A filter with Invert on lets through exactly the notes it would otherwise hold back. Invert is off in a new editor. (S1)
+- **R5.** Pitch has a switch for each pitch class, C to B, all off in a new editor. It lets a note through when the switch for its pitch class, in whatever octave, is on; with none on it lets none through. (S1)
+- **R6.** Time has Start, Length and Repeat, counted in beats of the clip's time signature, to a hundredth of a beat: Start from 1, the clip's 1.1.1; Length above 0; Repeat 0 or more. A new editor's are Start 1, Length 1 and Repeat one bar of the clip's signature. It lets a note through when its start lies from Start up to, but not including, Start plus Length, or in that window moved later by a whole number of Repeats when Repeat is above 0. While the bar shows, Shift-dragging sideways in the note area (I-DRAG-042) sets Start to where the drag began and Length to the span dragged, on the grid, and switches Time on, so the window repeats at the Repeat. (S1, S3; the units' steps, the defaults and the Shift-drag's settings are Beatlayer's own)
+- **R7.** Chance has Min and Max, 0 to 100 %, 0 and 100 % in a new editor, and lets a note through when its chance lies from Min to Max. Velocity has Min and Max, 1 to 127, 1 and 127 in a new editor, and lets a note through when its velocity lies from Min to Max. Moving Min past Max, or Max past Min, takes the other with it. (S1, S3; the ranges, defaults and the pair's behaviour are Beatlayer's own)
+- **R8.** Condition has three switches, all off in a new editor: Active lets through the notes that aren't deactivated ([note-editing.md](note-editing.md) R18), Chance those whose chance is below 100 %, and Velocity Deviation those whose velocity deviation isn't 0. With two or three on, a note must pass each; with none on, every note passes. (S1; combining the switches is Beatlayer's own)
+- **R9.** Count has Every, 1 to 16, Offset, 0 to one less than Every, and Quantized, 2, 0 and off in a new editor. With Quantized off, the notes are counted in order of their starts, notes that start on the same tick counting once together, from 0; with it on, the editing grid's steps are counted from the start of the clip's span, empty steps included, from 0, and a note belongs to the step it starts in. A note passes when its count less Offset is 0 or a whole multiple of Every. (S1; the ranges and defaults are Beatlayer's own)
+- **R10.** Duration has Min and Max, in beats of the clip's signature to a hundredth of a beat, from 0 to the length of the clip's span, 0 and that length in a new editor, and lets a note through when its length lies from Min to Max. (S1; the units, range and defaults are Beatlayer's own)
+- **R11.** Scale has Use Clip Scale, on in a new editor, and its own Scale Root and Scale Name choosers, C and Major in a new editor, offering the scale list ([scales.md](scales.md) R1). With Use Clip Scale on it lets through the notes whose pitch is in the clip's scale ([scales.md](scales.md) R3), whether or not the clip's Scale Mode is on; with it off, the notes in the scale its own choosers name. (S1, S3; the defaults are Beatlayer's own)
+- **R12.** The filters' settings, and which are on, belong to the editor: they're kept while the editor shows another clip and while the app runs, aren't saved with the set, and aren't undo steps. When the editor shows a different clip, every filter is switched off. (Beatlayer's own)
+- **R13.** Invert Selection (Cmd-Shift-A, Ctrl-Shift-A on Windows; S-NOTE-034; Edit ▸ Invert Selection, M-EDIT-010; the editor's context menu) selects every note in the clip's span that wasn't selected and deselects those that were, and the time selection follows ([piano-roll.md](piano-roll.md) R24). It is enabled while the editor shows a clip that holds notes. It is never an undo step and changes nothing in the set. (S2, S4)
+- **R14.** The filters' and Invert Selection's actions are registered commands, run by the bar, the keys, the menus and agents alike, in the read class: `clip_view.note_filters` shows or hides the bar, chooses the filter shown, sets any filter's controls and Invert, switches filters on (Select) and off, and returns every filter's settings, which are on, and the selection; `clip_view.invert_selection` inverts the selection. Each acts on the clip the editor shows. `view.state`'s `clip_view` reports the bar and the filters. (S7)
+- **R15.** Assistive technology reads the switch as a switch with its state, the chooser as a list naming each filter and whether it's on, and each control with its name and value; a selection made by the filters is announced as a selection is. (S7)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.4 | |
+| R2 | to be written in WP-6.4 | |
+| R3 | to be written in WP-6.4 | |
+| R4 | to be written in WP-6.4 | |
+| R5 | to be written in WP-6.4 | |
+| R6 | to be written in WP-6.4 | |
+| R7 | to be written in WP-6.4 | |
+| R8 | to be written in WP-6.4 | |
+| R9 | to be written in WP-6.4 | |
+| R10 | to be written in WP-6.4 | |
+| R11 | to be written in WP-6.4 | |
+| R12 | to be written in WP-6.4 | |
+| R13 | to be written in WP-6.4 | |
+| R14 | to be written in WP-6.4 | |
+| R15 | to be written in WP-6.4 | |

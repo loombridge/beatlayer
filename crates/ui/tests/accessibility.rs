@@ -2638,6 +2638,48 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "what the Macro Controls and the mappings list show",
             )),
         ),
+        // Spec: macros R25 to R30 and R32. The Macro Variations view's
+        // buttons, its rows and the macro's context menu reach these with the
+        // pointer; Rename, Duplicate and Delete also take Cmd+R, Cmd+D and the
+        // Delete key through the device's own commands.
+        (
+            "rack.store_variation",
+            Exception(Equivalent("the variations view's New button")),
+        ),
+        (
+            "rack.launch_variation",
+            Exception(Equivalent("a variation row's Launch button")),
+        ),
+        (
+            "rack.overwrite_variation",
+            Exception(Equivalent("a variation row's Overwrite button")),
+        ),
+        (
+            "rack.rename_variation",
+            Exception(Equivalent("Rename on a variation row")),
+        ),
+        (
+            "rack.duplicate_variation",
+            Exception(Equivalent("Duplicate on a variation row")),
+        ),
+        (
+            "rack.delete_variation",
+            Exception(Equivalent("Delete on a variation row")),
+        ),
+        (
+            "rack.set_macro_variation_excluded",
+            Exception(Equivalent(
+                "Exclude Macro From Variations on a macro's context menu",
+            )),
+        ),
+        (
+            "rack.show_variations",
+            Exception(Equivalent("the view column's Show/Hide Macro Variations")),
+        ),
+        (
+            "rack.select_variation",
+            Exception(Equivalent("a click on a variation's row")),
+        ),
         (
             "chain.select",
             main(a_rack, device_view, "Chain Pad", Key::Enter),

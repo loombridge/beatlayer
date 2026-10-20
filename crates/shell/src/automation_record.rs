@@ -160,6 +160,40 @@ pub fn moved(document: &Document, command: &Command) -> Option<(TrackId, Automat
     })
 }
 
+/// Every control move `command` makes that automation can record: one move
+/// for a control's own command, and one per macro a variation launch moves
+/// (macros spec, R27), each of which is a hand move on that macro.
+#[must_use]
+pub fn moved_all(document: &Document, command: &Command) -> Vec<(TrackId, AutomationTarget, f64)> {
+    if let Command::LaunchVariation { rack, index } = command {
+        let Some(device) = document.device(*rack) else {
+            return Vec::new();
+        };
+        let Some(variation) = device.macros.variations.get(*index) else {
+            return Vec::new();
+        };
+        let Some(track) = document.device_track(*rack) else {
+            return Vec::new();
+        };
+        return (1..=bl_model::MACROS)
+            .filter(|number| !device.macros.setting(*number).variation_excluded)
+            .filter_map(|number| {
+                variation.values.get(usize::from(number - 1)).map(|value| {
+                    (
+                        track,
+                        AutomationTarget::Device {
+                            device: *rack,
+                            param: bl_model::macro_param(number),
+                        },
+                        *value,
+                    )
+                })
+            })
+            .collect();
+    }
+    moved(document, command).into_iter().collect()
+}
+
 /// The slot a Session recording writes a control's moves into (WP-3.12).
 pub type SlotKey = (TrackId, SceneId, AutomationTarget);
 

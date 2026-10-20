@@ -2,18 +2,18 @@
 
 <!-- Generated from shortcuts.toml by `cargo xtask ui-parity`. Don't edit this file by hand: edit shortcuts.toml and regenerate. `cargo xtask check` fails if the two differ. -->
 
-Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 359 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
+Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 377 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
 
 ## By milestone
 
 | Milestone | Shortcuts |
 |---|---|
 | M1 | 137 |
-| M2 | 85 |
+| M2 | 87 |
 | M3 | 39 |
 | M4 | 21 |
 | M5 | 10 |
-| M6 | 55 |
+| M6 | 71 |
 | M7 | 2 |
 | M9 | 8 |
 | M10 | 2 |
@@ -24,7 +24,7 @@ A shortcut applies in its context. The same keys may mean different things in di
 
 | Context | Applies when | Shortcuts |
 |---|---|---|
-| [`global`](#global) | Anywhere in a main window, unless a narrower context binds the same keys. | 103 |
+| [`global`](#global) | Anywhere in a main window, unless a narrower context binds the same keys. | 105 |
 | [`dialog`](#dialog) | A secondary window or dialog has focus. | 1 |
 | [`tab-focus`](#tab-focus) | Use Tab Key to Move Focus is on (Navigate menu or Display & Input settings). | 4 |
 | [`text-field`](#text-field) | A name or text is being edited. | 2 |
@@ -33,17 +33,17 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`session`](#session) | The Session View has focus. | 28 |
 | [`arrangement`](#arrangement) | The Arrangement View has focus. | 48 |
 | [`track-headers`](#track-headers) | A track title bar is selected, in either view. | 13 |
-| [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 4 |
-| [`loop-brace`](#loop-brace) | A loop brace or a clip start or end marker is selected. | 10 |
-| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 13 |
-| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 8 |
+| [`take-lanes`](#take-lanes) | A take lane is selected in the Arrangement. | 6 |
+| [`loop-brace`](#loop-brace) | A loop brace or a clip start or end marker is selected, or a multi-clip loop bar. | 11 |
+| [`envelope`](#envelope) | An automation lane or the Clip View's Envelope Editor has focus. | 17 |
+| [`clip-view`](#clip-view) | The Clip View has focus, whichever editor it shows. | 9 |
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
-| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 38 |
-| [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 13 |
+| [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 42 |
+| [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
 | [`device-view`](#device-view) | The Device View has focus. | 12 |
 | [`rack-chains`](#rack-chains) | A rack's chain list has focus. | 1 |
 | [`sample-swap`](#sample-swap) | A Drum Rack, a pad, Simpler or Drum Sampler is selected. | 5 |
-| [`browser`](#browser) | The browser's content pane has focus. | 14 |
+| [`browser`](#browser) | The browser's content pane has focus. | 15 |
 | [`browser-sidebar`](#browser-sidebar) | The browser's sidebar has focus. | 2 |
 | [`browser-search`](#browser-search) | The browser's search field has focus. | 1 |
 | [`computer-midi-keyboard`](#computer-midi-keyboard) | The computer MIDI keyboard is on. | 4 |
@@ -158,6 +158,8 @@ Anywhere in a main window, unless a narrower context binds the same keys.
 | S-VIEW-022 | Hide or show the detail area (the Clip View or Device View) | `Cmd+Option+L` | `Ctrl+Alt+L` | key | press | M2 | observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-VIEW-023 | Show the Max for Live window | `Cmd+Option+Shift+M` | `Ctrl+Alt+Shift+M` | key | press | M9 | observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-MENU-006 | Open the system's emoji and symbols picker | `Ctrl+Cmd+Space` | none | key | press | M1 | observed in 12.4.3 (macOS), 10 October 2026: Edit menu (Emoji & Symbols) |
+| S-MENU-007 | Open the command search | `Cmd+Shift+P` | `Ctrl+Shift+P` | key | press | M6 | Beatlayer (IMP-16, WP-6.42); not in Live |
+| S-FOCUS-015 | Open the track search | `Cmd+Shift+O` | `Ctrl+Shift+O` | key | press | M6 | Beatlayer (IMP-18, WP-6.42); not in Live |
 
 ## dialog
 
@@ -278,7 +280,7 @@ The Arrangement View has focus.
 | S-ARR-018 | Duplicate time across all tracks | `Cmd+Shift+D` | `Ctrl+Shift+D` | key | press | M6 | manual 42.16; observed in 12.4.3 (macOS), 10 October 2026: Edit menu |
 | S-ARR-019 | Delete time across all tracks | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` | key | press | M6 | manual 42.16; observed in 12.4.3 (macOS), 10 October 2026: Edit menu |
 | S-ARR-021 | Unfold every track | `Option+U` | `Alt+U` | key | press | M1 | manual 42.16; observed in 12.4.3 (macOS), 10 October 2026: View menu |
-| S-ARR-022 | Make the selected tracks or clips taller or shorter | `Option+Plus` or `Option+Minus` | `Alt+Plus` or `Alt+Minus` | key | press | M1 | manual 42.16 |
+| S-ARR-022 | Make the selected tracks or clips taller or shorter | `Option+Plus` or `Option+Minus` | `Alt+Plus` or `Alt+Minus` | key | press | M1 | manual 42.16, 21.2 |
 | S-ARR-023 | Scroll the display to follow playback (unconfirmed) | `Option+Shift+F` | `Ctrl+Shift+F` | key | press | M1 | manual 42.16 |
 | S-ARR-024 | Pan the display around the selection | Cmd+Option+drag | Ctrl+Alt+drag | mouse | held | M1 | manual 42.16 |
 | S-ARR-025 | Fit all tracks to the Arrangement's height | `H` | `H` | key | press | M1 | manual 42.16 |
@@ -333,10 +335,12 @@ A take lane is selected in the Arrangement.
 | S-COMP-003 | Audition the selected take lane | `T` | `T` | key | press | M6 | manual 42.17 |
 | S-COMP-005 | Duplicate the selected take lane | `Cmd+D` | `Ctrl+D` | key | press | M6 | manual 42.17 |
 | S-COMP-006 | Replace the main lane's clip with the previous or next take | `Cmd+Up` or `Cmd+Down` | `Ctrl+Up` or `Ctrl+Down` | key | press | M6 | manual 42.17 |
+| S-COMP-007 | Go from a take lane to its track's main lane and fold the take lanes | `Left` | `Left` | key | press | M6 | manual 21.1 |
+| S-COMP-008 | Move the selected take lanes up or down | `Cmd+Up` or `Cmd+Down` | `Ctrl+Up` or `Ctrl+Down` | key | press | M6 | manual 21.2 |
 
 ## loop-brace
 
-A loop brace or a clip start or end marker is selected.
+A loop brace or a clip start or end marker is selected, or a multi-clip loop bar.
 
 | ID | Action | macOS | Windows | Kind | Trigger | Milestone | Source |
 |---|---|---|---|---|---|---|---|
@@ -350,6 +354,7 @@ A loop brace or a clip start or end marker is selected.
 | S-SAMPLE-006 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.11 |
 | S-NOTE-022 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.12 |
 | S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M1 | manual 42.16 |
+| S-LOOP-012 | Duplicate Loop: double the loop and copy its notes into the new half | `Cmd+D` | `Ctrl+D` | key | press | M6 | manual 10.7.3, 10.8 |
 
 ## envelope
 
@@ -370,6 +375,10 @@ An automation lane or the Clip View's Envelope Editor has focus.
 | S-A11Y-023 | Change the selected breakpoint's value | `Up` or `Down` | `Up` or `Down` | key | press | M6 | manual 41.5 |
 | S-A11Y-024 | Cancel the breakpoint edit and deselect | `Esc` | `Esc` | key | press | M6 | manual 41.5 |
 | S-A11Y-025 | Delete the selected breakpoint | `Delete` | `Delete` | key | press | M6 | manual 41.5 |
+| S-NOTE-053 | Select every breakpoint of the focused expression envelope | `Cmd+A` | `Ctrl+A` | key | press | M6 | manual 12.2 |
+| S-A11Y-028 | Cycle the automated parameters in the Clip View's Envelope Editor | `Option+Up` or `Option+Down` | `Alt+Up` or `Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
+| S-A11Y-029 | Cycle all of the clip's device parameters in the Clip View's Envelope Editor | `Shift+Option+Up` or `Shift+Option+Down` | `Shift+Alt+Up` or `Shift+Alt+Down` | key | press | M6 | Live 12 release notes, 12.2, bug fixes (the Clip View's Envelope Editor) |
+| S-A11Y-030 | Move the selected breakpoint in time by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 41.5.1; Live 12 release notes, 12.2 |
 
 ## clip-view
 
@@ -377,14 +386,15 @@ The Clip View has focus, whichever editor it shows.
 
 | ID | Action | macOS | Windows | Kind | Trigger | Milestone | Source |
 |---|---|---|---|---|---|---|---|
-| S-LOOP-001 | Set the clip start marker at the play position | `Cmd+F9` | `Ctrl+F9` | key | press | M2 | manual 42.8 |
-| S-LOOP-002 | Set the loop start at the play position | `Cmd+F10` | `Ctrl+F10` | key | press | M2 | manual 42.8 |
-| S-LOOP-003 | Set the loop end at the play position | `Cmd+F11` | `Ctrl+F11` | key | press | M2 | manual 42.8 |
-| S-LOOP-004 | Set the clip end marker at the play position | `Cmd+F12` | `Ctrl+F12` | key | press | M2 | manual 42.8 |
+| S-LOOP-001 | Set the clip start marker at the play position | `Cmd+F9` | `Ctrl+F9` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
+| S-LOOP-002 | Set the loop start at the play position | `Cmd+F10` | `Ctrl+F10` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
+| S-LOOP-003 | Set the loop end at the play position | `Cmd+F11` | `Ctrl+F11` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
+| S-LOOP-004 | Set the clip end marker at the play position | `Cmd+F12` | `Ctrl+F12` | key | press | M2 | manual 42.8; Live 12 release notes, 12.0 |
 | S-CLIPMODE-003 | Show the Content Editor (the Sample or Notes tab) | `Option+Shift+1` | `Alt+Shift+1` | key | press | M2 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-004 | Show the Envelope Editor (the Envelopes tab) | `Option+Shift+2` | `Alt+Shift+2` | key | press | M3 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-CLIPMODE-005 | Show the Expression Editor (the MPE tab) | `Option+Shift+3` | `Alt+Shift+3` | key | press | M6 | manual 42.10; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-030 | Expand the Clip View to full size | `Cmd+Option+E` | `Ctrl+Alt+E` | key | press | M6 | manual 42.12; observed in 12.4.3 (macOS), 10 October 2026: View menu |
+| S-NOTE-052 | Choose the previous or next chord in Stacks' Chord Selector Pad | `Cmd+Up` or `Cmd+Down` | `Ctrl+Up` or `Ctrl+Down` | key | press | M6 | manual 11.3.4 |
 
 ## sample-editor
 
@@ -419,8 +429,8 @@ The Clip View shows a MIDI clip's MIDI Note Editor.
 | S-NOTE-001 | Select all notes | `Cmd+A` | `Ctrl+A` | key | press | M2 | manual 42.12 |
 | S-NOTE-002 | Copy notes by dragging | Option+drag | Ctrl+drag | mouse | press | M2 | manual 42.12 |
 | S-NOTE-003 | Chop the selected notes on the grid, or split them at the time selection's edges | `Cmd+E` | `Ctrl+E` | key | press | M6 | manual 42.12 |
-| S-NOTE-004 | Chop notes into a number of parts set by dragging up or down (unconfirmed) | Cmd+E (hold) and drag | Ctrl+E (hold) and drag | mouse | held | M6 | manual 42.12 |
-| S-NOTE-005 | Chop notes in steps of two while dragging up or down | Cmd+Shift+E (hold) and drag | Ctrl+Shift+E (hold) and drag | mouse | held | M6 | manual 42.12 |
+| S-NOTE-004 | Chop notes into a number of parts set by dragging up or down (unconfirmed) | Cmd+E (hold) and drag or Option+E (hold) and drag | Ctrl+E (hold) and drag | mouse | held | M6 | manual 42.12 |
+| S-NOTE-005 | Chop notes in steps of two while dragging up or down | Cmd+Shift+E (hold) and drag or Option+Shift+E (hold) and drag | Ctrl+Shift+E (hold) and drag | mouse | held | M6 | manual 42.12 |
 | S-NOTE-006 | Split a note where clicked; drag to move the split | E (hold) and click | E (hold) and click | mouse | held | M6 | manual 42.12 |
 | S-NOTE-007 | Join the selected notes | `Cmd+J` | `Ctrl+J` | key | press | M6 | manual 42.12 |
 | S-NOTE-008 | Fit the selected notes to the time range | `Cmd+Option+J` | `Ctrl+Alt+J` | key | press | M6 | manual 42.12; observed in 12.4.3 (macOS), 10 October 2026: Edit menu |
@@ -436,7 +446,7 @@ The Clip View shows a MIDI clip's MIDI Note Editor.
 | S-NOTE-018 | Move the insert marker to the end | `End` or `Fn+Right` | `End` | key | press | M2 | manual 42.12 |
 | S-NOTE-019 | Select the previous or next note (unconfirmed) | `Option+Down` or `Option+Up` | `Alt+Down` or `Alt+Up` | key | press | M2 | manual 42.12 |
 | S-NOTE-020 | Select the previous or next note of the same pitch (unconfirmed) | `Option+Left` or `Option+Right` | `Alt+Left` or `Alt+Right` | key | press | M2 | manual 42.12 |
-| S-NOTE-021 | Scroll the display to follow playback (unconfirmed) | `Option+Shift+F` | `Ctrl+Shift+F` | key | press | M2 | manual 42.12 |
+| S-NOTE-021 | Scroll the display to follow playback (unconfirmed) | `Option+Shift+F` | `Alt+Shift+F` | key | press | M2 | manual 42.12, 42.9 |
 | S-NOTE-023 | Zoom to the clip selection | `Z` | `Z` | key | press | M2 | manual 42.12 |
 | S-NOTE-024 | Zoom back from the clip selection | `X` | `X` | key | press | M2 | manual 42.12 |
 | S-NOTE-025 | Zoom in or out horizontally | `Plus` or `Minus` | `Plus` or `Minus` | key | press | M2 | manual 42.12 |
@@ -453,6 +463,10 @@ The Clip View shows a MIDI clip's MIDI Note Editor.
 | S-NOTE-039 | Fold the editor to the clip's scale | `G` | `G` | key | press | M6 | manual 10.6; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-NOTE-040 | Toggle Focus Mode for multi-clip editing (momentary while held) | `N` | `N` | key | latch | M6 | manual 10.8.1 |
 | S-NOTE-044 | Turn Step Input Mode on or off | `Cmd+Shift+B` | `Ctrl+Shift+B` | key | press | M6 | observed in 12.4.3 (macOS), 10 October 2026: Options menu |
+| S-NOTE-045 | Move the insert marker one grid step earlier or later | `Left` or `Right` | `Left` or `Right` | key | press | M2 | manual 10.5.2 |
+| S-NOTE-046 | Move the time selection's end to the next or previous note start or end | `Option+Shift+Left` or `Option+Shift+Right` | `Alt+Shift+Left` or `Alt+Shift+Right` | key | press | M2 | manual 10.5.2 |
+| S-NOTE-048 | Add the held notes at the insert marker and step on, or lengthen the notes just added | `Right` | `Right` | key | press | M6 | manual 19.3.4 |
+| S-NOTE-049 | Shorten, then remove, the notes just added, and step back | `Left` | `Left` | key | press | M6 | manual 19.3.4 |
 
 ## note-selection
 
@@ -473,6 +487,9 @@ Notes are selected in the MIDI Note Editor.
 | S-NOTE-041 | Deactivate the selected notes | `0` | `0` | key | press | M6 | manual 10.5.7 |
 | S-NOTE-042 | Deselect the notes | `Esc` | `Esc` | key | press | M2 | manual 10.5.2 |
 | S-NOTE-043 | Add the previous or next note to the selection (unconfirmed) | `Option+Shift+Down` or `Option+Shift+Up` | `Ctrl+Shift+Down` or `Ctrl+Shift+Up` | key | press | M2 | manual 10.5.2 |
+| S-NOTE-047 | After a chop, while Cmd stays held, chop the same notes into one part more or fewer, or with Shift into the next or previous power of two | `Cmd+Up` or `Cmd+Down` or `Cmd+Shift+Up` or `Cmd+Shift+Down` | `Ctrl+Up` or `Ctrl+Down` or `Ctrl+Shift+Up` or `Ctrl+Shift+Down` | key | press | M6 | manual 10.5.8.2 |
+| S-NOTE-050 | Change the selected notes' velocity or release velocity by 10, or by 1 with Shift | `Cmd+Up` or `Cmd+Down` or `Cmd+Shift+Up` or `Cmd+Shift+Down` | `Ctrl+Up` or `Ctrl+Down` or `Ctrl+Shift+Up` or `Ctrl+Shift+Down` | key | press | M6 | manual 10.5.12 |
+| S-NOTE-051 | Change the selected notes' chance by 10 %, or by 1 % with Shift | `Up` or `Down` or `Shift+Up` or `Shift+Down` | `Up` or `Down` or `Shift+Up` or `Shift+Down` | key | press | M6 | manual 10.5.13 |
 
 ## device-view
 
@@ -533,6 +550,7 @@ The browser's content pane has focus.
 | S-BRW-013 | Show or hide the filter view | `Cmd+Option+G` | `Ctrl+Alt+G` | key | press | M6 | manual 42.22; observed in 12.4.3 (macOS), 10 October 2026: View menu |
 | S-BRW-014 | Show or hide the tag editor | `Cmd+Shift+E` | `Ctrl+Shift+E` | key | press | M6 | manual 42.22 |
 | S-A11Y-015 | Extend the selection in the content pane | `Shift+Up` or `Shift+Down` | `Shift+Up` or `Shift+Down` | key | press | M1 | manual 41.4.1.6 |
+| S-BRW-015 | Move the focus to Quick Tags' Add field | `Cmd+E` | `Ctrl+E` | key | press | M6 | Live 12 release notes, 12.2 (Quick Tags) |
 
 ## browser-sidebar
 
@@ -584,6 +602,7 @@ The Settings window has focus.
 | S-VIEW-008 | note | The key labelled ? on a US layout. Manual 2.2.2 calls it the ? key. |
 | S-VIEW-009 | unconfirmed | Corrected from the manual's Cmd+Option+V / Ctrl+Alt+V: Live 12.4.3's View menu shows Cmd+Option+Shift+V, and its Edit menu shows Cmd+Option+V for Paste Bounced Audio (S-BOUNCE-002). The Windows binding is inferred from macOS. |
 | S-VIEW-012 | note | Manual 17 gives Ctrl+Option+I on macOS; Live 12.4.6's Mixer Controls submenu shows Cmd+Option+I. |
+| S-FOCUS-009 | note | In Beatlayer it goes to the shown panel of the group the focus was last in (detail views, R24). |
 | S-FILE-006 | note | macOS only. |
 | S-FILE-007 | note | Manual 41.4.1.3 gives Cmd+R / Ctrl+R for this, which is Rename everywhere else; treated as an error in that section. |
 | S-FILE-008 | unconfirmed | Live 12.4.3 shows no key beside Export MIDI Clip... in the File menu or the clip context menus (observed 10 October 2026). |
@@ -598,6 +617,10 @@ The Settings window has focus.
 | S-ENV-002 | same command as S-VAL-003 |  |
 | S-ENV-005 | note | Manual 27.1 gives Ctrl+Backspace on Windows for clearing a clip envelope. |
 | S-ENV-006 | same command as S-EDIT-013 |  |
+| S-LOOP-001 | note | The 12.0 release notes say these set the markers to the time selection. |
+| S-LOOP-002 | note | The 12.0 release notes say these set the markers to the time selection. |
+| S-LOOP-003 | note | The 12.0 release notes say these set the markers to the time selection. |
+| S-LOOP-004 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-ZOOM-003 | note | Manual 41.4.1.3 describes the same keys as widening and narrowing the Arrangement grid; the adaptive grid follows the zoom. |
 | S-ZOOM-005 | unconfirmed | Sections 42.11, 42.12 and 42.16 give Ctrl+Shift+F on Windows for the same command. |
 | S-CLIPMODE-001 | unconfirmed | Manual 8.1.3 gives Alt+Tab on Windows. |
@@ -605,16 +628,15 @@ The Settings window has focus.
 | S-SAMPLE-005 | unconfirmed | Section 42.9 gives Alt+Shift+F on Windows for the same command. |
 | S-SAMPLE-006 | note | Acts when the start marker is selected (42.8). |
 | S-SAMPLE-012 | unconfirmed | Manual 9.2.3 gives Ctrl+Shift+Backspace on Windows. |
-| S-NOTE-004 | unconfirmed | Manual 10.5.8 gives E with Option (macOS) or E with Ctrl (Windows) held while dragging. |
+| S-NOTE-004 | unconfirmed | Manual 10.5.8 gives E with Option (macOS) or E with Ctrl (Windows) held while dragging; both macOS bindings are listed. |
 | S-NOTE-019 | unconfirmed | Manual 41.4.1.4 gives Ctrl on Windows for the same command. |
 | S-NOTE-020 | unconfirmed | Manual 41.4.1.4 gives Ctrl on Windows for the same command. |
-| S-NOTE-021 | unconfirmed; shares keys with S-NOTE-037 | On Windows the manual gives the same keys as Show or Hide Note Filters in the same editor, and 42.9 gives Alt+Shift+F. |
+| S-NOTE-021 | unconfirmed | On Windows 42.12 gives Ctrl+Shift+F, the same keys as Show or Hide Note Filters (S-NOTE-037) in the same editor, and 42.9 gives Alt+Shift+F. Beatlayer binds Alt+Shift+F and leaves Ctrl+Shift+F to the note filters. |
 | S-NOTE-022 | same command as S-SAMPLE-006 |  |
-| S-NOTE-037 | shares keys with S-NOTE-021 |  |
 | S-GRID-002 | note | Context-dependent keys: in the Arrangement, Cmd+1 to Cmd+4 are Narrow Grid, Widen Grid, Triplet Grid, and Snap to Grid (its clip and time-selection context menus); with the Session View focused, the Options menu lists the same keys as launch quantisation (S-SES-024 to S-SES-027), observed in 12.4.3. |
 | S-GRID-003 | note | Context-dependent keys: in the Arrangement, Cmd+1 to Cmd+4 are Narrow Grid, Widen Grid, Triplet Grid, and Snap to Grid (its clip and time-selection context menus); with the Session View focused, the Options menu lists the same keys as launch quantisation (S-SES-024 to S-SES-027), observed in 12.4.3. |
 | S-GRID-004 | note | Context-dependent keys: in the Arrangement, Cmd+1 to Cmd+4 are Narrow Grid, Widen Grid, Triplet Grid, and Snap to Grid (its clip and time-selection context menus); with the Session View focused, the Options menu lists the same keys as launch quantisation (S-SES-024 to S-SES-027), observed in 12.4.3. |
-| S-GRID-005 | note | Context-dependent keys: in the Arrangement, Cmd+1 to Cmd+4 are Narrow Grid, Widen Grid, Triplet Grid, and Snap to Grid (its clip and time-selection context menus); with the Session View focused, the Options menu lists the same keys as launch quantisation (S-SES-024 to S-SES-027), observed in 12.4.3. |
+| S-GRID-005 | note | Context-dependent keys: in the Arrangement, Cmd+1 to Cmd+4 are Narrow Grid, Widen Grid, Triplet Grid, and Snap to Grid (its clip and time-selection context menus); with the Session View focused, the Options menu lists the same keys as launch quantisation (S-SES-024 to S-SES-027), observed in 12.4.3. In the Clip View's MPE tab, Cmd+4 switches that tab's own grid, saved with the clip (manual 12.2). |
 | S-GRID-007 | same command as S-EDIT-013 |  |
 | S-SES-001 | note | With a scene selected in the Main track, Enter launches the scene (41.4.1.2). |
 | S-SES-010 | same command as S-SES-002 |  |
@@ -625,11 +647,13 @@ The Settings window has focus.
 | S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. |
 | S-ARR-020 | note | Live 12.4.3's View menu shows U beside Show Selected Grouped Track. |
 | S-ARR-021 | note | Live 12.4.3's View menu shows these keys beside Show Grouped Tracks. |
+| S-ARR-022 | note | It makes selected take lanes taller or shorter too (manual 21.2). |
 | S-ARR-023 | unconfirmed | Section 42.9 gives Alt+Shift+F on Windows for the same command. |
 | S-ARR-024 | same command as S-ZOOM-007 |  |
 | S-ARR-028 | note | With nothing selected the same keys move the insert marker by the grid (41.4.1.3). The Move Clips With Arrow Keys setting turns nudging off. |
 | S-ARR-029 | note | Live 12.4.3 offers Reverse Clip(s) with this key for an empty MIDI clip too; the manual describes it for audio. |
 | S-ARR-035 | note | Puts the keyboard focus in the mixer at the selected track; Right then moves the selection to the next track (observed in 12.4.6 (macOS), 11 October 2026). |
+| S-COMP-006 | shares keys with S-COMP-008 | The manual gives Cmd+Up and Cmd+Down both for moving take lanes (21.2, S-COMP-008) and for replacing the main lane's material with the next or previous take (21.6, 42.17): with take lane headers selected they move lanes, with clips or time selected they replace. |
 | S-BOUNCE-002 | note | Also works in a Session slot (shown in the empty slot's context menu). On macOS Live 12.4.3 moved the video window to Cmd+Option+Shift+V (S-VIEW-009), so these keys aren't shared there; the manual gives Ctrl+Alt+V for both on Windows. |
 | S-TRACK-001 | note | Inserts the track directly after the selected track and selects it (pressed in 12.4.3 (macOS), 13 October 2026, with one track selected). |
 | S-TRACK-002 | note | Inserts the track after the last selected track and selects it (pressed in 12.4.3 (macOS), 13 October 2026, with tracks 1 to 3 selected). |
@@ -673,3 +697,18 @@ The Settings window has focus.
 | S-ARR-037 | same command as S-SES-007 |  |
 | S-NOTE-044 | note | Disabled in the Options menu in a new set. The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-MENU-006 | note | macOS only: the system adds this item to every Edit menu (M-EDIT-040). |
+| S-NOTE-045 | note | With no notes selected; with notes selected the arrows move them (S-A11Y-011). |
+| S-NOTE-047 | shares keys with S-NOTE-027, S-NOTE-028, S-NOTE-043 | Only straight after Cmd+E (S-NOTE-003) while Cmd stays held; otherwise the same keys change velocity and velocity deviation, and on Windows Ctrl+Shift+Up and Down also add the next or previous note to the selection (S-NOTE-043). |
+| S-NOTE-048 | shares keys with S-NOTE-045 | Only while step recording: the note editor shows a clip on an armed track with the Preview switch on and the transport stopped. |
+| S-NOTE-049 | shares keys with S-NOTE-045 | Only while step recording: the note editor shows a clip on an armed track with the Preview switch on and the transport stopped. |
+| S-NOTE-050 | shares keys with S-NOTE-027, S-NOTE-028, S-NOTE-043, S-NOTE-047 | Only after a marker in the Velocity or Release Velocity lane was clicked last. In the Velocity and Release Velocity lanes. The steps of 1 with Shift are Beatlayer's own. |
+| S-NOTE-051 | shares keys with S-A11Y-008, S-A11Y-009 | Only after a marker in the Chance lane was clicked last. In the Chance lane. The steps of 1 % with Shift are Beatlayer's own. |
+| S-NOTE-052 | note | Handled by the Chord Selector Pad while it has the keyboard focus. |
+| S-NOTE-053 | note | In the MPE tab, on the focused expression envelope. |
+| S-LOOP-012 | note | With the loop brace selected, or with multi-clip loop bars selected. |
+| S-COMP-008 | shares keys with S-COMP-006 | The manual gives Cmd+Up and Cmd+Down both for moving take lanes (21.2) and for replacing the main lane's material with the next or previous take (21.6, 42.17, S-COMP-006): with take lane headers selected they move lanes, with clips or time selected they replace. |
+| S-A11Y-028 | same command as S-A11Y-026 |  |
+| S-A11Y-029 | same command as S-A11Y-027 |  |
+| S-A11Y-030 | shares keys with S-A11Y-018 | While a breakpoint is selected; with none selected, Left and Right move the insert marker (S-A11Y-018). |
+| S-MENU-007 | note | Beatlayer's own key for Help ▸ Search Commands…, which Live 12 leaves unbound on both platforms; it works wherever the keyboard focus is. |
+| S-FOCUS-015 | note | Beatlayer's own key for Navigate ▸ Find Track, which Live 12 leaves unbound on both platforms; it works wherever the keyboard focus is. |

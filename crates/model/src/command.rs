@@ -1039,9 +1039,11 @@ pub enum Command {
         at: Ticks,
     },
     /// Slides a clip's contents inside the clip, which stays where it is
-    /// (R54): its Start marker and loop brace move by `by`, and on a warped
-    /// clip its warp markers' beats move with them, so the same audio plays
-    /// on later (or earlier) beats while the clip keeps its place and length.
+    /// (R54): its Start marker, its End marker and its loop brace each move
+    /// the other way through its contents by `by`, and its warp markers keep
+    /// their beats and their times in the file, so the same audio — its
+    /// markers and its waveform with it — plays `by` ticks later (or earlier)
+    /// while the clip keeps its place and length.
     SlideContents {
         /// The audio or MIDI clip.
         clip: ClipId,

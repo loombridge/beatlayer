@@ -146,10 +146,15 @@ pub struct EditKeys {
     /// Select time inside a clip from its title bar: Shift with Option
     /// (Alt) (S-ARR-007).
     pub time_in_clip: bool,
-    /// Slide a clip's contents inside the clip: Shift with Option (Alt) on
-    /// macOS, Shift with Ctrl on Windows and Linux (S-ARR-005), on the clip's
-    /// body; with `bypass` as well, it doesn't snap (S-ARR-036).
+    /// Slide a clip's contents inside the clip: Shift with Option (Alt), on
+    /// the clip's body (S-ARR-005, I-DRAG-013); with `slide_bypass` as well,
+    /// it doesn't snap (S-ARR-036).
     pub slide: bool,
+    /// Slide a clip's contents without snapping: Cmd with Shift and Option on
+    /// macOS, Ctrl with Shift and Alt on Windows and Linux (S-ARR-036,
+    /// I-DRAG-014). The general `bypass` is Alt there, which is this
+    /// gesture's slide key.
+    pub slide_bypass: bool,
 }
 
 impl EditKeys {
@@ -167,11 +172,8 @@ impl EditKeys {
             toggle: modifiers.command,
             extend: modifiers.shift,
             time_in_clip: modifiers.shift && modifiers.alt,
-            slide: if mac {
-                modifiers.shift && modifiers.alt
-            } else {
-                modifiers.shift && modifiers.ctrl
-            },
+            slide: modifiers.shift && modifiers.alt,
+            slide_bypass: modifiers.command,
         }
     }
 }
@@ -411,8 +413,8 @@ impl ClipGestures {
             // Spec: warping R54. The contents move by the drag, snapped to
             // the grid unless Cmd is held as well.
             ClipDrag::Slide { clip, from } => {
-                let to = lanes.view.snap_drag(lanes.doc, at, keys.bypass);
-                let from = lanes.view.snap_drag(lanes.doc, *from, keys.bypass);
+                let to = lanes.view.snap_drag(lanes.doc, at, keys.slide_bypass);
+                let from = lanes.view.snap_drag(lanes.doc, *from, keys.slide_bypass);
                 Some((SLIDE_CONTENTS, json!({ "clip": clip, "by": to - from })))
             }
         }

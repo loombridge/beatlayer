@@ -380,13 +380,19 @@ fn dragging_an_edge_resizes_and_esc_cancels_a_drag() {
     assert_eq!(s.steps(), 2);
 }
 
-/// The modifier that slides a clip's contents: Shift with Option (Alt) on
-/// macOS, Shift with Ctrl elsewhere (S-ARR-005).
+/// The modifier that slides a clip's contents: Shift with Option (Alt)
+/// (S-ARR-005).
 fn slide_key() -> Modifiers {
+    Modifiers::SHIFT | Modifiers::ALT
+}
+
+/// The modifier that slides a clip's contents without snapping: Cmd with
+/// Shift and Option on macOS, Ctrl with Shift and Alt elsewhere (S-ARR-036).
+fn slide_bypass_key() -> Modifiers {
     if cfg!(target_os = "macos") {
-        Modifiers::SHIFT | Modifiers::ALT
+        Modifiers::MAC_CMD | Modifiers::COMMAND
     } else {
-        Modifiers::SHIFT | Modifiers::CTRL
+        Modifiers::CTRL | Modifiers::COMMAND
     }
 }
 
@@ -512,7 +518,7 @@ fn shift_option_dragging_a_clips_contents_slides_them_in_one_step() {
     );
     assert_eq!(s.doc().clip(a).unwrap().data, doc.clip(a).unwrap().data);
     let before = s.clip(a);
-    let bypass = slide_key() | bypass_key();
+    let bypass = slide_key() | slide_bypass_key();
     s.drag(
         pos2(x(4.0), AUDIO_3.1),
         pos2(x(5.0) + 2.0, AUDIO_3.1),

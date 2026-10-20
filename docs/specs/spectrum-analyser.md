@@ -26,10 +26,11 @@ The user can configure the analysis block size, channel routing (Left, Right, or
 - **R3.** Discrete frequency bins are spaced exactly `rate / Block` Hz apart. (S1)
 - **R4.** Channel chooser selects analysis of Left channel, Right channel, or Both (mono sum `(L + R) * 0.5`). (S1)
 - **R5.** Avg averages the power of N successive analysis blocks (from 1 to 32 blocks, default 1). (S1)
-- **R6.** Max enables peak-hold: the highest measured level at each bin is retained until cleared or reset. (S1)
+- **R6.** Max enables peak-hold: the highest measured level at each bin is retained until cleared or reset. Setting `Clear Max` resets the held maximum to the floor level (-150 dB) on a rising edge. (S1)
 - **R7.** The latest spectrum is published lock-free after every block through triple-buffer display data, and is readable headless by `device.display` with `live = true`. (S2)
 - **R8.** The display cell expands in a floating window according to IMP-14. (S2)
 - **R9.** Every parameter can be automated and modulated; no memory allocation, lock, or blocking operation occurs on the audio thread. (S2)
+- **R10.** Dynamic range mode (Range Mode): in manual 'Range' mode, the vertical axis spans from Range Min to Range Max. In 'Auto' mode, the vertical span adjusts automatically to incoming signal levels: Range Max is rounded up to the nearest 6 dB step above the peak bin (clamped to [-60 dB, +12 dB]), and Range Min is set 72 dB below Range Max (minimum -150 dB); if no signal or peak is below -120 dB, the range defaults to [-120 dB, 0 dB]. (S1, S2)
 
 ## Tests
 
@@ -40,10 +41,11 @@ The user can configure the analysis block size, channel routing (Left, Right, or
 | R3 | `crates/devices/tests/spectrum_analyser.rs`, `the_bins_are_the_rate_over_block_apart` | unit, real-time trap |
 | R4 | `crates/devices/tests/spectrum_analyser.rs`, `each_channel_choice_reads_its_channel` | unit, real-time trap |
 | R5 | `crates/devices/tests/spectrum_analyser.rs`, `avg_n_averages_n_blocks` | unit, real-time trap |
-| R6 | `crates/devices/tests/spectrum_analyser.rs`, `max_holds_the_highest_reading_until_cleared` | unit, real-time trap |
+| R6 | `crates/devices/tests/spectrum_analyser.rs`, `max_holds_the_highest_reading_until_cleared`, `clear_max_resets_accumulated_peak_hold` | unit, real-time trap |
 | R7 | `crates/shell/tests/device_displays.rs`, `the_spectrums_display_publishes_and_reads_headless` | unit |
 | R8 | `crates/ui/tests/device_panel.rs`, `the_spectrums_cell_draws_in_docked_and_floating_windows` | UI script |
 | R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`; `rtsan/tests/devices.rs`, `spectrum_passes_under_rtsan` | unit, RTSan |
+| R10 | `crates/devices/tests/spectrum_analyser.rs`, `auto_range_mode_scales_vertical_span_to_signal` | unit |
 
 ## Defaults, ranges and details
 

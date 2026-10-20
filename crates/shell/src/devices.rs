@@ -1369,14 +1369,22 @@ impl DeviceView {
         let DeviceKind::Native { device_type } = &device.kind else {
             return empty_display(device.id);
         };
+        let view = self.display_view(device);
         let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
         let mut display = self
             .description(&device.kind)
             .and_then(|description| {
-                bl_devices::display(device_type, device.id, description, &device.params, data)
+                bl_devices::display_for_view(
+                    device_type,
+                    device.id,
+                    description,
+                    &device.params,
+                    data,
+                    view.as_deref(),
+                )
             })
             .unwrap_or_else(|| empty_display(device.id));
-        display.view = self.display_view(device);
+        display.view = view;
         display
     }
 

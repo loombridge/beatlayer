@@ -98,13 +98,14 @@ fn freeze_holds_the_captured_window() {
     // Freeze, then feed silence: the window stays as it was.
     let silent = vec![0.0f32; frames];
     let mut data: Vec<f32> = silent.iter().chain(&silent).copied().collect();
+    let events = [common::set(0, FREEZE, 1.0)];
     {
         let mut block = Block::new(
             &mut data,
             2,
             frames,
             frames,
-            &[common::set(0, FREEZE, 1.0)],
+            &events,
             TransportInfo::default(),
             RATE,
         );
@@ -186,7 +187,10 @@ fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
         }
         renders.push(out);
     }
-    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    assert_eq!(
+        renders[0], input,
+        "the output is the input, at every block size"
+    );
     for render in &renders[1..] {
         assert_eq!(render, &renders[0]);
     }

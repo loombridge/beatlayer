@@ -25,9 +25,12 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 - **R3.** The distance in cents from the nearest equal-temperament semitone is calculated as $100 \times (p - \text{round}(p))$, where $p = 69 + 12 \log_2(f / \text{Ref})$. Setting the Reference to 432 Hz shifts the cents readout according to this relationship. (S1)
 - **R4.** The note spellings in the Show Options menu (Sharps `C#`, Flats `D♭`, or Sharps and Flats `C#/D♭`) govern note name formatting. (S1)
 - **R5.** The device offers Classic and Histogram views, switchable via view buttons or `device.set_display_view`. (S1, S2)
-- **R6.** Tuner publishes its detected pitch, nearest note, and cents deviation lock-free after every block, readable headless by `device.display`. (S2)
-- **R7.** The display cell expands in a floating window according to IMP-14. (S2)
-- **R8.** Every parameter can be automated and modulated; no memory allocation, lock, or blocking operation occurs on the audio thread. (S2)
+  - Classic View supports Target mode (default, showing a needle along the curve within [-50, +50] cents) and Strobe mode (simulated rotating strobe band whose speed and direction indicate pitch deviation).
+  - Histogram View displays pitch history over time (the last 32 measurements), with Auto centring enabled by the Auto parameter (centring the pitch history within a ±50 cents window around the detected note).
+- **R6.** Readout chooser toggles between displaying deviation in cents and frequency in Hertz in the needle marker and primary readings. (S1)
+- **R7.** Tuner publishes its detected pitch, nearest note, cents deviation, strobe phase, and pitch history lock-free after every block, readable headless by `device.display`. (S2)
+- **R8.** The display cell expands in a floating window according to IMP-14. (S2)
+- **R9.** Every parameter can be automated and modulated; no memory allocation, lock, or blocking operation occurs on the audio thread. (S2)
 
 ## Tests
 
@@ -37,10 +40,11 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 | R2 | `crates/devices/tests/tuner.rs`, `sines_from_41_hz_to_2_khz_read_their_note_within_one_cent`, `a_96_khz_stream_reads_its_pitch_within_one_cent` | unit, real-time trap |
 | R3 | `crates/devices/tests/tuner.rs`, `a_432_hz_reference_moves_the_cents_reading` | unit, real-time trap |
 | R4 | `crates/devices/tests/tuner.rs`, `each_spelling_names_the_note_as_stated` | unit, real-time trap |
-| R5 | `crates/devices/tests/tuner.rs`, `views_and_modes_switch_cleanly` | unit |
-| R6 | `crates/shell/tests/device_displays.rs`, `the_tuners_display_publishes_and_reads_headless` | unit |
-| R7 | `crates/ui/tests/device_panel.rs`, `the_tuners_cell_draws_in_docked_and_floating_windows` | UI script |
-| R8 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`; `rtsan/tests/devices.rs`, `tuner_passes_under_rtsan` | unit, RTSan |
+| R5 | `crates/devices/tests/tuner.rs`, `views_and_modes_switch_cleanly`, `histogram_view_shows_pitch_history_and_auto_centring` | unit |
+| R6 | `crates/devices/tests/tuner.rs`, `classic_strobe_mode_and_readout_chooser` | unit |
+| R7 | `crates/shell/tests/device_displays.rs`, `the_tuners_display_publishes_and_reads_headless` | unit |
+| R8 | `crates/ui/tests/device_panel.rs`, `the_tuners_cell_draws_in_docked_and_floating_windows` | UI script |
+| R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`; `rtsan/tests/devices.rs`, `tuner_passes_under_rtsan` | unit, RTSan |
 
 ## Defaults, ranges and details
 

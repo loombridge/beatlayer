@@ -399,8 +399,9 @@ pub fn display(
 ) -> DeviceDisplay {
     let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
     let scale_x = value(SCALE_X) as usize;
-    let range_min = value(RANGE_MIN) as f32;
-    let range_max = value(RANGE_MAX) as f32;
+    let range_mode = value(RANGE_MODE) as usize;
+    let mut range_min = value(RANGE_MIN) as f32;
+    let mut range_max = value(RANGE_MAX) as f32;
 
     let (x_unit, log_x) = match scale_x {
         0 => ("Hz".to_owned(), false),
@@ -412,6 +413,20 @@ pub fn display(
     let mut readings = Vec::new();
 
     if let Some(bins) = data {
+        let peak_val = bins.iter().copied().reduce(f32::max);
+        if range_mode == 1 {
+            // Auto dynamic range mode (Spec: spectrum-analyser R10):
+            // Range Max is rounded up to the nearest 6 dB step above the peak bin
+            // (clamped to [-60 dB, +12 dB]), and Range Min is set 72 dB below Range Max
+            // (minimum -150 dB). If no signal or peak is below -120 dB, defaults to [-120 dB, 0 dB].
+            if let Some(peak) = peak_val.filter(|&p| p > -120.0) {
+                range_max = ((peak / 6.0).ceil() * 6.0).clamp(-60.0, 12.0);
+                range_min = (range_max - 72.0).max(-150.0);
+            } else {
+                range_max = 0.0;
+                range_min = -120.0;
+            }
+        }
         series.push(DisplaySeries {
             name: "Spectrum".to_owned(),
             unit: "dB".to_owned(),
@@ -422,12 +437,12 @@ pub fn display(
             detail: false,
             values: bins.to_vec(),
         });
-        if let Some(peak_val) = bins.iter().copied().reduce(f32::max) {
+        if let Some(peak) = peak_val {
             readings.push(bl_model::DisplayReading {
                 name: "Peak".to_owned(),
-                value: peak_val,
+                value: peak,
                 unit: "dB".to_owned(),
-                text: format!("{peak_val:.1} dB"),
+                text: format!("{peak:.1} dB"),
             });
         }
     }

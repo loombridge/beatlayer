@@ -248,8 +248,82 @@ fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
         }
         renders.push(out);
     }
-    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    assert_eq!(
+        renders[0], input,
+        "the output is the input, at every block size"
+    );
     for render in &renders[1..] {
         assert_eq!(render, &renders[0]);
     }
+}
+
+// Spec: spectrum-analyser R6
+#[test]
+fn clear_max_resets_accumulated_peak_hold() {
+    let block_size = 1024;
+    let mut node = make_node(
+        &[(BLOCK, 2.0), (MAX, 1.0), (REFRESH, 10.0), (CLEAR_MAX, 0.0)],
+        block_size,
+    );
+    let bin_k = 16;
+    let hz = bin_k as f64 * RATE.as_f64() / block_size as f64;
+    let signal = sine(hz, 1.0, block_size);
+    let silent = vec![0.0f32; block_size];
+
+    // Feed signal to establish peak
+    process_stereo(&mut node, &signal, &signal);
+    let peak_before = node.device().max_held()[bin_k];
+    assert!(peak_before.abs() < 0.1, "peak is held at 0 dB");
+
+    // Feed silence: Max peak hold retains the peak
+    for _ in 0..4 {
+        process_stereo(&mut node, &silent, &silent);
+    }
+    assert!(
+        (node.device().max_held()[bin_k] - peak_before).abs() < 1e-4,
+        "peak remains held during silence"
+    );
+
+    // Trigger Clear Max via parameter event
+    let clear_event = common::set(0, CLEAR_MAX, 1.0);
+    process_stereo_events(&mut node, &silent, &silent, &[clear_event]);
+    let peak_after = node.device().max_held()[bin_k];
+    assert!(
+        peak_after < -100.0,
+        "Clear Max reset the held peak to the floor: {peak_after} dB"
+    );
+}
+
+// Spec: spectrum-analyser R10
+#[test]
+fn auto_range_mode_scales_vertical_span_to_signal() {
+    let desc = spectrum_type();
+    let id = bl_model::DeviceId(bl_core::id::Id::new(1).unwrap());
+    let mut values = bl_model::OrdMap::new();
+    values.insert(bl_devices::spectrum_analyser::RANGE_MODE, 0.0); // Range
+    values.insert(bl_devices::spectrum_analyser::RANGE_MIN, -100.0);
+    values.insert(bl_devices::spectrum_analyser::RANGE_MAX, 6.0);
+
+    let mut fake_bins = vec![-120.0f32; bl_devices::spectrum_analyser::DISPLAY_BINS];
+    fake_bins[50] = -21.4;
+
+    // Manual Range mode uses RANGE_MIN and RANGE_MAX directly
+    let manual_display =
+        bl_devices::spectrum_analyser::display(id, &desc.description, &values, Some(&fake_bins));
+    let series = manual_display.series("Spectrum").unwrap();
+    assert_eq!(series.y_range, [-100.0, 6.0]);
+
+    // Auto mode scales to the peak (-21.4 dB -> ceil(-21.4 / 6.0) * 6.0 = -18.0 dB max, -90.0 dB min)
+    values.insert(bl_devices::spectrum_analyser::RANGE_MODE, 1.0);
+    let auto_display =
+        bl_devices::spectrum_analyser::display(id, &desc.description, &values, Some(&fake_bins));
+    let auto_series = auto_display.series("Spectrum").unwrap();
+    assert_eq!(auto_series.y_range, [-90.0, -18.0]);
+
+    // Silent signal in Auto mode defaults to [-120.0, 0.0]
+    let silent_bins = vec![-150.0f32; bl_devices::spectrum_analyser::DISPLAY_BINS];
+    let silent_display =
+        bl_devices::spectrum_analyser::display(id, &desc.description, &values, Some(&silent_bins));
+    let silent_series = silent_display.series("Spectrum").unwrap();
+    assert_eq!(silent_series.y_range, [-120.0, 0.0]);
 }

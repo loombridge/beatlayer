@@ -152,6 +152,20 @@ pub fn display(
     values: &OrdMap<ParamId, f64>,
     data: Option<&[f32]>,
 ) -> Option<DeviceDisplay> {
+    display_for_view(device_type, device, description, values, data, None)
+}
+
+/// What `device_type`'s display shows for a specific view: `values` are the device's
+/// set values, `data` the newest data its node published, and `view` the active display view.
+#[must_use]
+pub fn display_for_view(
+    device_type: &str,
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+    view: Option<&str>,
+) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
@@ -190,7 +204,13 @@ pub fn display(
             values,
             data,
         )),
-        TUNER => Some(tuner::display(device, description, values, data)),
+        TUNER => Some(tuner::display_for_view(
+            device,
+            description,
+            values,
+            data,
+            view,
+        )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
         _ => None,

@@ -214,7 +214,10 @@ fn renders_are_bit_identical_at_block_sizes_1_64_512_and_4096() {
         }
         renders.push(out);
     }
-    assert_eq!(renders[0], input, "the output is the input, at every block size");
+    assert_eq!(
+        renders[0], input,
+        "the output is the input, at every block size"
+    );
     for render in &renders[1..] {
         assert_eq!(render, &renders[0]);
     }
@@ -264,4 +267,121 @@ fn a_96_khz_stream_reads_its_pitch_within_one_cent() {
         "440 Hz at 96 kHz reads {detected:.2} Hz ({cents:.2} cents)"
     );
     assert_eq!(node.device().note_name().as_deref(), Some("A4"));
+}
+
+// Spec: tuner R5
+#[test]
+fn histogram_view_shows_pitch_history_and_auto_centring() {
+    let desc = tuner_type();
+    let id = bl_model::DeviceId(bl_core::id::Id::new(1).unwrap());
+    let mut values = bl_model::OrdMap::new();
+    values.insert(bl_devices::tuner::AUTO, 1.0); // Auto centring enabled
+
+    // Published data: [pitch, midi, cents, in_tune, valid, strobe_phase, ..history]
+    let mut data = vec![0.0f32; bl_devices::tuner::TUNER_DISPLAY_LEN];
+    data[0] = 440.0;
+    data[1] = 69.0;
+    data[2] = 5.0; // +5 cents
+    data[3] = 0.0;
+    data[4] = 1.0; // Valid
+    data[5] = 0.25; // Strobe phase
+    for i in 0..bl_devices::tuner::HIST_LEN {
+        data[6 + i] = (i as f32) - 10.0;
+    }
+
+    // Histogram view with Auto centring: y_range is [-50.0, 50.0]
+    let disp_auto = bl_devices::tuner::display_for_view(
+        id,
+        &desc.description,
+        &values,
+        Some(&data),
+        Some("Histogram"),
+    );
+    assert_eq!(disp_auto.view.as_deref(), Some("Histogram"));
+    let hist_series = disp_auto
+        .series("Histogram")
+        .expect("Histogram series exists");
+    assert_eq!(hist_series.values.len(), bl_devices::tuner::HIST_LEN);
+    assert_eq!(hist_series.y_range, [-50.0, 50.0]);
+    assert_eq!(
+        hist_series.x_range,
+        [0.0, bl_devices::tuner::HIST_LEN as f32]
+    );
+    let pitch_marker = disp_auto
+        .markers
+        .iter()
+        .find(|m| m.name == "Pitch")
+        .expect("Pitch marker exists");
+    assert_eq!(pitch_marker.y, 5.0);
+
+    // Histogram view with Auto centring disabled: y_range is [-100.0, 100.0]
+    values.insert(bl_devices::tuner::AUTO, 0.0);
+    let disp_manual = bl_devices::tuner::display_for_view(
+        id,
+        &desc.description,
+        &values,
+        Some(&data),
+        Some("Histogram"),
+    );
+    let manual_hist = disp_manual.series("Histogram").unwrap();
+    assert_eq!(manual_hist.y_range, [-100.0, 100.0]);
+}
+
+// Spec: tuner R5, R6
+#[test]
+fn classic_strobe_mode_and_readout_chooser() {
+    let desc = tuner_type();
+    let id = bl_model::DeviceId(bl_core::id::Id::new(1).unwrap());
+    let mut values = bl_model::OrdMap::new();
+    values.insert(CLASSIC_MODE, 0.0); // Target mode
+    values.insert(HERTZ_CENTS, 0.0); // Hz readout
+
+    let mut data = vec![0.0f32; bl_devices::tuner::TUNER_DISPLAY_LEN];
+    data[0] = 442.5;
+    data[1] = 69.0;
+    data[2] = 9.8; // +9.8 cents
+    data[3] = 0.0;
+    data[4] = 1.0; // Valid
+    data[5] = 0.6; // Strobe phase
+
+    // Target mode with Hz readout
+    let disp_target = bl_devices::tuner::display_for_view(
+        id,
+        &desc.description,
+        &values,
+        Some(&data),
+        Some("Classic"),
+    );
+    assert!(disp_target.series("Tuning").is_some());
+    assert!(disp_target.series("Strobe").is_none());
+    let needle = disp_target
+        .markers
+        .iter()
+        .find(|m| m.name == "Needle")
+        .unwrap();
+    assert_eq!(needle.text, "A4 442.5 Hz");
+    assert_eq!(disp_target.readings[1].name, "Pitch"); // Primary readout after note is Pitch
+
+    // Strobe mode with Cents readout
+    values.insert(CLASSIC_MODE, 1.0); // Strobe mode
+    values.insert(HERTZ_CENTS, 1.0); // Cents readout
+    let disp_strobe = bl_devices::tuner::display_for_view(
+        id,
+        &desc.description,
+        &values,
+        Some(&data),
+        Some("Classic"),
+    );
+    assert!(disp_strobe.series("Strobe").is_some());
+    assert!(disp_strobe.series("Tuning").is_none());
+    let strobe_reading = disp_strobe.reading("Strobe").unwrap();
+    assert_eq!(strobe_reading.text, "Rotating Right (Sharp)");
+    let strobe_marker = disp_strobe
+        .markers
+        .iter()
+        .find(|m| m.name == "Strobe")
+        .unwrap();
+    assert!(strobe_marker.text.contains("A4 +9.8 ct"));
+    assert!(strobe_marker.text.contains("Rotating Right (Sharp)"));
+    assert_eq!(disp_strobe.readings[1].name, "Cents"); // Primary readout after note is Cents
 }

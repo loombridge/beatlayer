@@ -48,8 +48,11 @@ const WINDOW_LEN: usize = 2048;
 /// worth of time at the lowest pitches, and a tuner's needle doesn't need to
 /// move faster than this. (Beatlayer's own response time, the tuner spec.)
 const ANALYSIS_INTERVAL: usize = 2048;
-/// Display data length published to the triple buffer.
-const TUNER_DISPLAY_LEN: usize = 5;
+/// Number of history samples for Histogram view.
+pub const HIST_LEN: usize = 32;
+/// Display data length published to the triple buffer:
+/// [pitch_hz, midi_note, cents, in_tune, valid, strobe_phase, ..history].
+pub const TUNER_DISPLAY_LEN: usize = 6 + HIST_LEN;
 
 /// Returns the descriptor and layout for Tuner.
 #[must_use]
@@ -116,6 +119,10 @@ pub struct Tuner {
     cents: Option<f64>,
     nearest_note_midi: Option<i32>,
     spelling: Spelling,
+    strobe_phase: f32,
+    pitch_history: [f32; HIST_LEN],
+    history_pos: usize,
+    history_count: usize,
     display_data: [f32; TUNER_DISPLAY_LEN],
 }
 
@@ -157,6 +164,10 @@ impl Tuner {
             cents: None,
             nearest_note_midi: None,
             spelling: Spelling::Sharps,
+            strobe_phase: 0.0,
+            pitch_history: [0.0; HIST_LEN],
+            history_pos: 0,
+            history_count: 0,
             display_data: [0.0f32; TUNER_DISPLAY_LEN],
         }
     }
@@ -204,7 +215,7 @@ impl Tuner {
             self.detected_pitch = None;
             self.cents = None;
             self.nearest_note_midi = None;
-            self.display_data = [0.0; TUNER_DISPLAY_LEN];
+            self.update_display_data(None);
             return;
         }
 
@@ -264,7 +275,7 @@ impl Tuner {
             self.detected_pitch = None;
             self.cents = None;
             self.nearest_note_midi = None;
-            self.display_data = [0.0; TUNER_DISPLAY_LEN];
+            self.update_display_data(None);
             return;
         };
 
@@ -289,11 +300,36 @@ impl Tuner {
         self.nearest_note_midi = Some(m);
         self.cents = Some(c);
 
-        self.display_data[0] = f as f32;
-        self.display_data[1] = m as f32;
-        self.display_data[2] = c as f32;
-        self.display_data[3] = if c.abs() < 5.0 { 1.0 } else { 0.0 };
-        self.display_data[4] = 1.0; // Valid signal
+        self.pitch_history[self.history_pos] = c as f32;
+        self.history_pos = (self.history_pos + 1) % HIST_LEN;
+        self.history_count = (self.history_count + 1).min(HIST_LEN);
+
+        self.update_display_data(Some((f, m, c)));
+    }
+
+    fn update_display_data(&mut self, current: Option<(f64, i32, f64)>) {
+        if let Some((f, m, c)) = current {
+            self.display_data[0] = f as f32;
+            self.display_data[1] = m as f32;
+            self.display_data[2] = c as f32;
+            self.display_data[3] = if c.abs() < 5.0 { 1.0 } else { 0.0 };
+            self.display_data[4] = 1.0; // Valid signal
+        } else {
+            self.display_data[0] = 0.0;
+            self.display_data[1] = 0.0;
+            self.display_data[2] = 0.0;
+            self.display_data[3] = 0.0;
+            self.display_data[4] = 0.0;
+        }
+        self.display_data[5] = self.strobe_phase;
+        for i in 0..HIST_LEN {
+            let idx = if self.history_count < HIST_LEN {
+                i
+            } else {
+                (self.history_pos + i) % HIST_LEN
+            };
+            self.display_data[6 + i] = self.pitch_history[idx];
+        }
     }
 }
 
@@ -327,6 +363,12 @@ impl NativeDevice for Tuner {
             self.ring_pos = (self.ring_pos + 1) % self.ring_len;
         }
 
+        if let Some(c) = self.cents {
+            let speed = (c as f32 / 50.0) * (frames as f32 / self.rate as f32) * 5.0;
+            self.strobe_phase = (self.strobe_phase + speed).rem_euclid(1.0);
+            self.display_data[5] = self.strobe_phase;
+        }
+
         // Spec: tuner R2. The difference function costs more than a block at
         // the lowest pitches, so the pitch is measured once per analysis
         // interval, not once per block; audio is never delayed by it.
@@ -351,18 +393,22 @@ impl NativeDevice for Tuner {
     }
 }
 
-/// Builds the device display for Tuner from parameters and publication data.
+/// Builds the device display for Tuner from parameters and publication data for a given view.
 #[must_use]
-pub fn display(
+pub fn display_for_view(
     device: DeviceId,
     description: &DeviceDescription,
     values: &OrdMap<ParamId, f64>,
     data: Option<&[f32]>,
+    view: Option<&str>,
 ) -> DeviceDisplay {
     let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
     let spelling_flats = value(SPELLING_FLATS) >= 0.5;
     let spelling_both = value(SPELLING_BOTH) >= 0.5;
 
+    // Note spelling priority: Sharps (C#) is the default when neither Flats nor Both
+    // is set. In the three-way spelling menu (Sharps, Flats, Both), the spelling selection
+    // checks Both first, then Flats, falling back to Sharps if neither is active.
     let spelling = if spelling_both {
         Spelling::Both
     } else if spelling_flats {
@@ -370,6 +416,11 @@ pub fn display(
     } else {
         Spelling::Sharps
     };
+
+    let readout_cents = value(HERTZ_CENTS) >= 0.5; // 0 = Hz, 1 = Cents
+    let classic_mode = value(CLASSIC_MODE) as usize; // 0 = Target, 1 = Strobe
+    let auto_centring = value(AUTO) >= 0.5;
+    let active_view = view.unwrap_or("Classic");
 
     let mut readings = Vec::new();
     let mut markers = Vec::new();
@@ -381,6 +432,7 @@ pub fn display(
             let pitch_hz = d[0];
             let midi = d[1] as i32;
             let cents = d[2];
+            let strobe_phase = d.get(5).copied().unwrap_or(0.0);
 
             let pc = (midi.rem_euclid(12)) as usize;
             let octave = (midi / 12) - 1;
@@ -397,46 +449,158 @@ pub fn display(
                 unit: "st".to_owned(),
                 text: note_str.clone(),
             });
-            readings.push(DisplayReading {
-                name: "Pitch".to_owned(),
-                value: pitch_hz,
-                unit: "Hz".to_owned(),
-                text: format!("{pitch_hz:.1} Hz"),
-            });
-            readings.push(DisplayReading {
-                name: "Cents".to_owned(),
-                value: cents,
-                unit: "ct".to_owned(),
-                text: format!("{cents:+.1} ct"),
-            });
 
-            series.push(DisplaySeries {
-                name: "Tuning".to_owned(),
-                unit: "ct".to_owned(),
-                x_unit: "".to_owned(),
-                x_range: [-50.0, 50.0],
-                log_x: false,
-                y_range: [-1.0, 1.0],
-                detail: false,
-                values: vec![cents],
-            });
+            if readout_cents {
+                readings.push(DisplayReading {
+                    name: "Cents".to_owned(),
+                    value: cents,
+                    unit: "ct".to_owned(),
+                    text: format!("{cents:+.1} ct"),
+                });
+                readings.push(DisplayReading {
+                    name: "Pitch".to_owned(),
+                    value: pitch_hz,
+                    unit: "Hz".to_owned(),
+                    text: format!("{pitch_hz:.1} Hz"),
+                });
+            } else {
+                readings.push(DisplayReading {
+                    name: "Pitch".to_owned(),
+                    value: pitch_hz,
+                    unit: "Hz".to_owned(),
+                    text: format!("{pitch_hz:.1} Hz"),
+                });
+                readings.push(DisplayReading {
+                    name: "Cents".to_owned(),
+                    value: cents,
+                    unit: "ct".to_owned(),
+                    text: format!("{cents:+.1} ct"),
+                });
+            }
 
-            markers.push(DisplayMarker {
-                name: "Needle".to_owned(),
-                series: "Tuning".to_owned(),
-                x: cents,
-                y: 0.0,
-                text: format!("{note_str} {cents:+.1} ct"),
-            });
+            let needle_text = if readout_cents {
+                format!("{note_str} {cents:+.1} ct")
+            } else {
+                format!("{note_str} {pitch_hz:.1} Hz")
+            };
+
+            if active_view == "Histogram" {
+                let history_values: Vec<f32> = if d.len() >= 6 + HIST_LEN {
+                    d[6..6 + HIST_LEN].to_vec()
+                } else {
+                    vec![cents; HIST_LEN]
+                };
+
+                let y_range = if auto_centring {
+                    [-50.0, 50.0]
+                } else {
+                    [-100.0, 100.0]
+                };
+
+                series.push(DisplaySeries {
+                    name: "Histogram".to_owned(),
+                    unit: "ct".to_owned(),
+                    x_unit: "step".to_owned(),
+                    x_range: [0.0, HIST_LEN as f32],
+                    log_x: false,
+                    y_range,
+                    detail: false,
+                    values: history_values,
+                });
+
+                markers.push(DisplayMarker {
+                    name: "Pitch".to_owned(),
+                    series: "Histogram".to_owned(),
+                    x: HIST_LEN as f32,
+                    y: cents,
+                    text: needle_text,
+                });
+            } else if classic_mode == 1 {
+                // Strobe Mode
+                let strobe_values: Vec<f32> = (0..32)
+                    .map(|i| {
+                        let phase = i as f32 / 32.0;
+                        (phase * 4.0 * std::f32::consts::TAU + strobe_phase * std::f32::consts::TAU)
+                            .sin()
+                            * 0.5
+                            + 0.5
+                    })
+                    .collect();
+
+                series.push(DisplaySeries {
+                    name: "Strobe".to_owned(),
+                    unit: "ct".to_owned(),
+                    x_unit: "".to_owned(),
+                    x_range: [0.0, 32.0],
+                    log_x: false,
+                    y_range: [0.0, 1.0],
+                    detail: false,
+                    values: strobe_values,
+                });
+
+                let strobe_direction = if cents.abs() < 1.0 {
+                    "In Tune"
+                } else if cents > 0.0 {
+                    "Rotating Right (Sharp)"
+                } else {
+                    "Rotating Left (Flat)"
+                };
+
+                readings.push(DisplayReading {
+                    name: "Strobe".to_owned(),
+                    value: cents,
+                    unit: "ct".to_owned(),
+                    text: strobe_direction.to_owned(),
+                });
+
+                markers.push(DisplayMarker {
+                    name: "Strobe".to_owned(),
+                    series: "Strobe".to_owned(),
+                    x: strobe_phase * 32.0,
+                    y: 0.5,
+                    text: format!("{needle_text} ({strobe_direction})"),
+                });
+            } else {
+                // Target Mode
+                series.push(DisplaySeries {
+                    name: "Tuning".to_owned(),
+                    unit: "ct".to_owned(),
+                    x_unit: "".to_owned(),
+                    x_range: [-50.0, 50.0],
+                    log_x: false,
+                    y_range: [-1.0, 1.0],
+                    detail: false,
+                    values: vec![cents],
+                });
+
+                markers.push(DisplayMarker {
+                    name: "Needle".to_owned(),
+                    series: "Tuning".to_owned(),
+                    x: cents,
+                    y: 0.0,
+                    text: needle_text,
+                });
+            }
         }
     }
 
     DeviceDisplay {
         device,
         live: data.is_some(),
-        view: Some("Classic".to_owned()),
+        view: Some(active_view.to_owned()),
         series,
         markers,
         readings,
     }
+}
+
+/// Builds the device display for Tuner from parameters and publication data.
+#[must_use]
+pub fn display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    display_for_view(device, description, values, data, None)
 }

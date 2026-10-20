@@ -315,12 +315,17 @@ fn the_tuners_display_publishes_and_reads_headless() {
 
     // Views
     assert_eq!(live.view.as_deref(), Some("Classic"));
+    assert!(live.series("Tuning").is_some());
+
     shell
         .invoke(
             "device.set_display_view",
             json!({ "device": tun, "view": "Histogram" }),
         )
         .unwrap();
+    let hist = display(&mut shell, tun);
+    assert_eq!(hist.view.as_deref(), Some("Histogram"));
+    assert!(hist.series("Histogram").is_some());
 }
 
 // Spec: oscilloscope R6

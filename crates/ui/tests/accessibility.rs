@@ -3466,6 +3466,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  (midi-clips R19)",
             )),
         ),
+        // DAWproject import (WP-6.36): the Open dialog, the browser, a drop
+        // on the window and the report window are WP-6.37b's.
+        (
+            "set.import_dawproject",
+            Exception(LaterView(
+                "the Open dialog, the browser and a drop on the window (WP-6.37b)",
+            )),
+        ),
+        (
+            "set.import_report",
+            Exception(LaterView("the DAWproject Import window (WP-6.37b)")),
+        ),
         // The Session View's scenes and slots (WP-3.1): the grid, its
         // context menus, and their keys are WP-3.7's.
         (

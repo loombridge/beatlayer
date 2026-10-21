@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bl_core::clock::TestClock;
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::SampleRate;
 use bl_devices::sampler::SAMPLER;
@@ -19,10 +20,16 @@ use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::routing::{self, InOut};
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use rtrb::Consumer;
 use serde_json::{Value, json};
 
 const BLOCK: usize = 256;
+
+/// One block's length, the step the test clock advances by.
+fn block() -> Duration {
+    Duration::from_nanos(BLOCK as u64 * 1_000_000_000 / 48_000)
+}
 
 /// A shell with two input ports and an output, a MIDI track, and an engine
 /// processor whose queue is the shell's.
@@ -32,8 +39,9 @@ struct Rig {
     track: TrackId,
     engine: Engine,
     processor: Processor,
-    /// When the next block starts, on the clock the messages are stamped on.
-    next: Instant,
+    /// The test clock the messages are stamped on and each block starts on,
+    /// so a note lands on its frame however busy the machine is (T199).
+    clock: TestClock,
 }
 
 impl Rig {
@@ -48,6 +56,8 @@ impl Rig {
         test.add_port(Direction::Output, "Synth");
         let mut shell = Shell::headless();
         shell.use_midi_backend(Box::new(test.clone()));
+        let clock = TestClock::new();
+        shell.use_test_clock(clock.clone());
         let track = shell.editor().document().top_level().next().unwrap();
         let (engine, mut processor) =
             Engine::start(EngineConfig::new(SampleRate::HZ_48000, BLOCK), registry).unwrap();
@@ -59,7 +69,7 @@ impl Rig {
             track,
             engine,
             processor,
-            next: Instant::now(),
+            clock,
         };
         rig.sync();
         rig
@@ -96,7 +106,7 @@ impl Rig {
     /// Plays a message from a port, and processes the block it arrives in
     /// and the one after, where it lands.
     fn play(&mut self, port: &str, message: impl AsRef<[u8]>) -> usize {
-        self.test.send(port, Instant::now(), message.as_ref());
+        self.test.send(port, self.clock.now(), message.as_ref());
         self.blocks_run(2)
     }
 
@@ -105,7 +115,7 @@ impl Rig {
     /// message is stamped on, and takes a few blocks to catch up.
     fn play_settled(&mut self, port: &str, message: impl AsRef<[u8]>) {
         let before = self.processor.midi_counters().received;
-        self.test.send(port, Instant::now(), message.as_ref());
+        self.test.send(port, self.clock.now(), message.as_ref());
         for _ in 0..400 {
             self.blocks_run(1);
             if self.processor.midi_counters().received > before {
@@ -117,14 +127,14 @@ impl Rig {
         panic!("the engine never took the message");
     }
 
-    /// Runs `count` blocks, each starting after the last and after now, and
-    /// returns how many messages the track's input received over them.
+    /// Runs `count` blocks, each starting after the last on the test clock,
+    /// and returns how many messages the track's input received over them.
     fn blocks_run(&mut self, count: u32) -> usize {
         let mut received = 0;
         for _ in 0..count {
-            let now = self.next.max(Instant::now());
-            self.next = now + Duration::from_nanos(BLOCK as u64 * 1_000_000_000 / 48_000);
+            let now = self.clock.now();
             self.processor.process_at(BLOCK, &NoInput, now);
+            self.clock.advance(block());
             received += self
                 .processor
                 .midi_input(self.track)
@@ -498,17 +508,18 @@ fn midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input() {
 /// played with the audio running doesn't fill a dead queue.
 #[test]
 fn the_audio_hosts_engine_takes_the_queue() {
-    let mut shell = Shell::headless();
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
+    let clock = control.clock().expect("manual pacing");
     let sender = shell.midi().sender().clone();
     for _ in 0..200 {
         sender.send(MidiInputEvent {
             source: MidiSource::ComputerKeyboard,
-            time: Instant::now(),
+            time: clock.now(),
             message: MidiMessage::note_on(0, 60, 100),
         });
     }
-    std::thread::sleep(Duration::from_millis(100));
+    testing::run_blocks(&control, &mut shell, 4);
     assert_eq!(sender.stats().snapshot().dropped, 0);
 }
 
@@ -566,9 +577,9 @@ fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
 
     // Loudest sample of the block's first channel.
     let peak = |rig: &mut Rig| {
-        let now = rig.next.max(Instant::now());
-        rig.next = now + Duration::from_nanos(BLOCK as u64 * 1_000_000_000 / 48_000);
+        let now = rig.clock.now();
         let out = rig.processor.process_at(BLOCK, &NoInput, now);
+        rig.clock.advance(block());
         out.channel(0).iter().fold(0.0_f32, |m, s| m.max(s.abs()))
     };
     assert_eq!(peak(&mut rig), 0.0, "silent before a key");

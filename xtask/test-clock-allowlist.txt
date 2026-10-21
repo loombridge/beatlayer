@@ -4,7 +4,6 @@
 # deletes their entries. `cargo xtask test-clock` fails on a file that isn't
 # listed and on an entry that no longer needs to be.
 
-crates/agent/tests/engine_host.rs # a timeout on the engine's own thread
 crates/agent/tests/http.rs # a timeout on the agent server and its client
 crates/agent/tests/perception.rs # a timeout on the engine's playback
 crates/agent/tests/plugin_vst3.rs # a timeout on a real VST3 host
@@ -24,7 +23,7 @@ crates/engine/src/sched.rs # a timeout on the compiler thread
 crates/engine/tests/capture_midi.rs # a timeout on capture
 crates/engine/tests/drum_racks.rs # a timeout on a drum chain
 crates/engine/tests/external_devices.rs # a timeout on a MIDI port
-crates/engine/tests/midi_input.rs # stamps messages with the system's clock
+crates/engine/tests/midi_input.rs # the delay-locked loop measured against a real-time thread and clock
 crates/engine/tests/midi_output.rs # stamps messages with the system's clock
 crates/engine/tests/midi_play.rs # stamps messages with the system's clock
 crates/engine/tests/midi_recording.rs # stamps messages with the system's clock
@@ -52,34 +51,21 @@ crates/shell/src/browser/index.rs # a timeout on the index's thread
 crates/shell/src/recording.rs # a timeout on a recording's thread
 crates/shell/tests/au_editor.rs # waits for a real Audio Unit's window
 crates/shell/tests/audio_settings.rs # a device's status changes on the system's clock
-crates/shell/tests/automation_record.rs # a timeout on the engine
-crates/shell/tests/browser.rs # a timeout on the browser's index
+crates/shell/tests/browser.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
-crates/shell/tests/midi_io.rs # stamps test messages with the system's clock
+crates/shell/tests/midi_io.rs # waits for the MIDI output thread to hand messages to the port
 crates/shell/tests/multi_output.rs # waits for a real CLAP plug-in
 crates/shell/tests/offline_plugins.rs # waits for a real CLAP render
 crates/shell/tests/offline_vst3_au.rs # waits for a real VST3 or AU render
 crates/shell/tests/plugins.rs # waits for a real CLAP plug-in
 crates/shell/tests/plugins_au.rs # waits for a real Audio Unit
 crates/shell/tests/processed_files.rs # a timeout on a processed file's write
-crates/shell/tests/realtime.rs # tests real-time safety under load
-crates/shell/tests/recording.rs # a timeout on a take
-crates/shell/tests/scene_tempo.rs # a timeout on a launch
-crates/shell/tests/session_automation.rs # a timeout on an automation pass
-crates/shell/tests/session_launch.rs # a timeout on a launch grid
-crates/shell/tests/session_recording.rs # a timeout on a recording
-crates/shell/tests/session_to_arrangement.rs # a timeout on an arrangement pass
-crates/shell/tests/transport.rs # a timeout on the transport
-crates/ui/tests/accessibility.rs # a timeout on the UI's layout
-crates/ui/tests/agent_settings.rs # a timeout on the agent server
-crates/ui/tests/browser.rs # a timeout on the browser's index
-crates/ui/tests/drum_racks.rs # waits for a real plug-in's UI
-crates/ui/tests/midi_input.rs # stamps keyboard input with the system's clock
+crates/shell/tests/realtime.rs # measures the callback under real-time pacing
+crates/ui/tests/accessibility.rs # waits for a real plug-in's editor to load
+crates/ui/tests/agent_settings.rs # measures the Settings window's frame cost itself
+crates/ui/tests/browser.rs # waits for the browser's index thread to read the disk
+crates/ui/tests/midi_input.rs # waits for the MIDI output thread and its indicator's timed fade
 crates/ui/tests/plugin_panel.rs # waits for a real plug-in's UI
-crates/ui/tests/rack_view.rs # a timeout on the rack's meters
-crates/ui/tests/sample_editor.rs # a timeout on a decoded waveform
-crates/ui/tests/session_view.rs # a timeout on a launched clip
-crates/ui/tests/settings_window.rs # a timeout on the device status
-crates/ui/tests/transport.rs # a timeout on the transport
+crates/ui/tests/transport.rs # measures the drawn playhead against a real-time engine

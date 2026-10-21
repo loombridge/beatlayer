@@ -1,15 +1,15 @@
 # The transposing MIDI effect
 
-- **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34; where a MIDI effect sits in a chain is [the device chains spec](device-chains.md)
+- **Status:** partial (R1 to R11 have passing tests; R12 to R14, Use Current Scale, are WP-6.8's)
+- **Work packages:** WP-5.30 (R1 to R11); WP-6.8 (Use Current Scale: R12 to R14; under a tuning the switch follows [tunings.md](tunings.md) R16). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34; where a MIDI effect sits in a chain is [the device chains spec](device-chains.md)
 - **Parity-matrix row:** Devices: MIDI effects
-- **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.5 "Pitch", read on 17 October 2026
+- **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.5 "Pitch", read on 17 October 2026; for Use Current Scale, the same manual's chapter 3, section 3.13 "Scale Awareness", and chapter 30's introduction, read 20 October 2026, and the Live 12 release notes, 12.0 and 12.1.10
 
 ## The behaviour
 
 Pitch is a MIDI effect that moves every note that reaches it by a number of semitones, and keeps the result inside a window of keys. A note that would land outside the window is dropped (Block), moved by octaves into it (Fold), or moved to its nearest edge (Limit). The note's velocity, release velocity, channel and timing are untouched, and its per-note expressions (bend, pressure, slide) follow it to its new key. Pitch ends each note on the key it started it on, whatever changes while the note is held.
 
-The device takes Live's name, Pitch; its look is the device framework's generic controls. Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are two buttons that move Pitch by Step Width; the generic layout has no momentary buttons, so Beatlayer carries Step Width as a parameter and agents and people set Pitch directly. The Use Current Scale switch is carried and does nothing until Phase 6's scales: Pitch then reads in scale degrees. This spec covers the device only.
+The device takes Live's name, Pitch; its look is the device framework's generic controls. Its parameters, ranges and units come from the manual's Pitch section. Step Up and Step Down in the manual are two buttons that move Pitch by Step Width; the generic layout has no momentary buttons, so Beatlayer carries Step Width as a parameter and agents and people set Pitch directly. The Use Current Scale switch in its title bar makes Pitch and Step Width count degrees of the device's current scale ([scales.md](scales.md)) instead of semitones. This spec covers the device only.
 
 ## Sources
 
@@ -19,6 +19,9 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 | S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | A native MIDI effect reads the stretch's notes, forwards what it doesn't change, sends notes in order, ends every note it started, and keeps its expressions with their notes |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules" | No allocation, lock, or blocking call on the audio thread; every buffer is made with the device |
+| S5 | Manual | Live 12 reference manual, chapter 3, section 3.13 "Scale Awareness", and chapter 30's introduction | Pitch is scale-aware: its Use Current Scale switch, in its title bar, applies the clip's scale and sets its pitch controls in scale degrees |
+| S6 | Release notes | Live 12 release notes, 12.0 (Pitch transforms per-note pitch bend to stay in the scale) and 12.1.10 (Pitch's handling of the per-note bend of a note outside the scale) | A moved note's bend stays in the scale |
+| S7 | Beatlayer | [scales.md](scales.md) R2 and R15 to R18 | Moving a key by degrees; a device's current scale, its Use Current Scale switch, held notes and per-note bends |
 
 ## Rules
 
@@ -32,7 +35,10 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 - **R8.** A note Pitch dropped takes its expressions with it. (S2)
 - **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Pitch/`. (S3)
 - **R10.** Every parameter is automatable and has a description, and nothing Pitch does on the audio thread allocates, locks, or blocks. (S3, S4)
-- **R11.** Use Current Scale is a switch that does nothing until Phase 6 brings scales; Step Width is a value that nothing reads until the Step Up and Step Down buttons exist. (S1)
+- **R11.** Step Width is a value that nothing reads until the Step Up and Step Down buttons exist; Use Current Scale is in R12 to R14. (S1)
+- **R12.** Use Current Scale, a switch in Pitch's title bar ([scales.md](scales.md) R16), off in a new Pitch: with it on, Pitch counts degrees of the device's current scale ([scales.md](scales.md) R15), from −30 to +30, and every note moves by that many degrees ([scales.md](scales.md) R2), a note outside the scale moving as the scale note below it does; a value beyond ±30 when the switch goes on acts as ±30 (Beatlayer's own). Step Width counts degrees too, from 1 to 30. (S1, S5, S7)
+- **R13.** With Use Current Scale on, Lowest and Range are still keys, and the window (R3 to R5) applies to the key a note's move gives it (Beatlayer's own). (S1, S7)
+- **R14.** With Use Current Scale on, the per-note bend of a note Pitch moved is carried in degrees, as [scales.md](scales.md) R18 says, and a change of the current scale while the note is held doesn't move it (R6). (S6, S7)
 
 ## Tests
 
@@ -49,6 +55,9 @@ The device takes Live's name, Pitch; its look is the device framework's generic 
 | R9 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R10 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description`; every test in `crates/devices/tests/lift.rs` runs its blocks as real-time sections under the allocation trap; `rtsan/tests/midi_effects.rs` | real-time trap |
 | R11 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` (both exist and read back) | MCP script |
+| R12 | to be written in WP-6.8 | |
+| R13 | to be written in WP-6.8 | |
+| R14 | to be written in WP-6.8 | |
 
 ## Defaults, ranges and details
 

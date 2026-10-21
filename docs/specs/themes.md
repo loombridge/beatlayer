@@ -1,0 +1,126 @@
+# Themes and colours: the Theme & Colors settings, theme files, and the colours of tracks, clips and scenes
+
+- **Status:** draft
+- **Work packages:** WP-6.30 (the Theme and Customization sections and theme files: R1 to R13), WP-6.30b (the colours of tracks, clips and scenes, their palettes, and the Track and Clip Colors section: R14 to R27; R16's palettes in the Session clip's, the scene's and the Clip View title bar's context menus come with those menus in WP-6.56, [session-context-menus.md](session-context-menus.md)), WP-6.50 (a row of custom colours, and new tracks taking their group's colour, IMP-37: R28 to R32). The interface zoom on the Display & Input page is [interface-zoom.md](interface-zoom.md)'s; the colours of rack chains and macros are [racks.md](racks.md)'s and [macros.md](macros.md)'s, which take their swatches from R15
+- **Parity-matrix row:** Views and workflow: Themes, light and dark, follow the OS, tone and contrast controls; [the improvements](../05-improvements.md), IMP-37 (a larger colour palette, and new tracks taking their group's colour)
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.4.3; the UI parity reference's rows L-SET-002, L-SET-003, L-SET-011, C-TRACK-015 to C-TRACK-017, C-SCENE-014, C-CLIP-SES-018 and the Arrangement clip menu's colours, L-CLIP-002, L-MIX-009, recorded from Live 12.4.3 and 12.4.6 on macOS
+
+## The behaviour
+
+Settings ▸ Theme & Colors decides how Beatlayer looks. Its Theme section chooses a theme, draws it light or dark or follows the operating system's mode, gives it a neutral, warm or cool tone, and turns high contrast on. Its Customization section sets how strong the grid lines are, how bright the backgrounds are, and how intense the interface's colours are and what hue they lean to. Its Track and Clip Colors section decides what colour a new track and a new clip get.
+
+Beatlayer's themes are its own: a theme is a pair of files of colour tokens, one for light and one for dark, in Beatlayer's own format. Beatlayer ships one, and reads others a person puts in the User Library. Live's themes, and its `.ask` theme files, are neither copied nor read.
+
+Every track, clip and scene has a colour from a palette of 70 swatches, 5 rows of 14, chosen from the palette at the end of its context menu. Changing a track's colour leaves its clips as they are; Assign Track Color to Clips gives them the track's colour, and a group's Assign Track Color to Grouped Tracks and Clips gives its colour to everything inside it. Beatlayer adds a sixth row of colours a person picks themselves, and an option for a track made inside a group to take the group's colour (IMP-37).
+
+This spec covers the Theme & Colors page, the theme files and how their colours are drawn, and the colours of tracks, clips and scenes. Where each colour is drawn is in the view's own spec ([arrangement-view.md](arrangement-view.md) R3 and R4, [session-view.md](session-view.md) R16).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 2 "First Steps", section 2.3.2 "Theme & Colors" | The Theme section chooses Live's colour scheme, sets the appearance to light, dark, or the operating system's light or dark mode, gives the palette a warm, cool or neutral tone, and turns high contrast on. Customization sets the grid lines' opacity, the brightness, and the interface colours' intensity and hue. Track and Clip Colors turns automatic track colours on or off or gives every track one default colour, reduces the number of colours used automatically, and gives new clips random colours or their track's |
+| S2 | Release notes | Live 12 release notes, 12.0 ("UI View Styling", "Interface") | Live's themes come with warm and cool tones and high-contrast variants, and Live can follow the operating system's light or dark mode. The Look/Feel settings were split into Display & Input and Theme & Colors, whose Theme section chooses the theme and sets its tone and contrast; Follow System matches the system's current mode. On Windows 10 and 11 the title bar follows the system's light or dark setting |
+| S3 | Release notes | Live 12 release notes, 12.2 | Brightness's range was widened, for the background colours; chromatic colours, such as clip and track colours and button states, aren't affected by it |
+| S4 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [layout.md](../ui-parity/layout.md) L-SET-002, L-SET-003 and L-SET-011 | Theme & Colors is the second Settings page. Its rows, in order: Theme (Theme, Appearance, Tone, High Contrast); Customization (Grid Line Intensity, Brightness, Color Intensity, Color Hue); Track and Clip Colors (Auto-Assign Track Colors, Default Track Color, Reduced Automatic Colors, Clip Color). Labels at x 154, controls at x 354, switches 54 points wide and choosers 108, rows about 22 points apart |
+| S5 | Manual | Same manual, chapter 8 "Clip View", section 8.1.1.3 "Clip Color"; chapter 18 "Mixing", section 18.3 "Group Tracks" | New clips take their track's colour; a clip's colour is chosen from the palette in its context menu or the Clip View title bar's; the track header's Assign Track Color to Clips gives the track's colour back to its clips, and a group track's Assign Track Color to Grouped Tracks and Clips gives the group's colour to its tracks and their clips; with several clips selected the title bar shows stripes in the interface's colours, and one colour can be given to them all |
+| S6 | Release notes | Live 12 release notes, 12.4.3 | Assign Track Color to Clips and Assign Track Color to Grouped Tracks recolour the track's clips in both the Session and the Arrangement, wherever they're run |
+| S7 | Observation | Live 12.4.3 on macOS, 10 October 2026, and Live 12 on macOS, 18 October 2026, recorded in [menus.md](../ui-parity/menus.md): the note on context menus, C-TRACK-015, C-TRACK-016, C-TRACK-017, C-SCENE-014, C-CLIP-SES-018 and C-CLIP-ARR-027d; [layout.md](../ui-parity/layout.md) L-CLIP-002 and L-MIX-009 | The track header, scene and Session clip menus end with a colour palette of 5 rows of 14 swatches; the track menu's palette is followed by Assign Track Color to Clips; a group's menu adds Assign Track Color to Grouped Tracks and Clips; the scene's palette has No Color before it; an Arrangement clip's menu ends with the clip colours; the clip's name is drawn in its colour in the Clip View's title bar; each mixer column has a strip of its track's colour along its bottom |
+| S8 | Beatlayer | [CONTRIBUTING.md, "Building without Ableton's code"](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code); [the architecture](../02-architecture.md), "UI", D16 and D17; [the parity matrix](../04-parity-matrix.md), "Themes, light and dark, follow the OS, tone and contrast controls"; [app-shell.md](app-shell.md) R5 and R23; [interface-zoom.md](interface-zoom.md) R4; [accessibility.md](accessibility.md) R1 and R7; [racks.md](racks.md) R26; [arrangement-editing.md](arrangement-editing.md) R6; [track-context-menu.md](track-context-menu.md) R6 and R7 | No Ableton colour themes or other content; Beatlayer's own colours and typeface; colours, sizes and fonts come from a theme file; Live's `.ask` themes aren't imported; every action is a registered command with a permission class, and a preference trivially changed back is `edit`; the Settings window's keys and `settings.state`; a number box that steps by drag and keys; the accessibility tree; the rack chain's palette of 5 rows of 14; the track menu's items and their places |
+| S9 | Beatlayer | [The improvements](../05-improvements.md), rules 1 to 4 and IMP-37; WCAG 2.2, success criteria 1.4.3, 1.4.6 and 1.4.11 (contrast ratios) | An improvement adds and never moves; a changed default is an option defaulting to Live's behaviour; IMP-37 proposes a larger colour palette and an option for new tracks to take their group's colour. The contrast ratio's definition, and its 4.5:1, 7:1 and 3:1 levels |
+
+## Rules
+
+**The Theme & Colors page (WP-6.30)**
+
+- **R1.** Settings ▸ Theme & Colors, the second page (L-SET-002), holds three sections in order, with L-SET-003's layout: Theme (Theme, Appearance, Tone, High Contrast); Customization (Grid Line Intensity, Brightness, Color Intensity, Color Hue); and Track and Clip Colors (Auto-Assign Track Colors, Default Track Color, Reduced Automatic Colors, Clip Color; R23). Every setting on the page is an application preference, kept in the preferences file: it isn't part of the set, isn't an undo step, and is `edit`-class as a preference trivially changed back. A change shows in every open window from the next frame, with no restart. (S1, S4, S8)
+- **R2.** Theme is a chooser of the themes Beatlayer finds: its bundled theme, named "Beatlayer", first, then the themes in the User Library's `Themes` folder (R9), by name. A new install draws Beatlayer. (S1, S8)
+- **R3.** Appearance is a chooser of Light, Dark and Follow System. Light and Dark draw the theme's light and dark colours. Follow System draws the light colours while the operating system is in its light mode and the dark ones in its dark mode, and follows a change of mode while Beatlayer runs. A new install draws Dark (Beatlayer's own default). (S1, S2)
+- **R4.** Tone is a chooser of Neutral, Warm and Cool. Neutral draws the theme's neutral colours (R6) as its file gives them; Warm and Cool give each of them, at its own lightness, a chroma of 8 towards the hue 60° (warm) or 250° (cool) of the CIE LCh(ab) space (Beatlayer's own law and amounts). The chromatic colours aren't toned. A new install draws Neutral. (S1, S2)
+- **R5.** High Contrast is an On/Off switch, off in a new install. On, every text colour stands at a contrast ratio of at least 7:1 against each background it's drawn on, the dimmed text at least 4.5:1, and separators, control outlines and the focus outline at least 3:1, the ratio as WCAG 2.2 defines it (Beatlayer's own levels): where the colours the theme and R7 give fall short, the text and lines are moved in lightness, towards white on a dark background and black on a light one, until they reach them. Off, the bundled theme's text reaches 4.5:1 and its dimmed text 3:1 against the backgrounds they're drawn on, in both appearances and every tone (Beatlayer's own levels). (S1, S2, S9)
+- **R6.** A theme's colours are of two kinds, fixed by their token names: the neutral colours (the window, panels, bars, controls and their hover and pressed states, lanes, rulers, display backgrounds, separators, grid lines, text and dimmed text) and the chromatic colours (the accent and the text on it, record, errors, the focus, meters, the playhead and insert marker, loop and time-selection colours, automation, modulation and mapping colours). The background colours are the neutral colours less separators, grid lines and text. The track palette (R15) is of neither kind. (S3, S8)
+- **R7.** Customization holds four number boxes, which step by a drag, by Up and Down while they have the keyboard focus, and by a screen reader's increment and decrement, as Zoom does ([interface-zoom.md](interface-zoom.md) R4); their ranges, steps and defaults are Beatlayer's own:
+  - **Grid Line Intensity**, 0 to 200 % in steps of 5, 100 % in a new install: the grid lines of the Arrangement, the Clip View's editors and the automation lanes are drawn as the lane's colour mixed towards the theme's grid colour by that much, 0 % showing no line and 200 % going on past the grid colour by as much again, within the colour range.
+  - **Brightness**, −50 to 50 in steps of 1, 0 in a new install: adds that many points of CIELAB lightness to every background colour, within 0 to 100; the chromatic colours and the track palette don't change.
+  - **Color Intensity**, 0 to 200 % in steps of 5, 100 % in a new install: multiplies the chroma of every chromatic colour, within the colours the screen can show; the track palette doesn't change.
+  - **Color Hue**, −180° to 180° in steps of 5°, 0° in a new install: turns the hue of every chromatic colour by that much; the track palette doesn't change.
+  (S1, S3)
+- **R8.** The colours drawn are worked out in this order: the theme file for the appearance (R3), then Tone (R4), then Brightness, Color Intensity and Color Hue (R7), then Grid Line Intensity (R7), and High Contrast last (R5), so its ratios hold whatever the other settings are. Everything Beatlayer draws takes the result: egui's widgets and the GPU-drawn views (the Arrangement, the Session grid, the editors, waveforms, meters and automation) in every window. (S1, S8)
+
+**Theme files (WP-6.30)**
+
+- **R9.** A theme file is a TOML file of Beatlayer's own format, as the bundled theme's are: the theme's `name`, whether it's `dark`, every colour token as `#RRGGBB`, the track palette's 14 colours, and the sizes. A theme is the one or two files that share a name: one light and one dark; a theme with only one draws it whatever the Appearance. Beatlayer reads theme files from the User Library's `Themes` folder when it starts and each time the Theme & Colors page opens. A file with an unknown token, a token missing, or a colour that isn't `#RRGGBB` isn't listed, and the Status Bar names the file and what's wrong with it. Live's `.ask` theme files aren't read. (S8)
+- **R10.** If the chosen theme can't be read when Beatlayer starts (its file is gone or broken), Beatlayer draws Beatlayer and says so in the Status Bar, keeping the choice so it comes back once the file is right (Beatlayer's own). (S8)
+- **R11.** Preferences saved before this page keep their look: a saved theme of Dark becomes Appearance Dark and Light Appearance Light, with the theme Beatlayer, Tone Neutral, High Contrast off and Customization at its defaults. (S8)
+- **R12.** Each setting is a registered command with a schema, a description and the `edit` class: `settings.set_theme` (`theme`, a theme's name; the values `dark` and `light`, which earlier agents send, set the Appearance instead), `settings.set_appearance` (`light`, `dark` or `follow-system`), `settings.set_tone` (`neutral`, `warm` or `cool`), `settings.set_high_contrast`, `settings.set_grid_line_intensity`, `settings.set_brightness`, `settings.set_color_intensity` and `settings.set_color_hue`, each reading back through `settings.state`'s `theme_colors`, which also lists the themes the chooser offers and the appearance drawn now, Follow System resolved ([app-shell.md](app-shell.md) R23). (S8)
+- **R13.** The accessibility tree names each control by its row's label, with its value: the choosers as pop-up buttons, High Contrast as a switch, the Customization rows as sliders with their range and unit, so a screen reader steps them (R7). (S8)
+
+**Track, clip and scene colours (WP-6.30b)**
+
+- **R14.** Every track, Main and the return tracks among them, every clip (in the Arrangement, a Session slot or a take lane) and every scene has a colour, saved with the set: one of the palette's 70 swatches, numbered 0 to 69 from the top row's left, row by row; a scene may have none, as a new scene has. (S5, S7)
+- **R15.** The palette's 70 swatches are Beatlayer's own colours, 5 rows of 14: the top row is the theme's 14 track colours as its file gives them, the second and third rows are those colours mixed 30 % and 60 % of the way towards white, and the fourth and fifth 30 % and 50 % of the way towards black, as the rack chain's palette is drawn ([racks.md](racks.md) R26). A set's colours are drawn in the theme in use, so they follow its appearance. (S7, S8)
+- **R16.** The colour palette at the end of a track's context menu (C-TRACK-015), drawn as 5 rows of 14 swatches with the track's own ticked, colours the selected tracks: `track.set_colour`, one undo step, `Change Track Color` (Beatlayer's own name). A track's clips keep their colours when its colour changes. A Session clip's menu (C-CLIP-SES-018), an Arrangement clip's menu (its colours last) and the Clip View title bar's context menu do the same for the selected clips, `clip.set_colour`, one undo step, `Change Clip Color`; with several clips selected the Clip View's title bar is drawn in stripes of the theme's colours. A scene's menu has No Color, then the palette (C-SCENE-014), `scene.set_colour` with a swatch or none, one undo step, `Change Scene Color`. (S5, S7)
+- **R17.** Assign Track Color to Clips, after the track menu's palette (C-TRACK-016), `track.assign_colour_to_clips`, gives every clip of each selected track its track's colour, in the Arrangement, in its Session slots and in its take lanes, wherever it's run, as one undo step. A group track's Assign Track Color to Grouped Tracks and Clips (C-TRACK-017), `track.assign_colour_to_grouped`, gives the group's colour to every track inside it at any depth and to all their clips, in both views, as one undo step. (S5, S6, S7)
+- **R18.** A track is drawn in its colour: its title in the Arrangement's headers ([arrangement-view.md](arrangement-view.md) R3), its title bar in the Session View and the mixers, and the strip along its mixer column's bottom (L-MIX-009). A clip is drawn in its colour: its body in the Arrangement ([arrangement-view.md](arrangement-view.md) R4), its slot in the Session View ([session-view.md](session-view.md) R16), and its name in the Clip View's title bar (L-CLIP-002). A scene with a colour has its name field in the Main track's column filled with it (Beatlayer's own). (S7)
+- **R19.** A track made new (inserted, made by dropping a file or a device, by a Slice to New MIDI Track or a bounce to a new track, and the group Group Tracks makes, Beatlayer's own for the group) takes the colour R23 gives; the tracks Group Tracks puts in the group keep theirs, and Ungroup changes no colour. A copy (Duplicate, Paste, a dragged copy) keeps the colours of what it copies. (S1, S5)
+- **R20.** A clip made new (recorded, made from a dropped file, by Insert Empty MIDI Clip, by Capture MIDI, by Consolidate or a bounce) takes the colour Clip Color gives (R23). A copy keeps its colour. (S1, S5)
+- **R21.** A set saved before colours loads with each track in swatch `id mod 14` of the top row, `id` being the track's ID, as such sets have been drawn; each clip in its track's colour; and every scene with none, so nothing changes colour on loading. A colour outside 0 to 69 doesn't load. (S8)
+- **R22.** The palettes are drawn as one control in the accessibility tree, a grid of 70 buttons each named by its row and column ("Row 2, colour 5"), the current one selected; Up, Down, Left and Right move between swatches and Enter chooses one, as in Beatlayer's other menus. (S8)
+
+**The Track and Clip Colors section (WP-6.30b)**
+
+- **R23.** Track and Clip Colors' rows (L-SET-011), their defaults Beatlayer's own:
+  - **Auto-Assign Track Colors**, an On/Off switch, on in a new install: on, a new track takes swatch `id mod n` of the automatic colours, `id` being its ID; off, every new track takes Default Track Color.
+  - **Default Track Color**, a chooser of the 70 swatches, drawn as the palette, swatch 12 in a new install; enabled while Auto-Assign Track Colors is off.
+  - **Reduced Automatic Colors**, an On/Off switch, off in a new install: off, the automatic colours are the top row's 14 (`n` is 14); on, its seven even-numbered swatches, 0, 2, 4 and so on to 12 (`n` is 7).
+  - **Clip Color**, a chooser of Track Color and Random, Track Color in a new install: Track Color gives a new clip its track's colour; Random gives it swatch `h mod 70`, `h` being a hash of the clip's ID, so the same clip always gets the same swatch.
+  (S1, S4, S5)
+- **R24.** Each row is a registered `edit`-class command: `settings.set_auto_assign_track_colours`, `settings.set_default_track_colour`, `settings.set_reduced_automatic_colours` and `settings.set_clip_colour`, reading back through `settings.state`'s `theme_colors`. (S8)
+- **R25.** `track.set_colour`, `clip.set_colour`, `scene.set_colour`, `track.assign_colour_to_clips` and `track.assign_colour_to_grouped` are registered `edit`-class commands with schemas and descriptions, taking the tracks, clips or scenes and a swatch, run by ID through the agent API; their effect reads back through the query tool's `track`, `clip` and `scene` objects, whose `colour` field gives the swatch. The commands' descriptions number the swatches by row and column, so an agent can choose one. (S8)
+- **R26.** The track menu's palette and Assign Track Color to Clips, and the group's Assign Track Color to Grouped Tracks and Clips, which [track-context-menu.md](track-context-menu.md) R6 and R7 draw disabled until tracks have colours, run their commands from this package on. (S7, S8)
+- **R27.** A colour is never heard: changing a track's, a clip's or a scene's colour sends the engine no new program and changes nothing it plays. (S8)
+
+**Custom colours and group colours (IMP-37, Beatlayer's own; WP-6.50)**
+
+- **R28.** Every colour palette (tracks, clips, scenes, rack chains and macros) has a sixth row under Live's five: 14 places for colours of the person's own, empty in a new install, and a Custom Color… item under the row. Custom Color… opens a colour picker (a hue and saturation square, a brightness slider and a `#RRGGBB` field) on the colour of what's being coloured; confirming it colours the selection with the picked colour and puts it in the row's first empty place, or in the place of the colour used longest ago when the row is full. A click on a filled place colours the selection with it. The row is an application preference, the same in every set. (S9)
+- **R29.** A custom colour is saved with the set as the colour itself, `#RRGGBB`, not as a place in the row, so the set shows it on any machine and after the row changes; unlike the 70 swatches it doesn't follow the theme's appearance. The colour commands (R16, R17, R25, and the chain and macro colour commands) take a swatch number or a `#RRGGBB` colour, and the query tool reads back whichever the object has. (S9)
+- **R30.** New Tracks Take Group Color, an On/Off switch on its own row after Reduced Automatic Colors, off in a new install so tracks are coloured as in Live (R23): on, a track made inside a group (inserted among the group's tracks, [app-shell.md](app-shell.md) R10, or made by dropping a file, a device or clips among them) takes the group's colour instead of an automatic or default one. A track moved into a group, and the tracks Group Tracks puts into a new group, keep their colours. `settings.set_new_tracks_take_group_colour` is its command, `edit`-class, reading back through `settings.state`'s `theme_colors`. (S9)
+- **R31.** The sixth row and Custom Color… are reached from the keyboard and read by a screen reader as R22's palette is, as a seventh and eighth row of the grid. (S8, S9)
+- **R32.** A set saved before WP-6.50 loads unchanged, its colours all swatches; a saved colour that is neither a swatch from 0 to 69 nor a `#RRGGBB` colour doesn't load. (S9)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.30 | |
+| R2 | to be written in WP-6.30 | |
+| R3 | to be written in WP-6.30 | |
+| R4 | to be written in WP-6.30 | |
+| R5 | to be written in WP-6.30 | |
+| R6 | to be written in WP-6.30 | |
+| R7 | to be written in WP-6.30 | |
+| R8 | to be written in WP-6.30 | |
+| R9 | to be written in WP-6.30 | |
+| R10 | to be written in WP-6.30 | |
+| R11 | to be written in WP-6.30 | |
+| R12 | to be written in WP-6.30 | |
+| R13 | to be written in WP-6.30 | |
+| R14 | to be written in WP-6.30b | |
+| R15 | to be written in WP-6.30b | |
+| R16 | to be written in WP-6.30b | |
+| R17 | to be written in WP-6.30b | |
+| R18 | to be written in WP-6.30b | |
+| R19 | to be written in WP-6.30b | |
+| R20 | to be written in WP-6.30b | |
+| R21 | to be written in WP-6.30b | |
+| R22 | to be written in WP-6.30b | |
+| R23 | to be written in WP-6.30b | |
+| R24 | to be written in WP-6.30b | |
+| R25 | to be written in WP-6.30b | |
+| R26 | to be written in WP-6.30b | |
+| R27 | to be written in WP-6.30b | |
+| R28 | to be written in WP-6.50 | |
+| R29 | to be written in WP-6.50 | |
+| R30 | to be written in WP-6.50 | |
+| R31 | to be written in WP-6.50 | |
+| R32 | to be written in WP-6.50 | |

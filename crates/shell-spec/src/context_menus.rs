@@ -15,8 +15,9 @@ use crate::arrangement::SET_GRID;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
-use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
+use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
 
@@ -115,6 +116,11 @@ const TIME: &[Row] = &[
 /// improvement, so not a row of menus.md, which records Live's menus. It's
 /// ticked while the selected device floats, and choosing it again docks it.
 pub const IMP_14: &str = "IMP-14";
+
+/// The row of Beatlayer's own Deactivate All Devices / Activate All Devices
+/// in a track's menu (IMP-25), just before Freeze Track: an improvement, so
+/// not a row of menus.md.
+pub const IMP_25: &str = "IMP-25";
 
 /// Whether a context menu's row is one of Live's, in menus.md, rather than
 /// one of Beatlayer's improvements.
@@ -236,7 +242,7 @@ const TRACK: &[Row] = &[
     ("C-TRACK-005", "Rename", Key(&["S-TRACK-004"])),
     ("C-TRACK-006", "Edit Info Text", Pending(None)),
     SEPARATOR,
-    ("C-TRACK-007", "Freeze Track", Pending(Some("S-TRACK-017"))),
+    ("C-TRACK-007", "Freeze Track", Key(&["S-TRACK-017"])),
     ("C-TRACK-008", "Bounce Track in Place", Pending(None)),
     SEPARATOR,
     ("C-TRACK-009", "Insert Audio Track", Key(&["S-TRACK-001"])),
@@ -265,6 +271,9 @@ pub struct TrackMenu {
     pub arrangement: bool,
     /// The Arrangement has a time selection on the track (C-TRACK-020).
     pub time_selection: bool,
+    /// Every top-level device on the selected tracks is already off, so the
+    /// Deactivate All Devices item reads Activate All Devices (IMP-25).
+    pub devices_off: bool,
 }
 
 /// The rows the other states add after row `after`. menus.md doesn't
@@ -314,8 +323,22 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
 /// track's `state` adds.
 #[must_use]
 pub fn track(state: TrackMenu) -> Vec<MenuItem> {
-    let mut rows = Vec::with_capacity(TRACK.len() + 8);
+    let mut rows = Vec::with_capacity(TRACK.len() + 9);
     for &row in TRACK {
+        // IMP-25 places Deactivate All Devices just before Freeze Track, in
+        // the same group; when every top-level device on the selection is
+        // already off it reads Activate All Devices.
+        if row.0 == "C-TRACK-007" {
+            rows.push((
+                IMP_25,
+                if state.devices_off {
+                    "Activate All Devices"
+                } else {
+                    "Deactivate All Devices"
+                },
+                Cmd(SET_DEVICES_ENABLED),
+            ));
+        }
         rows.push(row);
         rows.extend(track_extras(row.0, state));
     }
@@ -330,7 +353,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
         }
-        "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
         "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
@@ -401,6 +423,11 @@ pub fn arrangement_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
 /// an audio clip's menu).
 const AUDIO_CLIP: &[Row] = &[
     SEPARATOR,
+    (
+        "C-CLIP-ARR-027e",
+        "Slice to New MIDI Track",
+        Cmd(SLICE_TO_MIDI),
+    ),
     (
         "C-CLIP-ARR-027a",
         "Convert Harmony to New MIDI Track",
@@ -522,6 +549,7 @@ mod tests {
         several: true,
         arrangement: true,
         time_selection: true,
+        devices_off: false,
     };
 
     #[test]
@@ -609,14 +637,15 @@ mod tests {
             .iter()
             .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
             .collect();
-        assert_eq!(added.len(), 4);
+        assert_eq!(added.len(), 5);
         let reverse = audio
             .iter()
             .position(|i| i.row == "C-CLIP-ARR-018")
             .unwrap();
         assert!(audio[reverse + 1].is_separator());
+        assert_eq!(audio[reverse + 2].label, "Slice to New MIDI Track");
         assert_eq!(
-            audio[reverse + 5].label,
+            audio[reverse + 6].label,
             "Separate Stems to New Audio Tracks"
         );
         let Some(text) = std::fs::read_to_string(

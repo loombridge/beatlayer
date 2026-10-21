@@ -36,6 +36,20 @@ pub struct TransientList {
     edited: Vec<f64>,
 }
 
+/// What the media store knows of an audio clip's file: its name, its sample
+/// rate, its bit depth and its channel count (the sample editor spec, R2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClipMediaInfo {
+    /// The file's name.
+    pub name: String,
+    /// The file's sample rate, in hertz.
+    pub sample_rate: u32,
+    /// The file's bit depth, for the codecs that have one.
+    pub bits_per_sample: Option<u32>,
+    /// The file's channel count.
+    pub channels: u16,
+}
+
 impl std::ops::Deref for TransientList {
     type Target = [f64];
 
@@ -111,6 +125,30 @@ impl Shell {
         self.media
             .entry(bl_media::ContentHash::from_bytes(audio.media.0))
             .map(|entry| entry.path)
+    }
+
+    /// What the media store knows of an audio clip's file: its name, its
+    /// sample rate, its bit depth and its channel count (the sample editor
+    /// spec, R2).
+    #[must_use]
+    pub fn clip_media_info(&self, clip: ClipId) -> Option<ClipMediaInfo> {
+        let Some(ClipData::Audio(audio)) = self.editor.document().clip(clip).map(|c| &c.data)
+        else {
+            return None;
+        };
+        let entry = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(audio.media.0))?;
+        let info = entry.info?;
+        Some(ClipMediaInfo {
+            name: entry
+                .path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            sample_rate: info.sample_rate,
+            bits_per_sample: info.bits_per_sample,
+            channels: info.channels,
+        })
     }
 
     /// The analysis of an audio clip's file, if it is ready (WP-4.3).

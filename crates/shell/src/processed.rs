@@ -42,6 +42,8 @@ pub enum Kind {
     Bounce,
     /// A clip's separated stems (IMP-11).
     Stems,
+    /// An audio clip's warped audio, for Slice to New MIDI Track (WP-4.16).
+    Slice,
     /// An instrument's autosampled notes (IMP-27).
     Autosample,
 }
@@ -57,6 +59,7 @@ impl Kind {
             Self::Freeze => "Freeze",
             Self::Bounce => "Bounce",
             Self::Stems => "Stems",
+            Self::Slice => "Slice",
             Self::Autosample => "Autosample",
         }
     }

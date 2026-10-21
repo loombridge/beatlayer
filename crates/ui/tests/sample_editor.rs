@@ -91,7 +91,7 @@ fn sample(name: &str, warp: bool) -> Sample {
     let scratch = Scratch::new(name);
     let path = scratch.0.join("Clicks.wav");
     wav(&path);
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     let track = h
         .shell
         .editor()
@@ -161,16 +161,20 @@ impl Sample {
         self.h.shell.editor().undo_history().len()
     }
 
-    /// The Clip View's rectangle, from its accessible node.
+    /// The Clip View's editor, from its accessible node: the place left of
+    /// the panels.
     fn view(&mut self) -> Rect {
         let output = self.h.settle();
         let nodes = Harness::nodes(&output);
         let node = Harness::node(&nodes, "Clip View");
         let bounds = node.bounds.expect("the Clip View has bounds");
-        Rect::from_min_max(
+        let view = Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        )
+        );
+        // The Audio Utilities panel is in the panels' right group, so the
+        // editor starts after it (WP-4.10b).
+        bl_ui::clip_view::editor_rect(view, true)
     }
 
     /// Where the editor puts things now.
@@ -594,7 +598,13 @@ fn markers_transients_and_the_pseudo_warp_marker_are_drawn() {
     assert_eq!(
         nodes
             .iter()
-            .filter(|n| n.label.starts_with("Transient "))
+            // The Sample Editor's transient markers, and not the Audio
+            // Utilities panel's Transient Loop Mode and Transient Envelope
+            // controls (WP-4.10b).
+            .filter(|n| {
+                n.label.starts_with("Transient ")
+                    && n.label["Transient ".len()..].parse::<u32>().is_ok()
+            })
             .count(),
         times.len()
     );
@@ -1048,12 +1058,13 @@ fn follow_scrolls_the_editor_to_the_playhead_until_an_edit_pauses_it() {
     );
     s.h.take_events();
     s.h.shell.run("transport.play", json!({})).unwrap();
-    let begun = std::time::Instant::now();
     let mut turned = Vec::new();
-    while turned.is_empty() && begun.elapsed() < std::time::Duration::from_secs(5) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    for _ in 0..2_000 {
         s.h.frame(vec![]);
         turned.extend(scrolls(&mut s));
+        if !turned.is_empty() {
+            break;
+        }
     }
     assert!(s.h.shell.playing(), "the song starts");
     let page = turned
@@ -1076,10 +1087,11 @@ fn follow_scrolls_the_editor_to_the_playhead_until_an_edit_pauses_it() {
     assert!(scrolls(&mut s).is_empty(), "paused");
     // Stopping the song lets it follow again.
     s.h.shell.run("transport.stop", json!({})).unwrap();
-    let begun = std::time::Instant::now();
-    while s.h.shell.playing() && begun.elapsed() < std::time::Duration::from_secs(5) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    for _ in 0..2_000 {
         s.h.frame(vec![]);
+        if !s.h.shell.playing() {
+            break;
+        }
     }
     assert!(!s.h.shell.playing());
     assert!(!s.h.shell.clip_view().sample().follow_paused());

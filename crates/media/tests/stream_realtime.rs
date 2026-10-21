@@ -221,6 +221,7 @@ fn play(
         findings: Arc::clone(findings),
     };
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: Some(play_frames),
         channels: 2,

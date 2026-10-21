@@ -78,6 +78,7 @@ fn the_capacity_target_plays_without_a_dropout() {
     let config = EngineConfig::new(rate, 128);
 
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: None,
         channels: 2,

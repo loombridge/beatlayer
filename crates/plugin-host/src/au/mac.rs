@@ -465,6 +465,7 @@ impl AuHost {
             .filter(|name| !name.trim().is_empty());
         let found = AuType {
             device_type: DeviceType {
+                external_output: false,
                 kind: kind(&id),
                 name,
                 role,

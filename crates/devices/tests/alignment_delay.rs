@@ -33,6 +33,7 @@ fn registry() -> Registry {
 /// block.
 fn render(rate: SampleRate, params: &[(ParamId, f64)], input: &[f32]) -> Vec<Vec<f32>> {
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: rate,
         max_frames: input.len(),
         channels: 2,

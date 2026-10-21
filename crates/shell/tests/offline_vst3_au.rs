@@ -458,6 +458,7 @@ fn a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back()
         assert_eq!(
             during,
             Some(NodeConfig {
+                round_trip_latency: 0,
                 sample_rate: SampleRate::new(96_000).unwrap(),
                 max_frames: 100,
                 channels: 2,

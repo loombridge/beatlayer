@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 fn client() -> Client<InProcess> {
     let (backend, _control) = NullBackend::with_devices(
         NullOptions {
+            dropout_after: None,
             channels: 4,
             ..NullOptions::default()
         },

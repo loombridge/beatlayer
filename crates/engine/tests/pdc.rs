@@ -713,6 +713,7 @@ fn loopback_rig(rate: bl_core::time::SampleRate, latency: bl_model::HardwareLate
         port: None,
         channel: 1,
         audio_from: Channel::Pair(3),
+        audio_to: None,
         hardware_latency: latency,
     });
     ed.apply(Command::InsertDevice {

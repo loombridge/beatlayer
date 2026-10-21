@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-568 commands in 38 areas.
+571 commands in 38 areas.
 
 ## Permission classes
 
@@ -407,6 +407,7 @@ Each command has:
 | [`perception.preview`](#perceptionpreview) | Preview Audio | `read` |  |  |
 | [`plugin.configure`](#pluginconfigure) | Configure Plug-In | `edit` |  |  |
 | [`plugin.configure_param`](#pluginconfigure_param) | Configure Plug-In Parameter | `edit` |  |  |
+| [`plugin.export_list`](#pluginexport_list) | Export the Set's Plug-In List | `external` |  |  |
 | [`plugin.info`](#plugininfo) | Plug-In Info | `read` |  |  |
 | [`plugin.list`](#pluginlist) | List Plug-Ins in the Set | `read` |  |  |
 | [`plugin.load`](#pluginload) | Load Plug-In | `external` |  |  |
@@ -586,6 +587,7 @@ Each command has:
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
 | [`view.lane`](#viewlane) | Note Editor Lane | `read` |  |  |
+| [`view.set_plugin_list_only_missing`](#viewset_plugin_list_only_missing) | Show Only Missing Plug-Ins | `read` |  |  |
 | [`view.set_zoom`](#viewset_zoom) | Zoom | `edit` |  |  |
 | [`view.state`](#viewstate) | View State | `read` |  |  |
 | [`view.toggle_assistant`](#viewtoggle_assistant) | Assistant | `read` |  |  |
@@ -593,6 +595,7 @@ Each command has:
 | [`view.toggle_clip_view`](#viewtoggle_clip_view) | Clip View | `read` | `Cmd+Option+3` | `Ctrl+Alt+3` |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
+| [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
 | [`view.zoom_in`](#viewzoom_in) | Zoom In | `edit` | `Cmd+Plus` | `Ctrl+Plus` |
 | [`view.zoom_out`](#viewzoom_out) | Zoom Out | `edit` | `Cmd+Minus` | `Ctrl+Minus` |
@@ -7396,6 +7399,22 @@ Arguments:
 
 Result: [`DeviceParameters`](#deviceparameters).
 
+#### `plugin.export_list`
+
+**Export the Set's Plug-In List**. Permission: `external`. Contexts: `global`.
+
+Writes the set's plug-in list to a text file, as the list's Export… button does: the set's name and the date, a header line, and one line per plug-in with its name, format, vendor, version, preset names, tracks, and `Missing` where this computer doesn't have it, separated by tabs. `path` is the file to write it to; left out, the app asks where to save it. The file is written outside the set, so an agent asks first. Returns the file written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The file to write the list to. Left out, the app asks where to save it, as the list's Export… button does. |
+
+Result: [`ExportedList`](#exportedlist).
+
 #### `plugin.info`
 
 **Plug-In Info**. Permission: `read`. Contexts: `device-view`.
@@ -7416,7 +7435,7 @@ Result: [`PluginInfo`](#plugininfo).
 
 **List Plug-Ins in the Set**. Permission: `read`. Contexts: `global`.
 
-Lists every plug-in the set uses, grouped by plug-in: its format, its identifier, name, the file the set says it came from, its vendor and version when the scanner knows them, the devices and tracks that use it, and whether this machine has it (missing when the scanner hasn't seen it, or says why it is blocklisted). Changes nothing.
+Lists every plug-in the set uses, grouped by plug-in: its format, its identifier, name, the file the set says it came from, its vendor and version when the scanner knows them, the devices and tracks that use it, the preset names its devices hold, and whether this machine has it (missing when the scanner hasn't seen it, or says why it is blocklisted). Changes nothing.
 
 Default keys: none.
 
@@ -10408,6 +10427,22 @@ Arguments:
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.set_plugin_list_only_missing`
+
+**Show Only Missing Plug-Ins**. Permission: `read`. Contexts: `global`.
+
+Switches Show Only Missing in the list of the set's plug-ins: while it is on, only the plug-ins this computer doesn't have show. `only_missing` says which way; left out, it switches. Changes only the view: it isn't saved with the set and isn't an undo step. The result says whether it shows and whether Show Only Missing is on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `only_missing` | boolean or null | no | Show only the plug-ins this computer doesn't have (true) or all of them (false); switches if left out. |
+
+Result: [`PluginListState`](#pluginliststate).
+
 #### `view.set_zoom`
 
 **Zoom**. Permission: `edit`. Contexts: `global`, `settings`.
@@ -10516,6 +10551,18 @@ Arguments:
 | `shown` | boolean or null | no | Show (true) or hide (false) them; switches if left out. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `view.toggle_plugin_list`
+
+**Plug-In List**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the list of the set's plug-ins in the detail area's place, where the File Manager opens (L-OTH-002), in front of the Clip or Device View. The list holds every plug-in the set uses, with its format, vendor, version, the preset names its devices hold, the tracks it is on, and whether this computer has it. Whether it shows is view state: it isn't saved with the set and isn't an undo step. The result says whether it shows and whether Show Only Missing is on.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`PluginListState`](#pluginliststate).
 
 #### `view.toggle_session_arrangement`
 
@@ -10997,6 +11044,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
+| [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
 | [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
 | [`set.relink_missing`](#setrelink_missing) | finds files outside the set; the clips that use them read their media |
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
@@ -15326,6 +15374,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
+| `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
@@ -15485,6 +15534,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it."
+    },
+    "preset_name": {
+      "description": "The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "role": {
       "$ref": "#/$defs/DeviceRole",
@@ -17796,6 +17852,34 @@ What `export.audio` returns.
     "took_seconds",
     "speed",
     "missing_media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportedList`
+
+What `plugin.export_list` returns: the file it wrote.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file the list was written to. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `plugin.export_list` returns: the file it wrote.",
+  "properties": {
+    "path": {
+      "description": "The file the list was written to.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }
@@ -24460,6 +24544,40 @@ What `plugin.info` and `plugin.show_window` return.
 
 </details>
 
+### `PluginListState`
+
+What the list of a set's plug-ins shows: whether it shows, and whether Show Only Missing is on (the plug-in list spec, R10).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `visible` | boolean | yes | Whether the list shows in the detail area's place. |
+| `only_missing` | boolean | yes | Whether Show Only Missing is on, so that only the plug-ins this computer doesn't have show. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the list of a set's plug-ins shows: whether it shows, and whether Show Only Missing is on (the plug-in list spec, R10).",
+  "properties": {
+    "only_missing": {
+      "description": "Whether Show Only Missing is on, so that only the plug-ins this computer doesn't have show.",
+      "type": "boolean"
+    },
+    "visible": {
+      "description": "Whether the list shows in the detail area's place.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "visible",
+    "only_missing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PluginLoaded`
 
 What `plugin.load` returns.
@@ -27498,6 +27616,7 @@ One plug-in a set uses (IMP-29).
 | `missing` | boolean | yes | Whether this machine has it: the scanner hasn't seen it, or the scanner blocklisted its file. |
 | `blocked` | string or null | no | Why it's missing, if the scanner blocklisted its file. |
 | `path` | string or null | no | The file the set says it came from, if any. |
+| `preset_names` | array of string | no | The preset names its devices hold, each once, in the order the devices come (the plug-in list spec, R5). |
 | `vendor` | string or null | no | Its vendor, from the scanner, if it's known on this machine. |
 | `version` | string or null | no | Its version, from the scanner, if it's known on this machine. |
 
@@ -27543,6 +27662,13 @@ One plug-in a set uses (IMP-29).
     "plugin_id": {
       "description": "Its identifier within its format.",
       "type": "string"
+    },
+    "preset_names": {
+      "description": "The preset names its devices hold, each once, in the order the devices come (the plug-in list spec, R5).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "tracks": {
       "description": "The tracks those devices are on.",
@@ -30473,6 +30599,7 @@ What `view.state` returns: what the view commands switch, without switching any 
 |---|---|---|---|
 | `window` | [`ViewResult`](#viewresult) | yes | The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom. |
 | `clip_view` | [`ClipViewState`](#clipviewstate) | yes | The Clip View and its note editor: whether it shows, Draw Mode, the clip it holds, the selected notes, the lane and Fold. |
+| `plugin_list` | [`PluginListState`](#pluginliststate) | yes | The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on. |
 | `assistant` | [`AssistantPanelState`](#assistantpanelstate) | yes | The assistant's panel. |
 | `plug_in_windows` | boolean | yes | Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it. |
 
@@ -30494,6 +30621,10 @@ What `view.state` returns: what the view commands switch, without switching any 
       "description": "Whether floating devices' and plug-ins' windows are shown, as `view.toggle_plug_in_windows` sets it.",
       "type": "boolean"
     },
+    "plugin_list": {
+      "$ref": "#/$defs/PluginListState",
+      "description": "The list of the set's plug-ins: whether it shows, and whether Show Only Missing is on."
+    },
     "window": {
       "$ref": "#/$defs/ViewResult",
       "description": "The main window: the main view, the browser, the Info View, full-screen mode and the interface zoom."
@@ -30502,6 +30633,7 @@ What `view.state` returns: what the view commands switch, without switching any 
   "required": [
     "window",
     "clip_view",
+    "plugin_list",
     "assistant",
     "plug_in_windows"
   ],

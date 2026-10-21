@@ -56,6 +56,12 @@ pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
+/// `view.toggle_plugin_list`: show or hide the list of the set's plug-ins
+/// (IMP-29, WP-6.41).
+pub const VIEW_TOGGLE_PLUGIN_LIST: &str = "view.toggle_plugin_list";
+/// `view.set_plugin_list_only_missing`: switch Show Only Missing in the list
+/// of the set's plug-ins (IMP-29, WP-6.41).
+pub const VIEW_SET_PLUGIN_LIST_ONLY_MISSING: &str = "view.set_plugin_list_only_missing";
 /// `view.draw_mode`: switch Draw Mode (B, WP-2.3).
 pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 /// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
@@ -191,6 +197,8 @@ pub const IDS: &[&str] = &[
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
+    VIEW_TOGGLE_PLUGIN_LIST,
+    VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
     VIEW_DRAW_MODE,
     VIEW_FOLD_NOTES,
     VIEW_LANE,
@@ -489,6 +497,16 @@ pub struct LaneArgs {
     pub lane: NoteField,
 }
 
+/// Arguments of `view.set_plugin_list_only_missing`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PluginListOnlyMissingArgs {
+    /// Show only the plug-ins this computer doesn't have (true) or all of
+    /// them (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only_missing: Option<bool>,
+}
+
 /// Arguments of `view.clip_tab`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -547,6 +565,9 @@ pub struct ViewState {
     /// The Clip View and its note editor: whether it shows, Draw Mode, the
     /// clip it holds, the selected notes, the lane and Fold.
     pub clip_view: ClipViewState,
+    /// The list of the set's plug-ins: whether it shows, and whether Show
+    /// Only Missing is on.
+    pub plugin_list: crate::plugins::PluginListState,
     /// The assistant's panel.
     pub assistant: crate::assistant::AssistantPanelState,
     /// Whether floating devices' and plug-ins' windows are shown, as
@@ -827,6 +848,35 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-015")
             .args::<NoArgs>()
             .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_TOGGLE_PLUGIN_LIST, "Plug-In List")
+            .description(
+                "Shows or hides the list of the set's plug-ins in the detail area's place, \
+                 where the File Manager opens (L-OTH-002), in front of the Clip or Device \
+                 View. The list holds every plug-in the set uses, with its format, vendor, \
+                 version, the preset names its devices hold, the tracks it is on, and whether \
+                 this computer has it. Whether it shows is view state: it isn't saved with \
+                 the set and isn't an undo step. The result says whether it shows and \
+                 whether Show Only Missing is on.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<crate::plugins::PluginListState>(),
+        CommandSpec::new(
+            VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
+            "Show Only Missing Plug-Ins",
+        )
+        .description(
+            "Switches Show Only Missing in the list of the set's plug-ins: while it is on, \
+                 only the plug-ins this computer doesn't have show. `only_missing` says which \
+                 way; left out, it switches. Changes only the view: it isn't saved with the \
+                 set and isn't an undo step. The result says whether it shows and whether Show \
+                 Only Missing is on.",
+        )
+        .permission(Permission::Read)
+        .context(Global)
+        .args::<PluginListOnlyMissingArgs>()
+        .result::<crate::plugins::PluginListState>(),
         CommandSpec::new(VIEW_DRAW_MODE, "Draw Mode")
             .description(
                 "Switches Draw Mode (B; Options ▸ Draw Mode), which changes what a click in \

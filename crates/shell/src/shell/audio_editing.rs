@@ -16,7 +16,7 @@ use bl_model::{
 };
 use bl_shell_spec::audio_editing::{
     self as ids, ConsolidateResult, ConsolidateSceneArgs, ConsolidateSceneResult, CropArgs,
-    CropResult,
+    CropResult, ReverseArgs, ReverseRangeArgs, ReverseRangeResult, ReverseResult,
 };
 use bl_shell_spec::editing::TargetArgs;
 use serde_json::Value;
@@ -37,11 +37,16 @@ const SLACK: f64 = 1e-9;
 /// covered, the track, the new clip, and the file it plays.
 type Landed = (usize, TrackId, ClipId, String);
 
+/// A clip a reversal made: the clip, and where its new file is.
+type Reversed = (ClipId, Option<String>);
+
 impl Shell {
     /// Runs one of the audio clip editing commands (WP-4.13).
     pub(super) fn run_audio_editing(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         match id {
             ids::CROP => self.crop(id, args),
+            ids::REVERSE => self.reverse(id, args),
+            ids::ARRANGEMENT_REVERSE => self.arrangement_reverse(id, args),
             ids::CONSOLIDATE => self.consolidate(id, args),
             ids::CONSOLIDATE_TO_SCENE => self.consolidate_to_scene(id, args),
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
@@ -53,6 +58,14 @@ impl Shell {
     pub(super) fn can_audio_edit(&self, id: &str, args: &Value) -> bool {
         match id {
             ids::CROP => self.crop_target(args).is_ok(),
+            ids::REVERSE => match Self::args::<ReverseArgs>(id, args.clone()) {
+                Ok(args) => self.reverse_target(&args).is_ok(),
+                Err(_) => false,
+            },
+            ids::ARRANGEMENT_REVERSE => match Self::args::<ReverseRangeArgs>(id, args.clone()) {
+                Ok(args) => self.reverse_range(id, &args).is_ok(),
+                Err(_) => false,
+            },
             ids::CONSOLIDATE | ids::CONSOLIDATE_TO_SCENE => {
                 match Self::args::<TargetArgs>(id, args.clone()) {
                     Ok(args) => self.material_of(id, &args).is_ok(),
@@ -61,6 +74,359 @@ impl Shell {
             }
             _ => false,
         }
+    }
+
+    /// `clip.reverse` (R7 to R10): the clip's file is written backwards
+    /// through the processed-file writer, and the clip plays it.
+    fn reverse(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let args: ReverseArgs = Self::args(id, args)?;
+        let clip = self.reverse_target(&args).map_err(|why| invalid(id, why))?;
+        let value = self.clip_of(id, clip)?;
+        let ClipData::Audio(audio) = &value.data else {
+            // Spec: R12. A MIDI clip isn't reversed, and nothing changes.
+            return Ok(to_value(&ReverseResult {
+                clip,
+                media: None,
+                path: None,
+            }));
+        };
+        let audio = audio.clone();
+        let decoded = self
+            .edited_audio(audio.media, &[])
+            .ok_or_else(|| failed(id, "the clip's file is missing"))?;
+        let seconds = decoded.frames() as f64 / f64::from(decoded.sample_rate());
+        // Spec: R10. A file Beatlayer made as a reversed copy goes back to
+        // the one it was made from, writing nothing.
+        if let Some(original) = self.store.reversed_from(&audio.media) {
+            let command = Command::ReverseClip {
+                clip,
+                media: Some(original),
+                seconds,
+            };
+            self.apply_one(id, "Reverse clip", command)?;
+            return Ok(to_value(&ReverseResult {
+                clip,
+                media: Some(original),
+                path: None,
+            }));
+        }
+        let landed: Rc<RefCell<Option<(ContentHash, String)>>> = Rc::new(RefCell::new(None));
+        let slot = Rc::clone(&landed);
+        self.reverse_file(id, &audio, move |shell, written| {
+            let hash = ContentHash(*written.hash.as_bytes());
+            shell
+                .editor
+                .transact("Reverse clip", |editor| {
+                    editor
+                        .apply(Command::ReverseClip {
+                            clip,
+                            media: Some(hash),
+                            seconds,
+                        })
+                        .map(drop)
+                })
+                .map_err(|error| error.to_string())?;
+            shell.changed();
+            *slot.borrow_mut() = Some((hash, written.path.to_string_lossy().into_owned()));
+            Ok(())
+        })?;
+        self.wait_processed();
+        let (media, path) = landed
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| failed(id, "the new file couldn't be written"))?;
+        Ok(to_value(&ReverseResult {
+            clip,
+            media: Some(media),
+            path: Some(path),
+        }))
+    }
+
+    /// `arrangement.reverse` (R11, R12): the audio in a span of the
+    /// Arrangement is reversed, across several clips, and the span plays
+    /// backwards as a whole.
+    fn arrangement_reverse(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let args: ReverseRangeArgs = Self::args(id, args)?;
+        let (material, start, end) = self.reverse_range(id, &args)?;
+        if material.is_empty() {
+            return Err(unavailable(id, "no clip is in the selection"));
+        }
+        // Spec: R12. A selection that holds a MIDI clip isn't reversed, and
+        // nothing changes.
+        for (_, clips) in &material {
+            for clip in clips {
+                if !matches!(clip.data, ClipData::Audio(_)) {
+                    return Err(unavailable(id, "the selection holds a MIDI clip"));
+                }
+            }
+        }
+        // Spec: freeze-and-bounce R8. A clip on a frozen track isn't
+        // reversed.
+        {
+            let doc = self.editor.document();
+            for (track, _) in &material {
+                if doc.track(*track).is_some_and(|track| track.is_frozen()) {
+                    return Err(unavailable(
+                        id,
+                        format!(
+                            "the track {} is frozen; unfreeze it to change its clip settings",
+                            track.0
+                        ),
+                    ));
+                }
+            }
+        }
+        let tracks: Vec<TrackId> = material.iter().map(|(track, _)| *track).collect();
+        self.editor.begin("Reverse clip(s)");
+        let outcome = self.reverse_span(id, &tracks, start, end);
+        let done = match outcome {
+            Ok(done) => {
+                self.editor.commit().unwrap_or(false);
+                self.changed();
+                done
+            }
+            Err(error) => {
+                self.editor.cancel().ok();
+                return Err(error);
+            }
+        };
+        Ok(to_value(&ReverseRangeResult {
+            clips: done.iter().map(|(clip, _)| *clip).collect(),
+            tracks,
+            files: done.iter().filter_map(|(_, path)| path.clone()).collect(),
+        }))
+    }
+
+    /// Splits the clips a span crosses at its edges, reverses each part
+    /// inside, and moves the parts so the span plays backwards as a whole
+    /// (R11).
+    fn reverse_span(
+        &mut self,
+        id: &str,
+        tracks: &[TrackId],
+        start: Ticks,
+        end: Ticks,
+    ) -> Result<Vec<(ClipId, Option<String>)>, ShellError> {
+        // The clips the span covers, right to left, so each keeps its first
+        // part.
+        for &track in tracks {
+            let clips: Vec<ClipId> = self
+                .editor
+                .document()
+                .track(track)
+                .map(|track| {
+                    track
+                        .clips()
+                        .filter(|clip| clip.start < end && clip.end() > start)
+                        .map(|clip| clip.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for clip in clips {
+                for at in [end, start] {
+                    let crosses = self
+                        .editor
+                        .document()
+                        .clip(clip)
+                        .is_some_and(|value| value.start < at && at < value.end());
+                    if crosses {
+                        crate::arrangement::placing::split_off(&mut self.editor, clip, at)
+                            .map_err(|error| failed(id, error))?;
+                    }
+                }
+            }
+        }
+        // The parts inside the span, each with where it lands: a part that
+        // started *d* after the span's start ends *d* before its end.
+        let mut parts: Vec<(TrackId, ClipId, Ticks)> = Vec::new();
+        for &track in tracks {
+            let inside: Vec<(ClipId, Ticks, Ticks)> = self
+                .editor
+                .document()
+                .track(track)
+                .map(|track| {
+                    track
+                        .clips()
+                        .filter(|clip| clip.start >= start && clip.end() <= end)
+                        .map(|clip| (clip.id, clip.start, clip.end()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (clip, _from, to) in inside {
+                let lands = start + (end - to);
+                parts.push((track, clip, lands));
+            }
+        }
+        let landed: Rc<RefCell<Vec<Reversed>>> = Rc::new(RefCell::new(Vec::new()));
+        let done = Rc::clone(&landed);
+        for (track, clip, lands) in parts {
+            let Some(value) = self.editor.document().clip(clip).cloned() else {
+                continue;
+            };
+            let ClipData::Audio(audio) = &value.data else {
+                continue;
+            };
+            let audio = audio.clone();
+            let decoded = self
+                .edited_audio(audio.media, &[])
+                .ok_or_else(|| failed(id, "a clip's file is missing"))?;
+            let seconds = decoded.frames() as f64 / f64::from(decoded.sample_rate());
+            let slot = Rc::clone(&done);
+            self.reverse_file(id, &audio, move |shell, written| {
+                let hash = ContentHash(*written.hash.as_bytes());
+                shell
+                    .editor
+                    .transact("Reverse clip(s)", |editor| {
+                        editor
+                            .apply(Command::ReverseClip {
+                                clip,
+                                media: Some(hash),
+                                seconds,
+                            })
+                            .map(drop)
+                            .and_then(|()| {
+                                editor
+                                    .apply(Command::MoveClip {
+                                        clip,
+                                        track,
+                                        start: lands,
+                                    })
+                                    .map(drop)
+                            })
+                    })
+                    .map_err(|error| error.to_string())?;
+                shell.changed();
+                slot.borrow_mut()
+                    .push((clip, Some(written.path.to_string_lossy().into_owned())));
+                Ok(())
+            })
+            .map_err(|error| failed(id, error))?;
+        }
+        self.wait_processed();
+        Ok(landed.borrow().clone())
+    }
+
+    /// Writes the reversed copy of `audio`'s file through the processed-file
+    /// writer (R7), and runs `done` with its hash when it is whole.
+    fn reverse_file(
+        &mut self,
+        id: &str,
+        audio: &AudioData,
+        done: impl FnOnce(&mut Shell, &Written) -> Result<(), String> + 'static,
+    ) -> Result<(), ShellError> {
+        let decoded = self
+            .edited_audio(audio.media, &[])
+            .ok_or_else(|| failed(id, "the clip's file is missing"))?;
+        let rate = decoded.sample_rate();
+        let frames = decoded.frames();
+        let channels = decoded.channel_count();
+        let stem = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(audio.media.0))
+            .and_then(|entry| {
+                entry
+                    .path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "Sample".to_owned());
+        let original = audio.media;
+        let request = Request {
+            kind: Kind::Reverse,
+            name: format!("{stem} Reverse.wav"),
+            spec: bl_media::EncodeSpec {
+                file_type: bl_media::FileType::Wav,
+                bit_depth: bl_media::BitDepth::Float32,
+                dither: bl_media::Dither::None,
+                sample_rate: rate,
+                channels: channels as u16,
+            },
+            frames: frames as u64,
+            produce: Box::new(move |sink| {
+                // Spec: R7. Frame n of the new file, in every channel, is
+                // frame L - 1 - n of the source.
+                let mut buffer = Vec::with_capacity(4096 * channels);
+                let mut at = frames;
+                while at > 0 {
+                    let from = at.saturating_sub(4096);
+                    buffer.clear();
+                    for frame in (from..at).rev() {
+                        for channel in 0..channels {
+                            buffer.push(
+                                decoded
+                                    .channel(channel)
+                                    .map_or(0.0, |samples| samples[frame]),
+                            );
+                        }
+                    }
+                    sink.write(&buffer)?;
+                    at = from;
+                }
+                Ok(())
+            }),
+        };
+        self.start_processed(request, move |shell, written| {
+            let hash = ContentHash(*written.hash.as_bytes());
+            // Spec: R10. The set's media table keeps which file the reversed
+            // copy was made from.
+            shell
+                .store
+                .add_reversed_media(hash, &written.path, written.size, original);
+            done(shell, &written)
+        })
+        .map_err(|error| failed(id, error))?;
+        Ok(())
+    }
+
+    /// The clip a `clip.reverse` acts on: the one the call names, the one
+    /// the Clip View shows, or the one the Arrangement has selected.
+    fn reverse_target(&self, args: &ReverseArgs) -> Result<ClipId, String> {
+        let doc = self.editor.document();
+        if let Some(clip) = args.clip {
+            return doc
+                .clip(clip)
+                .map(|_| clip)
+                .ok_or_else(|| format!("no clip has the ID {}", clip.0));
+        }
+        if let Some(shown) = self.clip_view.shown_any_clip(doc, &self.arrangement) {
+            return Ok(shown);
+        }
+        self.arrangement
+            .selected_clips()
+            .first()
+            .copied()
+            .ok_or_else(|| "no clip is selected".to_owned())
+    }
+
+    /// The material a `arrangement.reverse` acts on: the clips a span of
+    /// time covers, on the tracks it covers, and the span itself.
+    #[expect(
+        clippy::type_complexity,
+        reason = "each track's clips cut to the range, and the range"
+    )]
+    fn reverse_range(
+        &self,
+        id: &str,
+        args: &ReverseRangeArgs,
+    ) -> Result<(Vec<(TrackId, Vec<Clip>)>, Ticks, Ticks), ShellError> {
+        let doc = self.editor.document();
+        let target = editing::target(
+            doc,
+            &self.arrangement,
+            TargetArgs {
+                clips: None,
+                tracks: args.tracks.clone(),
+                start: args.start.clone(),
+                end: args.end.clone(),
+            },
+        )
+        .map_err(|failure| edit_error(id, failure))?;
+        let (by_track, start, end) = editing::material(doc, &target);
+        let material: Vec<(TrackId, Vec<Clip>)> = by_track
+            .into_iter()
+            .filter(|(_, clips)| !clips.is_empty())
+            .collect();
+        Ok((material, start, end))
     }
 
     /// `clip.crop` (R14 to R18): an audio clip's region is written as a new
@@ -878,6 +1244,8 @@ fn consolidated_audio(
         tempo_leader: false,
         ram: false,
         high_quality: true,
+        transpose: 0,
+        detune: 0.0,
         transient_edits: bl_model::TransientEdits::default(),
     }
 }

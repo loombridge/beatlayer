@@ -218,6 +218,22 @@ impl Editor {
         Ok(())
     }
 
+    /// Records the name of the preset a device holds (the plug-in list spec,
+    /// R5) without an undo step: saving a preset names it, and the name is
+    /// a note for the set file, not a change to the sound.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::Command`] if there's no such device.
+    pub fn amend_device_preset_name(
+        &mut self,
+        device: crate::DeviceId,
+        name: Option<String>,
+    ) -> Result<(), EditError> {
+        self.document.set_device_preset_name(device, name)?;
+        Ok(())
+    }
+
     /// Points the set's current scale at `scale`, as selecting a clip or a
     /// clip that starts playing does (the scales spec, R10 and R11): the
     /// current scale follows, and that is no undo step, though the set is

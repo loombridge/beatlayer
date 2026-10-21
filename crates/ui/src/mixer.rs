@@ -35,7 +35,7 @@ use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     ARRANGEMENT_TITLE_ROW, ChainColumn, ChainStripLayout, Column, ColumnKind, MixerLayout,
     SCALE_LABELS, Sections, SessionLayout, StripLayout, TrackColumn, crossfade_buttons,
-    crossfader_slider, in_out_row, send_knob, split_pans, track_options,
+    crossfader_slider, in_out_row, performance_impact, send_knob, split_pans, track_options,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -53,6 +53,7 @@ pub fn sections(shell: &Shell) -> Sections {
         crossfader: view.crossfader(),
         returns: view.return_tracks(),
         track_options: view.track_options(),
+        performance_impact: view.performance_impact(),
     }
 }
 
@@ -469,6 +470,16 @@ impl MixerUi {
                     activator: &label,
                 };
                 parts.track_options_section(&mut column_ui, column.rect, span, events);
+            }
+            if let Some(span) = layout.performance_impact {
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.performance_impact_section(&mut column_ui, column.rect, span);
             }
         }
         self.scroll(&ui, sections_area, of, events);
@@ -1426,6 +1437,45 @@ impl StripParts<'_> {
         self.track_delay(ui, delay, events);
         self.delay_unit(ui, unit, events);
         self.keep_monitoring(ui, keep, events);
+    }
+
+    /// The Performance Impact section (L-MIX-007): the six segments under
+    /// the strip, lit from the left with the track's share of the set's
+    /// processing time (the mixer spec, R31).
+    pub fn performance_impact_section(&self, ui: &mut Ui, column: Rect, span: (f32, f32)) {
+        let lit = self.impact_segments();
+        let segments = performance_impact(column, span);
+        let painter = ui.painter();
+        for (i, rect) in segments.iter().enumerate() {
+            let colour = if i < lit {
+                self.theme.colors.accent.0
+            } else {
+                self.theme.colors.inactive.0
+            };
+            painter.rect_filled(*rect, self.theme.sizes.corner, colour);
+        }
+        let id = Id::new(("mixer-impact", self.place, self.track));
+        let rect = Rect::from_min_max(pos2(column.left(), span.0), pos2(column.right(), span.1));
+        let response = ui.interact(rect, id, Sense::hover());
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::ProgressIndicator, true, "Performance Impact")
+        });
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Group);
+            node.set_label("Performance Impact".to_owned());
+            node.set_value(format!("{lit} of 6 segments"));
+            node.set_bounds(bounds(rect));
+        });
+    }
+
+    /// How many of the six Performance Impact segments the track lights:
+    /// its share of the set's processing time, a sixth at a time (the mixer
+    /// spec, R31).
+    fn impact_segments(&self) -> usize {
+        self.shell
+            .meter(self.track)
+            .map(|meter| bl_shell::mixer_view::impact_segments(meter.impact))
+            .unwrap_or(0) as usize
     }
 
     /// The Track Delay field (R28): the delay in its current unit, dragged,

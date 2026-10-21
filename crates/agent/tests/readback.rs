@@ -541,6 +541,8 @@ fn fixture() -> Project {
             ram: true,
             high_quality: false,
             tempo_leader: true,
+            transpose: 7,
+            detune: -12.5,
             transient_edits: TransientEdits {
                 added: vec![0.5],
                 removed: vec![1.25],

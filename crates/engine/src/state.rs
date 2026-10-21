@@ -26,6 +26,10 @@ pub struct TrackMeter {
     pub peak: [f32; 2],
     /// The RMS level of the first two channels.
     pub rms: [f32; 2],
+    /// The track's share of the set's processing time, from 0 to 1 (the
+    /// mixer spec, R31): what the Performance Impact indicator shows, in
+    /// six segments.
+    pub impact: f32,
     /// The most gain reduction any of the track's compressors or limiters
     /// reported for the block, in dB, as a compressor's Gain Reduction reads
     /// it: zero when none of them reduced (the mixer view spec, R40). Gates

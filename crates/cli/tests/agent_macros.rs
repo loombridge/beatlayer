@@ -141,6 +141,32 @@ fn an_agent_maps_moves_randomises_and_reads_back_macros() {
         queried["macros"]["macros"][0]["mappings"][0]["param"],
         json!("Width")
     );
+
+    // Spec: macros R21, R22. The style is set by ID and reads back through
+    // `rack.macros` and the query tool.
+    run(
+        &mut client,
+        "rack.set_macro_style",
+        json!({ "rack": rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+    );
+    let read = run(&mut client, "rack.macros", json!({ "rack": rack }));
+    assert_eq!(read["macros"][0]["style"], json!("stepped"));
+    assert_eq!(read["macros"][0]["steps"], json!(4));
+    let queried = call(&mut client, "query", json!({ "id": rack }));
+    assert_eq!(queried["macros"]["macros"][0]["style"], json!("stepped"));
+    assert_eq!(queried["macros"]["macros"][0]["steps"], json!(4));
+    // A stepped macro takes only its steps.
+    run(
+        &mut client,
+        "device.set_param",
+        json!({ "device": rack, "param": 100, "value": 0.4 }),
+    );
+    let read = run(&mut client, "rack.macros", json!({ "rack": rack }));
+    let value = read["macros"][0]["value"].as_f64().expect("a value");
+    assert!(
+        (value - 1.0 / 3.0).abs() < 1e-9,
+        "the nearest step: {value}"
+    );
 }
 
 // Spec: macros R26, R27, R32.

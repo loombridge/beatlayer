@@ -114,7 +114,7 @@ fn a_plugin_in_a_chain_keeps_its_instance_across_edits() {
     assert_eq!(offline.heap_operations(), 0);
 }
 
-// Spec: mixer-view R21
+// Spec: mixer-view R40
 #[test]
 fn a_plugins_gain_adjustment_shows_on_its_tracks_meter() {
     let host = ClapHost::new();

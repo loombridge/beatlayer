@@ -125,7 +125,7 @@ pub fn meter_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-meter", place, track))
 }
 
-/// The ID of a strip's gain-reduction bar (R21).
+/// The ID of a strip's gain-reduction bar (R40).
 #[must_use]
 pub fn gain_reduction_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-gain-reduction", place, track))
@@ -2899,7 +2899,7 @@ impl StripParts<'_> {
         });
     }
 
-    /// The gain-reduction bar (R21; IMP-25): a thin bar beside the meter
+    /// The gain-reduction bar (R40; IMP-25): a thin bar beside the meter
     /// showing the most reduction any of the track's compressors or
     /// limiters reported for the last block, on the meter's own 0-to-60 dB
     /// scale, filled from the top.

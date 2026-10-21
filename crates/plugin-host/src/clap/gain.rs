@@ -3,7 +3,7 @@
 //! adjustment, in dB, a plug-in applied to the last sample of the block it
 //! just processed. A compressor or limiter reports its reduction through it;
 //! the engine reads it after each block for the track's gain-reduction meter
-//! (the mixer view spec, R21). A plug-in that doesn't implement it reports
+//! (the mixer view spec, R40). A plug-in that doesn't implement it reports
 //! nothing.
 
 use clack_host::extensions::prelude::*;

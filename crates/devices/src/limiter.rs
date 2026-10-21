@@ -227,7 +227,7 @@ pub struct Brickwall {
     /// How long a reduction has been held, which Auto Release reads.
     hold_frames: f32,
     /// The most gain the last block took off, in dB (the mixer view spec,
-    /// R21): the least gain the limiter applied, zero when it reduced
+    /// R40): the least gain the limiter applied, zero when it reduced
     /// nothing.
     reduction: f32,
 }
@@ -410,7 +410,7 @@ impl NativeDevice for Brickwall {
             self.hold_frames = 0.0;
         }
         let release = self.release_step(params.value(RELEASE_INDEX), auto);
-        // The least gain of the block, for the gain-reduction meter (R21).
+        // The least gain of the block, for the gain-reduction meter (R40).
         let mut least_gain = 1.0f32;
         for channel in 0..channels {
             let work = &self.work[channel][..frames];

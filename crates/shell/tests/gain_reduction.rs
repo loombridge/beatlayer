@@ -1,4 +1,4 @@
-//! The gain-reduction meter (IMP-25; the mixer view spec, R21): a track's
+//! The gain-reduction meter (IMP-25; the mixer view spec, R40): a track's
 //! compressors and limiters report the gain they took off the last block, and
 //! the engine publishes the most any of them reported with the track's
 //! meters. Every block runs under the allocation trap.
@@ -6,6 +6,9 @@
 bl_rt::install_trap!();
 
 use bl_core::time::SampleRate;
+use bl_devices::bus_compressor::{
+    ATTACK as BUS_ATTACK, BUS_COMPRESSOR, THRESHOLD as BUS_THRESHOLD,
+};
 use bl_devices::compressor::{ATTACK, COMPRESSOR, THRESHOLD};
 use bl_devices::limiter::{CEILING, LIMITER};
 use bl_engine::nodes::{TEST_TONE, test_tone};
@@ -94,7 +97,7 @@ fn most_reduction(
     most
 }
 
-// Spec: mixer-view R21
+// Spec: mixer-view R40
 #[test]
 fn a_compressor_publishes_its_reduction_on_its_track_at_every_block_size() {
     for block in [1usize, 64, 512, 4096] {
@@ -109,7 +112,7 @@ fn a_compressor_publishes_its_reduction_on_its_track_at_every_block_size() {
     }
 }
 
-// Spec: mixer-view R21
+// Spec: mixer-view R40
 #[test]
 fn a_track_without_a_compressor_reports_no_reduction() {
     let (mut processor, mut monitor, track) = running(&[]);
@@ -120,7 +123,7 @@ fn a_track_without_a_compressor_reports_no_reduction() {
     );
 }
 
-// Spec: mixer-view R21
+// Spec: mixer-view R40
 #[test]
 fn two_reducing_devices_combine_as_the_most_reduction() {
     // The compressor turns the tone down 1.5 dB, to a -7.5 dBFS peak; the
@@ -134,5 +137,22 @@ fn two_reducing_devices_combine_as_the_most_reduction() {
     assert!(
         (most + 10.5).abs() < 1.0,
         "the limiter's 10.5 dB reduction is the most: {most} dB"
+    );
+}
+
+// Spec: mixer-view R40. Every native compressor and limiter reports, not only
+// the Compressor and the Limiter: the Glue Compressor's reading reaches the
+// track's meter too (Multiband Dynamics' is the device's own test).
+#[test]
+fn the_glue_compressor_reports_its_reduction() {
+    // A 4:1 ratio over a -14 dB threshold turns a -6 dBFS tone down 6 dB.
+    let (mut processor, mut monitor, track) = running(&[(
+        BUS_COMPRESSOR,
+        &[(BUS_THRESHOLD, -14.0), (BUS_ATTACK, 0.01)],
+    )]);
+    let most = most_reduction(&mut processor, &mut monitor, track, 512);
+    assert!(
+        (most + 6.0).abs() < 0.5,
+        "the Glue Compressor's 6 dB reduction reads as {most} dB"
     );
 }

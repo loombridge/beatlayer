@@ -519,7 +519,7 @@ impl MainWindowUi {
             // The playhead and the Arrangement Position fields move with
             // the engine every frame (control-bar-transport R14), and the
             // meters and the gain-reduction bars until they're silent
-            // (mixer-view R10, R21).
+            // (mixer-view R10, R40).
             ctx.request_repaint();
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.

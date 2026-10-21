@@ -70,7 +70,7 @@ pub trait NativeDevice: Send + 'static {
     /// zero for a device that reduces nothing, negative for a compressor or
     /// a limiter, positive for one that adds gain. The engine reads it after
     /// every block for the track's gain-reduction meter (the mixer view
-    /// spec, R21). The default is zero.
+    /// spec, R40). The default is zero.
     fn gain_reduction(&self) -> f32 {
         0.0
     }

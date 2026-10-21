@@ -642,7 +642,7 @@ pub struct StripLayout {
     /// The meter (x 60 to 71, y 11 to 119).
     pub meter: Rect,
     /// The gain-reduction bar, a thin bar beside the meter (x 71 to 74, y 11
-    /// to 119; IMP-25, the mixer view spec R21).
+    /// to 119; IMP-25, the mixer view spec R40).
     pub gain_reduction: Rect,
     /// The scale's labels' column (x 74 to 86).
     pub labels: (f32, f32),

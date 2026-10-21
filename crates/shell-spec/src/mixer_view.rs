@@ -92,7 +92,7 @@ pub struct ViewMixerState {
 }
 
 /// One track's gain reduction, as `mixer_view.state` reports it (IMP-25,
-/// the mixer view spec R21).
+/// the mixer view spec R40).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrackGainReduction {
     /// The track.
@@ -131,7 +131,7 @@ pub struct MixerViewState {
     /// new set.
     pub track_options: bool,
     /// Each track's gain reduction, in the order the tracks run (IMP-25,
-    /// R21); empty when no engine has published meters.
+    /// R40); empty when no engine has published meters.
     #[serde(default)]
     pub gain_reduction: Vec<TrackGainReduction>,
     /// The racks whose chains fold out in the mixers (racks spec, R27): the

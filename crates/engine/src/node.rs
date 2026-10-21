@@ -486,7 +486,7 @@ pub trait Node: Send + 'static {
     /// compressor's Gain Reduction reads it: zero for a node that reduces
     /// nothing, negative for a reduction, positive for a device that adds
     /// gain. The engine reads it after every block for the track's
-    /// gain-reduction meter (the mixer view spec, R21). The default is zero.
+    /// gain-reduction meter (the mixer view spec, R40). The default is zero.
     fn gain_reduction(&self) -> f32 {
         0.0
     }

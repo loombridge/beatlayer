@@ -245,6 +245,9 @@ pub struct Bond {
     /// The gain reduction in dB now, and the loudest wet sample, before and
     /// after the clip, since the display last published.
     reduction: f32,
+    /// The deepest reduction the last block reached, in dB (the mixer view
+    /// spec, R40).
+    block_reduction: f32,
     peak_wet: f32,
     peak_out: f32,
     soft_clipping: bool,
@@ -291,6 +294,7 @@ impl Bond {
             ],
             latency: if on { latency } else { 0 },
             reduction: 0.0,
+            block_reduction: 0.0,
             peak_wet: 0.0,
             peak_out: 0.0,
             soft_clipping: false,
@@ -334,6 +338,7 @@ impl NativeDevice for Bond {
         };
 
         // 1. The reduction, frame by frame.
+        self.block_reduction = 0.0;
         for i in 0..frames {
             if self.tick.is_multiple_of(REFRESH_FRAMES) {
                 self.settings = Settings {
@@ -379,6 +384,7 @@ impl NativeDevice for Bond {
                 *state += (wanted - *state) * step;
             }
             self.reduction = -0.5 * (self.fast + self.slow);
+            self.block_reduction = self.block_reduction.min(self.reduction);
             self.gains[i] = db_to_gain(f64::from(self.reduction)) as f32 * makeup[i];
         }
 
@@ -440,6 +446,12 @@ impl NativeDevice for Bond {
 
     fn latency(&self) -> u32 {
         self.latency
+    }
+
+    /// The deepest reduction the last block reached, in dB (the mixer view
+    /// spec, R40).
+    fn gain_reduction(&self) -> f32 {
+        self.block_reduction
     }
 
     fn display_len(&self) -> usize {

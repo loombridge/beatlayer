@@ -2,7 +2,7 @@
 //! (`clap.gain-adjustment-metering/0`, a draft extension) for the test
 //! plug-in: it reports the gain adjustment, in dB, it applied to the last
 //! sample of the block it just processed, so a test can see a reduction on
-//! the track's meter (the mixer view spec, R21).
+//! the track's meter (the mixer view spec, R40).
 
 use std::ffi::CStr;
 

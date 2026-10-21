@@ -15,7 +15,8 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-545 commands in 37 areas.
+547 commands in 37 areas.
+
 ## Permission classes
 
 | Class | What a command in it may do | An agent |
@@ -21202,8 +21203,10 @@ What `mixer_view.state` and the other view commands return.
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
 | `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
+
 <details><summary>JSON Schema</summary>
 
 ```json
@@ -21227,7 +21230,7 @@ What `mixer_view.state` and the other view commands return.
     },
     "gain_reduction": {
       "default": [],
-      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R21); empty when no engine has published meters.",
+      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
       "items": {
         "$ref": "#/$defs/TrackGainReduction"
       },
@@ -28061,7 +28064,7 @@ One of:
 
 ### `TrackGainReduction`
 
-One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R21).
+One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -28072,7 +28075,7 @@ One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer 
 
 ```json
 {
-  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R21).",
+  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).",
   "properties": {
     "reduction": {
       "description": "The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced.",

@@ -98,7 +98,7 @@ pub struct ClapNode {
     max_frames: usize,
     steady: u64,
     /// The gain adjustment, in dB, the plug-in reported for the last block
-    /// (the mixer view spec, R21): zero when it reports none or reduces
+    /// (the mixer view spec, R40): zero when it reports none or reduces
     /// nothing.
     reduction: f32,
 }
@@ -290,7 +290,7 @@ fn transport(block: &Block<'_>) -> TransportEvent {
 impl Node for ClapNode {
     fn process(&mut self, block: &mut Block<'_>) {
         self.receive();
-        // A block the plug-in doesn't process reduces nothing (R21).
+        // A block the plug-in doesn't process reduces nothing (R40).
         self.reduction = 0.0;
         let frames = block.frames();
         let Some(processor) = self.processor.as_mut() else {
@@ -418,7 +418,7 @@ impl Node for ClapNode {
             Some(&transport),
         );
         self.steady = self.steady.wrapping_add(frames as u64);
-        // Spec: mixer-view R21. The gain adjustment, in dB, the plug-in
+        // Spec: mixer-view R40. The gain adjustment, in dB, the plug-in
         // reports for the block it just processed.
         self.reduction = gain::reduction(&started.plugin_handle()).map_or(0.0, |db| db as f32);
         if result.is_err() {

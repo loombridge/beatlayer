@@ -3765,7 +3765,7 @@ impl Shell {
 
     /// One track's gain reduction in dB, as its compressors and limiters
     /// last reported it: zero when the engine published no meter for the
-    /// track, or none of them reduced (the mixer view spec, R21).
+    /// track, or none of them reduced (the mixer view spec, R40).
     #[must_use]
     pub fn gain_reduction(&self, track: TrackId) -> f32 {
         self.meter(track).map_or(0.0, |meter| meter.gain_reduction)
@@ -3773,7 +3773,7 @@ impl Shell {
 
     /// Every track's gain reduction, as `mixer_view.state` reports it: one
     /// entry per track the engine published a meter for, in the order the
-    /// tracks run (IMP-25, the mixer view spec R21).
+    /// tracks run (IMP-25, the mixer view spec R40).
     #[must_use]
     pub fn gain_reductions(&self) -> Vec<crate::mixer_view::TrackGainReduction> {
         self.meters
@@ -6813,7 +6813,7 @@ impl Shell {
                     },
                 )
                 .map(|mut state| {
-                    // Spec: mixer-view R21. The strips' gain-reduction bars
+                    // Spec: mixer-view R40. The strips' gain-reduction bars
                     // read with the meters.
                     state.gain_reduction = self.gain_reductions();
                     state

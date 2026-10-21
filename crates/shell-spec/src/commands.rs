@@ -88,6 +88,8 @@ pub const VIEW_ZOOM_OUT: &str = "view.zoom_out";
 pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
 /// `view.set_zoom`: set the interface zoom to a percentage.
 pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
+/// `view.toggle_undo_history`: show or hide the Undo History panel.
+pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -204,6 +206,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_OUT,
     VIEW_ZOOM_RESET,
     VIEW_SET_ZOOM,
+    VIEW_TOGGLE_UNDO_HISTORY,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -549,9 +552,24 @@ pub struct ViewState {
     pub clip_view: ClipViewState,
     /// The assistant's panel.
     pub assistant: crate::assistant::AssistantPanelState,
+    /// Whether the Undo History panel shows.
+    pub undo_history: bool,
     /// Whether floating devices' and plug-ins' windows are shown, as
     /// `view.toggle_plug_in_windows` sets it.
     pub plug_in_windows: bool,
+}
+
+/// What `view.toggle_undo_history` returns: the Undo History panel's state
+/// afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct UndoHistoryState {
+    /// Whether the panel shows.
+    pub open: bool,
+    /// How many steps the history holds.
+    pub steps: usize,
+    /// The current row's place in the history, counted up from the set's
+    /// start: 0 before any step.
+    pub current: usize,
 }
 
 /// Adds the shell's commands to a registry, the agent server's
@@ -802,8 +820,9 @@ fn specs() -> Vec<CommandSpec> {
                  the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, \
                  `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View \
                  with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, \
-                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and \
-                 whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes \
+                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel, the \
+                 Undo History (`view.toggle_undo_history`), and whether plug-in windows are \
+                 shown (`view.toggle_plug_in_windows`). Changes \
                  nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
                  `mixer_view.state`, the Session View's in `session.state` and the Device \
                  View's in `device_view.state`.",
@@ -977,6 +996,19 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Settings])
             .args::<ZoomArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_UNDO_HISTORY, "Undo History")
+            .description(
+                "Shows or hides the Undo History panel at the right of the main window, in the \
+                 column the Learn View uses. The panel lists the set's steps, newest first, with \
+                 the ones that can be redone greyed, and clicking a row returns the set to that \
+                 point. Whether it shows is view state: it isn't saved with the set and isn't an \
+                 undo step. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-021")
+            .args::<NoArgs>()
+            .result::<UndoHistoryState>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(
                 "Moves the keyboard focus to the Control Bar at the top of the main window, \

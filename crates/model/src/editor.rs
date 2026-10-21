@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 
 use bl_core::id::{Id, IdAllocator};
+use serde::{Deserialize, Serialize};
 
 use crate::changes::ChangeSet;
 use crate::command::Command;
@@ -57,18 +58,73 @@ pub struct Editor {
 #[derive(Debug)]
 struct Open {
     label: Cow<'static, str>,
+    maker: Maker,
     start: Document,
 }
 
-/// A step in the history: its label and one version of the document. On the
-/// undo stack that's the version before the step; on the redo stack, the
-/// version after it. The current document is the other end of the newest
-/// step on either stack, so no version is stored twice. The version is boxed
-/// to keep the stacks' unused capacity small.
+/// A step in the history: its label, who made it, and one version of the
+/// document. On the undo stack that's the version before the step; on the
+/// redo stack, the version after it. The current document is the other end
+/// of the newest step on either stack, so no version is stored twice. The
+/// version is boxed to keep the stacks' unused capacity small.
 #[derive(Debug)]
 struct Step {
     label: Cow<'static, str>,
+    maker: Maker,
     document: Box<Document>,
+}
+
+/// Who made a step in the history: the person, an agent by the name the
+/// agent API knows it by, or the built-in assistant.
+///
+/// Spec: undo-history R9.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Maker {
+    /// The person, whose own gesture the step came from.
+    Person,
+    /// An agent, by the name the agent API knows it by.
+    Agent(String),
+    /// The built-in assistant.
+    Assistant,
+}
+
+impl Maker {
+    /// The name of whoever made the step: the agent's name, "Assistant", or
+    /// "the person".
+    #[must_use]
+    pub fn name(&self) -> Cow<'static, str> {
+        match self {
+            Self::Person => Cow::Borrowed("the person"),
+            Self::Agent(name) => Cow::Owned(name.clone()),
+            Self::Assistant => Cow::Borrowed("Assistant"),
+        }
+    }
+
+    /// Whether an agent or the assistant made the step, rather than the
+    /// person.
+    #[must_use]
+    pub fn is_agent(&self) -> bool {
+        !matches!(self, Self::Person)
+    }
+}
+
+/// A row of the undo history: one step, where it stands in the list, and
+/// who made it. The rows come from the top: the steps that can be redone
+/// first, then the ones that can be undone, the newest of them the current
+/// row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryStep {
+    /// The step's label, as the Edit menu names it.
+    pub label: Cow<'static, str>,
+    /// Who made it.
+    pub maker: Maker,
+    /// Whether it has been undone: the set is before it, and it can be
+    /// redone.
+    pub undone: bool,
+    /// Its place in the list, counted up from the set's start: 0 is the
+    /// set's start, before any step.
+    pub index: usize,
 }
 
 /// Why the editor refused a request.
@@ -88,6 +144,13 @@ pub enum EditError {
     NothingToUndo,
     /// Redo with nothing to redo.
     NothingToRedo,
+    /// A jump to a step the history doesn't hold.
+    NoSuchStep {
+        /// The row the jump named.
+        index: usize,
+        /// How many rows the history holds.
+        steps: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -99,6 +162,9 @@ impl fmt::Display for EditError {
             Self::TransactionOpen => f.write_str("a transaction is open"),
             Self::NothingToUndo => f.write_str("nothing to undo"),
             Self::NothingToRedo => f.write_str("nothing to redo"),
+            Self::NoSuchStep { index, steps } => {
+                write!(f, "there's no step {index} in a history of {steps}")
+            }
         }
     }
 }
@@ -190,7 +256,7 @@ impl Editor {
         }
         let changes = ChangeSet::between(&before, &self.document);
         if self.open.is_empty() && !changes.is_empty() && command.records_undo() {
-            self.record(command.label_in(&before).into(), before);
+            self.record(command.label_in(&before).into(), Maker::Person, before);
         }
         Ok(changes)
     }
@@ -226,11 +292,22 @@ impl Editor {
         label: impl Into<Cow<'static, str>>,
         document: Document,
     ) -> ChangeSet {
+        self.replace_by(Maker::Person, label, document)
+    }
+
+    /// [`Editor::replace`], with the step recorded as `maker`'s: the agent
+    /// API restores a checkpoint as the agent's own step.
+    pub fn replace_by(
+        &mut self,
+        maker: Maker,
+        label: impl Into<Cow<'static, str>>,
+        document: Document,
+    ) -> ChangeSet {
         self.ids.skip_past(document.max_id());
         let before = std::mem::replace(&mut self.document, document);
         let changes = ChangeSet::between(&before, &self.document);
         if self.open.is_empty() && !changes.is_empty() {
-            self.record(label.into(), before);
+            self.record(label.into(), maker, before);
         }
         changes
     }
@@ -238,8 +315,15 @@ impl Editor {
     /// Opens a transaction. Its label names the undo step, such as "Move
     /// clips". Inside another transaction, the outer one's label is used.
     pub fn begin(&mut self, label: impl Into<Cow<'static, str>>) {
+        self.begin_by(Maker::Person, label);
+    }
+
+    /// [`Editor::begin`], with the step recorded as `maker`'s: an agent's
+    /// batch and the assistant's turn open their transaction this way.
+    pub fn begin_by(&mut self, maker: Maker, label: impl Into<Cow<'static, str>>) {
         self.open.push(Open {
             label: label.into(),
+            maker,
             start: self.document.clone(),
         });
     }
@@ -257,7 +341,7 @@ impl Editor {
         if !self.open.is_empty() || open.start == self.document {
             return Ok(false);
         }
-        self.record(open.label, open.start);
+        self.record(open.label, open.maker, open.start);
         Ok(true)
     }
 
@@ -286,7 +370,21 @@ impl Editor {
         label: impl Into<Cow<'static, str>>,
         edit: impl FnOnce(&mut Self) -> Result<T, E>,
     ) -> Result<T, E> {
-        self.begin(label);
+        self.transact_by(Maker::Person, label, edit)
+    }
+
+    /// [`Editor::transact`], with the step recorded as `maker`'s.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `edit` returns.
+    pub fn transact_by<T, E>(
+        &mut self,
+        maker: Maker,
+        label: impl Into<Cow<'static, str>>,
+        edit: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.begin_by(maker, label);
         let depth = self.open.len();
         let result = edit(self);
         if self.open.len() >= depth {
@@ -320,17 +418,29 @@ impl Editor {
         if self.in_transaction() {
             return Err(EditError::TransactionOpen);
         }
-        let Step { label, document } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
+        let before = self.document.clone();
+        self.undo_step()?;
+        Ok(ChangeSet::between(&before, &self.document))
+    }
+
+    /// Undoes the newest step: the document goes back to the version before
+    /// it, and the step moves to the redo stack.
+    fn undo_step(&mut self) -> Result<(), EditError> {
+        let Step {
+            label,
+            maker,
+            document,
+        } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
         document.settings.cue_mode = self.document.settings.cue_mode;
-        let changes = ChangeSet::between(&self.document, &document);
         let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
+            maker,
             document: Box::new(after),
         });
-        Ok(changes)
+        Ok(())
     }
 
     /// Redoes the newest undone step and returns what that changed.
@@ -344,16 +454,28 @@ impl Editor {
         if self.in_transaction() {
             return Err(EditError::TransactionOpen);
         }
-        let Step { label, document } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
+        let before = self.document.clone();
+        self.redo_step()?;
+        Ok(ChangeSet::between(&before, &self.document))
+    }
+
+    /// Redoes the newest undone step: the document goes on to the version
+    /// after it, and the step moves back to the undo stack.
+    fn redo_step(&mut self) -> Result<(), EditError> {
+        let Step {
+            label,
+            maker,
+            document,
+        } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
-        let changes = ChangeSet::between(&self.document, &document);
         let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
+            maker,
             document: Box::new(before),
         });
-        Ok(changes)
+        Ok(())
     }
 
     /// Whether there's a step to undo.
@@ -378,6 +500,78 @@ impl Editor {
         self.redo.iter().rev().map(|step| step.label.as_ref())
     }
 
+    /// The history's rows, from the top: the steps that can be redone
+    /// first, newest first, then the steps that can be undone, the newest
+    /// of them the current row.
+    ///
+    /// The set's start isn't a row here: it has no step, and the panel adds
+    /// it at the bottom.
+    #[must_use]
+    pub fn history(&self) -> Vec<HistoryStep> {
+        let total = self.undo.len() + self.redo.len();
+        let mut rows = Vec::with_capacity(total);
+        for (offset, step) in self.redo.iter().enumerate() {
+            rows.push(HistoryStep {
+                label: step.label.clone(),
+                maker: step.maker.clone(),
+                undone: true,
+                index: total - offset,
+            });
+        }
+        for (offset, step) in self.undo.iter().rev().enumerate() {
+            rows.push(HistoryStep {
+                label: step.label.clone(),
+                maker: step.maker.clone(),
+                undone: false,
+                index: self.undo.len() - offset,
+            });
+        }
+        rows
+    }
+
+    /// The current row's place in the history, counted up from the set's
+    /// start: 0 before any step, and the number of steps that can be
+    /// undone when the newest of them is the current row.
+    #[must_use]
+    pub fn current_index(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Returns the set to the state just after the step at `index`, counted
+    /// up from the set's start: 0 is the set's start, before any step, and
+    /// the newest step is the number of steps there are.
+    ///
+    /// The jump undoes or redoes as many steps as it takes, and is no step
+    /// of its own: the steps above the row it went to stay listed, greyed.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::TransactionOpen`] during a transaction, and
+    /// [`EditError::NoSuchStep`] if the history doesn't hold that row.
+    pub fn go_to_step(&mut self, index: usize) -> Result<ChangeSet, EditError> {
+        if self.in_transaction() {
+            return Err(EditError::TransactionOpen);
+        }
+        let steps = self.undo.len() + self.redo.len();
+        if index > steps {
+            return Err(EditError::NoSuchStep { index, steps });
+        }
+        if self.undo.len() == index {
+            return Ok(ChangeSet::default());
+        }
+        let before = self.document.clone();
+        // The steps move between the stacks without working out what each
+        // one changed: the jump's own change set is the difference between
+        // the two versions.
+        while self.undo.len() > index {
+            self.undo_step()?;
+        }
+        while self.undo.len() < index {
+            self.redo_step()?;
+        }
+        Ok(ChangeSet::between(&before, &self.document))
+    }
+
     /// Keeps at most `limit` undo steps, dropping the oldest. `None`, the
     /// default, keeps them all.
     pub fn set_undo_limit(&mut self, limit: Option<usize>) {
@@ -399,10 +593,11 @@ impl Editor {
         Ok(())
     }
 
-    fn record(&mut self, label: Cow<'static, str>, before: Document) {
+    fn record(&mut self, label: Cow<'static, str>, maker: Maker, before: Document) {
         self.redo.clear();
         self.undo.push_back(Step {
             label,
+            maker,
             document: Box::new(before),
         });
         self.trim();
@@ -792,6 +987,99 @@ mod tests {
         editor.replace("Other", other.document().clone());
         let fresh: TrackId = editor.new_id();
         assert!(fresh.0 > other.document().max_id());
+    }
+
+    // Spec: undo-history R6, R7, R9
+    #[test]
+    fn a_jump_walks_the_history_without_recording_a_step() {
+        let mut editor = Editor::new();
+        let start = editor.document().clone();
+        let track = midi_track(&mut editor);
+        let one = editor.document().clone();
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        let two = editor.document().clone();
+        editor.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        let three = editor.document().clone();
+        assert_eq!(editor.history().len(), 3);
+
+        // Back to the step before the newest one.
+        editor.go_to_step(2).unwrap();
+        assert_eq!(editor.document(), &two);
+        // The jump is no step of its own.
+        assert_eq!(editor.history().len(), 3);
+        // The step above it is greyed, and can be redone.
+        let rows = editor.history();
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].undone, "the newest step is undone");
+        assert_eq!(rows[0].label, "Change pan");
+        assert!(!rows[1].undone);
+        assert_eq!(rows[1].index, 2);
+        assert_eq!(rows[2].index, 1);
+
+        // Back to the set's start undoes every step.
+        editor.go_to_step(0).unwrap();
+        assert_eq!(editor.document(), &start);
+        assert_eq!(editor.history().len(), 3);
+        assert!(editor.history().iter().all(|row| row.undone));
+
+        // And forward again gives every version back.
+        editor.go_to_step(3).unwrap();
+        assert_eq!(editor.document(), &three);
+        editor.go_to_step(1).unwrap();
+        assert_eq!(editor.document(), &one);
+        editor.go_to_step(3).unwrap();
+        assert_eq!(editor.document(), &three);
+
+        // A row the history doesn't hold is refused.
+        assert_eq!(
+            editor.go_to_step(4),
+            Err(EditError::NoSuchStep { index: 4, steps: 3 })
+        );
+    }
+
+    // Spec: undo-history R7
+    #[test]
+    fn a_new_edit_after_a_jump_discards_the_greyed_steps() {
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        editor.go_to_step(1).unwrap();
+        assert!(editor.can_redo());
+
+        editor
+            .apply(Command::SetMute { track, mute: true })
+            .unwrap();
+        assert!(!editor.can_redo());
+        assert_eq!(editor.history().len(), 2);
+        assert_eq!(editor.history()[0].label, "Mute track");
+    }
+
+    // Spec: undo-history R9
+    #[test]
+    fn a_steps_maker_survives_undo_and_redo() {
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.begin_by(Maker::Agent("editor".to_owned()), "editor: Set Volume");
+        editor.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        editor.commit().unwrap();
+
+        let rows = editor.history();
+        assert_eq!(rows[0].maker, Maker::Agent("editor".to_owned()));
+        assert_eq!(rows[1].maker, Maker::Person);
+
+        // Undoing and redoing keeps the maker with the step.
+        editor.undo().unwrap();
+        assert_eq!(editor.history()[0].maker, Maker::Agent("editor".to_owned()));
+        editor.redo().unwrap();
+        assert_eq!(editor.history()[0].maker, Maker::Agent("editor".to_owned()));
     }
 
     #[test]

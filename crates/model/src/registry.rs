@@ -47,7 +47,8 @@ use bl_commands::{
     Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry, args_schema, result_schema,
     tagged_variant,
 };
-use schemars::Schema;
+use schemars::{JsonSchema, Schema};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::changes::ChangeSet;
@@ -61,6 +62,8 @@ pub const UNDO: &str = "edit.undo";
 pub const RE_ENABLE_AUTOMATION: &str = "automation.re_enable";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
+/// The ID of the command that jumps to a point in the undo history.
+pub const GO_TO_STEP: &str = "edit.go_to_step";
 /// The ID of `clip.set_midi_region`: a MIDI clip's Start and End markers.
 pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
 /// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
@@ -112,7 +115,21 @@ pub fn run(editor: &mut Editor, id: &str, args: Value) -> Result<ChangeSet, RunE
             no_args(entry.id, args)?;
             Ok(editor.redo()?)
         }
+        Action::GoToStep => {
+            let GoToStepArgs { index } = go_to_step_args(entry.id, args)?;
+            Ok(editor.go_to_step(index)?)
+        }
     }
+}
+
+/// Arguments of [`GO_TO_STEP`]: which row of the history to go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GoToStepArgs {
+    /// The row, counted up from the set's start: 0 is the set's start,
+    /// before any step, and the newest step is the number of steps there
+    /// are.
+    pub index: usize,
 }
 
 /// The [`Command`] a document command's ID and JSON arguments describe,
@@ -156,6 +173,13 @@ fn no_args(command: &'static str, args: Value) -> Result<(), RunError> {
             command,
             message: error.to_string(),
         })
+}
+
+fn go_to_step_args(command: &'static str, args: Value) -> Result<GoToStepArgs, RunError> {
+    serde_json::from_value::<GoToStepArgs>(args).map_err(|error| RunError::InvalidArgs {
+        command,
+        message: error.to_string(),
+    })
 }
 
 /// Why [`run`] or [`command_from_args`] refused a command.
@@ -216,6 +240,8 @@ enum Action {
     Undo,
     /// Redoes the newest undone step.
     Redo,
+    /// Jumps to a row of the history.
+    GoToStep,
 }
 
 /// A default binding, in a form a constant can hold.
@@ -256,6 +282,7 @@ impl Entry {
                 None => spec,
             },
             Action::Undo | Action::Redo => spec.args::<NoArgs>(),
+            Action::GoToStep => spec.args::<GoToStepArgs>(),
         };
         for key in self.keys {
             spec = spec.binding(match *key {
@@ -2900,5 +2927,17 @@ const ENTRIES: &[Entry] = &[
         description: "Redoes the step most recently undone. It fails if nothing has been \
             undone since the last new change, because a new change discards the steps that \
             could have been redone.",
+    },
+    Entry {
+        id: GO_TO_STEP,
+        action: Action::GoToStep,
+        label: "Go to Step",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Returns the set to the state just after the step at `index`, counted up \
+            from the set's start: 0 is the set's start, before any step, and the newest step \
+            is the number of steps there are. The steps above that row are undone and stay \
+            listed, greyed, until a new change replaces them. The jump is no step of its own.",
     },
 ];

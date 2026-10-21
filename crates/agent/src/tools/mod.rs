@@ -224,6 +224,12 @@ impl Ctx<'_> {
     pub(crate) fn step_label(&self, what: &str) -> String {
         format!("{}: {what}", self.agent())
     }
+
+    /// Who made the steps this agent's calls record: the agent, by the name
+    /// the agent API knows it by (undo history R9).
+    pub(crate) fn maker(&self) -> bl_model::Maker {
+        bl_model::Maker::Agent(self.agent().to_owned())
+    }
 }
 
 /// Every tool's definition, for `tools/list`.

@@ -286,6 +286,7 @@ fn a_labelled_run_is_one_undo_step_with_that_label() {
     let id: bl_model::ClipId = shell.new_id();
     shell
         .run_labelled(
+            bl_model::Maker::Agent("editor".to_owned()),
             "editor: Create Clip",
             "clip.create",
             json!({ "track": track, "clip": { "id": id, "name": "A", "start": 0,
@@ -294,6 +295,7 @@ fn a_labelled_run_is_one_undo_step_with_that_label() {
         .unwrap();
     shell
         .run_labelled(
+            bl_model::Maker::Agent("editor".to_owned()),
             "editor: Move Clips",
             "arrangement.move_clips",
             json!({ "clips": [id], "by": 705_600 }),
@@ -302,6 +304,7 @@ fn a_labelled_run_is_one_undo_step_with_that_label() {
     // Selecting changes nothing in the set and records nothing.
     shell
         .run_labelled(
+            bl_model::Maker::Agent("editor".to_owned()),
             "editor: Select",
             "arrangement.select_clips",
             json!({ "clips": [id] }),
@@ -311,6 +314,7 @@ fn a_labelled_run_is_one_undo_step_with_that_label() {
     assert!(
         shell
             .run_labelled(
+                bl_model::Maker::Agent("editor".to_owned()),
                 "editor: Move Clips",
                 "arrangement.move_clips",
                 json!({ "clips": [id], "by": -2_822_400 }),

@@ -144,6 +144,8 @@ pub struct MainWindowUi {
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
+    /// The Undo History panel (WP-6.28): the row the keyboard has moved to.
+    undo_history: crate::undo_history_panel::UndoHistoryPanelUi,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -219,6 +221,7 @@ impl MainWindowUi {
             device_titles: Vec::new(),
             chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
+            undo_history: crate::undo_history_panel::UndoHistoryPanelUi::default(),
         }
     }
 
@@ -410,11 +413,15 @@ impl MainWindowUi {
             let assistant = shell
                 .assistant_docked_width()
                 .map(|width| self.assistant.drag_width().unwrap_or(width));
-            let layout = ShellLayout::compute_with_assistant(
+            let undo_history = shell
+                .undo_history_open()
+                .then_some(crate::layout::UNDO_HISTORY_WIDTH);
+            let layout = ShellLayout::compute_with_panes(
                 area.size(),
                 shell.browser_visible(),
                 shell.info_view_visible(),
                 assistant,
+                undo_history,
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
@@ -495,6 +502,11 @@ impl MainWindowUi {
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
+            }
+            if let Some(pane) = layout.undo_history {
+                self.undo_history.show(ui, shell, theme, pane, &mut events);
+            } else {
+                self.undo_history.hide(&mut events);
             }
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
@@ -708,6 +720,7 @@ impl MainWindowUi {
             (Area::Detail, Some(layout.detail)),
             (Area::StatusBar, Some(layout.status_bar)),
             (Area::Assistant, layout.assistant),
+            (Area::UndoHistory, layout.undo_history),
         ];
         if let Some((area, _)) = areas
             .iter()
@@ -1233,6 +1246,7 @@ fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLay
         Area::Detail => Some(layout.detail),
         Area::StatusBar => Some(layout.status_bar),
         Area::Assistant => layout.assistant,
+        Area::UndoHistory => layout.undo_history,
     };
     if let Some(rect) = rect {
         ui.painter().rect_stroke(

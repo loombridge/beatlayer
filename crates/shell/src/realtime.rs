@@ -514,6 +514,9 @@ fn play(
     };
     // The plan goes to the engine, which plays the range.
     if let Err(why) = audio.render(plan) {
+        // Nothing will fill the rings now: the writers stop at once rather
+        // than wait for samples that never come.
+        finished.store(true, Ordering::Relaxed);
         for writer in writers {
             let _ = writer.join();
         }
@@ -645,40 +648,51 @@ fn write_output(
     let scratch = export::hidden_beside(&job.path, "render");
     let mut peak = 0.0f32;
     let mut frames = 0u64;
+    // The frames the scratch file holds, which the normalise pass reads
+    // back: a rate conversion makes them fewer than `frames` (R26).
+    let mut staged = 0u64;
     let mut samples: Vec<f32> = Vec::with_capacity(8192 * CHANNELS);
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err(ExportError::Cancelled);
         }
-        samples.clear();
         while samples.len() < 8192 * CHANNELS {
             match consumer.pop() {
                 Ok(sample) => samples.push(sample),
                 Err(PopError::Empty) => break,
             }
         }
-        if !samples.is_empty() {
-            for sample in &samples {
+        // Only whole frames are written: the audio thread pushes one sample
+        // at a time, so a pop can land between a frame's channels, and the
+        // half frame waits here for the rest.
+        let whole = samples.len() - samples.len() % CHANNELS;
+        if whole > 0 {
+            let whole = &samples[..whole];
+            for sample in whole {
                 if sample.is_finite() {
                     peak = peak.max(sample.abs());
                 }
             }
-            frames += (samples.len() / CHANNELS) as u64;
+            frames += (whole.len() / CHANNELS) as u64;
             match converter.as_mut() {
                 Some(converter) => {
                     let mut written = Vec::new();
-                    converter.push(&samples, &mut |out| {
+                    converter.push(whole, &mut |out| {
                         written.extend_from_slice(out);
                         Ok(())
                     })?;
+                    staged += (written.len() / CHANNELS) as u64;
                     export::write(&mut out, &written)?;
                 }
-                None => export::write(&mut out, &samples)?,
+                None => {
+                    staged += (whole.len() / CHANNELS) as u64;
+                    export::write(&mut out, whole)?;
+                }
             }
+            samples.drain(..whole.len());
         } else if !done.load(Ordering::Relaxed) {
-            // The ring is empty for now: the writer waits for more.
+            // Nothing to write for now: the writer waits for more.
             thread::sleep(POLL);
-            continue;
         } else {
             break;
         }
@@ -690,6 +704,7 @@ fn write_output(
             written.extend_from_slice(out);
             Ok(())
         })?;
+        staged += (written.len() / CHANNELS) as u64;
         export::write(&mut out, &written)?;
     }
     // The normalise pass, or the writer itself.
@@ -701,7 +716,7 @@ fn write_output(
             partial.as_path(),
             scratch.as_path(),
             &mut [],
-            frames,
+            staged,
             peak,
             job.normalize,
             &cancel,

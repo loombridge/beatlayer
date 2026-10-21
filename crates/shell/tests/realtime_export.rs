@@ -3,6 +3,8 @@
 //! renders in real time, on the running engine, and the file holds exactly
 //! the range's frames.
 
+bl_rt::install_trap!();
+
 use std::path::PathBuf;
 use std::thread;
 
@@ -100,8 +102,12 @@ fn shell_on_manual_loopback(dropout_after: Option<u64>) -> (Shell, NullControl) 
 
 /// Runs the device's blocks on a thread of their own, until the render has
 /// finished: the export runs on the test's thread, and the device's blocks
-/// are what it plays.
-fn drive(control: NullControl, session: bl_shell::realtime::Session) -> thread::JoinHandle<()> {
+/// are what it plays. The control comes back with the thread, so a test can
+/// run the blocks itself again.
+fn drive(
+    control: NullControl,
+    session: bl_shell::realtime::Session,
+) -> thread::JoinHandle<NullControl> {
     thread::spawn(move || {
         let mut rendering = false;
         for _ in 0..400 {
@@ -113,6 +119,7 @@ fn drive(control: NullControl, session: bl_shell::realtime::Session) -> thread::
             }
             thread::yield_now();
         }
+        control
     })
 }
 
@@ -211,6 +218,73 @@ fn an_export_with_external_hardware_renders_in_real_time() {
     );
     // The song is stopped where the range ended.
     assert!(!shell.audio_mut().transport_state().playing);
+    // Spec: external-devices R29. The render's blocks touch no heap: the
+    // audio thread copies into rings the export made before it started.
+    let stats = shell.audio().stats().expect("a stream is open");
+    assert!(stats.blocks > 0);
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+}
+
+// Spec: external-devices R24. The render's plan goes when the render ends,
+// so the song plays again from where it stopped.
+#[test]
+fn the_song_plays_again_after_a_render() {
+    let folder = TestDir::new("again");
+    let (mut shell, control) = shell_on_manual_loopback(None);
+    set_with_effect(&mut shell, &folder);
+    let session = shell.realtime_session();
+    let driver = drive(control, session);
+
+    let out = folder.path("Live.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 48000, "wait_seconds": 0 }),
+        )
+        .unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert!(result.real_time, "the export rendered in real time");
+    let control = driver.join().unwrap();
+
+    // The song plays on from the range's end: the render's plan is gone, so
+    // nothing stops it at the range's first frame.
+    let before = shell.audio_mut().transport_state().position;
+    shell.run("transport.play", json!({})).unwrap();
+    bl_shell::testing::run_blocks(&control, &mut shell, 4);
+    let after = shell.audio_mut().transport_state().position;
+    assert!(
+        after > before,
+        "the song plays again: {before:?} to {after:?}"
+    );
+}
+
+// Spec: external-devices R26. A real-time render at a rate below the
+// device's is converted down, and Normalize's second pass reads the frames
+// the conversion wrote.
+#[test]
+fn a_realtime_render_converts_the_rate_and_normalises() {
+    let folder = TestDir::new("convert");
+    let mut shell = shell_on_loopback();
+    set_with_effect(&mut shell, &folder);
+
+    let out = folder.path("Lower.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 44100, "wait_seconds": 0, "normalize": true }),
+        )
+        .unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert!(result.real_time, "the export rendered in real time");
+    assert!(out.exists(), "the file is there: {result:?}");
+    let frames = frames_of(&out);
+    let expected = 24_000 * 44_100 / 48_000;
+    assert!(
+        frames.abs_diff(expected) <= 1,
+        "the file holds the range at the file's rate: {frames} frames"
+    );
 }
 
 // Spec: external-devices R22. The outputs whose path runs through the

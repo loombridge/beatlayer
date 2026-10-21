@@ -89,24 +89,21 @@ pub(crate) fn capture(
     if !fits {
         return false;
     }
-    let mut taken = 0u64;
     for output in &mut plan.outputs {
         let task = match output.track {
             Some(track) => program.task_of(track),
             None => Some(program.output),
         };
         let Some(task) = task else { continue };
-        let lanes: Vec<&[f32]> = (0..channels)
-            .map(|c| program.task_output(task, c, frames))
-            .collect();
+        // Spec: external-devices R29. Nothing here allocates: each channel's
+        // samples are read one at a time, frame by frame.
         for frame in skip..skip + take {
-            for lane in &lanes {
+            for channel in 0..channels {
+                let lane = program.task_output(task, channel, frames);
                 let _ = output.producer.push(lane[frame]);
             }
         }
-        taken += take as u64;
         output.captured.fetch_add(take as u64, Relaxed);
     }
-    let _ = taken;
     true
 }

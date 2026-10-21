@@ -695,8 +695,12 @@ impl Processor {
                     self.last_take = None;
                     self.plan = Some(plan);
                 }
-                Message::Render(plan) => {
-                    self.rendering = Some(plan);
+                Message::Render(mut plan) => {
+                    // Spec: external-devices R24. Only a plan with outputs
+                    // renders anything: an empty one only closes the rings of
+                    // the render before it, and the song must play on after
+                    // one, not stop at the frame it names.
+                    self.rendering = (!plan.get_mut().outputs.is_empty()).then_some(plan);
                 }
                 Message::OutputLatency(frames) => self.output_latency = frames,
             }

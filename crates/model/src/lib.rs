@@ -61,6 +61,7 @@ pub mod articulation;
 mod auto_warp;
 pub mod automation;
 pub mod base64;
+pub mod bounce;
 mod changes;
 mod clip;
 mod command;
@@ -105,6 +106,7 @@ pub use automation::{
     envelope_value,
 };
 pub use bl_stretch::WarpMap;
+pub use bounce::{BouncedAutomation, BouncedTrack};
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, EnvelopeKind, MidiData,

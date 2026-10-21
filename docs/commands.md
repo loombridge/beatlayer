@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-582 commands in 39 areas.
+581 commands in 38 areas.
 
 ## Permission classes
 
@@ -84,12 +84,6 @@ Each command has:
 | [`arrangement.zoom`](#arrangementzoom) | Zoom Arrangement | `read` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`arrangement.zoom_back`](#arrangementzoom_back) | Zoom Back from Time Selection | `read` | `X` | `X` |
 | [`arrangement.zoom_to_selection`](#arrangementzoom_to_selection) | Zoom to Time Selection | `read` | `Z` | `Z` |
-| [`articulation.add`](#articulationadd) | Add Articulation | `edit` |  |  |
-| [`articulation.delete`](#articulationdelete) | Delete Articulation | `edit` |  |  |
-| [`articulation.learn`](#articulationlearn) | Learn Articulation | `read` |  |  |
-| [`articulation.list`](#articulationlist) | List Articulations | `read` |  |  |
-| [`articulation.move`](#articulationmove) | Move Articulation | `edit` |  |  |
-| [`articulation.set`](#articulationset) | Change Articulation | `edit` |  |  |
 | [`assistant.forget_key`](#assistantforget_key) | Forget Assistant API Key | `external` |  |  |
 | [`assistant.send`](#assistantsend) | Send to Assistant | `read` |  |  |
 | [`assistant.set_base_url`](#assistantset_base_url) | Assistant Base URL | `edit` |  |  |
@@ -558,14 +552,19 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
 | [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | Create Bounced Track | `edit` |  |  |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
 | [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | Paste Bounced Audio | `edit` | `Cmd+Option+V` | `Ctrl+Alt+V` |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
 | [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
@@ -1632,115 +1631,6 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ArrangementState`](#arrangementstate).
-
-### Area `articulation`
-
-#### `articulation.add`
-
-**Add Articulation**. Permission: `edit`. Contexts: `device-view`.
-
-Adds an articulation to an Articulation Map's list, at `index` (or at the end when it isn't given), with the name `name`. The list holds up to 32 articulations and keeps one at least. One undo step (Add Articulation).
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `name` | string | yes | Its name. An empty name is the numbered one a new articulation gets. |
-| `index` | integer or null | no | Where in the list it goes, or `null` for the end. |
-
-Result: [`ChangeSet`](#changeset).
-
-#### `articulation.delete`
-
-**Delete Articulation**. Permission: `edit`. Contexts: `device-view`.
-
-Removes the articulation at `index` (counted from 0) from an Articulation Map's list. The list keeps one articulation at least. One undo step (Delete Articulation).
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
-
-Result: [`ChangeSet`](#changeset).
-
-#### `articulation.learn`
-
-**Learn Articulation**. Permission: `read`. Contexts: `device-view`.
-
-Lights a row's Learn button, as clicking it does, so the next note-on or control change the device hears becomes that articulation's trigger: a key, or the controller with that one value as its range. Learning it is one undo step (Change Articulation); the button goes out afterwards. Clicking a lit button again, or leaving `index` out, puts it out without a change. It changes only the panel: it isn't an undo step, and it isn't saved with the set.
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
-| `index` | integer or null | no | The articulation's place in the list, from 0; without it, the row that is learning stops. |
-
-Result: [`ArticulationLearn`](#articulationlearn).
-
-#### `articulation.list`
-
-**List Articulations**. Permission: `read`. Contexts: `device-view`.
-
-Reports the articulations an Articulation Map holds, in order: each with its name, its trigger (`{"kind":"none"}`, `{"kind":"key","key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`), its outputs (a key with a velocity, or a controller with a value) and its channel (a number from 1 to 16, or null for none). Changes nothing.
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
-
-Result: [`ArticulationList`](#articulationlist).
-
-#### `articulation.move`
-
-**Move Articulation**. Permission: `edit`. Contexts: `device-view`.
-
-Moves the articulation at `index` (counted from 0) in an Articulation Map's list to `to`, or to the end of the list when `to` isn't given. One undo step (Move Articulation).
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
-| `to` | integer or null | no | Where it goes: the articulation there takes its place, or it goes last when `null`. |
-
-Result: [`ChangeSet`](#changeset).
-
-#### `articulation.set`
-
-**Change Articulation**. Permission: `edit`. Contexts: `device-view`.
-
-Changes the articulation at `index` (counted from 0) in an Articulation Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't given stays as it is. A trigger is `{"kind":"none"}`, `{"kind":"key", "key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`; an output is `{"kind":"key","key":36,"velocity":100}` or `{"kind":"controller","controller":1,"value":64}`; a channel is a number from 1 to 16, or null for none, so the articulation's notes keep the channel they come in on. Two articulations of a device never trigger on the same key or on overlapping ranges of the same controller. One undo step (Change Articulation).
-
-Default keys: none.
-
-Arguments:
-
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
-| `channel` | integer or null | no | Its new channel: a channel from 1 to 16, or `null` for none, so its notes keep the channel they come in on. |
-| `name` | string or null | no | Its new name. |
-| `outputs` | array or null | no | Its new outputs, in order. |
-| `trigger` | [`ArticulationTrigger`](#articulationtrigger) or null | no | Its new trigger. |
-
-Result: [`ChangeSet`](#changeset).
 
 ### Area `assistant`
 
@@ -5733,7 +5623,6 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
-| `articulations` | array or null | no | An Articulation Map's articulations (the articulation map spec, R16), which a preset of one holds; `null` to keep the ones the device has. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
@@ -9941,6 +9830,47 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.bounce_in_place`
+
+**Bounce Track in Place**. Permission: `destructive`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and replaces each with an audio track holding it: no devices, the track's name with " (Bounce)" after it, its volume, pan, sends, activator, solo, output routing, and mixer automation, and its clips playing the bounced audio. `tracks` names them (left out, the selected tracks). A group is bounced as one track, after its mixer. The files go into Samples/Processed/Bounce. It is destructive, since it deletes the track's devices and clips, and undoing it gives the source track back exactly.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
+#### `track.bounce_to_new_track`
+
+**Bounce to New Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected clips, or the time selection on the selected tracks, to audio on a new track directly after each source track, and switches the source material off. `tracks` names the source tracks (left out, the selected ones), `clips` the clips to bounce (left out, the selected clips, or the time selection), and `start` and `end` the time selection. The new track takes its source's name with " (Bounce)" after it, its colour, and its mixer settings, and the files go into Samples/Processed/Bounce. It is an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-001 | `Cmd+B` | `Ctrl+B` | `global` | Bounce the selection to a new audio track | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `clips` | array or null | no | The clips to bounce. Left out, the selected clips, or the time selection on the tracks. |
+| `end` | [`Position`](#position) or null | no | Where the time selection ends. Left out, the Arrangement's time selection. |
+| `start` | [`Position`](#position) or null | no | Where the time selection starts. Left out, the Arrangement's time selection. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.clear_frozen`
 
 **Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
@@ -9980,6 +9910,24 @@ Arguments:
 | `name` | string | yes | Its name. |
 | `index` | integer, at least 0 | yes | Where it goes in its list, from 0 to the list's length. |
 | `parent` | [`TrackId`](#trackid) or null | no | The group to put it in, or `null` (or nothing) for the top level. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.create_bounced_track`
+
+**Create Bounced Track**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Makes a new audio track directly after the track that was bounced, holding the bounced audio. `bounced` is what the new track holds. `track.bounce_to_new_track` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `track` | [`TrackId`](#trackid) | yes | The new track's ID. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the new track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10077,6 +10025,29 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.paste_bounced_audio`
+
+**Paste Bounced Audio**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders what Copy last put on the clipboard as it is at the moment of pasting, and places it as Paste places clips: on the track, or in the slot, named. The destination is an audio track, an empty MIDI track, which becomes an audio track, or a take lane. The audio replaces what it covers. With nothing copied, or with the copied source deleted, the command is unavailable. It is an edit, and destructive when it would replace or shorten a clip.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-002 | `Cmd+Option+V` | `Ctrl+Alt+V` | `arrangement` | Paste bounced audio into the lane or slot | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the audio goes in the Arrangement. Left out, the time selection's start, or the insert marker. |
+| `channels` | [`Channels`](#channels) | no | How many channels the pasted file holds. |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot to paste into. Left out, the Arrangement. |
+| `track` | [`TrackId`](#trackid) or null | no | The track to paste onto. Left out, the selected track. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.rename`
 
 **Rename Track**. Permission: `edit`. Contexts: `track-headers`.
@@ -10095,6 +10066,23 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.set_bounced`
+
+**Set Track Bounced**. Permission: `destructive`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Replaces a track with the audio track a bounce made: no devices, the track's name with " (Bounce)" after it, its mixer settings, and its clips playing the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the bounced track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10855,10 +10843,6 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
-| [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
-| [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
-| [`articulation.move`](#articulationmove) | `articulation.list` | `articulations` |
-| [`articulation.set`](#articulationset) | `articulation.list` | `articulations` |
 | [`assistant.forget_key`](#assistantforget_key) | `settings.state` | `assistant.key_set` |
 | [`assistant.set_base_url`](#assistantset_base_url) | `settings.state` | `assistant.base_url` |
 | [`assistant.set_key`](#assistantset_key) | `settings.state` | `assistant.key_set` |
@@ -11187,14 +11171,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.bounce_in_place`](#trackbounce_in_place) | the query tool's `song` | `tracks` |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | the query tool's `song` | `tracks` |
 | [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
 | [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | the query tool's `track` | `clips` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
 | [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
@@ -11793,308 +11782,6 @@ What the Arrangement View shows: every view command returns it.
     "automation_arm"
   ],
   "type": "object"
-}
-```
-
-</details>
-
-### `Articulation`
-
-One articulation of an Articulation Map.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Its name, which the panel shows and the Articulation control reads. |
-| `trigger` | [`ArticulationTrigger`](#articulationtrigger) | yes | What makes it current. |
-| `channel` | integer or null | no | The channel its notes go out on, or `None` for the channel they come in on. |
-| `outputs` | array of [`ArticulationOutput`](#articulationoutput) | no | What it sends when it becomes current, in order. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "One articulation of an Articulation Map.",
-  "properties": {
-    "channel": {
-      "description": "The channel its notes go out on, or `None` for the channel they come in on.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "name": {
-      "description": "Its name, which the panel shows and the Articulation control reads.",
-      "type": "string"
-    },
-    "outputs": {
-      "description": "What it sends when it becomes current, in order.",
-      "items": {
-        "$ref": "#/$defs/ArticulationOutput"
-      },
-      "type": "array"
-    },
-    "trigger": {
-      "$ref": "#/$defs/ArticulationTrigger",
-      "description": "What makes it current."
-    }
-  },
-  "required": [
-    "name",
-    "trigger"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `ArticulationLearn`
-
-What `articulation.learn` returns: the row that is learning.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `index` | integer or null | yes | The articulation's place in the list, from 0, or `null` when none is learning. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "What `articulation.learn` returns: the row that is learning.",
-  "properties": {
-    "device": {
-      "$ref": "#/$defs/DeviceId",
-      "description": "The device."
-    },
-    "index": {
-      "description": "The articulation's place in the list, from 0, or `null` when none is learning.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    }
-  },
-  "required": [
-    "device",
-    "index"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `ArticulationList`
-
-What `articulation.list` returns: an Articulation Map's articulations, in order.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The device. |
-| `articulations` | array of [`Articulation`](#articulation) | yes | Its articulations, in order. |
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "What `articulation.list` returns: an Articulation Map's articulations, in order.",
-  "properties": {
-    "articulations": {
-      "description": "Its articulations, in order.",
-      "items": {
-        "$ref": "#/$defs/Articulation"
-      },
-      "type": "array"
-    },
-    "device": {
-      "$ref": "#/$defs/DeviceId",
-      "description": "The device."
-    }
-  },
-  "required": [
-    "device",
-    "articulations"
-  ],
-  "type": "object"
-}
-```
-
-</details>
-
-### `ArticulationOutput`
-
-What an articulation sends when it becomes current.
-
-One of:
-
-- an object with `kind` = `"key"`, `key` (integer from 0 to 255), `velocity` (integer from 0 to 255): A key, 0 to 127, with a velocity, 1 to 127.
-- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `value` (integer from 0 to 255): A controller, 0 to 127, with a value, 0 to 127.
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "What an articulation sends when it becomes current.",
-  "oneOf": [
-    {
-      "description": "A key, 0 to 127, with a velocity, 1 to 127.",
-      "properties": {
-        "key": {
-          "description": "The key.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "kind": {
-          "const": "key",
-          "type": "string"
-        },
-        "velocity": {
-          "description": "The velocity.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "kind",
-        "key",
-        "velocity"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A controller, 0 to 127, with a value, 0 to 127.",
-      "properties": {
-        "controller": {
-          "description": "The controller.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "kind": {
-          "const": "controller",
-          "type": "string"
-        },
-        "value": {
-          "description": "The value.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "kind",
-        "controller",
-        "value"
-      ],
-      "type": "object"
-    }
-  ]
-}
-```
-
-</details>
-
-### `ArticulationTrigger`
-
-What makes an articulation current.
-
-One of:
-
-- an object with `kind` = `"none"`: None: only the Articulation control chooses it.
-- an object with `kind` = `"key"`, `key` (integer from 0 to 255): A key, 0 to 127, matched on any channel at any velocity.
-- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `lowest` (integer from 0 to 255), `highest` (integer from 0 to 255): A controller, 0 to 127, with a range of values from a lowest to a highest.
-
-<details><summary>JSON Schema</summary>
-
-```json
-{
-  "description": "What makes an articulation current.",
-  "oneOf": [
-    {
-      "description": "None: only the Articulation control chooses it.",
-      "properties": {
-        "kind": {
-          "const": "none",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A key, 0 to 127, matched on any channel at any velocity.",
-      "properties": {
-        "key": {
-          "description": "The key.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "kind": {
-          "const": "key",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "key"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A controller, 0 to 127, with a range of values from a lowest to a highest.",
-      "properties": {
-        "controller": {
-          "description": "The controller.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "highest": {
-          "description": "The highest value of the range.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "kind": {
-          "const": "controller",
-          "type": "string"
-        },
-        "lowest": {
-          "description": "The lowest value of the range.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "kind",
-        "controller",
-        "lowest",
-        "highest"
-      ],
-      "type": "object"
-    }
-  ]
 }
 ```
 
@@ -13437,6 +13124,194 @@ A plug-in that failed a scan, and why.
 
 </details>
 
+### `BounceResult`
+
+What a bounce did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks the bounce made or changed. |
+| `clips` | array of [`ClipId`](#clipid) | no | The clips it made. |
+| `files` | array of string | no | The files it wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a bounce did.",
+  "properties": {
+    "clips": {
+      "description": "The clips it made.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The files it wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tracks": {
+      "description": "The tracks the bounce made or changed.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedAutomation`
+
+One automated mixer control of a bounced track: the control it drives and its envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The control: a mixer control or a send. |
+| `envelope` | [`Envelope`](#envelope) | yes | Its envelope. |
+| `enabled` | boolean | yes | Whether the envelope drove the control. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One automated mixer control of a bounced track: the control it drives and its envelope.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the envelope drove the control.",
+      "type": "boolean"
+    },
+    "envelope": {
+      "$ref": "#/$defs/Envelope",
+      "description": "Its envelope."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The control: a mixer control or a send."
+    }
+  },
+  "required": [
+    "target",
+    "envelope",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedTrack`
+
+The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The track's name: its source's name with " (Bounce)" after it. |
+| `automation` | array of [`BouncedAutomation`](#bouncedautomation) | no | Its mixer automation: one envelope per automated mixer control. |
+| `clips` | array of [`Clip`](#clip) | no | The clips on its Arrangement lane. |
+| `mixer` | [`Mixer`](#mixer) | no | Its mixer settings: its source's volume, pan, activator, and solo. |
+| `output` | [`Output`](#output) | no | Where its audio goes. |
+| `sends` | array of pair of [`TrackId`](#trackid) and number | no | Its sends, by return track: the level of each send that isn't at −∞ dB. |
+| `slots` | array of pair of [`SceneId`](#sceneid) and [`Clip`](#clip) | no | The clips in its Session slots, by scene. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.",
+  "properties": {
+    "automation": {
+      "description": "Its mixer automation: one envelope per automated mixer control.",
+      "items": {
+        "$ref": "#/$defs/BouncedAutomation"
+      },
+      "type": "array"
+    },
+    "clips": {
+      "description": "The clips on its Arrangement lane.",
+      "items": {
+        "$ref": "#/$defs/Clip"
+      },
+      "type": "array"
+    },
+    "mixer": {
+      "$ref": "#/$defs/Mixer",
+      "default": {
+        "arm": false,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false,
+        "volume": 1.0
+      },
+      "description": "Its mixer settings: its source's volume, pan, activator, and solo."
+    },
+    "name": {
+      "description": "The track's name: its source's name with \" (Bounce)\" after it.",
+      "type": "string"
+    },
+    "output": {
+      "$ref": "#/$defs/Output",
+      "default": {
+        "type": "default"
+      },
+      "description": "Where its audio goes."
+    },
+    "sends": {
+      "description": "Its sends, by return track: the level of each send that isn't at −∞ dB.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/TrackId"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "slots": {
+      "description": "The clips in its Session slots, by scene.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/SceneId"
+          },
+          {
+            "$ref": "#/$defs/Clip"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Bpm`
 
 A tempo in quarter notes per minute, whatever the time signature.
@@ -14574,6 +14449,43 @@ One channel's levels.
     "rms_dbfs"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Channels`
+
+How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.
+
+One of:
+
+- `"auto"`: One channel when the render's two channels are equal at every frame, two otherwise.
+- `"mono"`: One channel: the mean of the two.
+- `"stereo"`: Two channels: a mono render's in both.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.",
+  "oneOf": [
+    {
+      "const": "auto",
+      "description": "One channel when the render's two channels are equal at every frame, two otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "mono",
+      "description": "One channel: the mean of the two.",
+      "type": "string"
+    },
+    {
+      "const": "stereo",
+      "description": "Two channels: a mono render's in both.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -15860,7 +15772,6 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `kind` | [`DeviceKind`](#devicekind) | yes | What the device is. |
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
-| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then. |
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `configured` | array or null | no | The plug-in parameters the device's panel holds, in order (clap-hosting R5, configure mode): the list Configure Mode edits, saved with the set. Left out until it's set: until then all of a plug-in's parameters are configured when it has no more than [`CONFIGURE_THRESHOLD`], and none when it has more (manual 24.1). Native devices never set it. |
@@ -15889,13 +15800,6 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 {
   "description": "A device in a track's chain: a native instrument or effect, or a plug-in.",
   "properties": {
-    "articulations": {
-      "description": "An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then.",
-      "items": {
-        "$ref": "#/$defs/Articulation"
-      },
-      "type": "array"
-    },
     "b_active": {
       "description": "Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active.",
       "type": "boolean"
@@ -16881,10 +16785,8 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
-| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
-| `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -16894,13 +16796,6 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 {
   "description": "What the generic UI needs to draw a device (WP-2.5): its type's description and its parameters' values now.",
   "properties": {
-    "articulations": {
-      "description": "An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device.",
-      "items": {
-        "$ref": "#/$defs/Articulation"
-      },
-      "type": "array"
-    },
     "configured": {
       "description": "The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device.",
       "items": {
@@ -16920,16 +16815,6 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "type": "integer"
       },
       "type": "array"
-    },
-    "learning": {
-      "description": "The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's.",
-      "format": "uint8",
-      "maximum": 255,
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
     },
     "loaded_slots": {
       "description": "For a device with sample slots: whether each slot holds a sample.",
@@ -22919,6 +22804,87 @@ One of:
     }
   ],
   "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
+}
+```
+
+</details>
+
+### `Mixer`
+
+A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `volume` | number | yes | Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative. |
+| `pan` | number | yes | Stereo position from −1.0 (left) to 1.0 (right). |
+| `mute` | boolean | yes | Whether the track is muted: its Track Activator is off. Always off on the Main track. |
+| `solo` | boolean | yes | Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track. |
+| `arm` | boolean | yes | Whether the track is armed for recording. Only audio and MIDI tracks can be armed. |
+| `crossfade` | [`CrossfadeAssign`](#crossfadeassign) | no | Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged. |
+| `pan_mode` | [`PanMode`](#panmode) | no | The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode. |
+| `split_left` | number | no | In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre). |
+| `split_right` | number | no | In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default. |
+| `tap` | [`SendTap`](#sendtap) | no | Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.",
+  "properties": {
+    "arm": {
+      "description": "Whether the track is armed for recording. Only audio and MIDI tracks can be armed.",
+      "type": "boolean"
+    },
+    "crossfade": {
+      "$ref": "#/$defs/CrossfadeAssign",
+      "description": "Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged."
+    },
+    "mute": {
+      "description": "Whether the track is muted: its Track Activator is off. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "pan": {
+      "description": "Stereo position from −1.0 (left) to 1.0 (right).",
+      "format": "double",
+      "type": "number"
+    },
+    "pan_mode": {
+      "$ref": "#/$defs/PanMode",
+      "description": "The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode."
+    },
+    "solo": {
+      "description": "Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "split_left": {
+      "description": "In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre).",
+      "format": "double",
+      "type": "number"
+    },
+    "split_right": {
+      "description": "In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default.",
+      "format": "double",
+      "type": "number"
+    },
+    "tap": {
+      "$ref": "#/$defs/SendTap",
+      "description": "Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged."
+    },
+    "volume": {
+      "description": "Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "volume",
+    "pan",
+    "mute",
+    "solo",
+    "arm"
+  ],
+  "type": "object"
 }
 ```
 

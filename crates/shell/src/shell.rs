@@ -63,6 +63,7 @@ use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
+use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -94,6 +95,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
+mod bounce;
 mod capture;
 mod freeze;
 mod keymap;
@@ -4255,6 +4257,7 @@ impl Shell {
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -5578,6 +5581,9 @@ impl Shell {
         if freeze_ids::handles(id) {
             return self.can_freeze(id, args);
         }
+        if bounce_ids::handles(id) {
+            return self.can_bounce(id, args);
+        }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
             let args = if args.is_null() {
@@ -6862,6 +6868,7 @@ impl Shell {
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
+                || bounce_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6885,6 +6892,9 @@ impl Shell {
         }
         if freeze_ids::handles(id) {
             return self.run_freeze(id, args);
+        }
+        if bounce_ids::handles(id) {
+            return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();

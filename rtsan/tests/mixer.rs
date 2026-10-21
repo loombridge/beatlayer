@@ -195,7 +195,14 @@ fn deactivated_devices_and_tracks_pass_under_rtsan() {
     let mut editor = Editor::new();
     let a = track(&mut editor, TrackKind::Audio, None);
     tone(&mut editor, a, 330.0);
-    let device = editor.document().track(a).unwrap().devices().next().unwrap().id;
+    let device = editor
+        .document()
+        .track(a)
+        .unwrap()
+        .devices()
+        .next()
+        .unwrap()
+        .id;
     let b = track(&mut editor, TrackKind::Midi, None);
     tone(&mut editor, b, 440.0);
     sender.send_update(compiler.sync(editor.document()));

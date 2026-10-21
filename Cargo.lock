@@ -691,6 +691,7 @@ dependencies = [
  "bl-plugin-host",
  "bl-project",
  "bl-shell",
+ "bl-test-clap",
  "bl-test-vst3",
  "hound",
  "lspk-agent",

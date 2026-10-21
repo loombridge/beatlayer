@@ -2454,6 +2454,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(an_expandable_device, device_view, "Expand", Key::Enter),
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
+        ("device.set_role", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
         ("track.set_devices_enabled", Exception(track_menu)),

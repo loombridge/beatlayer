@@ -2139,6 +2139,21 @@ const ENTRIES: &[Entry] = &[
             device.",
     },
     Entry {
+        id: "device.set_role",
+        action: Action::Apply("set_device_role"),
+        label: "Use as MIDI Effect",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Places a device in another position of its chain (IMP-24): a plug-in that \
+            sends notes on from a note output can sit in the MIDI-effect position, before the \
+            instrument; `role` is where it goes (`midi_effect`, `instrument` or \
+            `audio_effect`), or left out to take the other position. A plug-in without a note \
+            output is refused, as is a role that \
+            breaks the chain's order (MIDI effects, then the instrument, then audio effects). \
+            The device keeps where it was placed, saved with the set. One undo step.",
+    },
+    Entry {
         id: "device.set_param",
         action: Action::Apply("set_device_param"),
         label: "Set Device Parameter",

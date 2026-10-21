@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
 use bl_model::{
-    Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat, PluginState,
+    Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamId, PluginFormat, PluginState,
 };
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
@@ -514,6 +514,7 @@ impl Vst3Host {
             // real lifecycle.
             let mut probe = new_instance(main, &module, &cid)?;
             let params: Vec<_> = probe.params.iter().map(|p| p.descriptor.clone()).collect();
+            let note_output = has_event_output(&probe.component);
             teardown(&mut probe);
             drop(probe);
             found.push(Vst3Type {
@@ -529,6 +530,7 @@ impl Vst3Host {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    note_output,
                     outputs: Vec::new(),
                 },
                 vendor,
@@ -836,7 +838,7 @@ impl NodeFactory for LoanFactory {
         else {
             return None;
         };
-        let (node, ends) = Vst3Node::new(config, 0);
+        let (node, ends) = Vst3Node::new(config, 0, device.role == DeviceRole::MidiEffect);
         let mut guard = lock(&self.inner.main);
         let problem = match guard.get() {
             Ok(main) if main.lending => borrow(main, device, *config, ends, &self.inner).err(),
@@ -876,7 +878,11 @@ impl NodeFactory for Vst3Factory {
         // at once, so a program compiled after an engine restart compensates
         // the same way as one compiled before it.
         let latency = lock(&self.inner.latencies).get(&device.id).copied();
-        let (node, ends) = Vst3Node::new(config, latency.unwrap_or(0));
+        let (node, ends) = Vst3Node::new(
+            config,
+            latency.unwrap_or(0),
+            device.role == DeviceRole::MidiEffect,
+        );
         lock(&self.inner.requests).push(Request {
             device: device.clone(),
             config: *config,
@@ -1587,6 +1593,16 @@ fn int32_of(value: impl TryInto<i32>) -> i32 {
     value.try_into().unwrap_or_default()
 }
 
+/// Whether the class sends events on from an event output bus (IMP-24):
+/// such a plug-in can sit in the MIDI-effect position of a MIDI track's
+/// chain, before the instrument.
+fn has_event_output(component: &ComPtr<IComponent>) -> bool {
+    let event = int32_of(MediaTypes_::kEvent);
+    let output = int32_of(BusDirections_::kOutput);
+    // SAFETY: the component is a live object and this is its own call, from
+    // the main thread.
+    (unsafe { component.getBusCount(event, output) }) > 0
+}
 /// Activates an instance for a node: the sample size, the bus
 /// arrangements, processing setup, activation and processing start, in the
 /// VST3 order, then an [`Active`](node::Active) for the node.

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-563 commands in 37 areas.
+564 commands in 37 areas.
 
 ## Permission classes
 
@@ -296,6 +296,7 @@ Each command has:
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
+| [`device.set_role`](#deviceset_role) | Use as MIDI Effect | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
 | [`device.set_sample_bpm`](#deviceset_sample_bpm) | Set Device Sample BPM | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
@@ -5432,6 +5433,23 @@ Arguments:
 | `media` | [`ContentHash`](#contenthash) | yes | The copy, by content hash. |
 | `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
 | `crop` | [`SampleRange`](#samplerange) or null | no | The edited sample's span the copy keeps, or `null` for all of it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_role`
+
+**Use as MIDI Effect**. Permission: `edit`. Contexts: `device-view`.
+
+Places a device in another position of its chain (IMP-24): a plug-in that sends notes on from a note output can sit in the MIDI-effect position, before the instrument; `role` is where it goes (`midi_effect`, `instrument` or `audio_effect`), or left out to take the other position. A plug-in without a note output is refused, as is a role that breaks the chain's order (MIDI effects, then the instrument, then audio effects). The device keeps where it was placed, saved with the set. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `role` | [`DeviceRole`](#devicerole) or null | no | Where it goes in the chain; the other position if left out. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10685,6 +10703,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
+| [`device.set_role`](#deviceset_role) | the query tool's `device` | `role` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
 | [`device.set_sample_bpm`](#deviceset_sample_bpm) | the query tool's `device` | `warp.bpm` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
@@ -26845,6 +26864,7 @@ A plug-in the scanner found.
 | `plugin_id` | string | yes | Its identifier within its format (a CLAP ID, or a VST3 class ID). |
 | `name` | string | yes | Its name. |
 | `role` | [`DeviceRole`](#devicerole) | yes | What it is in a chain. |
+| `note_output` | boolean | yes | Whether it sends notes on from a note output (IMP-24): such a plug-in can sit in the MIDI-effect position of a MIDI track's chain. |
 | `hidden` | boolean | yes | Whether the browser hides it (IMP-07). |
 | `vendor` | string or null | no | Its vendor, if it gives one. |
 | `version` | string or null | no | Its version, if it gives one. |
@@ -26866,6 +26886,10 @@ A plug-in the scanner found.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "note_output": {
+      "description": "Whether it sends notes on from a note output (IMP-24): such a plug-in can sit in the MIDI-effect position of a MIDI track's chain.",
+      "type": "boolean"
     },
     "path": {
       "description": "The file or bundle it's in.",
@@ -26900,6 +26924,7 @@ A plug-in the scanner found.
     "plugin_id",
     "name",
     "role",
+    "note_output",
     "hidden"
   ],
   "type": "object"

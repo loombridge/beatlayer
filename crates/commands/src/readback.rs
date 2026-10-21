@@ -330,6 +330,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.set_sample", query(Device, "media")),
     ("device.set_sample_bpm", query(Device, "warp.bpm")),
     ("device.set_show_preset_name", query(Device, "show_preset_name")),
+    ("device.set_role", query(Device, "role")),
     ("device.set_midi_sidechain_source", query(Device, "midi_sidechain.source")),
     ("device.set_sidechain_enabled", query(Device, "sidechain.enabled")),
     ("device.set_sidechain_gain", query(Device, "sidechain.gain")),

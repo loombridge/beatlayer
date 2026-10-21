@@ -462,6 +462,7 @@ impl AuHost {
                 sidechain: false,
                 external: false,
                 midi_sidechain: false,
+                note_output: has_note_output(&unit, role),
                 outputs: Vec::new(),
             },
             vendor,
@@ -846,7 +847,7 @@ impl NodeFactory for LoanFactory {
         else {
             return None;
         };
-        let (node, ends) = AuNode::new(config);
+        let (node, ends) = AuNode::new(config, device.role == DeviceRole::MidiEffect);
         let mut guard = lock(&self.inner.main);
         let problem = match guard.get() {
             Ok(main) if main.lending => borrow(main, device, *config, ends).err(),
@@ -900,7 +901,7 @@ impl NodeFactory for AuFactory {
         else {
             return None;
         };
-        let (node, ends) = AuNode::new(config);
+        let (node, ends) = AuNode::new(config, device.role == DeviceRole::MidiEffect);
         lock(&self.inner.requests).push(Request {
             device: device.clone(),
             config: *config,
@@ -963,6 +964,7 @@ pub(super) fn scan_file(path: &Path) -> Result<Vec<ScannedPlugin>, AuError> {
             vendor: unit.vendor,
             version: unit.version,
             role: unit.device_type.role,
+            note_output: unit.device_type.note_output,
         });
     }
     Ok(found)
@@ -1216,6 +1218,19 @@ fn role_text(component_type: &str) -> Option<DeviceRole> {
         "aumi" => Some(DeviceRole::MidiEffect),
         _ => None,
     }
+}
+
+/// Whether the unit sends notes on from a MIDI output (IMP-24): such a
+/// device can sit in the MIDI-effect position of a MIDI track's chain,
+/// before the instrument. A MIDI effect always has one; another unit has
+/// one when it names a MIDI output.
+fn has_note_output(unit: &AUAudioUnit, role: DeviceRole) -> bool {
+    if role == DeviceRole::MidiEffect {
+        return true;
+    }
+    // SAFETY: reading the unit's own MIDI output names is a property read on
+    // the thread that made it.
+    unsafe { unit.MIDIOutputNames() }.count() > 0
 }
 
 /// A version as the system reports it: 0xMMMMmmDD as `M.m.D`.

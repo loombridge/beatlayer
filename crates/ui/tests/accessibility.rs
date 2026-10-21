@@ -2068,6 +2068,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        ("song.scales", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.
         (

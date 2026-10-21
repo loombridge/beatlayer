@@ -162,6 +162,32 @@ fn midi_clip(editor: &Editor, id: bl_model::ClipId) -> &bl_model::MidiData {
     data
 }
 
+// Spec: scales R7. An imported MIDI file makes a clip from nothing, so it
+// takes the set's current scale.
+#[test]
+fn an_imported_clip_takes_the_current_scale() {
+    let dir = TempDir::new("import-scale");
+    let bytes = generate(
+        Format::SingleTrack,
+        &[("Bass", &[note(0, 96, 36, 100)], &[])],
+    );
+    let path = dir.file("Bass.mid", &bytes);
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetScale {
+            enabled: Some(true),
+            root: Some(10),
+            name: Some("minor".to_owned()),
+        })
+        .unwrap();
+    let result = midi_files::import(&mut editor, &path, None, Ticks::ZERO, false).unwrap();
+    assert_eq!(
+        editor.document().clip(result.clips[0].clip).unwrap().scale,
+        bl_model::Scale::new(10, bl_model::ScaleName::Minor),
+        "the imported clip takes the current scale"
+    );
+}
+
 // Spec: midi-clips R16 (a type 0 file becomes a new MIDI track with one clip).
 #[test]
 fn a_type_0_file_becomes_one_new_midi_track() {

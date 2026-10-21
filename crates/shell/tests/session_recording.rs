@@ -228,6 +228,34 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
     assert_eq!(stats.heap_operations, 0, "{stats:?}");
 }
 
+// Spec: scales R7. A Session recording makes a clip from nothing, so it
+// takes the set's current scale.
+#[test]
+fn a_session_recording_takes_the_current_scale() {
+    let (mut shell, control) = rig();
+    let keys = midi_track(&mut shell, "Keys");
+    let scene = first_scene(&shell);
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 3, "name": "dorian" }),
+        )
+        .unwrap();
+    shell.run("session.record", json!({})).unwrap();
+    poll_until(&control, &mut shell, "the clip to appear", |shell| {
+        slot_clip(shell, keys, scene).is_some()
+    });
+    play_a(&control, &mut shell, 150);
+    shell.run("session.stop_recording", json!({})).unwrap();
+    poll_until(&control, &mut shell, "the recording to end", recorded);
+    let clip = slot_clip(&shell, keys, scene).expect("the recorded clip");
+    assert_eq!(
+        clip.scale,
+        bl_model::Scale::new(3, bl_model::ScaleName::Dorian),
+        "the Session recording takes the current scale"
+    );
+}
+
 // Spec: session-recording R1. A track whose selected slot is taken records
 // into the next empty slot below it; with none, a scene is inserted at the
 // end, in the same undo step.

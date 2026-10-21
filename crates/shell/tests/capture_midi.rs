@@ -192,6 +192,30 @@ fn a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step() {
     assert_eq!(stats.heap_operations, 0, "{stats:?}");
 }
 
+// Spec: scales R7. A captured clip is made from nothing, so it takes the
+// set's current scale.
+#[test]
+fn a_captured_clip_takes_the_current_scale() {
+    let (mut shell, control) = rig();
+    let keys = midi_track(&mut shell, &control, "Keys");
+    let scene = scenes(&shell)[0];
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 5, "name": "minor" }),
+        )
+        .unwrap();
+    play_a(&control, &mut shell, 2);
+    assert!(ready(&mut shell));
+    shell.run("midi.capture", json!({})).unwrap();
+    let clip = slot_clip(&shell, keys, scene).expect("the captured clip");
+    assert_eq!(
+        clip.scale,
+        bl_model::Scale::new(5, bl_model::ScaleName::Minor),
+        "the captured clip takes the current scale"
+    );
+}
+
 // Spec: capture-midi R4. A taken slot sends the clip to the next empty one
 // below it; with none left, a scene is added at the end.
 #[test]

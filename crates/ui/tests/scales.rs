@@ -216,13 +216,28 @@ fn a_mixed_selection_shows_an_asterisk_and_a_partly_filled_switch() {
 fn the_scale_controls_take_the_keyboard_focus() {
     // Spec: scales R14.
     let (mut h, _track, _first, _second) = harness();
-    h.ctx
-        .memory_mut(|memory| memory.request_focus(element_id(Element::ScaleMode)));
-    h.shell.set_focused_area(bl_shell::Area::ControlBar);
+    // Option-0 (Alt-0) to the Control Bar; with Use Tab Key to Move Focus
+    // on, Tab runs along the Control Bar's controls.
+    h.shell
+        .run("focus.toggle_tab_navigation", json!({}))
+        .unwrap();
+    h.key(egui::Key::Num0, egui::Modifiers::ALT);
     h.settle();
-    assert_eq!(
-        h.ctx.memory(|memory| memory.focused()),
-        Some(element_id(Element::ScaleMode)),
-        "the switch has the keyboard"
-    );
+    assert_eq!(h.shell.focused_area(), bl_shell::Area::ControlBar);
+    let scale = [Element::ScaleMode, Element::RootNote, Element::ScaleName];
+    let mut reached = Vec::new();
+    for _ in 0..60 {
+        let focused = h.ctx.memory(|memory| memory.focused());
+        reached.extend(
+            scale
+                .iter()
+                .copied()
+                .filter(|element| Some(element_id(*element)) == focused),
+        );
+        h.key(egui::Key::Tab, egui::Modifiers::NONE);
+        h.settle();
+    }
+    for element in scale {
+        assert!(reached.contains(&element), "Tab never reached {element:?}");
+    }
 }

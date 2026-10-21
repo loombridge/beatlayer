@@ -194,6 +194,26 @@ fn file_frames(shell: &Shell, media: ContentHash) -> u64 {
 // Spec: slice-to-midi R4. The region's start and each of the loop's
 // transients inside it become a slice, and a quarter-note division gives
 // one every half second.
+// Spec: scales R7. Slicing to a new MIDI track makes a clip from nothing,
+// so it takes the set's current scale.
+#[test]
+fn a_sliced_track_s_clip_takes_the_current_scale() {
+    let scratch = Scratch::new("slice-scale");
+    let (mut shell, _track, clip) = loop_clip(&scratch);
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 7, "name": "mixolydian" }),
+        )
+        .unwrap();
+    let result = slice(&mut shell, clip, json!({ "by": "transients" }));
+    assert_eq!(
+        shell.editor().document().clip(result.clip).unwrap().scale,
+        bl_model::Scale::new(7, bl_model::ScaleName::Mixolydian),
+        "the sliced track's clip takes the current scale"
+    );
+}
+
 #[test]
 fn slices_start_at_each_transient_warp_marker_or_division() {
     let scratch = Scratch::new("transients");

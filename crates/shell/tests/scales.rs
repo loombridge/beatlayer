@@ -2,7 +2,6 @@
 //! controls show, which follows the selection and the clips that play, and
 //! which the clips made next take. The behaviour is in the scales spec.
 
-use bl_audio_io::NullControl;
 use bl_core::time::Ticks;
 use bl_model::{
     Clip, ClipData, ClipId, Command, Editor, MidiData, Scale, ScaleName, TrackId, TrackKind,
@@ -445,10 +444,4 @@ fn a_clip_made_by_the_model_takes_the_current_scale() {
         editor.document().clip(clip).unwrap().scale,
         Scale::new(11, ScaleName::Locrian)
     );
-}
-
-/// The control of the test above: the null device is paced by hand.
-#[allow(dead_code)]
-fn unused(control: &NullControl) {
-    let _ = control;
 }

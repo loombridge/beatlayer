@@ -224,10 +224,7 @@ impl<'a> Audio<'_, 'a> {
         let range = self.range.clone();
         let block = &mut *self.block;
         let (data, out) = block.channel_with_external_out(channel);
-        (
-            &mut data[range.clone()],
-            out.map(|out| &mut out[range]),
-        )
+        (&mut data[range.clone()], out.map(|out| &mut out[range]))
     }
 
     /// Sends a note on from the stretch, at `note.offset` frames after its

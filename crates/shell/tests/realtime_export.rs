@@ -6,15 +6,15 @@
 use std::path::PathBuf;
 use std::thread;
 
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_devices::hardware_effect_type;
 use bl_model::{Channel, DeviceId, TrackId};
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
+use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::export_commands::{self as export_ids, ExportResult};
 use bl_shell::files::ProjectFiles;
 use bl_shell::realtime::Phase;
 use bl_shell::settings::Preferences;
-use bl_shell::Shell;
 use serde_json::{Value, json};
 
 /// A folder for the test's files.
@@ -22,10 +22,8 @@ struct TestDir(PathBuf);
 
 impl TestDir {
     fn new(name: &str) -> Self {
-        let folder = std::env::temp_dir().join(format!(
-            "bl-realtime-{name}-{}",
-            std::process::id()
-        ));
+        let folder =
+            std::env::temp_dir().join(format!("bl-realtime-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         Self(folder)
@@ -46,7 +44,9 @@ impl Drop for TestDir {
 /// frames of input latency and 600 of output latency: the device's round
 /// trip is the loopback's delay.
 fn shell_on_loopback() -> Shell {
-    let backend = NullBackend::default().with_latency(400, 600).with_loopback(1_000);
+    let backend = NullBackend::default()
+        .with_latency(400, 600)
+        .with_loopback(1_000);
     let devices = backend.clone();
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
@@ -235,7 +235,10 @@ fn a_track_without_the_hardware_renders_offline() {
         )
         .unwrap();
     let result: ExportResult = serde_json::from_value(result).unwrap();
-    assert!(result.real_time, "the track with the hardware rendered in real time");
+    assert!(
+        result.real_time,
+        "the track with the hardware rendered in real time"
+    );
     assert!(result.files.len() > 1, "every track was written");
     let other = result
         .files
@@ -311,7 +314,11 @@ fn with_auto_restart_off_the_dropout_is_listed() {
     driver.join().unwrap();
     let result: ExportResult = serde_json::from_value(result).unwrap();
     assert_eq!(result.attempts, 1, "the render carried on");
-    assert_eq!(result.dropouts.len(), 1, "the dropout is listed: {result:?}");
+    assert_eq!(
+        result.dropouts.len(),
+        1,
+        "the dropout is listed: {result:?}"
+    );
     let dropout = &result.dropouts[0];
     assert!(
         dropout.position > bl_core::time::Ticks::ZERO,

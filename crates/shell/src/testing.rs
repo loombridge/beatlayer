@@ -37,7 +37,8 @@ pub fn advance(control: &NullControl, shell: &mut Shell, millis: u64) {
 /// Waits until the engine plays the set as it is now: the change has reached
 /// the audio thread and a few blocks have run with it, so a note played next
 /// reaches a track just armed or changed.
-pub fn settle(control: &NullControl, shell: &mut Shell) {    assert!(
+pub fn settle(control: &NullControl, shell: &mut Shell) {
+    assert!(
         shell.audio().flush(Duration::from_secs(10)),
         "the engine never took the set"
     );

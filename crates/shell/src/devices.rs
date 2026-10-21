@@ -1299,7 +1299,10 @@ impl DeviceView {
                 // sends its signal to the interface's outputs and hears it
                 // back: it has an Audio To and no MIDI To.
                 audio_to: external.audio_to.map(|channel| channel.label()),
-                output: self.types.iter().any(|t| t.kind == d.kind && t.external_output),
+                output: self
+                    .types
+                    .iter()
+                    .any(|t| t.kind == d.kind && t.external_output),
                 hardware_latency: external.hardware_latency,
             }),
             midi_sidechain: d

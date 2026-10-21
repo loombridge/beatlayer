@@ -747,10 +747,12 @@ pub(crate) fn open(
     };
     if job.normalize {
         let file = File::create(scratch).map_err(|error| failed(scratch, &error))?;
-        Ok(Out::Scratch(BufWriter::with_capacity(1 << 16, file), Vec::new()))
+        Ok(Out::Scratch(
+            BufWriter::with_capacity(1 << 16, file),
+            Vec::new(),
+        ))
     } else {
-        let writer =
-            AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
+        let writer = AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
         Ok(Out::Writer(writer))
     }
 }
@@ -777,6 +779,7 @@ pub(crate) fn write(out: &mut Out, samples: &[f32]) -> Result<(), ExportError> {
 /// without it, the writer itself. `head` is the loop render's head, in
 /// the file's rate, and `total` the frames the scratch file holds.
 /// Returns the writer, the gain, and the peak of what was written.
+#[expect(clippy::too_many_arguments, reason = "the finish's inputs")]
 pub(crate) fn finish(
     out: Out,
     spec: EncodeSpec,
@@ -785,6 +788,7 @@ pub(crate) fn finish(
     head: &mut [f32],
     total: u64,
     peak: f32,
+    normalize: bool,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(AudioWriter, f64, f32), ExportError> {
@@ -797,7 +801,7 @@ pub(crate) fn finish(
         ));
     };
     let mut gain = 1.0;
-    if peak > 0.0 {
+    if normalize && peak > 0.0 {
         gain = 1.0 / f64::from(peak);
     }
     file.into_inner()
@@ -954,6 +958,7 @@ fn run(
             &mut head,
             total,
             peak,
+            job.normalize,
             cancel,
             &mut |share| progress(0.5 + share / 2.0),
         )?,
@@ -1159,6 +1164,7 @@ fn prepare_document_for_track(
 ///
 /// [`ShellError`] for arguments that can't be exported, an existing file,
 /// or an export that failed.
+#[expect(clippy::too_many_arguments, reason = "the export's inputs")]
 pub fn run_command(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
@@ -1237,84 +1243,85 @@ pub fn run_command(
         block: BLOCK,
     };
 
+    #[expect(clippy::type_complexity, reason = "the renders and their paths")]
     let (renders, written_paths): (Vec<(Option<TrackId>, Document, Job)>, Vec<PathBuf>) =
         match rendered_choice {
-        RenderedTrack::Main => {
-            let job = make_job(path.clone());
-            (vec![(None, document.clone(), job)], vec![path.clone()])
-        }
-        RenderedTrack::Track(id) => {
-            if id == document.main_id() {
-                return Err(invalid(
-                    "the Main track is the whole mix: choose `main` to render it".to_owned(),
-                ));
+            RenderedTrack::Main => {
+                let job = make_job(path.clone());
+                (vec![(None, document.clone(), job)], vec![path.clone()])
             }
-            if document.track(id).is_none() {
-                return Err(invalid(format!("no track has the ID {}", id.0)));
+            RenderedTrack::Track(id) => {
+                if id == document.main_id() {
+                    return Err(invalid(
+                        "the Main track is the whole mix: choose `main` to render it".to_owned(),
+                    ));
+                }
+                if document.track(id).is_none() {
+                    return Err(invalid(format!("no track has the ID {}", id.0)));
+                }
+                let transformed =
+                    prepare_document_for_track(document, id, args.include_return_and_main_effects)
+                        .map_err(invalid)?;
+                let job = make_job(path.clone());
+                (vec![(Some(id), transformed, job)], vec![path.clone()])
             }
-            let transformed =
-                prepare_document_for_track(document, id, args.include_return_and_main_effects)
+            RenderedTrack::AllTracks => {
+                let tracks: Vec<&bl_model::Track> = document
+                    .track_order()
+                    .into_iter()
+                    .filter_map(|id| document.track(id))
+                    .filter(|t| track_makes_audio(t))
+                    .collect();
+                if tracks.is_empty() {
+                    return Err(invalid(
+                        "the set has no tracks to export; add a track or choose Main".to_owned(),
+                    ));
+                }
+                let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+                let mut renders = Vec::with_capacity(tracks.len());
+                for (track, dest) in tracks.iter().zip(&dest_paths) {
+                    let transformed = prepare_document_for_track(
+                        document,
+                        track.id(),
+                        args.include_return_and_main_effects,
+                    )
                     .map_err(invalid)?;
-            let job = make_job(path.clone());
-            (vec![(Some(id), transformed, job)], vec![path.clone()])
-        }
-        RenderedTrack::AllTracks => {
-            let tracks: Vec<&bl_model::Track> = document
-                .track_order()
-                .into_iter()
-                .filter_map(|id| document.track(id))
-                .filter(|t| track_makes_audio(t))
-                .collect();
-            if tracks.is_empty() {
-                return Err(invalid(
-                    "the set has no tracks to export; add a track or choose Main".to_owned(),
-                ));
+                    renders.push((Some(track.id()), transformed, make_job(dest.clone())));
+                }
+                (renders, dest_paths)
             }
-            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
-            let mut renders = Vec::with_capacity(tracks.len());
-            for (track, dest) in tracks.iter().zip(&dest_paths) {
-                let transformed = prepare_document_for_track(
-                    document,
-                    track.id(),
-                    args.include_return_and_main_effects,
-                )
-                .map_err(invalid)?;
-                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
-            }
-            (renders, dest_paths)
-        }
-        RenderedTrack::SelectedTracks => {
-            if selected_tracks.is_empty() {
-                return Err(invalid(
+            RenderedTrack::SelectedTracks => {
+                if selected_tracks.is_empty() {
+                    return Err(invalid(
                     "no tracks are selected in the Arrangement: select tracks, or choose all tracks or Main".to_owned(),
                 ));
-            }
-            let tracks: Vec<&bl_model::Track> = document
-                .track_order()
-                .into_iter()
-                .filter(|id| selected_tracks.contains(id))
-                .filter_map(|id| document.track(id))
-                .filter(|t| track_makes_audio(t))
-                .collect();
-            if tracks.is_empty() {
-                return Err(invalid(
+                }
+                let tracks: Vec<&bl_model::Track> = document
+                    .track_order()
+                    .into_iter()
+                    .filter(|id| selected_tracks.contains(id))
+                    .filter_map(|id| document.track(id))
+                    .filter(|t| track_makes_audio(t))
+                    .collect();
+                if tracks.is_empty() {
+                    return Err(invalid(
                     "the selected tracks make no audio: add an instrument or audio effect, or choose Main".to_owned(),
                 ));
+                }
+                let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+                let mut renders = Vec::with_capacity(tracks.len());
+                for (track, dest) in tracks.iter().zip(&dest_paths) {
+                    let transformed = prepare_document_for_track(
+                        document,
+                        track.id(),
+                        args.include_return_and_main_effects,
+                    )
+                    .map_err(invalid)?;
+                    renders.push((Some(track.id()), transformed, make_job(dest.clone())));
+                }
+                (renders, dest_paths)
             }
-            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
-            let mut renders = Vec::with_capacity(tracks.len());
-            for (track, dest) in tracks.iter().zip(&dest_paths) {
-                let transformed = prepare_document_for_track(
-                    document,
-                    track.id(),
-                    args.include_return_and_main_effects,
-                )
-                .map_err(invalid)?;
-                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
-            }
-            (renders, dest_paths)
-        }
-    };
+        };
 
     // Spec: external-devices R22. The outputs whose path runs through
     // external hardware render in real time; the others render offline, as
@@ -1340,8 +1347,8 @@ pub fn run_command(
         },
     };
     let cancel = session.cancel_flag();
-    let (mut reports, partials) = render_multi(&offline, media, plugins, &cancel, &mut |_| {})
-        .map_err(failed)?;
+    let (mut reports, partials) =
+        render_multi(&offline, media, plugins, &cancel, &mut |_| {}).map_err(failed)?;
     let mut outcome = crate::realtime::Outcome::default();
     if !live.is_empty() {
         // Spec: external-devices R22, R26. Without a running audio device,

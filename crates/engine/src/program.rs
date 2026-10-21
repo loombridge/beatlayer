@@ -645,6 +645,7 @@ fn delay_in_place(
 /// channel feeds both sides, a stereo pair one each; a channel the device
 /// doesn't have is silence (WP-2.13). `input` holds `device_channels`
 /// channels `stride` frames apart; `scratch` is the program's channels.
+#[expect(clippy::too_many_arguments, reason = "the input's mapping")]
 fn map_device_input(
     scratch: &mut [f32],
     input: &[f32],

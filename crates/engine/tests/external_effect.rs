@@ -187,12 +187,7 @@ fn rig() -> Rig {
     );
     let audio = track(&mut rig.editor, TrackKind::Audio, None);
     clip(&mut rig.editor, audio, hash(1));
-    effect(
-        &mut rig.editor,
-        audio,
-        Channel::Pair(1),
-        Channel::Pair(1),
-    );
+    effect(&mut rig.editor, audio, Channel::Pair(1), Channel::Pair(1));
     rig.sync();
     rig
 }
@@ -321,11 +316,7 @@ fn dry_and_wet_line_up_and_the_return_is_flipped_by_invert() {
     });
     settle(&mut rig);
     let (main, _) = play(&mut rig, TOTAL, 8);
-    assert_eq!(
-        heard(&main),
-        vec![(TOTAL, -1.0)],
-        "the return is flipped"
-    );
+    assert_eq!(heard(&main), vec![(TOTAL, -1.0)], "the return is flipped");
 }
 
 // Spec: external-devices R19

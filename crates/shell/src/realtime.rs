@@ -13,8 +13,8 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -483,7 +483,7 @@ fn play(
         };
         let consumer = consumers.remove(0);
         let job = job.clone();
-        let cancel = Arc::clone(&cancel);
+        let cancel = cancel.clone();
         let finished = Arc::clone(&finished);
         writers.push(thread::spawn(move || {
             write_output(consumer, converter, out, job, cancel, finished)
@@ -530,11 +530,9 @@ fn play(
         if done || !audio.engine_running() {
             break;
         }
-        let share = captured
-            .first()
-            .map_or(0.0, |count| {
-                count.load(Ordering::Relaxed) as f64 / frames as f64
-            });
+        let share = captured.first().map_or(0.0, |count| {
+            count.load(Ordering::Relaxed) as f64 / frames as f64
+        });
         // Spec: external-devices R23. The dialog shows the render's
         // progress and how many attempts it has taken.
         session.set_state(Phase::Rendering, share, attempt);
@@ -595,7 +593,11 @@ fn dropouts(
     for (kind, was, is) in [
         ("the device reported an xrun", was.xruns, now.xruns),
         ("the device's clock broke", was.gaps, now.gaps),
-        ("a callback overran its block", was.late_blocks, now.late_blocks),
+        (
+            "a callback overran its block",
+            was.late_blocks,
+            now.late_blocks,
+        ),
     ] {
         if is > was {
             found.push(Dropout {
@@ -692,6 +694,7 @@ fn write_output(
             &mut [],
             frames,
             peak,
+            job.normalize,
             &cancel,
             &mut |_| {},
         )?,

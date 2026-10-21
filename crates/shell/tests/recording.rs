@@ -66,6 +66,7 @@ fn duplex_shell() -> (Shell, NullControl) {
 fn four_channel_backend() -> (NullBackend, NullControl) {
     NullBackend::with_devices(
         NullOptions {
+            dropout_after: None,
             channels: 4,
             ..NullOptions::default()
         },

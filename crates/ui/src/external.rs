@@ -83,10 +83,7 @@ fn row_at(section: Rect, n: usize) -> Rect {
 
 /// The unit switch, at the end of the Hardware Latency box.
 fn unit_beside(latency: Rect) -> Rect {
-    Rect::from_min_size(
-        pos2(latency.right() - 22.0, latency.top()),
-        vec2(22.0, ROW),
-    )
+    Rect::from_min_size(pos2(latency.right() - 22.0, latency.top()), vec2(22.0, ROW))
 }
 
 /// A Hardware Latency as the box shows it: `12.50 ms` or `600 smp`.
@@ -164,7 +161,14 @@ pub fn draw(
         (None, None, Some(audio_to), audio_from, latency, unit)
     } else {
         let [midi_to, channel, audio_from, latency, unit] = rows(frame);
-        (Some(midi_to), Some(channel), None, audio_from, latency, unit)
+        (
+            Some(midi_to),
+            Some(channel),
+            None,
+            audio_from,
+            latency,
+            unit,
+        )
     };
 
     // The names above the controls.

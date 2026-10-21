@@ -45,14 +45,8 @@ pub fn hardware_effect_type() -> DeviceType {
             .describe("Scales the signal sent to the hardware."),
         ParamDescriptor::gain(GAIN_IN, "In Gain", 24.0, 0.0)
             .describe("Scales the signal coming back from the hardware."),
-        ParamDescriptor::continuous(
-            DRY_WET,
-            "Dry/Wet",
-            (0.0, 100.0),
-            100.0,
-            ParamUnit::Percent,
-        )
-        .describe("Balances the dry signal against the processed one."),
+        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+            .describe("Balances the dry signal against the processed one."),
         ParamDescriptor::toggle(INVERT, "Invert", false)
             .describe("Flips the phase of the signal coming back."),
     ]))
@@ -83,9 +77,7 @@ impl Effect {
     /// interface's round trip and its Hardware Latency (R19, R20).
     fn new(device: &Device, config: &NodeConfig) -> Self {
         let hardware = device.external.as_ref().map_or(0, |external| {
-            external
-                .hardware_latency
-                .frames(config.sample_rate.hz())
+            external.hardware_latency.frames(config.sample_rate.hz())
         });
         let latency = (config.round_trip_latency as usize).saturating_add(hardware as usize);
         Self {
@@ -117,9 +109,9 @@ impl NativeDevice for Effect {
                 // times the in Gain and with its phase flipped while Invert
                 // is on.
                 let returning = audio.external(channel);
-                let (input, mut outgoing) = audio.channel_with_external_out(channel);
+                let (input, outgoing) = audio.channel_with_external_out(channel);
                 let heard = input[frame];
-                if let Some(outgoing) = outgoing.as_deref_mut() {
+                if let Some(outgoing) = outgoing {
                     let sent = heard * gain_out[frame];
                     peak_out = peak_out.max(sent.abs());
                     outgoing[frame] = sent;

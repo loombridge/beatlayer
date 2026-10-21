@@ -35,6 +35,9 @@ pub struct AuType {
     pub vendor: Option<String>,
     /// Its version, if it gives one.
     pub version: Option<String>,
+    /// The name of the preset the unit holds, as it reports it (the plug-in
+    /// list spec, R5).
+    pub preset: Option<String>,
 }
 
 /// The Audio Unit host: on this platform, nothing hosts Audio Units.

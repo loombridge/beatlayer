@@ -132,8 +132,11 @@ fn a_freeze_writes_a_processed_file_and_one_undo_step() {
     let result = freeze(&mut shell, track);
     assert_eq!(result["frozen"], json!([track]));
     let written = result["files"][0].as_str().unwrap();
+    let folder = Path::new("Samples").join("Processed").join("Freeze");
     assert!(
-        written.contains("Samples/Processed/Freeze"),
+        Path::new(written)
+            .parent()
+            .is_some_and(|parent| parent.ends_with(&folder)),
         "freeze files go into Samples/Processed/Freeze: {written}"
     );
     assert!(Path::new(written).exists());

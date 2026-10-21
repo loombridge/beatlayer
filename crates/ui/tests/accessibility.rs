@@ -2286,6 +2286,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The freeze's document-level commands (WP-4.14): `track.freeze` and
+        // `track.unfreeze` are the ones a person and an agent run, from the
+        // menus and Cmd-Option-Shift-F, and they apply these.
+        (
+            "track.set_frozen",
+            Exception(Equivalent(
+                "track.freeze, from the Edit menu, the track and clip menus, and Cmd-Option-Shift-F (freeze-and-bounce R13)",
+            )),
+        ),
+        (
+            "track.clear_frozen",
+            Exception(Equivalent(
+                "track.unfreeze, the same item read as Unfreeze Track (freeze-and-bounce R10, R13)",
+            )),
+        ),
+        (
+            "track.unfreeze",
+            Exception(Equivalent(
+                "the Freeze Track item, which reads Unfreeze Track and unfreezes a selection that is frozen (freeze-and-bounce R1, R10)",
+            )),
+        ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),

@@ -67,6 +67,7 @@ use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -91,6 +92,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 
 pub(crate) mod audio_editing;
 mod capture;
+mod freeze;
 mod multisampler;
 mod processed_files;
 mod sample_edits;
@@ -4127,6 +4129,7 @@ impl Shell {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
                 || audio_ids::handles(id)
+                || freeze_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -5339,6 +5342,64 @@ impl Shell {
         contexts
     }
 
+    /// The frozen track that refuses `id`, if any (the freeze and bounce
+    /// spec, R8).
+    fn frozen_blocks(&self, id: &str, args: &Value) -> Option<TrackId> {
+        // R7 keeps a frozen track's mixer live: volume, pan, sends, the
+        // activator, solo and the crossfader all work; only its devices, its
+        // clips' own settings, arming and new clips are locked (R8).
+        if !(id.starts_with("device.")
+            || id.starts_with("clip.")
+            || matches!(
+                id,
+                "mixer.set_arm"
+                    | "mixer.arm_exclusive"
+                    | "browser.add_to_arrangement"
+                    | "browser.insert"
+                    | "track.create"
+            ))
+        {
+            return None;
+        }
+        // R7: moving, copying, deleting, trimming and launching a frozen
+        // clip still work.
+        if matches!(
+            id,
+            "clip.move"
+                | "clip.move_by"
+                | "clip.move_to_slot"
+                | "clip.delete"
+                | "clip.set_length"
+                | "clip.trim_start"
+                | "clip.set_launch_mode"
+                | "clip.set_launch_quantization"
+                | "clip.set_legato"
+                | "clip.set_follow_actions"
+        ) {
+            return None;
+        }
+        let doc = self.editor.document();
+        if let Some(clip) = args
+            .get("clip")
+            .and_then(|value| serde_json::from_value::<bl_model::ClipId>(value.clone()).ok())
+        {
+            return doc
+                .clip_track(clip)
+                .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()));
+        }
+        if let Some(device) = args
+            .get("device")
+            .and_then(|value| serde_json::from_value::<bl_model::DeviceId>(value.clone()).ok())
+        {
+            return doc
+                .device_track(device)
+                .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()));
+        }
+        args.get("track")
+            .and_then(|value| serde_json::from_value::<TrackId>(value.clone()).ok())
+            .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()))
+    }
+
     /// [`Shell::can_invoke`] with `active` as the contexts that apply.
     #[must_use]
     pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
@@ -5351,6 +5412,9 @@ impl Shell {
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
+        }
+        if freeze_ids::handles(id) {
+            return self.can_freeze(id, args);
         }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
@@ -6528,9 +6592,19 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if let Some(track) = self.frozen_blocks(id, &args) {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: format!(
+                    "the track {} is frozen; unfreeze it to change its devices or clip settings",
+                    track.0
+                ),
+            });
+        }
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || audio_ids::handles(id)
+                || freeze_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6551,6 +6625,9 @@ impl Shell {
         }
         if audio_ids::handles(id) {
             return self.run_audio_editing(id, args);
+        }
+        if freeze_ids::handles(id) {
+            return self.run_freeze(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();

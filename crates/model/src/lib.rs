@@ -115,6 +115,7 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub mod freeze;
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
@@ -122,6 +123,7 @@ pub use follow::{
     FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
     FollowPatch,
 };
+pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };

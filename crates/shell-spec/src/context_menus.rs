@@ -242,7 +242,7 @@ const TRACK: &[Row] = &[
     ("C-TRACK-005", "Rename", Key(&["S-TRACK-004"])),
     ("C-TRACK-006", "Edit Info Text", Pending(None)),
     SEPARATOR,
-    ("C-TRACK-007", "Freeze Track", Pending(Some("S-TRACK-017"))),
+    ("C-TRACK-007", "Freeze Track", Key(&["S-TRACK-017"])),
     ("C-TRACK-008", "Bounce Track in Place", Pending(None)),
     SEPARATOR,
     ("C-TRACK-009", "Insert Audio Track", Key(&["S-TRACK-001"])),
@@ -353,7 +353,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
         }
-        "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
         "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {

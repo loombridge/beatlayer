@@ -237,11 +237,13 @@ fn fixture_project() -> Project {
             hash: kick_sample,
             path: MediaPath::new("Samples/Imported/Kick loop.wav").unwrap(),
             size: 1_058_444,
+            reversed_from: None,
         },
         MediaRef {
             hash: ContentHash([0x50; 32]),
             path: MediaPath::new("../Library/Pads/Warm pad.aif").unwrap(),
             size: u64::from(u32::MAX) + 1,
+            reversed_from: None,
         },
     ]
     .into_iter()

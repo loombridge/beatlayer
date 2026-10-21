@@ -2286,6 +2286,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The reversal's commands (WP-4.7): `clip.reverse` is the one a
+        // person and an agent run, from the Audio Utilities panel's Reverse
+        // button, and it applies `clip.reverse_file`.
+        ("clip.reverse", Exception(audio_panel)),
+        (
+            "clip.reverse_file",
+            Exception(Equivalent(
+                "clip.reverse, from the Audio Utilities panel's Reverse button (audio-clip-editing R7)",
+            )),
+        ),
+        // The clip's pitch (WP-4.7): the Audio Utilities panel's Transpose
+        // and Detune fields.
+        ("clip.set_pitch", Exception(audio_panel)),
         // The freeze's document-level commands (WP-4.14): `track.freeze` and
         // `track.unfreeze` are the ones a person and an agent run, from the
         // menus and Cmd-Option-Shift-F, and they apply these.

@@ -520,6 +520,7 @@ mod tests {
             glitch_every: None,
         };
         let backend = NullBackend::with_options(NullOptions {
+            dropout_after: None,
             pacing: Pacing::Free,
             frame_limit: Some(48_000),
             channels: 2,

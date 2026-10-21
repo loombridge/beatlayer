@@ -87,7 +87,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R5 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `a_mono_track_freezes_to_a_mono_file` | shell test |
 | R6 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output`; `bl-engine offline::tests::freezing_a_track_drops_its_devices_from_the_program` | shell test, engine test |
 | R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_still_mixes` (volume, pan, sends, the activator and solo) | shell test |
-| R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming` | shell test |
+| R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming`, `a_frozen_track_s_clips_arent_reversed` | shell test |
 | R9 | not yet tested | shell test |
 | R10 | `crates/shell/tests/freeze.rs`, `unfreezing_keeps_edits_made_while_frozen` | shell test |
 | R11 | not yet tested | shell test |

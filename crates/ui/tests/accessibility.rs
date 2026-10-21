@@ -1074,6 +1074,7 @@ fn four_channel_interface(h: &mut Harness) {
     use bl_shell::settings::Preferences;
 
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         channels: 4,
         ..NullOptions::default()
     });
@@ -1533,6 +1534,20 @@ fn a_multisampler(h: &mut Harness) {
 
 /// The keyboard in the Device View, as a click there leaves it.
 fn device_view(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
+/// The list of the set's plug-ins, open in the detail area, with the
+/// keyboard in it (IMP-29, WP-6.41).
+fn plugin_list(h: &mut Harness) {
+    h.shell
+        .run("view.toggle_plugin_list", json!({}))
+        .expect("the list opens");
     h.shell.set_focused_area(bl_shell::Area::Detail);
     h.ctx.memory_mut(|m| {
         if let Some(id) = m.focused() {
@@ -2286,6 +2301,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The reversal's commands (WP-4.7): `clip.reverse` is the one a
+        // person and an agent run, from the Audio Utilities panel's Reverse
+        // button, and it applies `clip.reverse_file`.
+        ("clip.reverse", Exception(audio_panel)),
+        (
+            "clip.reverse_file",
+            Exception(Equivalent(
+                "clip.reverse, from the Audio Utilities panel's Reverse button (audio-clip-editing R7)",
+            )),
+        ),
+        // The clip's pitch (WP-4.7): the Audio Utilities panel's Transpose
+        // and Detune fields.
+        ("clip.set_pitch", Exception(audio_panel)),
         // The freeze's document-level commands (WP-4.14): `track.freeze` and
         // `track.unfreeze` are the ones a person and an agent run, from the
         // menus and Cmd-Option-Shift-F, and they apply these.
@@ -2438,6 +2466,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
+        // Show Only Missing switch.
+        (
+            "view.set_plugin_list_only_missing",
+            main(nothing, plugin_list, "Show Only Missing", Key::Enter),
+        ),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -2456,6 +2490,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(an_expandable_device, device_view, "Expand", Key::Enter),
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
+        ("device.set_role", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
         ("track.set_devices_enabled", Exception(track_menu)),
@@ -2682,6 +2717,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Exclude Macro from Randomization on a macro's context menu",
             )),
+        ),
+        (
+            "rack.set_macro_style",
+            Exception(Equivalent("Macro Style on a macro's context menu")),
         ),
         (
             "rack.set_mapped_value",
@@ -3296,9 +3335,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.rescan",
             settings("plug-ins", nothing, "Rescan Plug-Ins", Key::Enter),
         ),
+        ("plugin.list", Exception(Query)),
         (
-            "plugin.list",
-            Exception(LaterView("the set's plug-ins view (Phase 6, IMP-29)")),
+            "plugin.export_list",
+            Exception(Equivalent(
+                "the Export… button in the list of the set's plug-ins, which asks where to \
+                 save the list",
+            )),
         ),
         (
             "plugin.settings",
@@ -3536,6 +3579,32 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        ("export.realtime.status", Exception(Query)),
+        (
+            "export.realtime.restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Restart, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.skip",
+            Exception(Equivalent(
+                "the real-time render's dialog's Skip, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.cancel",
+            Exception(Equivalent(
+                "the real-time render's dialog's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.auto_restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Auto-Restart on Drop-Outs switch, which Tab \
+                 reaches",
+            )),
         ),
         // Slice to New MIDI Track's dialog (WP-4.16).
         (

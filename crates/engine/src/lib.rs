@@ -110,6 +110,7 @@ mod processor;
 mod program;
 pub mod recording;
 mod registry;
+pub mod render;
 pub mod routing;
 mod sched;
 pub mod session;
@@ -160,6 +161,7 @@ pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
+pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
@@ -259,6 +261,7 @@ impl EngineConfig {
             sample_rate: self.sample_rate,
             max_frames: self.max_frames,
             channels: self.channels,
+            round_trip_latency: self.round_trip_latency,
         }
     }
 }

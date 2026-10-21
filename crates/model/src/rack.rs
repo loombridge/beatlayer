@@ -60,6 +60,39 @@ pub fn default_macro_name(number: u8) -> String {
     format!("Macro {number}")
 }
 
+/// How many steps a stepped macro takes at least (macros spec, R22).
+pub const MACRO_STEPS_MIN: u8 = 2;
+
+/// How many steps a stepped macro takes at most (macros spec, R22).
+pub const MACRO_STEPS_MAX: u8 = 16;
+
+/// How many steps a stepped macro takes when it has none of its own (macros
+/// spec, R22).
+pub const MACRO_STEPS_DEFAULT: u8 = 8;
+
+/// The position of the step of `steps` nearest `value` (macros spec, R22):
+/// `k / (steps − 1)`, `k` from 0 to `steps − 1`.
+#[must_use]
+pub fn macro_step_position(steps: u8, value: f64) -> f64 {
+    let steps = f64::from(steps.clamp(MACRO_STEPS_MIN, MACRO_STEPS_MAX));
+    let k = (value.clamp(0.0, 1.0) * (steps - 1.0)).round();
+    k / (steps - 1.0)
+}
+
+/// How a macro is drawn and which positions it takes (macros spec, R21 to
+/// R23). Every macro starts as a knob, Live's continuous control.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroStyle {
+    /// Live's continuous knob.
+    #[default]
+    Knob,
+    /// A knob that takes a number of steps.
+    Stepped,
+    /// A stepped macro drawn as its steps' buttons.
+    RadioButtons,
+}
+
 /// What every kind of rack describes of its parameters (device framework
 /// R3): the chain selector, Chain Selector Filters MIDI Ctrl, and the 16
 /// macros (macros spec, R1).
@@ -90,9 +123,10 @@ pub fn description() -> &'static DeviceDescription {
     &DESCRIPTION
 }
 
-/// One macro's saved settings beside its value (macros spec, R10, R14, R16
-/// and R30). A macro's value is a parameter of its rack, in `Device::params`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// One macro's saved settings beside its value (macros spec, R10, R14, R16,
+/// R21 and R30). A macro's value is a parameter of its rack, in
+/// `Device::params`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Macro {
     /// The name Rename gave it; empty for its default name (R10).
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -109,6 +143,66 @@ pub struct Macro {
     /// Whether a variation launch leaves it alone (R30).
     #[serde(default, skip_serializing_if = "is_off")]
     pub variation_excluded: bool,
+    /// How it is drawn and which positions it takes (R21).
+    #[serde(default, skip_serializing_if = "is_knob_style")]
+    pub style: MacroStyle,
+    /// How many steps a stepped macro takes, from 2 to 16 (R22).
+    #[serde(
+        default = "default_macro_steps",
+        skip_serializing_if = "is_default_steps"
+    )]
+    pub steps: u8,
+}
+
+impl Default for Macro {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            colour: None,
+            info: String::new(),
+            randomize_excluded: false,
+            variation_excluded: false,
+            style: MacroStyle::Knob,
+            steps: MACRO_STEPS_DEFAULT,
+        }
+    }
+}
+
+impl Macro {
+    /// Whether the macro takes steps rather than a continuous value (macros
+    /// spec, R22).
+    #[must_use]
+    pub fn is_stepped(&self) -> bool {
+        matches!(self.style, MacroStyle::Stepped | MacroStyle::RadioButtons)
+    }
+
+    /// The position the macro takes for `value`: the nearest step when it is
+    /// stepped, and `value` itself when it is a knob (macros spec, R22).
+    #[must_use]
+    pub fn position_of(&self, value: f64) -> f64 {
+        if self.is_stepped() {
+            macro_step_position(self.steps, value)
+        } else {
+            value
+        }
+    }
+}
+
+/// The steps a macro takes when it has none of its own (macros spec, R22).
+fn default_macro_steps() -> u8 {
+    MACRO_STEPS_DEFAULT
+}
+
+/// Whether the style is the default one, so it isn't saved (macros spec,
+/// R21).
+fn is_knob_style(style: &MacroStyle) -> bool {
+    *style == MacroStyle::Knob
+}
+
+/// Whether the number of steps is the default one, so it isn't saved
+/// (macros spec, R22).
+fn is_default_steps(steps: &u8) -> bool {
+    *steps == MACRO_STEPS_DEFAULT
 }
 
 /// A parameter a macro drives: a device's parameter inside the rack, or a
@@ -204,6 +298,8 @@ impl RackMacros {
             info: String::new(),
             randomize_excluded: false,
             variation_excluded: false,
+            style: MacroStyle::Knob,
+            steps: MACRO_STEPS_DEFAULT,
         };
         self.settings
             .get(usize::from(number.saturating_sub(1)))
@@ -1500,6 +1596,11 @@ fn check_macros(rack: &Device) -> Result<(), ModelError> {
         if let Some(colour) = macro_settings.colour {
             crate::command::check_value("macro colour", f64::from(colour), colour < CHAIN_COLOURS)?;
         }
+        crate::command::check_value(
+            "macro steps",
+            f64::from(macro_settings.steps),
+            (MACRO_STEPS_MIN..=MACRO_STEPS_MAX).contains(&macro_settings.steps),
+        )?;
     }
     for variation in &macros.variations {
         if variation.values.len() != usize::from(MACROS) {
@@ -1588,6 +1689,38 @@ fn check_zones(kind: RackKind, chain: &Chain) -> Result<(), ModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Spec: macros R22
+    #[test]
+    fn a_stepped_macro_takes_only_its_steps() {
+        // Eight steps: the positions are k / 7.
+        assert_eq!(macro_step_position(8, 0.0), 0.0);
+        assert_eq!(macro_step_position(8, 1.0), 1.0);
+        assert!((macro_step_position(8, 0.2) - 1.0 / 7.0).abs() < 1e-12);
+        assert!((macro_step_position(8, 0.3) - 2.0 / 7.0).abs() < 1e-12);
+        assert!((macro_step_position(8, 0.36) - 3.0 / 7.0).abs() < 1e-12);
+        // Four steps: k / 3.
+        assert!((macro_step_position(4, 0.4) - 1.0 / 3.0).abs() < 1e-12);
+        assert!((macro_step_position(4, 0.5) - 2.0 / 3.0).abs() < 1e-12);
+        // A knob takes any value; a stepped macro takes its steps.
+        let knob = Macro::default();
+        assert_eq!(knob.style, MacroStyle::Knob);
+        assert_eq!(knob.steps, MACRO_STEPS_DEFAULT);
+        assert!((knob.position_of(0.37) - 0.37).abs() < 1e-12);
+        let stepped = Macro {
+            style: MacroStyle::Stepped,
+            steps: 4,
+            ..Macro::default()
+        };
+        assert!(stepped.is_stepped());
+        assert!((stepped.position_of(0.4) - 1.0 / 3.0).abs() < 1e-12);
+        // Radio buttons are a stepped macro drawn as buttons.
+        let buttons = Macro {
+            style: MacroStyle::RadioButtons,
+            ..Macro::default()
+        };
+        assert!(buttons.is_stepped());
+    }
 
     /// The macros' values with only the first one set, as a variation holds.
     fn values(one: f64) -> Vec<f64> {

@@ -4,8 +4,8 @@
 
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceId, DeviceKind, DeviceRole, EditError, Editor,
-    MacroMapping, MacroTarget, MixerParam, ParamDescriptor, ParamId, ParamUnit, RackKind, TrackId,
-    TrackKind, macro_param,
+    MacroMapping, MacroStyle, MacroTarget, MixerParam, ParamDescriptor, ParamId, ParamUnit,
+    RackKind, TrackId, TrackKind, macro_param,
 };
 
 struct Song {
@@ -379,6 +379,15 @@ fn macros_and_mappings_save_with_the_set_and_load_back() {
             max: 0.25,
         })
         .unwrap();
+    // Spec: macros R17, R21. The style saves with the set too.
+    song.editor
+        .apply(Command::SetMacroStyle {
+            rack: rack_id,
+            macro_number: 3,
+            style: MacroStyle::RadioButtons,
+            steps: Some(4),
+        })
+        .unwrap();
     let saved = song.editor.document().device(rack_id).unwrap().clone();
     let json = serde_json::to_value(&saved).unwrap();
     let back: Device = serde_json::from_value(json).unwrap();
@@ -389,6 +398,8 @@ fn macros_and_mappings_save_with_the_set_and_load_back() {
         (back.macros.mappings[0].min, back.macros.mappings[0].max),
         (0.75, 0.25)
     );
+    assert_eq!(back.macros.setting(3).style, MacroStyle::RadioButtons);
+    assert_eq!(back.macros.setting(3).steps, 4);
 }
 
 // Spec: macros R17

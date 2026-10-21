@@ -374,6 +374,7 @@ fn fixture() -> Project {
         port: Some("Synth".to_owned()),
         channel: 5,
         audio_from: Channel::Mono(3),
+        audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
     });
     device.sidechain = Some(Sidechain {
@@ -535,6 +536,8 @@ fn fixture() -> Project {
             ram: true,
             high_quality: false,
             tempo_leader: true,
+            transpose: 7,
+            detune: -12.5,
             transient_edits: TransientEdits {
                 added: vec![0.5],
                 removed: vec![1.25],

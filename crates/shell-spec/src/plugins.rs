@@ -46,6 +46,9 @@ pub const SCAN: &str = "plugin.scan";
 pub const RESCAN: &str = "plugin.rescan";
 /// `plugin.list`: every plug-in the set uses, and where (WP-2.9, IMP-29).
 pub const LIST: &str = "plugin.list";
+/// `plugin.export_list`: write the set's plug-in list to a text file (IMP-29,
+/// WP-6.41).
+pub const EXPORT_LIST: &str = "plugin.export_list";
 /// `plugin.settings`: hidden plug-ins and the format preference (WP-2.9,
 /// IMP-07).
 pub const SETTINGS: &str = "plugin.settings";
@@ -66,6 +69,7 @@ pub const IDS: &[&str] = &[
     SCAN,
     RESCAN,
     LIST,
+    EXPORT_LIST,
     SETTINGS,
 ];
 
@@ -389,6 +393,10 @@ pub struct SetPlugin {
     pub devices: Vec<DeviceId>,
     /// The tracks those devices are on.
     pub tracks: Vec<TrackId>,
+    /// The preset names its devices hold, each once, in the order the
+    /// devices come (the plug-in list spec, R5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preset_names: Vec<String>,
     /// Whether this machine has it: the scanner hasn't seen it, or the
     /// scanner blocklisted its file.
     pub missing: bool,
@@ -402,6 +410,34 @@ pub struct SetPlugin {
 pub struct SetPluginList {
     /// Every plug-in the set uses.
     pub plugins: Vec<SetPlugin>,
+}
+
+/// Arguments of `plugin.export_list`: where to write the list.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportListArgs {
+    /// The file to write the list to. Left out, the app asks where to
+    /// save it, as the list's Export… button does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// What `plugin.export_list` returns: the file it wrote.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ExportedList {
+    /// The file the list was written to.
+    pub path: String,
+}
+
+/// What the list of a set's plug-ins shows: whether it shows, and whether
+/// Show Only Missing is on (the plug-in list spec, R10).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginListState {
+    /// Whether the list shows in the detail area's place.
+    pub visible: bool,
+    /// Whether Show Only Missing is on, so that only the plug-ins this
+    /// computer doesn't have show.
+    pub only_missing: bool,
 }
 
 /// Arguments of `plugin.settings`: the fields to change; none to read them.
@@ -648,14 +684,29 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Lists every plug-in the set uses, grouped by plug-in: its format, its \
                  identifier, name, the file the set says it came from, its vendor and version \
-                 when the scanner knows them, the devices and tracks that use it, and whether \
-                 this machine has it (missing when the scanner hasn't seen it, or says why it \
-                 is blocklisted). Changes nothing.",
+                 when the scanner knows them, the devices and tracks that use it, the preset \
+                 names its devices hold, and whether this machine has it (missing when the \
+                 scanner hasn't seen it, or says why it is blocklisted). Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)
             .args::<ListArgs>()
             .result::<SetPluginList>(),
+    )?;
+    registry.register(
+        CommandSpec::new(EXPORT_LIST, "Export the Set's Plug-In List")
+            .description(
+                "Writes the set's plug-in list to a text file, as the list's Export… button \
+                 does: the set's name and the date, a header line, and one line per plug-in \
+                 with its name, format, vendor, version, preset names, tracks, and `Missing` \
+                 where this computer doesn't have it, separated by tabs. `path` is the file to \
+                 write it to; left out, the app asks where to save it. The file is written \
+                 outside the set, so an agent asks first. Returns the file written.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<ExportListArgs>()
+            .result::<ExportedList>(),
     )?;
     registry.register(
         CommandSpec::new(SETTINGS, "Plug-In Settings")

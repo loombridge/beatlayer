@@ -3346,6 +3346,9 @@ impl Document {
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 loaded.set_name(name);
+                // The preset the device holds is the one its name names (the
+                // plug-in list spec, R5).
+                loaded.preset_name = (!name.is_empty()).then(|| name.clone());
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
                     *self.device_mut(*device)? = loaded;
@@ -6133,6 +6136,21 @@ impl Document {
     ) -> Result<(), ModelError> {
         if self.device_ref(id)?.plugin != state {
             self.device_mut(id)?.plugin = state;
+        }
+        Ok(())
+    }
+
+    /// Sets the name of the preset a device holds (the plug-in list spec,
+    /// R5), outside the command system:
+    /// [`Editor::amend_device_preset_name`](crate::Editor::amend_device_preset_name)
+    /// calls it.
+    pub(crate) fn set_device_preset_name(
+        &mut self,
+        id: DeviceId,
+        name: Option<String>,
+    ) -> Result<(), ModelError> {
+        if self.device_ref(id)?.preset_name != name {
+            self.device_mut(id)?.preset_name = name;
         }
         Ok(())
     }

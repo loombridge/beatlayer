@@ -105,6 +105,13 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
+    /// The name of the preset the device holds (the plug-in list spec, R5):
+    /// the Beatlayer device preset last loaded into it or saved from it, or
+    /// else the program name the plug-in's format reported. Left out of the
+    /// saved set while there is none, so a device saved before this package
+    /// loads with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_name: Option<String>,
     /// The plug-in parameters the device's panel holds, in order (clap-hosting
     /// R5, configure mode): the list Configure Mode edits, saved with the set.
     /// Left out until it's set: until then all of a plug-in's parameters are
@@ -416,6 +423,7 @@ impl Device {
             midi_sidechain: None,
             floating: false,
             plugin: None,
+            preset_name: None,
             configured: None,
             media: Vec::new(),
             sample_edits: Vec::new(),
@@ -699,6 +707,20 @@ pub enum PluginFormat {
     AudioUnit,
     /// LV2 (Linux).
     Lv2,
+}
+
+impl PluginFormat {
+    /// The short name a plug-in's badge shows for the format (L-BRW-016):
+    /// `CLAP`, `VST3`, `AU`, `LV2`.
+    #[must_use]
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Self::Clap => "CLAP",
+            Self::Vst3 => "VST3",
+            Self::AudioUnit => "AU",
+            Self::Lv2 => "LV2",
+        }
+    }
 }
 
 /// Serialises an optional set of parameter values as `param_pairs` does.

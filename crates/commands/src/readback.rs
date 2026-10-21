@@ -400,6 +400,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("pad.swap", query(Device, "chains")),
     ("plugin.configure", read("device_view.state", "devices")),
     ("plugin.configure_param", read("device.parameters", "params")),
+    ("plugin.export_list", nothing(FILE)),
     ("plugin.load", query(Track, "devices")),
     ("plugin.load_au", query(Track, "devices")),
     ("plugin.move_configured_param", read("device.parameters", "params")),

@@ -84,6 +84,7 @@ pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
 pub mod settings;
+pub mod slice;
 pub mod stems;
 pub mod tracks;
 pub mod transport;
@@ -124,5 +125,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     freeze::register(registry)?;
+    slice::register(registry)?;
     warping::register(registry)
 }

@@ -1,7 +1,7 @@
 # Freeze and bounce: Freeze Track, Bounce Track in Place, Bounce to New Track, Bounce Group, and Paste Bounced Audio
 
 - **Status:** partial (freezing and unfreezing, WP-4.14; the bounces, WP-4.15, aren't built)
-- **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing)
+- **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing); WP-6.21 (take lanes in freezes and bounces, R30)
 - **Parity-matrix row:** Audio clips and warping: Freeze Track; Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -27,6 +27,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | S8 | Spec | [offline plug-in renders](offline-plugin-renders.md) R1 to R11; [export](export.md) R3, R10, R14 | A render borrows the engine's CLAP, VST3 and Audio Unit plug-ins and stops the transport while it does; renders are the same at any block size; a cancelled render leaves nothing. |
 | S9 | Spec | [routing](routing.md) R12 and R15; [mixer](mixer.md) R4 | Post FX is a track's signal after its devices and before its mixer; a track at rest passes its signal through to the bit. |
 | S10 | Spec | [audio clip editing](audio-clip-editing.md) R1 to R6 and R24; [arrangement editing](arrangement-editing.md) R6, R8, R11; [agent permissions](agent-permissions.md) R1 | Processed files' folders, format, names, media table, and Temporary Folder; consolidating on a frozen track; a clip placed over another replaces what it covers; Split; Paste's placing; a call that places clips over others is destructive. |
+| S11 | Release notes and spec | Live 12 release notes, 12.2.5 and 12.3, read 20 October 2026; [comping](comping.md) R1, R2, R14 | Bounce to New Track is unavailable for a time selection holding only take-lane clips, and skips a track whose selection holds only take-lane clips or deactivated clips, making no empty track; Paste Bounced Audio pastes onto a take lane. A track plays its main lane, and a take lane only while it's auditioned |
 
 ## Rules
 
@@ -71,6 +72,10 @@ This spec covers what each command renders, what it does to the tracks and clips
 - **R28.** The items sit at their menus.md rows in Live's order, with their keys: Freeze Track and Bounce Track in Place enabled with a track that can be frozen or bounced selected, Bounce to New Track with clips or time selected, and Paste Bounced Audio once a source is copied; S-TRACK-017, S-BOUNCE-001, and S-BOUNCE-002 are bound in their contexts. Frozen clips are drawn as frozen, in Beatlayer's own colours, and tail regions crosshatched. (S1, S6)
 - **R29.** An agent reaches every freeze and bounce through its command, with the tracks, clips, and ranges spelled out or the selection, and the call returns when the edit has landed, with the new tracks' and clips' IDs. (D17)
 
+**Take lanes (WP-6.21)**
+
+- **R30.** A freeze and every bounce render a track's main lane: its take lanes' clips aren't in them, auditioned or not. On a frozen track a take lane can't be auditioned and nothing is copied from a take lane to the main lane, both refused with the frozen-track message as R8 refuses new clips, while take lanes can still be inserted, renamed, moved and deleted and their clips edited, since they play no part in the freeze (Beatlayer's own). Bounce to New Track skips a source track whose selected material is all on take lanes or deactivated, making no track for it, and is disabled when the whole selection is; Bounce Track in Place gives the new track no take lanes (Beatlayer's own). Paste Bounced Audio onto a take lane places the audio on that lane (R25). (S1, S3, S11)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -92,6 +97,16 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R15 | `crates/shell/tests/freeze.rs`, `a_frozen_return_renders_what_is_sent_to_it` (the render's content; playing it in time isn't tested) | shell test |
 | R16 | not yet tested | shell test |
 | R17 | not yet tested | shell test |
+| R18 | `crates/shell/tests/bounce.rs`, `a_bounce_is_taken_where_a_freeze_is_and_keeps_its_tails` | shell test |
+| R19 | `crates/cli/tests/bounce_goldens.rs`, `a_bounced_track_nulls_against_its_source` (Bounce in Place, to New Track, and Paste Bounced Audio) | golden render |
+| R20 | `crates/shell/tests/bounce.rs`, `a_mono_source_bounces_to_mono_and_the_channels_argument_overrides_it` | shell test |
+| R21 | `crates/shell/tests/bounce.rs`, `bounce_in_place_replaces_the_track_keeping_its_mixer_in_both_views` | shell test |
+| R22 | `crates/shell/tests/bounce.rs`, `bounce_to_new_track_makes_a_track_per_source_and_switches_the_source_off` | shell test |
+| R23 | `crates/cli/tests/bounce_goldens.rs`, `a_group_bounce_holds_its_returns_and_not_mains_devices` | golden render |
+| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off` | shell test |
+| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track` | shell test |
+| R26 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/agent/tests/permissions.rs`, `bounce_in_place_asks_first_and_paste_bounced_audio_over_clips_asks`; `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it` | unit, agent test |
 | R27 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |
 | R28 | `xtask/src/keymap.rs` (S-TRACK-017 bound) | shell test |
 | R29 | not yet tested | shell test |
+| R30 | to be written in WP-6.21 | shell test |

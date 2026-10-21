@@ -1,0 +1,99 @@
+# The second window: two main views at once, the detail views between windows, and clips between the Session and the Arrangement
+
+- **Status:** draft
+- **Work packages:** WP-6.29 (the second window: R1 to R17), WP-6.29b (clips between the Session and the Arrangement, by dragging in one window or between two, and by Copy and Paste: R18 to R23). Each window's own interface zoom is [interface-zoom.md](interface-zoom.md) R11 to R15; the detail area inside a window is [detail-views.md](detail-views.md)'s
+- **Parity-matrix row:** Views and workflow: Second window; Interface zoom, per window
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.1; the UI parity reference's rows L-WIN2-001 to L-WIN2-003, L-WIN-002, L-CTRL-001, L-CTRL-027, L-ARR-018, M-VIEW-002, M-FILE-004, S-VIEW-002, S-VIEW-003, S-VIEW-004, I-DROP-014, I-DROP-015 and I-FOCUS-010, recorded from Live 12.4.3 on macOS
+
+## The behaviour
+
+View ▸ Second Window (Cmd+Shift+W) opens a second window that shows the main view the first one doesn't: with the Session View in the main window, the second shows the Arrangement, and Tab swaps them between the windows. Each window has its own Control Bar, main view, detail area and Status Bar, and the second starts without the browser. On two screens a person can perform in the Session View on one and arrange on the other, or keep one window for detailed editing. Both windows show one set: a selection, a fader move or a launch in one shows in the other at once.
+
+The Clip View and the Device View open in the window that has the focus, and F12 moves them to the other window; the Clip View always shows the clip selected last, in whichever window it was selected. Each window's interface zoom is its own.
+
+With two windows open, clips drag straight from the Session View in one window to the Arrangement in the other, and back; in one window they drag over the view selector, which switches views so they drop in the other view. Copy and Paste carry them between the views too.
+
+This spec covers the second window, what it shows, the keyboard focus between the windows, what the set keeps of them, and clips moving between the two views. The detail area's own rules are [detail-views.md](detail-views.md)'s; the zoom's are [interface-zoom.md](interface-zoom.md)'s.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 3 "Live Concepts", section 3.6 "Arrangement and Session" | In one window, Tab or the view controls switch between the Session View and the Arrangement; with two windows, Tab swaps them between the windows. With Use Tab Key to Navigate on, Option+1 and Option+2 (Alt+1, Alt+2) and the Navigate menu show the views. Switching views changes only what's shown, never what plays |
+| S2 | Manual | Same manual, chapter 7 "Session View", section 7.5 "Recording Sessions into the Arrangement" | Clips move between the Session and the Arrangement by Copy and Paste, by dragging them onto the Session or Arrangement selector, or, with the Second Window option (View menu, Cmd+Shift+W, Ctrl+Shift+W), by dragging them between the windows. Arrangement material pasted into the Session View keeps its order from top to bottom as it ran in time, over consecutive scenes, so playing the scenes in turn plays the arrangement back |
+| S3 | Manual | Same manual, chapter 8 "Clip View", its introduction | The Clip View opens in the window that has the focus; F12 moves it to the other window, and so does Shift+Tab while Use Tab Key to Navigate is off. It always shows the clip selected last, even when the clip was selected in the other window, so one window can be kept for detailed editing |
+| S4 | Manual | Same manual, chapter 2 "First Steps", section 2.3.1 "Display & Input" | The Zoom setting is for the main window, the second window when it's open, and the Settings window |
+| S5 | Release notes | Live 12 release notes, 12.0 ("UI View Styling", "Interface") and 12.1 | 12.0: with a second window, each window's zoom is set on its own in Display & Input; dragging a clip onto a view selector in the second window switches its view at once. 12.1: fixes for the Clip View's height, the Arrangement's mixer and the note editor's E keys in the second window, which holds a Clip View, a mixer and the editors' keys like the main window |
+| S6 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [layout.md](../ui-parity/layout.md) L-WIN2-001 to L-WIN2-003, L-WIN-002, L-CTRL-001, L-CTRL-027 and L-ARR-018, [menus.md](../ui-parity/menus.md) M-VIEW-002 and M-FILE-004, [shortcuts.toml](../ui-parity/shortcuts.toml) S-VIEW-002 to S-VIEW-004, and [interactions.md](../ui-parity/interactions.md) I-DROP-014, I-DROP-015 and I-FOCUS-010 | The second window opens at 990 × 703 points and shows the main view the first window isn't showing. It has its own Control Bar with the same controls, cut off at the window's width, the main view, a detail area with the Clip or Device View, and its own Status Bar; no browser by default. The Clip or Device View opens in the focused window and F12 (or Shift+Tab) moves it to the other. Clips dragged onto a view selector switch views so they can be dropped in the other view; with two windows, clips dragged to the other window go between the Session and the Arrangement. The mixer's switch is one per view. File ▸ Close Window (Cmd+W) closes a secondary window |
+| S7 | Beatlayer | [The architecture](../02-architecture.md), "UI", "Agent control" and "View captures", D16, D17, D20, D22 and D24; [app-shell.md](app-shell.md) R11, R14, R16 and R23; [detail-views.md](detail-views.md); [interface-zoom.md](interface-zoom.md); [info-view.md](info-view.md) R8; [undo-history.md](undo-history.md) R1; [accessibility.md](accessibility.md) R1 to R3 and R7; [arrangement-editing.md](arrangement-editing.md) R6; [session-view.md](session-view.md) R18 | The UI holds no song state; Beatlayer draws its own windows from its own event loop; a new set opens in the Arrangement View and a saved default set keeps its choice; Beatlayer's compact title bar on macOS; the assistant's pane; the keymap's contexts by focused area; Close Window; `view.state`; how material placed over a clip replaces it; how slots take dropped clips |
+
+## Rules
+
+**Opening and closing (WP-6.29)**
+
+- **R1.** View ▸ Second Window (M-VIEW-002), Cmd+Shift+W (Ctrl+Shift+W; S-VIEW-002), `view.toggle_second_window`, opens the second window, and run again closes it; the menu item is ticked while it's open (Beatlayer's own). Its close button and File ▸ Close Window (Cmd+W, with the second window in front; [app-shell.md](app-shell.md) R16) close it too. It opens at 990 × 703 points the first time (L-WIN2-001) and afterwards where it was and at the size it had when it was last closed, kept in the preferences file and brought inside a screen if the screens have changed (Beatlayer's own). (S2, S6)
+- **R2.** The second window holds, top to bottom: its title bar, Beatlayer's compact one on macOS with the set's name as the main window's ([app-shell.md](app-shell.md) R14); its own Control Bar, with every control of the main window's Control Bar at the same places, those past its right edge cut off rather than moved (L-WIN2-002), save the assistant's toggle, which stays the main window's alone (D24; Beatlayer's own); its main view; its detail area (R7); and its own Status Bar. It starts with its browser hidden (L-WIN2-002, R5). (S6, S7)
+- **R3.** Both windows show one set. The selection, the transport, the mixer, the undo history and every setting are the same in both; a change made in one window, or by an agent, shows in both on the next frame. (S1, S3)
+
+**The main views**
+
+- **R4.** The two windows always show different main views: the second window opens on the one the main window doesn't show (L-WIN2-001). Tab (S-VIEW-003, while Tab doesn't move the focus), `view.toggle_session_arrangement`, and a click in either window's view selector on the view the window doesn't show (L-CTRL-027) swap them: the window that showed the Session View shows the Arrangement and the other the Session View. A click on the view a window already shows changes nothing (Beatlayer's reading of L-WIN2-001 and manual 3.6). (S1, S6)
+- **R5.** Each window has its own browser switch, its Control Bar's browser toggle (L-CTRL-001), and View ▸ Browser and its key (M-VIEW-021, S-VIEW-010) with that window in front. The browser is one, its search, place and selection the same in whichever window shows it, or in both (Beatlayer's own). (S6)
+- **R6.** The mixer's switches and sections belong to each view, not each window (L-ARR-018): a window shows the mixer of the view it shows as that view's switch says, and swapping the views (R4) takes each view's mixer with it. (S6)
+
+**The detail views across the windows**
+
+- **R7.** The Clip View and the Device View each show in at most one window at a time, and each window's detail area holds the ones it shows, as [detail-views.md](detail-views.md) R7 to R12 lay them out. A view shown by its toggle, its selector, its key, its menu item or a double-click ([detail-views.md](detail-views.md) R1 to R4, R14) shows in the window with the focus, leaving the other window if it showed there (manual 8, I-FOCUS-010). The Clip View shows the clip selected last and the Device View the selected track, whichever window the selection was made in. The Clip View keeps its height, and whether it's expanded, when it moves (Beatlayer's own). (S3, S6)
+- **R8.** With the second window open, F12, Shift+Tab (while Use Tab Key to Move Focus is off), View ▸ Toggle Clip/Device View and `view.switch_detail_view` move the views the focused window's detail area shows into the other window's detail area, where they show as they did; when the focused window shows neither view, they move the views the other window shows into it (Beatlayer's own for the second case and for both views at once). This takes the place of [detail-views.md](detail-views.md) R5 while two windows are open. (S3, S6)
+- **R9.** Closing the second window moves the detail views it showed into the main window's detail area, showing as they did; the main window keeps its main view (Beatlayer's own). (S7)
+
+**The focus and the keys**
+
+- **R10.** Each window has its own areas and its own keyboard focus within them ([app-shell.md](app-shell.md) R11, [accessibility.md](accessibility.md) R3). A key goes to the window in front and runs what the keymap binds for that window's focused area. The window with the focus is the one in front, or, while a secondary window such as the Settings window or a floating device's is in front, the one of the two that was in front last; it's the window that commands acting on one window act on (R7, R8, [interface-zoom.md](interface-zoom.md) R13). A click in a window gives it the focus. (S3, S6, S7)
+- **R11.** Navigate ▸ Session View (Option+1) and Arrangement View (Option+2) give the focus to the view in whichever window shows it, bringing that window to the front; Navigate ▸ Clip View (Option+3) and Device View (Option+4) do the same for the window that shows that detail view, and, when neither window shows it, show it in the window with the focus ([detail-views.md](detail-views.md) R14). The other Navigate items act in the window with the focus (Beatlayer's own). (S1, S7)
+- **R12.** The Info View ([info-view.md](info-view.md) R8), the Undo History ([undo-history.md](undo-history.md) R1) and the assistant's pane (D24) belong to the main window: their keys and menu items show them there whichever window has the focus, without bringing it to the front (Beatlayer's own). (S6, S7)
+- **R13.** View ▸ Full Screen (S-VIEW-001) puts the window with the focus into full screen and back; each window's full-screen mode is its own (Beatlayer's own). (S7)
+
+**What the set keeps, and what an agent reads**
+
+- **R14.** The set saves, beside its document, which main view the main window shows and whether the second window is open, and a set opens with them as they were saved; switching either isn't an undo step and doesn't mark the set as changed, and the next save keeps it. A set saved before this opens in the Arrangement View with the second window closed. The factory default set opens in the Arrangement View with one window, and a saved default set opens as it was saved (D20). The second window's place, size and zoom are preferences, not part of the set (R1, [interface-zoom.md](interface-zoom.md) R11). (S7)
+- **R15.** `view.toggle_second_window` is a registered `read`-class command (it moves the view) with a schema and a description, returning the windows' state. `view.state` reports `second_window`: whether it's open, the main view it shows, whether its browser shows, its zoom, its frame, and its detail area as [detail-views.md](detail-views.md) R17 reports the main window's; and `focused_window`, `main` or `second` ([app-shell.md](app-shell.md) R23). The commands that act on one window (the view, browser, detail-view and zoom commands) take an optional `window`, `main` or `second`, and act on the window with the focus without it. The agent API's view captures take a view from whichever window shows it. (S7)
+- **R16.** Each window is a root of its own in the accessibility tree, the main window's named for the set and the second window's "<set name>, Second Window" (Beatlayer's own wording), each with its areas as [accessibility.md](accessibility.md) R1 names them; the tree's focus is the focused control of the window in front. With Outline View in Focus on, only that window outlines its focused area ([accessibility.md](accessibility.md) R7). (S7)
+- **R17.** The second window scales by its own zoom ([interface-zoom.md](interface-zoom.md) R11 to R15); everything else in it follows the same layout rules as the main window's at the same size, the Control Bar measured from the window's left edge (L-WIN2-002). (S4, S5, S6)
+
+**Clips between the Session and the Arrangement (WP-6.29b)**
+
+- **R18.** In one window, clips dragged from the main view onto the Control Bar's view selector (I-DROP-014) switch the window to the other view while the drag goes on, at once, so the clips drop there; in the second window the same happens in it (release notes 12.0). Esc, or letting go outside a place that takes clips, ends the drag with nothing changed and leaves the view switched. (S2, S5, S6)
+- **R19.** With two windows open, clips dragged from one window's main view into the other window's (I-DROP-015) drop there without switching either window's view. (S2, S6)
+- **R20.** Session clips dropped in the Arrangement are copied there, the clips in their slots staying as they were (Beatlayer's own): the clip under the pointer's first starts at the drop position, snapped to the grid as an Arrangement drag snaps (I-DRAG-021), on the track under the pointer, and clips from other tracks land on the tracks as far down from it as they were across the grid from it; clips of one track from several scenes land one after another in scene order, each as long as its loop or region. Each keeps its contents, loop, warp settings and envelopes. Whatever lies under them is replaced as [arrangement-editing.md](arrangement-editing.md) R6 says. A clip that would land on a track of the wrong kind (an audio clip on a MIDI track) isn't placed, and the Status Bar says how many weren't. (S2, S7)
+- **R21.** Arrangement clips dropped on a Session slot are copied into slots, the Arrangement staying as it was (Beatlayer's own): the clips of one track go down the scenes from the slot under the pointer in the order they play, one clip a slot, and the clips of several tracks go across the tracks from it, so playing the scenes in turn plays them back in order (manual 7.5); scenes are added at the end of the list when they run past the last. A clip landing on an occupied slot replaces the slot's clip, and a slot on a track of the wrong kind, a return or Main, takes nothing. (S2, S7)
+- **R22.** Copy (Cmd+C) of Session clips and Paste (Cmd+V) in the Arrangement place them as R20 says, at the insert marker on the selected track; Copy of Arrangement clips and Paste in the Session View place them as R21 says, from the selected slot. (S2)
+- **R23.** Each drop and each paste is one undo step, `Copy Clips to Arrangement` or `Copy Clips to Session` (Beatlayer's own names), through `session.copy_to_arrangement` (the clips, the first track and the position) and `session.copy_to_session` (the clips, the first track and the first scene), registered `edit`-class commands that are `destructive` when they would replace or shorten other clips, so an agent's asks first (the architecture's permission classes); their effect reads back through the query tool's `track` objects, the Arrangement clips and the slots. A drag is a gesture: an agent's calls wait until it ends. (S7)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.29 | |
+| R2 | to be written in WP-6.29 | |
+| R3 | to be written in WP-6.29 | |
+| R4 | to be written in WP-6.29 | |
+| R5 | to be written in WP-6.29 | |
+| R6 | to be written in WP-6.29 | |
+| R7 | to be written in WP-6.29 | |
+| R8 | to be written in WP-6.29 | |
+| R9 | to be written in WP-6.29 | |
+| R10 | to be written in WP-6.29 | |
+| R11 | to be written in WP-6.29 | |
+| R12 | to be written in WP-6.29 | |
+| R13 | to be written in WP-6.29 | |
+| R14 | to be written in WP-6.29 | |
+| R15 | to be written in WP-6.29 | |
+| R16 | to be written in WP-6.29 | |
+| R17 | to be written in WP-6.29 | |
+| R18 | to be written in WP-6.29b | |
+| R19 | to be written in WP-6.29b | |
+| R20 | to be written in WP-6.29b | |
+| R21 | to be written in WP-6.29b | |
+| R22 | to be written in WP-6.29b | |
+| R23 | to be written in WP-6.29b | |

@@ -1,7 +1,7 @@
 # Default bindings of the document's commands
 
-- **Status:** implemented (as registry data; the key handling that acts on it comes with the UI packages)
-- **Work packages:** WP-0.14
+- **Status:** partial (R1 to R7 implemented as registry data, the key handling that acts on them coming with the UI packages; R8 is WP-6.43's)
+- **Work packages:** WP-0.14; WP-6.43 (R8, with [custom-shortcuts.md](custom-shortcuts.md))
 - **Parity-matrix row:** Interface: Keyboard shortcuts, macOS and Windows, including held (momentary) shortcuts
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026
 
@@ -33,6 +33,7 @@ Every row of the UI parity reference cited here rests on the manual section it n
 - **R5.** With a track title bar selected, S toggles the track's solo (`mixer.set_solo`), C toggles its arm (`mixer.set_arm`), and 0 toggles its activator (`mixer.set_mute`, where deactivated means muted). F1 to F8 toggle the activators of tracks 1 to 8 wherever the focus is. (S2, S3, S5, S6)
 - **R6.** In the Arrangement, 0 toggles the activator of the selected clips (`clip.set_mute`). (S4, S5)
 - **R7.** No other document command has a default binding. Setting volume, pan, tempo, or time signatures, and the device commands other than delete and rename, are reached by controls, gestures, and agents. (S1 to S4: chapter 42 has no other shortcut that runs one of these commands directly)
+- **R8.** These are the default bindings. A person's own shortcuts ([custom-shortcuts.md](custom-shortcuts.md), IMP-17) layer over them: a person can give any of these commands other keys, or keys where R7 gives none, and take a default key away; with no user keymap, the bindings are exactly R1 to R7's. The registry's default bindings never change with a person's keymap. (S1 to S4; [the improvements](../05-improvements.md), IMP-17)
 
 ## Tests
 
@@ -40,3 +41,4 @@ Every row of the UI parity reference cited here rests on the manual section it n
 |---|---|---|
 | R1 to R7 | `crates/model/tests/command_registry.rs`, `bindings_follow_the_spec` | unit |
 | R1 to R6 | `xtask/src/commands.rs`, `the_repository_reference_is_in_sync`: every bound shortcut exists in the reference and applies globally or in one of the command's contexts, and no two commands share a shortcut in a context | unit |
+| R8 | to be written in WP-6.43 | |

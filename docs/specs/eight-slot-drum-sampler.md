@@ -1,7 +1,7 @@
 # The eight-slot drum sampler
 
-- **Status:** partial (the individual outputs are T192's, a slot's Play button and the sample display wait for the audition path and the sample display; every other rule has a passing test)
-- **Work packages:** WP-5.17
+- **Status:** partial (the individual outputs are T192's, a slot's Play button and the sample display wait for the audition path and the sample display; every other rule has a passing test; R21, tuning systems, is WP-6.9's)
+- **Work packages:** WP-5.17; WP-6.9 (tuning systems: R21)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.7 "Impulse" (31.7.1 "Sample Slots", 31.7.2 "Start, Transpose and Stretch", 31.7.3 "Filter", 31.7.4 "Saturator and Envelope", 31.7.5 "Pan and Volume", 31.7.6 "Global Controls"), read October 2026
 
@@ -27,6 +27,8 @@ This spec covers the device, its parameters and its panel. It leaves to [the dev
 | S6 | Beatlayer | [The device framework spec](device-framework.md), [the improvements](../05-improvements.md) (rules G1 and G2, D17) | Parameter descriptors, smoothing at the frame, gains reaching −∞ dB, every parameter automatable and modulatable, every action a registered command that an agent can read back |
 | S7 | Beatlayer | [The sampler spec](sampler.md), R2 and R11, and [the architecture](../02-architecture.md), "The media store" and "Real-time rules" | How a device names its sample by content hash, has it decoded on the compiler's thread, and plays it from memory; no allocation, lock or blocking call on the audio thread |
 | S8 | Beatlayer | [The MIDI clips spec](midi-clips.md), R2 and R7 | Notes reach the track's device chain sample-accurately, each note-off carrying its release velocity |
+| S9 | Manual | Live 12 reference manual, chapter 15 "Using Tuning Systems", its introduction; the Live 12 release notes, 12.0 and 12.1 | Built-in instruments play a loaded tuning, and Drum Racks bypass it; one step of per-note pitch bend is one step of the tuning |
+| S10 | Beatlayer | [tunings.md](tunings.md) R12 to R14 | How a native instrument plays a key's tuned pitch, which tracks play the tuning, and per-note bends under a tuning |
 
 ## Rules
 
@@ -50,6 +52,7 @@ This spec covers the device, its parameters and its panel. It leaves to [the dev
 - **R18.** The panel is the eight slot cells along the top, each showing its number, its key and whether it holds a sample, and below them the controls of the selected slot, with the global controls beside them. Clicking a cell, or Enter on it, selects its slot; a sample dropped on a cell loads into that slot, and dropped elsewhere on the device into the selected one. Selecting a slot (`device.select_slot`) changes only the view: it is not an undo step, is not saved with the set, and is read back as `selected_slot` in the device's panel in `device.state`. (Beatlayer's own look)
 - **R19.** Every action here is a registered command that an agent runs by ID and reads back: `device.load_sample` and `device.set_sample` (the device's `media`), `device.set_param` (its `params`, every slot's parameters by number) and `device.select_slot` (the panel's `selected_slot`). (S6)
 - **R20.** Every parameter can be automated and modulated (rule G2) to the frame, and every gain, Volume of each slot and the global Volume, reaches −∞ dB (rule G1); every parameter has a written description. (S6)
+- **R21.** Impulse's keys choose its slots (R2) and a slot's pitch doesn't follow the key, so a set's tuning changes nothing Impulse plays ([tunings.md](tunings.md) R12). (S9, S10)
 
 ## Tests
 
@@ -75,6 +78,7 @@ This spec covers the device, its parameters and its panel. It leaves to [the dev
 | R18 | `crates/shell/tests/kitbag.rs`, `a_sample_with_no_slot_goes_into_the_selected_one_and_the_panel_says_so`; `crates/ui/tests/device_view.rs`, `clicking_a_slot_cell_shows_that_slots_controls`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` (`device.select_slot`) | shell test; UI script |
 | R19 | `crates/cli/tests/agent_drum_sampler.rs`, `an_agent_loads_selects_and_clears_slots_by_command_id_and_reads_them_back`; `crates/agent/tests/readback.rs` | MCP script |
 | R20 | `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_has_a_description` | unit, real-time trap |
+| R21 | to be written in WP-6.9 | |
 
 ## Not built yet
 

@@ -75,6 +75,9 @@ pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
 pub const VIEW_TOGGLE_PLUG_IN_WINDOWS: &str = "view.toggle_plug_in_windows";
+/// `view.close_plug_in_windows`: close every open plug-in editor window
+/// (View ▸ Close All Plug-in Windows, IMP-25).
+pub const CLOSE_PLUG_IN_WINDOWS: &str = "view.close_plug_in_windows";
 /// `view.toggle_session_arrangement`: switch the main view.
 pub const VIEW_TOGGLE_SESSION_ARRANGEMENT: &str = "view.toggle_session_arrangement";
 /// `view.zoom_in`: zoom the interface in.
@@ -192,6 +195,7 @@ pub const IDS: &[&str] = &[
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
+    CLOSE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN,
     VIEW_ZOOM_OUT,
@@ -489,6 +493,14 @@ pub struct SwitchResult {
     pub on: bool,
 }
 
+/// What `view.close_plug_in_windows` returns: how many editor windows it
+/// closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ClosedPlugInWindows {
+    /// The editor windows it closed.
+    pub closed: usize,
+}
+
 /// What the view commands return: the window's view state afterwards.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewResult {
@@ -740,6 +752,17 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-DEV-009")
             .args::<TogglePlugInWindowsArgs>()
             .result::<SwitchResult>(),
+        CommandSpec::new(CLOSE_PLUG_IN_WINDOWS, "Close All Plug-in Windows")
+            .description(
+                "Closes every open plug-in editor window at once, as View ▸ Close All Plug-in \
+                 Windows does. It closes editors only: floating native device windows stay as \
+                 they are, so it changes nothing in the set, isn't an undo step, and is in the \
+                 read class. It has no key. Returns how many editor windows it closed.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ClosedPlugInWindows>(),
         CommandSpec::new(VIEW_TOGGLE_BROWSER, "Browser")
             .description(
                 "Shows or hides the browser at the left of the main window; the main view \

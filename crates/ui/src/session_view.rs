@@ -156,7 +156,7 @@ impl GridUi {
         let scroll_y = state.scroll_y as f32;
         let layout = MixerLayout::compute(
             session.slots,
-            columns.len(),
+            &crate::mixer::folds(shell, &columns).columns,
             returns.len(),
             sections,
             scroll_x,
@@ -227,6 +227,10 @@ impl GridUi {
                 &mut grid, shell, theme, &scene_row, &name, index, &state, events,
             );
             for column in &layout.columns {
+                // A chain's column has no clip slots (racks spec, R27).
+                if matches!(column.kind, ColumnKind::Chain(_)) {
+                    continue;
+                }
                 let track = columns[column.index];
                 let cell = column.rect.intersect(row).shrink(1.0);
                 if cell.width() <= 0.0 || cell.height() <= 0.0 {
@@ -464,6 +468,11 @@ impl GridUi {
             painter.rect_filled(rect.shrink(5.0), 0.0, colour);
         };
         for column in &layout.columns {
+            // A chain's column has no status row of its own (racks spec,
+            // R27).
+            if matches!(column.kind, ColumnKind::Chain(_)) {
+                continue;
+            }
             let track = columns[column.index];
             let Some(t) = doc.track(track).filter(|t| t.kind().holds_clips()) else {
                 continue;
@@ -987,6 +996,7 @@ pub fn column_track(
 ) -> TrackId {
     match column.kind {
         ColumnKind::Track => columns[column.index],
+        ColumnKind::Chain(_) => columns[column.index],
         ColumnKind::Return => returns[column.index],
         ColumnKind::Main => doc.main_id(),
     }

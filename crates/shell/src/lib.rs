@@ -141,6 +141,7 @@ pub use bl_shell_spec::session_launch as session_launch_commands;
 /// (WP-3.7).
 pub use bl_shell_spec::session_view as session_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
+pub use bl_shell_spec::slice as slice_commands;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).
 /// Stem separation's command IDs and arguments (IMP-11).

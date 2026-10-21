@@ -175,6 +175,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.group",
             "track.move",
             "track.rename",
+            "track.set_devices_enabled",
             "track.set_frozen",
             "track.unfreeze",
             "track.ungroup"

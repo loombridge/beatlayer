@@ -421,6 +421,11 @@ impl Shell {
                     };
                     let done = Rc::clone(&landed);
                     let bad = Rc::clone(&broke);
+                    // Spec: scales R7. A consolidated clip keeps the scale
+                    // of the first clip it was made from.
+                    let scale = clips
+                        .first()
+                        .map_or_else(bl_model::Scale::default, |clip| clip.scale);
                     self.start_processed(request, move |shell, written| {
                         let audio = consolidated_audio(
                             ContentHash(*written.hash.as_bytes()),
@@ -438,6 +443,7 @@ impl Shell {
                             data: ClipData::Audio(audio),
                             envelopes: Vec::new(),
                             launch: bl_model::ClipLaunch::default(),
+                            scale,
                         };
                         let placed = shell.editor.transact(label_of(scene), |editor| {
                             place(editor, track, scene, start, end, clip)
@@ -713,13 +719,21 @@ fn place(
     end: Ticks,
     clip: Clip,
 ) -> Result<(), bl_model::EditError> {
+    // Spec: scales R7. A consolidated clip keeps the scale of the first
+    // clip it was made from, which the clip takes the set's current scale
+    // when it is made.
+    let scale = clip.scale;
+    let id = clip.id;
     if let Some(scene) = scene {
-        return editor
-            .apply(Command::CreateSlotClip { track, scene, clip })
-            .map(drop);
+        editor.apply(Command::CreateSlotClip { track, scene, clip })?;
+    } else {
+        clear(editor, track, start, end, &BTreeSet::new())?;
+        editor.apply(Command::CreateClip { track, clip })?;
     }
-    clear(editor, track, start, end, &BTreeSet::new())?;
-    editor.apply(Command::CreateClip { track, clip }).map(drop)
+    if scale != editor.document().settings().scale {
+        editor.apply(scale.command(vec![id]))?;
+    }
+    Ok(())
 }
 
 /// The span a crop keeps (R16): the call's `start` and `end`, or, when it

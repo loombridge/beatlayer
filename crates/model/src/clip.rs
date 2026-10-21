@@ -32,6 +32,7 @@ use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
+use crate::scale::Scale;
 use crate::warp::{TransientEdits, WarpMarker};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
@@ -73,6 +74,12 @@ pub struct Clip {
     /// launching reads. The defaults for a clip saved without them.
     #[serde(default, skip_serializing_if = "ClipLaunch::is_default")]
     pub launch: ClipLaunch,
+    /// The clip's scale (WP-6.7): its Scale Mode switch, its root and its
+    /// scale name. It never changes what the clip plays; it tells the rest
+    /// of the set which keys belong. A clip off at C, in Major, writes
+    /// nothing, so a set saved before the scales loads unchanged.
+    #[serde(default, skip_serializing_if = "Scale::is_default")]
+    pub scale: Scale,
 }
 
 impl Clip {
@@ -89,6 +96,7 @@ impl Clip {
             data,
             envelopes: Vec::new(),
             launch: ClipLaunch::default(),
+            scale: Scale::default(),
         }
     }
 
@@ -959,6 +967,9 @@ pub fn consolidated_midi(
         }),
         envelopes,
         launch: ClipLaunch::default(),
+        // Spec: scales R7. A consolidated clip takes the scale of the first
+        // clip it was made from.
+        scale: clips.first().map_or_else(Scale::default, |clip| clip.scale),
     }
 }
 

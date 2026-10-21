@@ -323,6 +323,7 @@ impl View<'_> {
             "end": self.position(clip.end()),
             "length": Self::length(clip.length),
             "mute": clip.mute,
+            "scale": scale_value(clip.scale),
             "content": content,
         })
     }
@@ -607,6 +608,7 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
             "segments": settings.tempo.segments().len(),
         },
         "time_signature_at_start": settings.time_signatures.signature_at(Ticks::ZERO).to_string(),
+        "scale": scale_value(settings.scale),
         "counts": {
             "tracks": document.track_count(),
             "clips": document.clip_count(),
@@ -632,6 +634,16 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         });
     }
     value
+}
+
+/// A scale as the query reads it: whether its Scale Mode is on, its root
+/// note, and its name.
+fn scale_value(scale: bl_model::Scale) -> Value {
+    json!({
+        "enabled": scale.enabled,
+        "root": scale.root,
+        "name": scale.name.id(),
+    })
 }
 
 /// One envelope of a track, without its points.

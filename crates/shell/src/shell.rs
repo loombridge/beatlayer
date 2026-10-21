@@ -1,5 +1,6 @@
 //! The shell's state and the one place every command runs: [`Shell`].
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -78,6 +79,7 @@ use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::sample_editor as sample_ids;
+use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -498,6 +500,14 @@ pub struct Shell {
     /// The Session slots' states the engine last published (WP-3.2), which
     /// the grid's launch buttons draw from.
     session_states: Vec<bl_engine::SlotStatus>,
+    /// The frames the Session slots that play launched on, as the shell
+    /// last saw them, so a clip that starts playing is told from one that
+    /// has been playing (the scales spec, R11).
+    launched: BTreeMap<(TrackId, bl_model::SceneId), Frames>,
+    /// The Arrangement clip the playhead was in, as the shell last saw it,
+    /// so the playhead entering a clip is told from its staying in one
+    /// (the scales spec, R11).
+    playing_clip: Option<bl_model::ClipId>,
     /// The tempo and time signature a launched scene put in place of the
     /// set's, as the engine last published them (WP-3.5).
     scene_override: bl_engine::SceneOverride,
@@ -928,6 +938,8 @@ impl Shell {
             mixer: MixerView::new(),
             session: SessionView::new(),
             session_states: Vec::new(),
+            launched: BTreeMap::new(),
+            playing_clip: None,
             scene_override: bl_engine::SceneOverride::default(),
             last_launched: None,
             session_over: Vec::new(),
@@ -4479,6 +4491,9 @@ impl Shell {
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        // Spec: scales R11. A clip that starts playing, and the clip the
+        // playhead enters, make their scale the current scale.
+        self.follow_playing_scale(&engine);
         // A drag in progress waits: its end is one change, not a split for
         // every frame of it.
         if self.recording.is_some()
@@ -4544,6 +4559,33 @@ impl Shell {
     #[must_use]
     pub fn playing(&self) -> bool {
         self.arrangement.transport().playing
+    }
+
+    /// Points the set's current scale at the clip that starts playing, and
+    /// at the Arrangement clip the playhead enters (the scales spec, R11).
+    /// It is no undo step, though the set is marked as changed.
+    fn follow_playing_scale(&mut self, engine: &EngineTransport) {
+        if !engine.playing {
+            self.launched.clear();
+            self.playing_clip = None;
+            return;
+        }
+        let doc = self.editor.document().clone();
+        let order = doc.track_order();
+        let (launches, launched) =
+            crate::scales::new_launches(&self.session_states, &self.launched);
+        self.launched = launched;
+        if let Some(scale) = crate::scales::launched_scale(&doc, &launches, &order) {
+            self.follow_scale(scale);
+            return;
+        }
+        let clip = crate::scales::arrangement_clip(&doc, engine.position, &self.session_over);
+        if clip != self.playing_clip {
+            self.playing_clip = clip;
+            if let Some(scale) = clip.and_then(|clip| doc.clip(clip)).map(|clip| clip.scale) {
+                self.follow_scale(scale);
+            }
+        }
     }
 
     /// The global launch quantisation and its enabled switch (WP-3.2), which
@@ -6289,11 +6331,50 @@ impl Shell {
         self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
+        let shown = self.shown_clip();
         let result = self.run_command(id, args);
         if result.is_ok() {
             self.follow_clip_selection(id, &arranged, slot);
+            // Spec: scales R10. Selecting a clip makes its scale the
+            // current scale, and a change to that clip's scale changes it
+            // with it.
+            self.follow_shown_scale(id, shown);
         }
         result
+    }
+
+    /// The clip the Clip View shows: the Session clip most recently
+    /// selected, or else the Arrangement's first selected clip.
+    fn shown_clip(&self) -> Option<bl_model::ClipId> {
+        self.clip_view
+            .shown_any_clip(self.editor.document(), &self.arrangement)
+    }
+
+    /// Points the set's current scale at the clip the Clip View shows, when
+    /// the selection changed or the clip's own scale did (the scales spec,
+    /// R10). It is no undo step, though the set is marked as changed.
+    fn follow_shown_scale(&mut self, id: &str, shown: Option<bl_model::ClipId>) {
+        let now = self.shown_clip();
+        let changed = now != shown;
+        if !changed && id != scales_ids::SET_CLIP_SCALE {
+            return;
+        }
+        let Some(scale) = crate::scales::shown_scale(self.editor.document(), now) else {
+            return;
+        };
+        self.follow_scale(scale);
+    }
+
+    /// Points the set's current scale at `scale` (the scales spec, R10, R11
+    /// and R12): no undo step, though the set is marked as changed.
+    fn follow_scale(&mut self, scale: bl_model::Scale) {
+        if self.editor.document().settings().scale == scale {
+            return;
+        }
+        self.editor.follow_scale(scale);
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
     }
 
     /// The clip in the Session slot selected first, if the slot holds one.
@@ -6303,6 +6384,26 @@ impl Shell {
             .document()
             .slot(slot.track, slot.scene)
             .map(|clip| clip.id)
+    }
+
+    /// The clips the Control Bar's scale controls change (the scales spec,
+    /// R12): the Arrangement's selected clips, or the Session slot's clip.
+    #[must_use]
+    pub fn scale_targets(&self) -> Vec<bl_model::ClipId> {
+        let arranged = self.arrangement.selected_clips();
+        if !arranged.is_empty() {
+            return arranged.to_vec();
+        }
+        self.selected_slot_clip().into_iter().collect()
+    }
+
+    /// What the Control Bar's scale controls show (the scales spec, R6): the
+    /// selected clips' scale, where every one of them has it, and the set's
+    /// current scale when no clip is selected.
+    #[must_use]
+    pub fn scale_display(&self) -> crate::scales::Display {
+        let targets = self.scale_targets();
+        crate::scales::display(self.editor.document(), &targets)
     }
 
     /// Points the Clip View at the clip most recently selected, in the
@@ -6856,6 +6957,12 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             let engine = self.poll_engine();
             return Ok(to_value(&crate::transport::state(self, engine)));
+        }
+        if scales_ids::handles(id) {
+            // Spec: scales R1, R13. The scale list, which the Scale Name
+            // chooser shows and an agent reads.
+            Self::args::<NoArgs>(id, args)?;
+            return Ok(to_value(&bl_shell_spec::scales::ScaleList::new()));
         }
         if view_ids::handles(id) {
             // Spec: clap-hosting R5 (WP-5.40). Choosing a plug-in parameter

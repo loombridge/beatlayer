@@ -83,6 +83,7 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
@@ -96,6 +97,7 @@ mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
 mod session_recording;
+mod slice;
 mod stems;
 mod warping;
 
@@ -247,6 +249,9 @@ pub enum Effect {
     /// Start renaming a macro in its Macro Controls slot; Return runs
     /// `rack.rename_macro` with the new name (WP-5.4).
     RenameMacro(bl_model::DeviceId, u8),
+    /// Start renaming a variation in its Macro Variations row; Return runs
+    /// `rack.rename_variation` with the new name (WP-5.5).
+    RenameVariation(bl_model::DeviceId, usize),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -443,6 +448,9 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Slice to New MIDI Track dialog (WP-4.16): its clip and the
+    /// slicing presets it offers. Never part of the set.
+    slice_dialog: Option<bl_shell_spec::slice::SliceDialogStatus>,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -765,6 +773,8 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A variation launch set the macros (R27).
+    Variation { rack: bl_model::DeviceId },
 }
 
 impl Shell {
@@ -842,6 +852,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            slice_dialog: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
@@ -5288,6 +5299,11 @@ impl Shell {
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
         }
+        if slice_ids::handles(id) {
+            // Spec: slice-to-midi R1. The menus' enabled states: one audio
+            // clip selected, in either view.
+            return self.can_slice(id, args);
+        }
         if id == CUE_MODE {
             // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
             // Main strip's button, are dimmed while Cue Out and Main Out
@@ -5356,8 +5372,12 @@ impl Shell {
             }
         }
         if id == "device.rename" && args.get("name").is_none() {
-            // A person names the device in its title bar.
-            return self.devices.selected().is_some();
+            // A person names the device in its title bar; with a macro or a
+            // variation selected, Rename names that instead (macros spec,
+            // R14, R29).
+            return self.devices.selected().is_some()
+                || self.devices.macro_selected().is_some()
+                || self.devices.variation_selected().is_some();
         }
         if id == "chain.rename" && args.get("name").is_none() {
             // A person names the chain in its row.
@@ -5881,6 +5901,13 @@ impl Shell {
             }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
+                // Spec: macros R29. With a variation selected, Rename names
+                // it, not the device.
+                if let Some((rack, index)) = self.devices.variation_selected() {
+                    self.effects.push(Effect::RenameVariation(rack, index));
+                    self.touch();
+                    return Ok(Value::Null);
+                }
                 // Spec: macros R14. With a macro selected, Rename names it,
                 // not the device.
                 if let Some((rack, number)) = self.devices.macro_selected() {
@@ -5927,6 +5954,30 @@ impl Shell {
                 self.effects.push(Effect::RenameMacro(rack, number));
                 self.touch();
                 Ok(Value::Null)
+            }
+            "device.duplicate" if !has("device") && self.devices.variation_selected().is_some() => {
+                // Spec: macros R29. With a variation selected, Duplicate
+                // copies it, not the device.
+                let (rack, index) = self
+                    .devices
+                    .variation_selected()
+                    .expect("checked to be selected");
+                self.run(
+                    "rack.duplicate_variation",
+                    json!({ "rack": rack, "index": index }),
+                )
+            }
+            "device.remove" if !has("device") && self.devices.variation_selected().is_some() => {
+                // Spec: macros R29. With a variation selected, Delete removes
+                // it, not the device.
+                let (rack, index) = self
+                    .devices
+                    .variation_selected()
+                    .expect("checked to be selected");
+                self.run(
+                    "rack.delete_variation",
+                    json!({ "rack": rack, "index": index }),
+                )
             }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;
@@ -6203,6 +6254,9 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::LaunchVariation { rack, .. } => {
+                Some(MacroEdit::Variation { rack: *rack })
+            }
             _ => None,
         }
     }
@@ -6250,6 +6304,12 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                (1..=bl_model::MACROS)
+                    .filter(|number| !rack.macros.setting(*number).variation_excluded)
+                    .flat_map(|number| self.devices.macro_commands(doc, rack, number))
+                    .collect()
+            }),
         }
     }
 
@@ -6346,6 +6406,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
+                || slice_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
@@ -6428,33 +6489,39 @@ impl Shell {
                 && self.automation_recording)
                 .then(|| model::command_from_args(id, args.clone()).ok())
                 .flatten()
-                .and_then(|command| {
-                    crate::automation_record::moved(self.editor.document(), &command)
-                });
+                .map(|command| {
+                    crate::automation_record::moved_all(self.editor.document(), &command)
+                })
+                .unwrap_or_default();
             // Spec: session-automation R1. With Automation Arm on and a
             // Session recording running, a control move is noted for the
             // clip it goes into.
-            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
-                .then(|| model::command_from_args(id, args.clone()).ok())
-                .flatten()
-                .and_then(|command| {
-                    let (track, target, value) =
-                        crate::automation_record::moved(self.editor.document(), &command)?;
-                    let before = crate::modulation::control_value(
-                        self.editor.document(),
-                        &self.devices,
-                        track,
-                        &target,
-                    )?;
-                    Some((track, target, before, value))
-                });
+            let session_moved: Vec<(TrackId, AutomationTarget, f64, f64)> =
+                (self.arrangement.automation_arm() && self.session_run.is_some())
+                    .then(|| model::command_from_args(id, args.clone()).ok())
+                    .flatten()
+                    .map(|command| {
+                        crate::automation_record::moved_all(self.editor.document(), &command)
+                            .into_iter()
+                            .filter_map(|(track, target, value)| {
+                                let before = crate::modulation::control_value(
+                                    self.editor.document(),
+                                    &self.devices,
+                                    track,
+                                    &target,
+                                )?;
+                                Some((track, target, before, value))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
             let changes = self.run_document_edit(id, args)?;
             // Spec: sample-editor R11. An edit in the Sample Editor pauses
             // Follow until playback starts or stops.
             if sample_edit_command(id) {
                 self.clip_view.sample_follow(true);
             }
-            if let Some((track, target, value)) = moved {
+            for (track, target, value) in moved {
                 self.automation_take.write(
                     track,
                     target,
@@ -6462,7 +6529,7 @@ impl Shell {
                     value,
                 );
             }
-            if let Some((track, target, before, value)) = session_moved {
+            for (track, target, before, value) in session_moved {
                 self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
@@ -6827,6 +6894,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if slice_ids::handles(id) {
+            return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time

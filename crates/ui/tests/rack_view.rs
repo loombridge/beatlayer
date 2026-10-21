@@ -242,7 +242,12 @@ fn a_racks_views_sit_left_to_right_in_its_brackets() {
             .iter()
             .map(|(v, _)| *v)
             .collect::<Vec<_>>(),
-        [RackView::Macros, RackView::ChainList, RackView::Devices]
+        [
+            RackView::Macros,
+            RackView::Variations,
+            RackView::ChainList,
+            RackView::Devices
+        ]
     );
 
     // The nested rack is a bracket inside its parent's.
@@ -295,7 +300,12 @@ fn hiding_every_view_folds_the_rack() {
     }
     let narrower = frame_of(&mut h, rack).width();
     assert!(narrower < wide, "each hidden view narrows it");
-    let devices = layout_of(&mut h, rack).selectors[2].1;
+    let devices = layout_of(&mut h, rack)
+        .selectors
+        .iter()
+        .find(|(v, _)| *v == RackView::Devices)
+        .unwrap()
+        .1;
     click(&mut h, devices.center());
     assert!(rack_state(&h, rack).is_strip());
     assert_eq!(

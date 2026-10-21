@@ -455,6 +455,7 @@ fn the_view_column_shows_input_output_send_and_return() {
         order,
         [
             RackView::Macros,
+            RackView::Variations,
             RackView::Pads,
             RackView::ChainList,
             RackView::Devices,

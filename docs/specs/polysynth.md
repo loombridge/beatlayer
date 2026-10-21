@@ -1,7 +1,7 @@
 # The polysynth
 
-- **Status:** implemented (part 1: the oscillators, the filter and the envelopes; part 2: the LFO, the modulation routes and MPE; the voice modes, the Drift control, Legato and Glide, and Envelope 2's cycling mode are still to come)
-- **Work packages:** WP-2.17 (parts 1 and 2)
+- **Status:** partial (part 1: the oscillators, the filter and the envelopes; part 2: the LFO, the modulation routes and MPE; the voice modes, the Drift control, Legato and Glide, and Envelope 2's cycling mode are still to come; R24 and R25, tuning systems, are WP-6.9's)
+- **Work packages:** WP-2.17 (parts 1 and 2); WP-6.9 (tuning systems: R24 and R25)
 - **Parity-matrix row:** Devices: Drift (Live's compact polyphonic instrument)
 - **Checked against:** Live 12's reference manual, section 31.3 "Drift", and the device framework spec; the parameter ranges, defaults, waveform drawings and modulation laws are Beatlayer's own
 
@@ -13,7 +13,7 @@ The filter is Beatlayer's own zero-delay-feedback pair: Type I is a 12 dB per oc
 
 The LFO offers the manual's nine waveforms and its four time modes — hertz, a ratio of the played note, milliseconds, or a division of the song's tempo — with a Retrigger switch, an Amount, and a slot that modulates its own rate. The Mod section has three slots, each a source, a destination and an amount, and the manual's dedicated slots sit beside them: Oscillator 1's Shape Mod, two Pitch Mods for both oscillators, and two Freq Mods for the low-pass cutoff. An MPE controller bends each note on its own through Note PB and PB Range, and its pressure and slide are per-note modulation sources. This part plays the manual's routes and MPE only: the voice modes (Mono with its Thickness, Stereo with its Spread, Unison with its Strength), the Drift control, Legato and Glide, and Envelope 2's cycling mode (which also carries the Cyc Env Rate destination) are still to come.
 
-This spec covers the instrument's behaviour. The framework every native device is built on (parameters, smoothing, layout, automation, rule G1 and G2) is the [device framework spec](device-framework.md); the MIDI note path it plays is WP-2.1's, and MPE's input (ports, zones, per-note messages) arrives with WP-2.2.
+This spec covers the instrument's behaviour. The framework every native device is built on (parameters, smoothing, layout, automation, rule G1 and G2) is the [device framework spec](device-framework.md); the MIDI note path it plays is WP-2.1's, and how per-note expressions reach it from clips and MPE controllers is [MPE](mpe.md)'s (WP-6.17).
 
 ## Sources
 
@@ -24,6 +24,8 @@ This spec covers the instrument's behaviour. The framework every native device i
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rules G1 and G2 | Every gain and level reaches −∞ dB; every parameter is automatable and modulated |
 | S4 | Beatlayer | The [device framework spec](device-framework.md), R2, R3, R10 to R13 | A gain's travel reaches silence and reads `-inf dB`; a device type with a parameter that can't be automated is refused; a layout places every parameter's control exactly once, and the docked size is the smallest |
 | S5 | Manual | Live 12 reference manual, section 31.3, "LFO Section" (31.3.5), "Mod Section" (31.3.6) and "Global Section" (31.3.7) | The LFO has four time modes — Rate in Hz, Ratio, Time in ms, and Sync in tempo-synced beat divisions — and nine waveforms: Sine, Triangle, Saw Up, Saw Down, Square, Sample & Hold, Wander (a sample and hold with an S-shape that interpolates between two values at the rate of the LFO), Linear Envelope and Exponential Envelope (one-shot decay envelopes). An R switch turns Retrigger on or off: on, the LFO resets to the same position in its phase each time a note is triggered; off, it is free-running. Amount sets its overall intensity, and a Modulation Source chooser with an Amount slider modulates the LFO itself. The Mod section offers up to three sources and destinations: its sources are Env 1, Env 2 / Cyc, LFO, Key, Velocity, Modwheel, Pressure and Slide, and its destinations are Osc 1 Gain, Osc 1 Shape, Osc 2 Gain, Osc 2 Detune, Noise Gain, LP Frequency, LP Resonance, HP Frequency, LFO Rate, Cyc Env Rate and Main Volume, with amounts from −100 % to 100 %. Elsewhere the manual gives Oscillator 1's Shape Mod (a source and an amount), two Pitch Mods for both oscillators, and up to two Freq Mods for the low-pass cutoff, and the Global section a Note PB switch ("enable per-note pitch bend", so that switching it off lets an MPE controller be used without its finger position bending the pitch) and a PB Range slider ("the global pitch bend range in semitones") |
+| S6 | Manual | Live 12 reference manual, chapter 15 "Using Tuning Systems", its introduction; the Live 12 release notes, 12.0 and 12.1 | Built-in instruments play a loaded tuning, and Drum Racks bypass it; one step of per-note pitch bend is one step of the tuning |
+| S7 | Beatlayer | [tunings.md](tunings.md) R12 to R14 | How a native instrument plays a key's tuned pitch, which tracks play the tuning, and per-note bends under a tuning |
 
 ## Rules
 
@@ -50,6 +52,8 @@ This spec covers the instrument's behaviour. The framework every native device i
 - **R21.** A source runs in its own units: Env 1, Env 2, Velocity, Modwheel, Pressure and Slide from 0 to 1, the mod wheel reading MIDI's controller 1 through the voice manager, from the control changes that reach the device ([device framework](device-framework.md) R39); the LFO and Key from −1 to 1, Key moving from C3 (key 60) by ±1 four octaves either side. A full Pitch Mod amount moves both oscillators by ±24 semitones, and a full route into LFO Rate multiplies the LFO's speed by 2⁴; the LFO's own slot moves its rate the same way. The Key centre and span and both ranges are Beatlayer's own. (S5)
 - **R22.** Note PB, on by default, follows an MPE controller's per-note pitch bend, and PB Range, 1 to 96 semitones and 48 by default, is the instrument's pitch bend range: a bend of ±1 moves the note it names by ±PB Range semitones, through the voice manager, and no other note moves. The pitch wheel bends every sounding note too: a pitch bend message moves them all by up to ±PB Range semitones, on the frame it lands. (With Note PB on, a bend on channels 2 to 16 is an MPE member channel's and moves only that channel's notes, and the wheel is channel 1's; with Note PB off every channel's bend is the wheel's.) With Note PB off, per-note bends are ignored. Pressure and Slide are per-note sources from 0 to 1 and are not gated by it. (S1, S5)
 - **R23.** Every LFO control, every route and its amount, every destination parameter and the MPE settings are the device's parameters: an agent sets and reads each through the device commands, as any parameter. (S4)
+- **R24.** On a track that plays the set's tuning ([tunings.md](tunings.md) R12, R14), a voice's pitch is its key's tuned pitch where it was the key, and Oct, Osc 2's Detune, Transpose, the pitch modulation routes and the pitch wheel add to it as they add to a key without a tuning. The filter's Key (R10) follows the tuned pitch, measured from C3's twelve-step pitch; the Key modulation source (R21) follows the key number (both Beatlayer's own). (S6, S7)
+- **R25.** Under a tuning, Note PB's per-note bend moves a note by steps of the tuning: ±1 moves it ±PB Range steps ([tunings.md](tunings.md) R13); the pitch wheel's bend stays in semitones. (S6, S7)
 
 ## Tests
 
@@ -76,3 +80,5 @@ This spec covers the instrument's behaviour. The framework every native device i
 | R21 | `crates/devices/tests/polysynth.rs`, `mpe_pressure_and_slide_are_modulation_sources`, `the_lfo_ratio_mode_modulates_the_note_at_its_own_rate`, `the_mod_wheel_moves_the_modwheel_source` | render, real-time trap |
 | R22 | `crates/devices/tests/polysynth.rs`, `mpe_pitch_bend_bends_one_note_only`, `the_pitch_wheel_bends_every_note_by_the_pb_range`, `mpe_pressure_and_slide_are_modulation_sources` | render, real-time trap |
 | R23 | `crates/agent/tests/polysynth.rs`, `every_lfo_route_and_mpe_setting_is_reachable_by_command` | agent |
+| R24 | to be written in WP-6.9 | |
+| R25 | to be written in WP-6.9 | |

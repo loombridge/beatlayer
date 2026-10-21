@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-581 commands in 38 areas.
+587 commands in 39 areas.
 
 ## Permission classes
 
@@ -84,6 +84,12 @@ Each command has:
 | [`arrangement.zoom`](#arrangementzoom) | Zoom Arrangement | `read` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`arrangement.zoom_back`](#arrangementzoom_back) | Zoom Back from Time Selection | `read` | `X` | `X` |
 | [`arrangement.zoom_to_selection`](#arrangementzoom_to_selection) | Zoom to Time Selection | `read` | `Z` | `Z` |
+| [`articulation.add`](#articulationadd) | Add Articulation | `edit` |  |  |
+| [`articulation.delete`](#articulationdelete) | Delete Articulation | `edit` |  |  |
+| [`articulation.learn`](#articulationlearn) | Learn Articulation | `read` |  |  |
+| [`articulation.list`](#articulationlist) | List Articulations | `read` |  |  |
+| [`articulation.move`](#articulationmove) | Move Articulation | `edit` |  |  |
+| [`articulation.set`](#articulationset) | Change Articulation | `edit` |  |  |
 | [`assistant.forget_key`](#assistantforget_key) | Forget Assistant API Key | `external` |  |  |
 | [`assistant.send`](#assistantsend) | Send to Assistant | `read` |  |  |
 | [`assistant.set_base_url`](#assistantset_base_url) | Assistant Base URL | `edit` |  |  |
@@ -1631,6 +1637,115 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ArrangementState`](#arrangementstate).
+
+### Area `articulation`
+
+#### `articulation.add`
+
+**Add Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Adds an articulation to an Articulation Map's list, at `index` (or at the end when it isn't given), with the name `name`. The list holds up to 32 articulations and keeps one at least. One undo step (Add Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. An empty name is the numbered one a new articulation gets. |
+| `index` | integer or null | no | Where in the list it goes, or `null` for the end. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.delete`
+
+**Delete Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the articulation at `index` (counted from 0) from an Articulation Map's list. The list keeps one articulation at least. One undo step (Delete Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.learn`
+
+**Learn Articulation**. Permission: `read`. Contexts: `device-view`.
+
+Lights a row's Learn button, as clicking it does, so the next note-on or control change the device hears becomes that articulation's trigger: a key, or the controller with that one value as its range. Learning it is one undo step (Change Articulation); the button goes out afterwards. Clicking a lit button again, or leaving `index` out, puts it out without a change. It changes only the panel: it isn't an undo step, and it isn't saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `index` | integer or null | no | The articulation's place in the list, from 0; without it, the row that is learning stops. |
+
+Result: [`ArticulationLearn`](#articulationlearn).
+
+#### `articulation.list`
+
+**List Articulations**. Permission: `read`. Contexts: `device-view`.
+
+Reports the articulations an Articulation Map holds, in order: each with its name, its trigger (`{"kind":"none"}`, `{"kind":"key","key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`), its outputs (a key with a velocity, or a controller with a value) and its channel (a number from 1 to 16, or null for none). Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`ArticulationList`](#articulationlist).
+
+#### `articulation.move`
+
+**Move Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Moves the articulation at `index` (counted from 0) in an Articulation Map's list to `to`, or to the end of the list when `to` isn't given. One undo step (Move Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+| `to` | integer or null | no | Where it goes: the articulation there takes its place, or it goes last when `null`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.set`
+
+**Change Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Changes the articulation at `index` (counted from 0) in an Articulation Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't given stays as it is. A trigger is `{"kind":"none"}`, `{"kind":"key", "key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`; an output is `{"kind":"key","key":36,"velocity":100}` or `{"kind":"controller","controller":1,"value":64}`; a channel is a number from 1 to 16, or null for none, so the articulation's notes keep the channel they come in on. Two articulations of a device never trigger on the same key or on overlapping ranges of the same controller. One undo step (Change Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+| `channel` | integer or null | no | Its new channel: a channel from 1 to 16, or `null` for none, so its notes keep the channel they come in on. |
+| `name` | string or null | no | Its new name. |
+| `outputs` | array or null | no | Its new outputs, in order. |
+| `trigger` | [`ArticulationTrigger`](#articulationtrigger) or null | no | Its new trigger. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `assistant`
 
@@ -5623,6 +5738,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
+| `articulations` | array or null | no | An Articulation Map's articulations (the articulation map spec, R16), which a preset of one holds; `null` to keep the ones the device has. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
@@ -10843,6 +10959,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
+| [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
+| [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
+| [`articulation.move`](#articulationmove) | `articulation.list` | `articulations` |
+| [`articulation.set`](#articulationset) | `articulation.list` | `articulations` |
 | [`assistant.forget_key`](#assistantforget_key) | `settings.state` | `assistant.key_set` |
 | [`assistant.set_base_url`](#assistantset_base_url) | `settings.state` | `assistant.base_url` |
 | [`assistant.set_key`](#assistantset_key) | `settings.state` | `assistant.key_set` |
@@ -11782,6 +11902,308 @@ What the Arrangement View shows: every view command returns it.
     "automation_arm"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Articulation`
+
+One articulation of an Articulation Map.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, which the panel shows and the Articulation control reads. |
+| `trigger` | [`ArticulationTrigger`](#articulationtrigger) | yes | What makes it current. |
+| `channel` | integer or null | no | The channel its notes go out on, or `None` for the channel they come in on. |
+| `outputs` | array of [`ArticulationOutput`](#articulationoutput) | no | What it sends when it becomes current, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One articulation of an Articulation Map.",
+  "properties": {
+    "channel": {
+      "description": "The channel its notes go out on, or `None` for the channel they come in on.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name, which the panel shows and the Articulation control reads.",
+      "type": "string"
+    },
+    "outputs": {
+      "description": "What it sends when it becomes current, in order.",
+      "items": {
+        "$ref": "#/$defs/ArticulationOutput"
+      },
+      "type": "array"
+    },
+    "trigger": {
+      "$ref": "#/$defs/ArticulationTrigger",
+      "description": "What makes it current."
+    }
+  },
+  "required": [
+    "name",
+    "trigger"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationLearn`
+
+What `articulation.learn` returns: the row that is learning.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer or null | yes | The articulation's place in the list, from 0, or `null` when none is learning. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `articulation.learn` returns: the row that is learning.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "index": {
+      "description": "The articulation's place in the list, from 0, or `null` when none is learning.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device",
+    "index"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationList`
+
+What `articulation.list` returns: an Articulation Map's articulations, in order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `articulations` | array of [`Articulation`](#articulation) | yes | Its articulations, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `articulation.list` returns: an Articulation Map's articulations, in order.",
+  "properties": {
+    "articulations": {
+      "description": "Its articulations, in order.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "articulations"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationOutput`
+
+What an articulation sends when it becomes current.
+
+One of:
+
+- an object with `kind` = `"key"`, `key` (integer from 0 to 255), `velocity` (integer from 0 to 255): A key, 0 to 127, with a velocity, 1 to 127.
+- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `value` (integer from 0 to 255): A controller, 0 to 127, with a value, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an articulation sends when it becomes current.",
+  "oneOf": [
+    {
+      "description": "A key, 0 to 127, with a velocity, 1 to 127.",
+      "properties": {
+        "key": {
+          "description": "The key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "key",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The velocity.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "key",
+        "velocity"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A controller, 0 to 127, with a value, 0 to 127.",
+      "properties": {
+        "controller": {
+          "description": "The controller.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "controller",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "controller",
+        "value"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ArticulationTrigger`
+
+What makes an articulation current.
+
+One of:
+
+- an object with `kind` = `"none"`: None: only the Articulation control chooses it.
+- an object with `kind` = `"key"`, `key` (integer from 0 to 255): A key, 0 to 127, matched on any channel at any velocity.
+- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `lowest` (integer from 0 to 255), `highest` (integer from 0 to 255): A controller, 0 to 127, with a range of values from a lowest to a highest.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What makes an articulation current.",
+  "oneOf": [
+    {
+      "description": "None: only the Articulation control chooses it.",
+      "properties": {
+        "kind": {
+          "const": "none",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A key, 0 to 127, matched on any channel at any velocity.",
+      "properties": {
+        "key": {
+          "description": "The key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "key"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A controller, 0 to 127, with a range of values from a lowest to a highest.",
+      "properties": {
+        "controller": {
+          "description": "The controller.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "highest": {
+          "description": "The highest value of the range.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "controller",
+          "type": "string"
+        },
+        "lowest": {
+          "description": "The lowest value of the range.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "controller",
+        "lowest",
+        "highest"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -15772,6 +16194,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `kind` | [`DeviceKind`](#devicekind) | yes | What the device is. |
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
+| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then. |
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `configured` | array or null | no | The plug-in parameters the device's panel holds, in order (clap-hosting R5, configure mode): the list Configure Mode edits, saved with the set. Left out until it's set: until then all of a plug-in's parameters are configured when it has no more than [`CONFIGURE_THRESHOLD`], and none when it has more (manual 24.1). Native devices never set it. |
@@ -15800,6 +16223,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 {
   "description": "A device in a track's chain: a native instrument or effect, or a plug-in.",
   "properties": {
+    "articulations": {
+      "description": "An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
     "b_active": {
       "description": "Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active.",
       "type": "boolean"
@@ -16785,8 +17215,10 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
+| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
+| `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -16796,6 +17228,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 {
   "description": "What the generic UI needs to draw a device (WP-2.5): its type's description and its parameters' values now.",
   "properties": {
+    "articulations": {
+      "description": "An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
     "configured": {
       "description": "The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device.",
       "items": {
@@ -16815,6 +17254,16 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "type": "integer"
       },
       "type": "array"
+    },
+    "learning": {
+      "description": "The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "loaded_slots": {
       "description": "For a device with sample slots: whether each slot holds a sample.",

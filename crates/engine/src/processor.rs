@@ -1974,6 +1974,7 @@ impl Processor {
                     peak: reading.peak,
                     rms: reading.rms,
                     impact: program.impact(task, total),
+                    gain_reduction: program.gain_reduction(task),
                 };
                 if state.meters.len() < state.meters.capacity() {
                     state.meters.push(meter);

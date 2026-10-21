@@ -899,12 +899,16 @@ fn beat_markers(document: &Document, start: Ticks, end: Ticks) -> Vec<WarpMarker
 
 /// A document holding only `track`, for a consolidate's render (R20): its
 /// clips' audio reaches Main without its devices or its mixer, and without
-/// another track's.
+/// another track's. Slice to New MIDI Track renders through it too
+/// (slice-to-midi R6).
 ///
 /// # Errors
 ///
 /// A message if the document refuses one of the steps.
-fn consolidate_document(document: &Document, track: TrackId) -> Result<Document, String> {
+pub(super) fn consolidate_document(
+    document: &Document,
+    track: TrackId,
+) -> Result<Document, String> {
     let mut doc = document.clone();
     let main = doc.main_id();
     // Spec: R20. The track's clips reach Main alone: a track in a group

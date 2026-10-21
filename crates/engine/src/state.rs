@@ -30,6 +30,11 @@ pub struct TrackMeter {
     /// mixer spec, R31): what the Performance Impact indicator shows, in
     /// six segments.
     pub impact: f32,
+    /// The most gain reduction any of the track's compressors or limiters
+    /// reported for the block, in dB, as a compressor's Gain Reduction reads
+    /// it: zero when none of them reduced (the mixer view spec, R40). Gates
+    /// are left out, as they don't report one.
+    pub gain_reduction: f32,
 }
 
 /// A parameter under modulation, as the last block played it (the modulation
@@ -214,6 +219,13 @@ impl EngineState {
     #[must_use]
     pub fn rms(&self, track: TrackId) -> Option<[f32; 2]> {
         self.track_meter(track).map(|meter| meter.rms)
+    }
+
+    /// One track's gain reduction, in dB, zero when none of its compressors
+    /// or limiters reduced (the mixer view spec, R40).
+    #[must_use]
+    pub fn gain_reduction(&self, track: TrackId) -> Option<f32> {
+        self.track_meter(track).map(|meter| meter.gain_reduction)
     }
 
     /// One track's meters.

@@ -28,7 +28,7 @@ use bl_shell::sample_editor_commands as ids;
 use bl_shell::{GesturePhase, Invocation, Shell};
 use egui::{
     Align2, Color32, CursorIcon, Id, Key, Mesh, Modifiers, Pos2, Rect, Sense, Shape, Stroke, Ui,
-    pos2,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -38,6 +38,9 @@ use crate::theme::Theme;
 
 /// How tall the time ruler is, in points (L-CLIP-011).
 pub const RULER_HEIGHT: f32 = 14.0;
+/// How tall the header above the ruler is: the file's name, sample rate,
+/// bit depth and channel count (R2).
+pub const HEADER_HEIGHT: f32 = 13.0;
 /// How tall the marker strip under the ruler is: the Start and End markers
 /// and the loop brace.
 pub const STRIP_HEIGHT: f32 = 16.0;
@@ -56,10 +59,21 @@ const QUARTER: f64 = 705_600.0;
 /// The fewest points between two grid lines the editor draws.
 const GRID_GAP: f32 = 6.0;
 
+/// The header under the Clip View's toolbar: the file's name, sample rate,
+/// bit depth and channel count (R2).
+#[must_use]
+pub fn header_rect(view: Rect) -> Rect {
+    let top = view.top() + crate::clip_view::TOOLBAR_HEIGHT;
+    Rect::from_min_max(
+        pos2(view.left(), top),
+        pos2(view.right(), top + HEADER_HEIGHT),
+    )
+}
+
 /// The ruler under the Clip View's toolbar.
 #[must_use]
 pub fn ruler_rect(view: Rect) -> Rect {
-    let top = view.top() + crate::clip_view::TOOLBAR_HEIGHT;
+    let top = header_rect(view).bottom();
     Rect::from_min_max(
         pos2(view.left(), top),
         pos2(view.right(), top + RULER_HEIGHT),
@@ -137,6 +151,8 @@ impl Axis {
 /// the clip's warp map.
 #[derive(Clone, Debug)]
 pub struct Geometry {
+    /// The header: the file's details.
+    pub header: Rect,
     /// The time ruler.
     pub ruler: Rect,
     /// The marker strip.
@@ -161,6 +177,7 @@ impl Geometry {
         let map = audio.warp.then(|| audio.warp_map().ok()).flatten();
         let wave = wave_rect(view);
         let mut geometry = Self {
+            header: header_rect(view),
             ruler: ruler_rect(view),
             strip: strip_rect(view),
             wave,
@@ -434,6 +451,146 @@ impl SampleEditorUi {
             self.input(ui, &frame, events);
         }
         self.accessibility(ui, &frame);
+        header(ui, shell, theme, geometry.header, clip, events);
+    }
+}
+
+/// The header above the ruler: the file's name, sample rate, bit depth and
+/// channel count. With several clips selected it shows each value they
+/// share, an asterisk where they differ, and how many files are selected
+/// (R2). Clicking the name shows the file in the browser.
+fn header(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rect: Rect,
+    clip: ClipId,
+    events: &mut Vec<UiEvent>,
+) {
+    let doc = shell.editor().document();
+    let clips = crate::audio_panel::targets(shell, doc, clip);
+    let infos: Vec<_> = clips
+        .iter()
+        .filter_map(|id| shell.clip_media_info(*id))
+        .collect();
+    let colours = &theme.colors;
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, colours.panel.0);
+    let Some(info) = shell.clip_media_info(clip) else {
+        painter.text(
+            rect.left_center(),
+            Align2::LEFT_CENTER,
+            "—",
+            theme.small_font(),
+            colours.text_dim.0,
+        );
+        return;
+    };
+    let names: Vec<&str> = infos.iter().map(|other| other.name.as_str()).collect();
+    let name = marked(&names, info.name.as_str(), &info.name);
+    let name_rect = Rect::from_min_size(
+        rect.min + vec2(6.0, 1.0),
+        vec2(
+            (rect.width() * 0.4).max(40.0),
+            (rect.height() - 2.0).max(1.0),
+        ),
+    );
+    let id = Id::new("sample-editor-file-name");
+    let response = ui.interact(name_rect, id, Sense::click());
+    painter.text(
+        name_rect.left_center(),
+        Align2::LEFT_CENTER,
+        &name,
+        theme.small_font(),
+        colours.text.0,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Show in Browser"));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_label("Show in Browser".to_owned());
+        node.set_value(name.clone());
+    });
+    if response.clicked() {
+        invoke(
+            events,
+            bl_shell::browser_commands::SHOW_FILE,
+            json!({ "clip": clip }),
+        );
+    }
+    // The sample rate, the bit depth and the channel count.
+    let rates: Vec<u32> = infos.iter().map(|other| other.sample_rate).collect();
+    let depths: Vec<Option<u32>> = infos.iter().map(|other| other.bits_per_sample).collect();
+    let channels: Vec<u16> = infos.iter().map(|other| other.channels).collect();
+    let rate_text = if info.sample_rate % 1000 == 0 {
+        format!("{} kHz", info.sample_rate / 1000)
+    } else {
+        format!("{:.1} kHz", f64::from(info.sample_rate) / 1000.0)
+    };
+    let depth_text = match info.bits_per_sample {
+        Some(bits) => format!("{bits} bit"),
+        None => "—".to_owned(),
+    };
+    let rate = marked(&rates, info.sample_rate, &rate_text);
+    let depth = marked(&depths, info.bits_per_sample, &depth_text);
+    let channels = marked(&channels, info.channels, &format!("{} ch", info.channels));
+    let mut x = name_rect.right() + 10.0;
+    for (salt, name, text, wide) in [
+        ("rate", "Sample Rate", rate, 60.0),
+        ("depth", "Bit Depth", depth, 60.0),
+        ("channels", "Channels", channels, 50.0),
+    ] {
+        let at = pos2(x, rect.center().y);
+        painter.text(
+            at,
+            Align2::LEFT_CENTER,
+            &text,
+            theme.small_font(),
+            colours.text_dim.0,
+        );
+        let text_rect =
+            Rect::from_min_size(pos2(x - 2.0, rect.top()), vec2(wide - 4.0, rect.height()));
+        header_value(ui, salt, name, text_rect, &text);
+        x += wide;
+    }
+    // How many files are selected.
+    if infos.len() > 1 {
+        let text = format!("{} files", infos.len());
+        painter.text(
+            rect.right_center(),
+            Align2::RIGHT_CENTER,
+            &text,
+            theme.small_font(),
+            colours.text_dim.0,
+        );
+        header_value(
+            ui,
+            "files",
+            "Files",
+            Rect::from_min_size(
+                pos2(rect.right() - 60.0, rect.top()),
+                vec2(60.0, rect.height()),
+            ),
+            &text,
+        );
+    }
+}
+
+/// A value in the header, which assistive technology reads.
+fn header_value(ui: &mut Ui, salt: &str, name: &str, rect: Rect, text: &str) {
+    let id = Id::new(("sample-header", salt));
+    let response = ui.interact(rect, id, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, false, name));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_label(name.to_owned());
+        node.set_value(text.to_owned());
+    });
+}
+
+/// The text of a value, with an asterisk where the selected clips differ.
+fn marked<T: PartialEq>(values: &[T], value: T, text: &str) -> String {
+    if values.iter().all(|other| *other == value) {
+        text.to_owned()
+    } else {
+        format!("{text}*")
     }
 }
 

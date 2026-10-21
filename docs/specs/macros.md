@@ -1,6 +1,6 @@
 # Macros: macro controls, Map mode, Randomize, and variations
 
-- **Status:** partial (WP-5.4 built R1 to R20; WP-5.4b builds R21 to R24)
+- **Status:** partial (WP-5.4 built R1 to R20 and WP-5.5 R25 to R33; WP-5.4b builds R21 to R24)
 - **Work packages:** WP-5.4 (macros, Map mode, Randomize, names and colours, R1 to R20), WP-5.4b (the stepped and radio-button styles: R21 to R24), WP-5.5 (macro variations: R25 to R33). The rack itself, its chains, its title bar and its view column are WP-5.1's and WP-5.2's ([racks.md](racks.md)); MIDI and key mapping of a macro is milestone M7's; rack presets are WP-5.8's; modulation of a macro or of a mapped parameter is [modulation.md](modulation.md)'s
 - **Parity-matrix row:** Automation and modulation: Macros (16 per rack), variations, randomise, map mode with per-mapping ranges; [the improvements](../05-improvements.md), IMP-30 (stepped and radio-button macro styles)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.4

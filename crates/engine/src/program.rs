@@ -989,6 +989,42 @@ impl EngineProgram {
         (time as f64 / total as f64) as f32
     }
 
+    /// The most gain reduction any of a task's track's compressors or
+    /// limiters reported for the last block, in dB, as a compressor's Gain
+    /// Reduction reads it: zero when none of them reduced. It reaches every
+    /// device at any depth inside a rack (the mixer view spec, R40).
+    pub(crate) fn gain_reduction(&self, task: u32) -> f32 {
+        let mut most = 0.0f32;
+        self.chain_gain_reduction(self.tasks[task as usize].chain, &mut most);
+        most
+    }
+
+    /// Folds the gain reduction of every device in `chain`, racks at any
+    /// depth included, into `most` (the mixer view spec, R40). A device
+    /// that's switched off processes nothing, so it counts as reducing
+    /// nothing.
+    fn chain_gain_reduction(&self, chain: Span, most: &mut f32) {
+        for &step in &self.steps[chain.range()] {
+            match step {
+                Step::Node(slot) => {
+                    let Some(slot) = self.slots.get(slot as usize) else {
+                        continue;
+                    };
+                    if let Some(Instance::Device(node)) = &slot.node
+                        && !slot.bypass
+                    {
+                        *most = most.min(node.gain_reduction());
+                    }
+                }
+                Step::Rack(rack) => {
+                    for chain in self.racks[rack as usize].all().range() {
+                        self.chain_gain_reduction(self.rack_chains[chain].steps, most);
+                    }
+                }
+            }
+        }
+    }
+
     /// Moves the nodes that survive from `old` into this program. Real-time
     /// safe: it swaps pointers, so whatever was in either slot stays owned
     /// by one of the two programs. Returns `false`, and moves nothing, if
@@ -1261,6 +1297,7 @@ impl EngineProgram {
                     transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    signatures: &self.time_signatures,
                     sidechain: None,
                     external: None,
                     outputs: None,
@@ -1423,6 +1460,7 @@ impl EngineProgram {
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                signatures: &self.time_signatures,
                 sidechain: None,
                 external: None,
                 outputs: None,
@@ -2083,6 +2121,7 @@ impl EngineProgram {
                 transport: block.transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                signatures: &self.time_signatures,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
                 external: returned,
                 outputs: output_tapped.then(|| turn.outputs(outputs)),
@@ -2322,6 +2361,7 @@ impl EngineProgram {
             transport: block.transport,
             sample_rate: self.sample_rate,
             tempo: &self.tempo,
+            signatures: &self.time_signatures,
             sidechain: None,
             notes: &[],
             notes_out: None,
@@ -2514,6 +2554,7 @@ impl EngineProgram {
                     transport: block.transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    signatures: &self.time_signatures,
                     sidechain: None,
                     external: None,
                     outputs: None,

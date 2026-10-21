@@ -182,6 +182,19 @@ pub struct Compiler {
     hits: ChainHits,
 }
 
+/// Whether `track` sits inside a frozen group, whose render replaces it
+/// (WP-4.14, R14).
+fn inside_frozen_group(document: &bl_model::Document, track: TrackId) -> bool {
+    let mut parent = document.parent(track);
+    while let Some(id) = parent {
+        if document.track(id).is_some_and(bl_model::Track::is_frozen) {
+            return true;
+        }
+        parent = document.parent(id);
+    }
+    false
+}
+
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
 /// mode)` triples sorted by scene and then track: what a scene launch
 /// queues (WP-3.2) and where a press reads its clip's mode (WP-3.3).
@@ -618,6 +631,35 @@ impl Compiler {
             .push((NodeKey::Device(device.id), self.gc.data(data)));
     }
 
+    /// Sends an audio track's clip player its clips, from the media library
+    /// (WP-1.4). A frozen track's list comes from its freeze files (R6).
+    fn send_audio_clips(
+        &mut self,
+        document: &Document,
+        track: &Track,
+        previous: Option<&Document>,
+        update: &mut Update,
+    ) {
+        let loop_start = self.loop_start_frame(document);
+        let previous = previous.and_then(|last| last.track(track.id()));
+        let built = ClipList::build(
+            track,
+            previous,
+            &document.settings().tempo,
+            self.config.sample_rate,
+            self.config.channels,
+            loop_start,
+            &mut self.sources,
+            self.registry.media(),
+        );
+        update.missing.extend(built.missing);
+        update.missing.sort_unstable();
+        update.missing.dedup();
+        update
+            .data
+            .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+    }
+
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
     fn send_clips(
@@ -631,26 +673,13 @@ impl Compiler {
             return;
         };
         match track.kind() {
-            TrackKind::Audio => {
-                let loop_start = self.loop_start_frame(document);
-                let previous = previous.and_then(|last| last.track(track.id()));
-                let built = ClipList::build(
-                    track,
-                    previous,
-                    &document.settings().tempo,
-                    self.config.sample_rate,
-                    self.config.channels,
-                    loop_start,
-                    &mut self.sources,
-                    self.registry.media(),
-                );
-                update.missing.extend(built.missing);
-                update.missing.sort_unstable();
-                update.missing.dedup();
-                update
-                    .data
-                    .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+            // A frozen MIDI track plays freeze files through the audio clip
+            // list; a frozen group or return plays its whole render (R6,
+            // R14, R15).
+            TrackKind::Midi | TrackKind::Group | TrackKind::Return if track.is_frozen() => {
+                self.send_audio_clips(document, track, previous, update);
             }
+            TrackKind::Audio => self.send_audio_clips(document, track, previous, update),
             TrackKind::Midi => {
                 let list =
                     MidiClipList::build(track, &document.settings().tempo, self.config.sample_rate);
@@ -681,7 +710,18 @@ impl Compiler {
         let previous = self.synced.clone();
         let graph = Graph::of(document);
         let solo = Solo::with(document, &graph);
-        let order = document.track_order();
+        // A frozen group plays its own render: the tracks inside it run no
+        // devices and reach no output (WP-4.14, R14).
+        let hidden: BTreeSet<TrackId> = document
+            .track_order()
+            .into_iter()
+            .filter(|id| inside_frozen_group(document, *id))
+            .collect();
+        let order: Vec<TrackId> = document
+            .track_order()
+            .into_iter()
+            .filter(|id| !hidden.contains(id))
+            .collect();
         let task_of: BTreeMap<TrackId, u32> = order
             .iter()
             .enumerate()
@@ -754,9 +794,12 @@ impl Compiler {
                 if track.kind() == TrackKind::Main {
                     continue;
                 }
+                let Some(&from) = task_of.get(&track.id()) else {
+                    continue;
+                };
                 cue_inputs.push(Input {
                     route: self.cue_route(&mut build, track),
-                    from: task_of[&track.id()],
+                    from,
                     tap: Tap::PostFx,
                     chain: NO_CHAIN,
                     device: NO_TASK,
@@ -1368,6 +1411,27 @@ impl Compiler {
         };
         // An audio or MIDI track's clip player runs first.
         let player = match track.kind() {
+            // A frozen MIDI track plays freeze files through an audio clip
+            // player (WP-4.14, R6).
+            TrackKind::Audio | TrackKind::Midi | TrackKind::Group | TrackKind::Return
+                if track.is_frozen() =>
+            {
+                Some({
+                    let key = NodeKey::Player(track.id());
+                    if self.previous(key, &Identity::Player).is_none() {
+                        build.new_players.insert(track.id());
+                    } else {
+                        build.restate.push(ParamEvent::now(
+                            key,
+                            crate::clips::player::AUDIBLE,
+                            switch(audible),
+                        ));
+                    }
+                    self.place(build, key, Identity::Player, 0, || {
+                        Instance::Device(Box::new(ClipPlayer::new(&config).audible(audible)))
+                    })
+                })
+            }
             TrackKind::Audio => Some({
                 let key = NodeKey::Player(track.id());
                 if self.previous(key, &Identity::Player).is_none() {
@@ -1402,7 +1466,14 @@ impl Compiler {
         };
         let sidechain_start = build.sidechains.len() as u32;
         let midi_start = build.midi_sidechains.len() as u32;
-        let chain = self.add_flow(build, track.devices(), sidechain_inputs, &mut dependencies);
+        // A frozen track runs none of its devices: its player hands on the
+        // freeze files (WP-4.14, R6).
+        let chain = self.add_flow(
+            build,
+            track.devices().filter(|_| !track.is_frozen()),
+            sidechain_inputs,
+            &mut dependencies,
+        );
         let sidechains = Span {
             start: sidechain_start,
             end: build.sidechains.len() as u32,
@@ -2505,7 +2576,10 @@ fn needs_program(
                 // routing change moves routes. Monitor alone doesn't: it
                 // opens and closes routes (see `route_events`).
                 let (was, is) = (before.routing(), after.routing());
+                // A freeze takes the track's devices out of the program and
+                // hides a frozen group's tracks (WP-4.14, R6, R14).
                 if !same_chain
+                    || before.is_frozen() != after.is_frozen()
                     || !before.children().eq(after.children())
                     || before.mixer().tap != after.mixer().tap
                     || was.input != is.input

@@ -1,4 +1,4 @@
-//! IMP-15: a deactivated device or track costs nothing.
+//! IMP-15: a switched-off device costs nothing.
 //!
 //! - A switched-off device isn't run, and the changes to its parameters
 //!   still reach it (the device-chains spec, R6).
@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use bl_commands::Registry as Commands;
 use bl_engine::testing;
-use bl_model::{Command, Editor, TrackKind, registry};
+use bl_model::{Editor, TrackKind, registry};
 use common::{Rig, dc, device, track};
 use serde_json::{Value, json};
 
@@ -39,11 +39,13 @@ fn a_switched_off_device_is_not_run_and_takes_its_parameter_change() {
     assert_eq!(rig.probe.counted.load(Relaxed), 64, "the counter counts");
 
     for device in [counter, level] {
-        rig.apply(Command::SetDeviceEnabled {
-            device,
-            enabled: false,
-        });
+        run(
+            &mut rig.editor,
+            "device.set_enabled",
+            json!({ "device": device, "enabled": false }),
+        );
     }
+    rig.sync();
     rig.block(64);
     assert_eq!(rig.last()[0], 0.0, "off: no DC");
     let counted = rig.probe.counted.load(Relaxed);
@@ -56,20 +58,22 @@ fn a_switched_off_device_is_not_run_and_takes_its_parameter_change() {
     );
 
     // A change while it's off still reaches it, without a recompile.
-    let synced = rig.apply(Command::SetDeviceParam {
-        device: level,
-        param: testing::VALUE,
-        value: 0.75,
-    });
-    assert!(!synced.program);
+    run(
+        &mut rig.editor,
+        "device.set_param",
+        json!({ "device": level, "param": testing::VALUE, "value": 0.75 }),
+    );
+    assert!(!rig.sync().program);
     rig.block(64);
 
     for device in [counter, level] {
-        rig.apply(Command::SetDeviceEnabled {
-            device,
-            enabled: true,
-        });
+        run(
+            &mut rig.editor,
+            "device.set_enabled",
+            json!({ "device": device, "enabled": true }),
+        );
     }
+    rig.sync();
     rig.block(64);
     assert_eq!(
         rig.last()[0],

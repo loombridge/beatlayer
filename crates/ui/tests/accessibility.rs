@@ -1641,7 +1641,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
-    let audio_panel = LaterView("the Audio Utilities panel's warp controls (WP-4.10b)");
+    let audio_panel = LaterView("the Audio Utilities panel's controls (WP-4.10b)");
     let clip_title_bar = LaterView("the audio clip's title bar Save button (WP-4.10b)");
     let auto_warp = LaterView(
         "the Sample Editor's context menu's Set 1.1.1 Here and Warp items, drawn disabled \
@@ -1659,6 +1659,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
     let device_menu = Equivalent(
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
+    );
+    let track_menu = Equivalent(
+        "the track's context menu, opened from its title bar with the context menu key \
+         (S-CTX-002), then the arrows and Enter, as in Live",
     );
     let metronome_menu = Equivalent(
         "the Metronome settings menu, from its pop-up arrow or context menu, as in Live \
@@ -2096,6 +2100,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  focused column into view",
             )),
         ),
+        // The fold button in a track's title bar (racks spec, R27): Live
+        // names the button (25.8) but its key isn't observed yet, and its
+        // place in the Tab order with it (the racks spec's open question
+        // 19).
+        (
+            "mixer_view.fold_chains",
+            Exception(Unobserved(
+                "the fold button in the track's title bar: Live's own key for it isn't observed \
+                 yet, and its place in the mixers' Tab order with it",
+            )),
+        ),
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
@@ -2271,6 +2286,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The freeze's document-level commands (WP-4.14): `track.freeze` and
+        // `track.unfreeze` are the ones a person and an agent run, from the
+        // menus and Cmd-Option-Shift-F, and they apply these.
+        (
+            "track.set_frozen",
+            Exception(Equivalent(
+                "track.freeze, from the Edit menu, the track and clip menus, and Cmd-Option-Shift-F (freeze-and-bounce R13)",
+            )),
+        ),
+        (
+            "track.clear_frozen",
+            Exception(Equivalent(
+                "track.unfreeze, the same item read as Unfreeze Track (freeze-and-bounce R10, R13)",
+            )),
+        ),
+        (
+            "track.unfreeze",
+            Exception(Equivalent(
+                "the Freeze Track item, which reads Unfreeze Track and unfreezes a selection that is frozen (freeze-and-bounce R1, R10)",
+            )),
+        ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
@@ -2298,6 +2334,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.set_follow_actions",
             Exception(Unobserved(
                 "the follow controls in the Launch Properties panel, which Tab reaches; their place in Live's Tab order",
+            )),
+        ),
+        ("clip.edit_sample", Exception(audio_panel)),
+        (
+            "clip.replace_sample",
+            Exception(Unobserved(
+                "a file dropped from the browser on the Clip View replaces the clip's sample (the \
+             sample editor spec, R18)",
+            )),
+        ),
+        (
+            "settings.set_sample_editor",
+            Exception(LaterView(
+                "the File & Folder page's Sample Editor Browse button, the second Browse on the \
+                 page (WP-4.10b)",
             )),
         ),
         ("clip.set_warp", Exception(audio_panel)),
@@ -2392,6 +2443,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
+        ("track.set_devices_enabled", Exception(track_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(
@@ -2625,6 +2677,48 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "what the Macro Controls and the mappings list show",
             )),
+        ),
+        // Spec: macros R25 to R30 and R32. The Macro Variations view's
+        // buttons, its rows and the macro's context menu reach these with the
+        // pointer; Rename, Duplicate and Delete also take Cmd+R, Cmd+D and the
+        // Delete key through the device's own commands.
+        (
+            "rack.store_variation",
+            Exception(Equivalent("the variations view's New button")),
+        ),
+        (
+            "rack.launch_variation",
+            Exception(Equivalent("a variation row's Launch button")),
+        ),
+        (
+            "rack.overwrite_variation",
+            Exception(Equivalent("a variation row's Overwrite button")),
+        ),
+        (
+            "rack.rename_variation",
+            Exception(Equivalent("Rename on a variation row")),
+        ),
+        (
+            "rack.duplicate_variation",
+            Exception(Equivalent("Duplicate on a variation row")),
+        ),
+        (
+            "rack.delete_variation",
+            Exception(Equivalent("Delete on a variation row")),
+        ),
+        (
+            "rack.set_macro_variation_excluded",
+            Exception(Equivalent(
+                "Exclude Macro From Variations on a macro's context menu",
+            )),
+        ),
+        (
+            "rack.show_variations",
+            Exception(Equivalent("the view column's Show/Hide Macro Variations")),
+        ),
+        (
+            "rack.select_variation",
+            Exception(Equivalent("a click on a variation's row")),
         ),
         (
             "chain.select",
@@ -3384,6 +3478,26 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.move_to_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
+        // The autosampler's dialog (WP-5.16, IMP-27).
+        (
+            "device.autosample_open",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (multisampler R64)",
+            )),
+        ),
+        (
+            "device.autosample",
+            Exception(Equivalent(
+                "the autosampler's dialog's Autosample, which Tab reaches",
+            )),
+        ),
+        (
+            "device.autosample_cancel",
+            Exception(Equivalent(
+                "the autosampler's dialog's Cancel, which Tab reaches",
+            )),
+        ),
         // Separate Stems' dialog (IMP-11).
         ("stems.status", Exception(Query)),
         (
@@ -3407,6 +3521,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        // Slice to New MIDI Track's dialog (WP-4.16).
+        (
+            "clip.slice_to_midi_track",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's OK, which Tab reaches",
+            )),
+        ),
+        (
+            "clip.close_slice_dialog",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's Cancel, or Esc",
+            )),
         ),
         // Gaps.
         (
@@ -3624,6 +3751,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.add_layers",
             "device.add_slice",
             "device.audition_sample",
+            "device.autosample_open",
             "device.convert",
             "device.crop_sample",
             "device.delete_layers",

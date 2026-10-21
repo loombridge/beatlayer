@@ -3,6 +3,8 @@
 
 #![allow(dead_code, reason = "each test file uses part of the harness")]
 
+use bl_audio_io::NullControl;
+use bl_shell::testing;
 use bl_shell::{Effect, Shell};
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
@@ -74,15 +76,40 @@ pub struct Harness {
     /// Files dropped into this window at the next frame, as a drag and
     /// drop from Finder or Explorer gives them.
     pub dropped: Vec<egui::DroppedFileHandle>,
+    /// The blocks of a null stream paced by hand (T199), when the harness
+    /// runs one: the engine advances only as the test asks or as its
+    /// [`frame`](Self::frame)s run, never on the wall clock.
+    control: Option<NullControl>,
 }
+
+/// The blocks one frame runs on a manually paced stream: a few, so a window
+/// that draws what the engine published keeps up between the test's own
+/// steps, as the display's frames would.
+const BLOCKS_PER_FRAME: u64 = 2;
 
 impl Harness {
     pub fn new(window: Window) -> Self {
+        let mut shell = Shell::headless();
+        shell.start_audio();
+        Self::with_shell(window, shell)
+    }
+
+    /// A harness whose null stream is paced by hand (T199): the engine's
+    /// blocks run only as the test's frames and [`advance`](Self::advance)
+    /// ask, so a test that waits for an engine result never races the wall
+    /// clock.
+    pub fn manual(window: Window) -> Self {
+        let (mut shell, control) = testing::rig();
+        shell.start_audio();
+        let mut harness = Self::with_shell(window, shell);
+        harness.control = Some(control);
+        harness
+    }
+
+    fn with_shell(window: Window, shell: Shell) -> Self {
         let ctx = Context::default();
         ctx.set_fonts(fonts());
         ctx.enable_accesskit();
-        let mut shell = Shell::headless();
-        shell.start_audio();
         let theme = Theme::builtin(shell.theme());
         theme.apply(&ctx);
         let zoom = shell.zoom();
@@ -114,14 +141,49 @@ impl Harness {
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
             dropped: Vec::new(),
+            control: None,
         }
+    }
+
+    /// Runs `blocks` blocks of the manually paced null stream, if the harness
+    /// has one: the engine advances as the test asks (T199).
+    pub fn advance(&mut self, blocks: u64) {
+        if let Some(control) = &self.control
+            && self.shell.audio().is_running()
+        {
+            control.run_blocks(blocks);
+        }
+    }
+
+    /// Runs frames, each advancing a manually paced engine, until `done`
+    /// holds; panics with `what` after 2,000 frames (about 6 s of test time).
+    pub fn wait(&mut self, what: &str, mut done: impl FnMut(&Harness) -> bool) {
+        for _ in 0..2_000 {
+            // The app's loop takes the background work's news every frame:
+            // the browser's index, a decoded preview, a finished scan.
+            self.shell.poll();
+            self.frame(vec![]);
+            if done(self) {
+                return;
+            }
+        }
+        panic!("waited for {what}");
     }
 
     /// A harness for a window that covers the system's title bar and draws
     /// Live's, as on macOS (D22): its content is the whole window, 1600 x
     /// 1000 points for the main window.
     pub fn with_title_bar(window: Window) -> Self {
-        let mut harness = Self::new(window);
+        Self::titled(Self::new(window), window)
+    }
+
+    /// The same, with the null stream paced by hand (T199), for a test that
+    /// waits for an engine result.
+    pub fn manual_with_title_bar(window: Window) -> Self {
+        Self::titled(Self::manual(window), window)
+    }
+
+    fn titled(mut harness: Self, _window: Window) -> Self {
         harness.size += vec2(0.0, bl_ui::layout::TITLE_BAR);
         harness.title_bar = true;
         harness
@@ -155,6 +217,7 @@ impl Harness {
         let invocations =
             self.dispatcher
                 .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+        self.advance(BLOCKS_PER_FRAME);
         self.engine = self.shell.poll_engine();
         if self.window == Window::Settings {
             self.settings.prepare(&mut self.shell);

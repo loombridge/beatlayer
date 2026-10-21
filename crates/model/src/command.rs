@@ -299,6 +299,19 @@ pub enum Command {
         /// The new name.
         name: String,
     },
+    /// Marks tracks frozen with the files a freeze rendered (WP-4.14, R13).
+    /// The track's devices, clips, and their settings stay as they are, so
+    /// unfreezing plays them again (R10).
+    FreezeTracks {
+        /// Each track and the audio its freeze rendered.
+        frozen: Vec<(TrackId, crate::freeze::FrozenTrack)>,
+    },
+    /// Plays tracks through their devices and clips again, dropping their
+    /// frozen audio (WP-4.14, R10). Their freeze files stay on disk.
+    UnfreezeTracks {
+        /// The tracks to unfreeze.
+        tracks: Vec<TrackId>,
+    },
     /// Gives a scene a tempo to set when it is launched, from 20 to 999
     /// BPM, or switches it off with `None` (WP-3.5).
     SetSceneTempo {
@@ -2054,6 +2067,62 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Stores every macro of a rack's values as a new variation at the end of
+    /// its list (macros spec, R26).
+    StoreVariation {
+        /// The rack.
+        rack: DeviceId,
+    },
+    /// Sets every macro of a rack that isn't excluded from variations to the
+    /// value a variation holds, at once and on one frame, as a hand move on
+    /// each (macros spec, R27).
+    LaunchVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Replaces every value a variation holds with the macros' values now,
+    /// keeping its name and place (macros spec, R28).
+    OverwriteVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Gives a variation a name of its own (macros spec, R29).
+    RenameVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+        /// The name.
+        name: String,
+    },
+    /// Copies a variation, with its name and values, straight after it
+    /// (macros spec, R29).
+    DuplicateVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Deletes a variation (macros spec, R29).
+    DeleteVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Leaves a macro out of variations, or puts it back (macros spec, R30).
+    SetMacroVariationExcluded {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// Whether it's left out.
+        excluded: bool,
+    },
 }
 
 impl Command {
@@ -2085,6 +2154,8 @@ impl Command {
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
             Self::RenameTrack { .. } => "Rename track",
+            Self::FreezeTracks { .. } => "Freeze tracks",
+            Self::UnfreezeTracks { .. } => "Unfreeze tracks",
             Self::SetVolume { .. } => "Change volume",
             Self::SetPan { .. } => "Change pan",
             Self::SetMute { .. } => "Mute track",
@@ -2311,6 +2382,13 @@ impl Command {
             Self::SetMacroInfo { .. } => "Change Macro Info Text",
             Self::RandomizeMacros { .. } => "Randomize Macros",
             Self::SetMacroRandomizeExcluded { .. } => "Exclude Macro from Randomization",
+            Self::StoreVariation { .. } => "Store Macro Variation",
+            Self::LaunchVariation { .. } => "Launch Macro Variation",
+            Self::OverwriteVariation { .. } => "Overwrite Macro Variation",
+            Self::RenameVariation { .. } => "Rename Macro Variation",
+            Self::DuplicateVariation { .. } => "Duplicate Macro Variation",
+            Self::DeleteVariation { .. } => "Delete Macro Variation",
+            Self::SetMacroVariationExcluded { .. } => "Exclude Macro from Variations",
             Self::SetMappedValue { .. } => "Change parameter",
         }
     }
@@ -2488,6 +2566,86 @@ impl Document {
             Command::RenameTrack { track, name } => {
                 if self.track_ref(*track)?.name != *name {
                     self.track_mut(*track)?.name.clone_from(name);
+                }
+                Ok(())
+            }
+            Command::FreezeTracks { frozen } => {
+                for (track, audio) in frozen {
+                    if self.track_ref(*track)?.kind == TrackKind::Main {
+                        return Err(ModelError::MainTrack);
+                    }
+                    // The clips play the freeze files: their own data is
+                    // kept in the frozen record and restored on unfreezing
+                    // (R6, R10).
+                    let mut played: Vec<(crate::ids::ClipId, Option<SceneId>, crate::clip::Clip)> =
+                        Vec::new();
+                    for region in &audio.clips {
+                        let Some(held) = self.track_ref(*track).ok() else {
+                            continue;
+                        };
+                        let Some(clip) = (match region.scene {
+                            None => held.clips.get(&region.clip),
+                            Some(scene) => held.slots.get(&scene),
+                        }) else {
+                            continue;
+                        };
+                        let mut clip = (**clip).clone();
+                        clip.data = audio.audio_for(region);
+                        played.push((region.clip, region.scene, clip));
+                    }
+                    let held = self.track_mut(*track)?;
+                    held.frozen = Some(audio.clone());
+                    for (clip, scene, played) in played {
+                        match scene {
+                            None => {
+                                held.clips.insert(clip, Shared::new(played));
+                            }
+                            Some(scene) => {
+                                held.slots.insert(scene, Shared::new(played));
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Command::UnfreezeTracks { tracks } => {
+                for track in tracks {
+                    let originals: Vec<(
+                        crate::ids::ClipId,
+                        crate::clip::ClipData,
+                        Option<SceneId>,
+                    )> = self
+                        .track_ref(*track)?
+                        .frozen
+                        .as_ref()
+                        .map(|frozen| {
+                            frozen
+                                .clips
+                                .iter()
+                                .map(|region| (region.clip, region.original.clone(), region.scene))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let held = self.track_mut(*track)?;
+                    for (clip, data, scene) in originals {
+                        match scene {
+                            None => {
+                                if let Some(existing) = held.clips.get(&clip).cloned() {
+                                    let mut back = (*existing).clone();
+                                    back.data = data;
+                                    held.clips.insert(clip, Shared::new(back));
+                                }
+                            }
+                            Some(scene) => {
+                                if let Some(existing) = held.slots.get(&scene).cloned() {
+                                    let mut back = (*existing).clone();
+                                    back.data = data;
+                                    held.slots.insert(scene, Shared::new(back));
+                                }
+                            }
+                        }
+                    }
+                    held.frozen = None;
                 }
                 Ok(())
             }
@@ -3758,6 +3916,40 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::StoreVariation { rack } => {
+                let values = self.rack_macro_values(*rack)?;
+                self.device_mut(*rack)?.macros.store_variation(values);
+                Ok(())
+            }
+            Command::LaunchVariation { rack, index } => self.launch_variation(*rack, *index),
+            Command::OverwriteVariation { rack, index } => {
+                let values = self.rack_macro_values(*rack)?;
+                self.device_mut(*rack)?
+                    .macros
+                    .overwrite_variation(*index, values)
+            }
+            Command::RenameVariation { rack, index, name } => {
+                self.variation_mut(*rack, *index)?.name.clone_from(name);
+                Ok(())
+            }
+            Command::DuplicateVariation { rack, index } => {
+                let variation = self.variation(*rack, *index)?.clone();
+                self.device_mut(*rack)?
+                    .macros
+                    .variations
+                    .insert(index + 1, variation);
+                Ok(())
+            }
+            Command::DeleteVariation { rack, index } => {
+                self.variation(*rack, *index)?;
+                self.device_mut(*rack)?.macros.variations.remove(*index);
+                Ok(())
+            }
+            Command::SetMacroVariationExcluded {
+                rack,
+                macro_number,
+                excluded,
+            } => self.edit_macro(*rack, *macro_number, |m| m.variation_excluded = *excluded),
         }
     }
 
@@ -3894,6 +4086,78 @@ impl Document {
         let mut macros = current.macros.clone();
         edit(macros.setting_mut(number));
         self.device_mut(rack)?.macros = macros;
+        Ok(())
+    }
+
+    /// Every macro of `rack`'s values, in number order (macros spec, R26).
+    fn rack_macro_values(&self, rack: DeviceId) -> Result<Vec<f64>, ModelError> {
+        let device = self.device_ref(rack)?;
+        if device.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        Ok(device.macro_values())
+    }
+
+    /// The variation at `index` of `rack`.
+    fn variation(
+        &self,
+        rack: DeviceId,
+        index: usize,
+    ) -> Result<&crate::rack::Variation, ModelError> {
+        self.device_ref(rack)?
+            .macros
+            .variations
+            .get(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))
+    }
+
+    /// The variation at `index` of `rack`, to change.
+    fn variation_mut(
+        &mut self,
+        rack: DeviceId,
+        index: usize,
+    ) -> Result<&mut crate::rack::Variation, ModelError> {
+        self.device_mut(rack)?
+            .macros
+            .variations
+            .get_mut(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))
+    }
+
+    /// Sets every macro of `rack` that isn't excluded from variations to the
+    /// value the variation at `index` holds, at once, as a hand move on each
+    /// (macros spec, R27).
+    fn launch_variation(&mut self, rack: DeviceId, index: usize) -> Result<(), ModelError> {
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        let variation = current
+            .macros
+            .variations
+            .get(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))?;
+        let moves: Vec<(u8, f64)> = (1..=MACROS)
+            .filter(|number| !current.macros.setting(*number).variation_excluded)
+            .filter_map(|number| {
+                variation
+                    .values
+                    .get(usize::from(number - 1))
+                    .map(|value| (number, value.clamp(0.0, 1.0)))
+            })
+            .collect();
+        let owner = self.device_owner(rack)?;
+        for (number, value) in &moves {
+            self.device_mut(rack)?
+                .set_param(crate::macro_param(*number), *value);
+        }
+        for (number, _) in &moves {
+            self.track_mut(owner)?
+                .override_target(&AutomationTarget::Device {
+                    device: rack,
+                    param: crate::macro_param(*number),
+                });
+        }
         Ok(())
     }
 

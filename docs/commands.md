@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-533 commands in 37 areas.
+558 commands in 37 areas.
 
 ## Permission classes
 
@@ -152,6 +152,7 @@ Each command has:
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
 | [`chain.set_zone`](#chainset_zone) | Change Chain Zone | `edit` |  |  |
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
+| [`clip.close_slice_dialog`](#clipclose_slice_dialog) | Close Slice to New MIDI Track | `read` |  |  |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
 | [`clip.crop`](#clipcrop) | Crop Clip | `edit` | `Cmd+Shift+J`; `Cmd+Shift+J` | `Ctrl+Shift+J`; `Ctrl+Shift+J` |
@@ -163,6 +164,7 @@ Each command has:
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
 | [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` | `Delete` | `Delete` |
+| [`clip.edit_sample`](#clipedit_sample) | Edit Sample | `external` |  |  |
 | [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` | `Cmd+I` | `Ctrl+I` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
@@ -172,8 +174,10 @@ Each command has:
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
+| [`clip.open_slice_dialog`](#clipopen_slice_dialog) | Slice to New MIDI Track | `read` |  |  |
 | [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.replace_sample`](#clipreplace_sample) | Replace Sample | `edit` |  |  |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
@@ -204,6 +208,7 @@ Each command has:
 | [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | Slice to New MIDI Track | `edit` |  |  |
 | [`clip.slide_contents`](#clipslide_contents) | Slide Clip Contents | `edit` | `Shift+Option+drag` | `Shift+Alt+drag` |
 | [`clip.stretch`](#clipstretch) | Stretch Clip | `edit` | `Shift+drag the clip title bar` | `Shift+drag the clip title bar` |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
@@ -225,6 +230,9 @@ Each command has:
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
 | [`device.add_slice`](#deviceadd_slice) | Add Slice | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
+| [`device.autosample`](#deviceautosample) | Autosample | `external` |  |  |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | Stop Autosampling | `edit` |  |  |
+| [`device.autosample_open`](#deviceautosample_open) | Autosample… | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
 | [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
@@ -351,6 +359,7 @@ Each command has:
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
+| [`mixer_view.fold_chains`](#mixer_viewfold_chains) | Fold Rack Chains | `read` |  |  |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.performance_impact`](#mixer_viewperformance_impact) | Performance Impact | `read` |  |  |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
@@ -401,23 +410,32 @@ Each command has:
 | [`plugin.settings`](#pluginsettings) | Plug-In Settings | `edit` |  |  |
 | [`plugin.show_window`](#pluginshow_window) | Show Plug-In Window | `read` |  |  |
 | [`plugin.unconfigure_param`](#pluginunconfigure_param) | Unconfigure Plug-In Parameter | `edit` |  |  |
+| [`rack.delete_variation`](#rackdelete_variation) | Delete Macro Variation | `destructive` |  |  |
+| [`rack.duplicate_variation`](#rackduplicate_variation) | Duplicate Macro Variation | `edit` |  |  |
 | [`rack.invert_mapping`](#rackinvert_mapping) | Invert Macro Mapping | `edit` |  |  |
+| [`rack.launch_variation`](#racklaunch_variation) | Launch Macro Variation | `edit` |  |  |
 | [`rack.macros`](#rackmacros) | Rack Macros | `read` |  |  |
 | [`rack.map_macro`](#rackmap_macro) | Map to Macro | `edit` |  |  |
 | [`rack.map_mode`](#rackmap_mode) | Map Mode | `edit` |  |  |
 | [`rack.move_pads`](#rackmove_pads) | Move the Pads | `read` |  |  |
+| [`rack.overwrite_variation`](#rackoverwrite_variation) | Overwrite Macro Variation | `edit` |  |  |
 | [`rack.randomize_macros`](#rackrandomize_macros) | Randomize Macros | `edit` |  |  |
 | [`rack.rename_macro`](#rackrename_macro) | Rename Macro | `edit` |  |  |
+| [`rack.rename_variation`](#rackrename_variation) | Rename Macro Variation | `edit` |  |  |
 | [`rack.select_macro`](#rackselect_macro) | Select Macro | `edit` |  |  |
+| [`rack.select_variation`](#rackselect_variation) | Select Macro Variation | `edit` |  |  |
 | [`rack.set_auto_select`](#rackset_auto_select) | Auto Select | `edit` |  |  |
 | [`rack.set_macro_colour`](#rackset_macro_colour) | Change Macro Color | `edit` |  |  |
 | [`rack.set_macro_count`](#rackset_macro_count) | Show More or Fewer Macros | `edit` |  |  |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | Change Macro Info Text | `edit` |  |  |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | Exclude Macro from Randomization | `edit` |  |  |
+| [`rack.set_macro_variation_excluded`](#rackset_macro_variation_excluded) | Exclude Macro from Variations | `edit` |  |  |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | Change parameter | `edit` |  |  |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | Change Macro Mapping | `edit` |  |  |
 | [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`rack.set_zone_editor`](#rackset_zone_editor) | Show a Rack's Zone Editor | `edit` |  |  |
+| [`rack.show_variations`](#rackshow_variations) | Show or Hide Macro Variations | `read` |  |  |
+| [`rack.store_variation`](#rackstore_variation) | Store Macro Variation | `edit` |  |  |
 | [`rack.switch_hot_swap_target`](#rackswitch_hot_swap_target) | Switch Hot-Swap Target | `read` | `D` | `D` |
 | [`rack.unmap_macro`](#rackunmap_macro) | Unmap Macro | `edit` |  |  |
 | [`routing.set_cue_out`](#routingset_cue_out) | Set Cue Out | `edit` |  |  |
@@ -493,6 +511,7 @@ Each command has:
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | Sample Editor | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
@@ -517,12 +536,17 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
+| [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
+| [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
+| [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
 | [`transport.insert_marker_to_playhead`](#transportinsert_marker_to_playhead) | Move Insert Marker To Playhead | `read` | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
@@ -547,6 +571,7 @@ Each command has:
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
 | [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
+| [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
@@ -2743,6 +2768,18 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 ### Area `clip`
 
+#### `clip.close_slice_dialog`
+
+**Close Slice to New MIDI Track**. Permission: `read`. Contexts: `global`.
+
+Closes the Slice to New MIDI Track dialog. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
+
 #### `clip.create`
 
 **Create Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2950,6 +2987,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.edit_sample`
+
+**Edit Sample**. Permission: `external`. Contexts: `clip-view`.
+
+Opens an audio clip's file in the external sample editor, as the Edit button in the Clip View's Audio Utilities panel does: the editor the File & Folder page's Sample Editor row names, or that page itself when it names none. The file's content is checked when Beatlayer comes to the front again: if it has changed, every clip of the set that played the old file plays the new one, in one undo step, each keeping its warp markers only if the file kept its length. Opens a program outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`EditedSample`](#editedsample).
+
 #### `clip.insert_transient`
 
 **Insert Transient**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -3124,6 +3177,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.open_slice_dialog`
+
+**Slice to New MIDI Track**. Permission: `read`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Opens the Slice to New MIDI Track dialog for an audio clip (`clip`, or the one audio clip selected in either view). The dialog holds the Slice By chooser (the beat divisions, Transients, and Warp Markers), the Slicing Preset chooser, and Preserve warped timing, and its OK runs `clip.slice_to_midi_track`. Changes nothing in the set: an agent calls `clip.slice_to_midi_track` instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
+
 #### `clip.quantize_audio`
 
 **Quantize**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -3169,6 +3238,23 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.replace_sample`
+
+**Replace Sample**. Permission: `edit`. Contexts: `clip-view`.
+
+Replaces an audio clip's file with the file at `path`, as dropping a file from the browser on the Clip View does: the clip keeps its gain and pitch, and its warp markers only if the new file is exactly as long as the old one. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file the clip plays instead. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`ReplacedSample`](#replacedsample).
 
 #### `clip.reset_transients`
 
@@ -3712,6 +3798,25 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.slice_to_midi_track`
+
+**Slice to New MIDI Track**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Cuts an audio clip into slices on a new MIDI track. The clip is sliced over its region: from its Start marker to its End marker, or, with the loop on, from the earlier of its Start marker and its loop's start to the loop's end. `by` is a beat division (`eight_bars`, `four_bars`, `two_bars`, `one_bar`, `half`, `quarter`, `eighth`, `sixteenth` — the default — or `thirty_second`), `transients` (one slice at each of the clip's transients in the region), or `warp_markers` (one at each of its warp markers; refused for an unwarped clip). With `preserve_warped_timing` on (the default) the slices are cut from the clip's warped audio, so each sounds as it did and its note falls where it played; off, they are cut from the clip's own file, unwarped. `preset` names a slicing preset: Beatlayer's factory presets (the default makes a Drum Rack of one sampler per slice, each chain receiving a note from C1 up and playing C3; `One Sampler` makes one sampler in Slice mode) or a user preset in the User Library's Defaults/Slicing folder. The new MIDI track goes directly after the clip's track, takes the clip's name, and holds a MIDI clip with one note per slice, rising chromatically, each lasting to the next, at velocity 127. More than 128 slices are refused (64 for `One Sampler`). Slicing leaves the audio clip as it was and is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `by` | [`SliceBy`](#sliceby) or null | no | How to cut it: a beat division, `transients`, or `warp_markers`. Left out, `sixteenth` (R2). |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+| `preserve_warped_timing` | boolean or null | no | Whether the slices are cut from the clip's warped audio, keeping the timing warping gave them. Left out, `true` (R2, R6). |
+| `preset` | string or null | no | The slicing preset's name: one of Beatlayer's factory presets or a user preset in the User Library's `Defaults/Slicing/` folder (R11). Left out, the default preset. |
+
+Result: [`SliceResult`](#sliceresult).
+
 #### `clip.slide_contents`
 
 **Slide Clip Contents**. Permission: `edit`. Contexts: `arrangement`.
@@ -4113,6 +4218,60 @@ Arguments:
 | `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
 
 Result: [`Auditioned`](#auditioned).
+
+#### `device.autosample`
+
+**Autosample**. Permission: `external`. Contexts: `device-view`.
+
+Samples an instrument across a range of notes and velocities into a new multisampler on a new MIDI track: the native instrument, the plug-in instrument, or the external instrument, rendered alone with its current settings. The notes are the lowest one and every `step` above it up to the highest, which is always sampled; each is played at `velocity_layers` velocities, held for `note_length` seconds and followed by `release_tail` seconds of render, and sampled `round_robins` times for the round robins. The samples are 32-bit floating-point WAVs in the project's `Samples/Processed/Autosample` folder, named for the instrument, the note and the velocity, and they join the set's media. With `detect_loops` on, each sample gets a sustain loop so a sustained sound holds past the note. The result is a new MIDI track straight after the source's, holding a multisampler with one layer per sample, its zones spread between the sampled notes, Round Robin on in Forward mode where there are round robins, and the volume envelope's release as long as the release tail. One undo step; undoing it leaves the files on disk. It writes files, and plays hardware for the external instrument.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `detect_loops` | boolean or null | no | Whether a loop is found in each sample. Off by default. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample: a native instrument, a plug-in instrument, or the external instrument. The one selected in the Device View when it is left out. |
+| `highest` | integer or null | no | The highest note sampled, from 0 to 127 (C-2 to G8). C6 by default. |
+| `lowest` | integer or null | no | The lowest note sampled, from 0 to 127 (C-2 to G8). C1 by default. |
+| `name` | string or null | no | The name of the instrument the samples are named for, and of the new track. The instrument's own name by default. |
+| `note_length` | number or null | no | How long each note is held, in seconds, from 0.1 to 30. 2 by default. |
+| `release_tail` | number or null | no | How long the render goes on after the note is released, in seconds, from 0 to 30. 1 by default. |
+| `round_robins` | integer or null | no | How many times each note is sampled, from 1 to 8, for the round robins. 1 by default. |
+| `step` | integer or null | no | How many semitones between the sampled notes, from 1 to 12. 3 by default. |
+| `velocity_layers` | integer or null | no | How many velocity layers each note is sampled at, from 1 to 16. 1 by default. |
+| `wait` | boolean or null | no | Whether to wait for the samples to be made before returning. True by default; with it off the command starts the samples and returns at once, and the progress is read from the dialog. |
+
+Result: [`Autosampled`](#autosampled).
+
+#### `device.autosample_cancel`
+
+**Stop Autosampling**. Permission: `edit`. Contexts: `device-view`.
+
+Stops a running autosample: the files it wrote are deleted and the set is left as it was. It does nothing when no autosample is running.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`AutosampleCancelled`](#autosamplecancelled).
+
+#### `device.autosample_open`
+
+**Autosample…**. Permission: `read`. Contexts: `device-view`.
+
+Opens the autosampler's dialog for an instrument: the notes and velocities to sample, the note length and release tail, the round robins, whether a loop is found in each sample, and the name the samples are given. It changes nothing in the set; the dialog's Autosample button runs `device.autosample`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample. The one selected in the Device View when it is left out. |
+
+Result: [`AutosamplerOpened`](#autosampleropened).
 
 #### `device.clear_sample_edits`
 
@@ -6348,6 +6507,23 @@ Arguments: none (send `{}`).
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.fold_chains`
+
+**Fold Rack Chains**. Permission: `read`. Contexts: `global`.
+
+Folds a rack's chains out in the mixers as strips after the track's, as the fold button in the track's title bar does, or folds them back in. `rack` is the rack: a rack of more than one chain, on a track or inside another rack's chain. A track's fold button is for the instrument or drum rack it holds; a chain's is for the rack inside it. A rack of one chain has no chains to fold out. Switches unless `shown` says which. Changes only the view, and isn't saved with the set; the chains it shows read back in `mixer_view.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack whose chains fold out. |
+| `shown` | boolean or null | no | Show them (true) or hide them (false); switches them if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.in_out`
 
 **Mixer In/Out**. Permission: `read`. Contexts: `global`.
@@ -7261,6 +7437,40 @@ Result: [`DeviceParameters`](#deviceparameters).
 
 ### Area `rack`
 
+#### `rack.delete_variation`
+
+**Delete Macro Variation**. Permission: `destructive`. Contexts: `device-view`.
+
+Deletes the variation at `index`. One undo step, `Delete Macro Variation`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | The variation's place in the rack's list, from 0. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.duplicate_variation`
+
+**Duplicate Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Puts a copy of the variation at `index`, with the same name and values, straight after it. One undo step, `Duplicate Macro Variation`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | The variation's place in the rack's list, from 0. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `rack.invert_mapping`
 
 **Invert Macro Mapping**. Permission: `edit`. Contexts: `device-view`.
@@ -7275,6 +7485,23 @@ Arguments:
 |---|---|---|---|
 | `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
 | `target` | [`MacroTarget`](#macrotarget) | yes | The mapped parameter. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.launch_variation`
+
+**Launch Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Sets every macro of a rack that isn't excluded from variations to the value the variation at `index` holds, at once and on one frame, as the Launch Macro Variation button does. Excluded macros keep their values. Each macro moved is a hand move on it, so its automation envelope is overridden and, while Automation Arm records, the move is written as its envelope. Continuous mapped parameters glide to their new values. One undo step, `Launch Macro Variation`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | The variation's place in the rack's list, from 0. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -7348,6 +7575,23 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `rack.overwrite_variation`
+
+**Overwrite Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces every value the variation at `index` holds with the macros' values now, keeping its name and place, as the Overwrite Macro Variation button does. One undo step, `Overwrite Macro Variation`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | The variation's place in the rack's list, from 0. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `rack.randomize_macros`
 
 **Randomize Macros**. Permission: `edit`. Contexts: `device-view`.
@@ -7383,6 +7627,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `rack.rename_variation`
+
+**Rename Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Gives the variation at `index` the `name` of its own. One undo step, `Rename Macro Variation`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `index` | integer, at least 0 | yes | The variation's place in the rack's list, from 0. |
+| `name` | string | yes | The name. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `rack.select_macro`
 
 **Select Macro**. Permission: `edit`. Contexts: `device-view`.
@@ -7396,6 +7658,23 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `macro_number` | integer or null | no | The macro, numbered from 1; null, or left out, selects none. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`MacroState`](#macrostate).
+
+#### `rack.select_variation`
+
+**Select Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Selects a variation in a rack's Macro Variations view, or none, so Rename, Duplicate and Delete act on it. It changes only the view: it isn't an undo step and the set doesn't keep it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `index` | integer or null | no | The variation's place in the rack's list, from 0; null, or left out, selects none. |
 | `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 
 Result: [`MacroState`](#macrostate).
@@ -7488,6 +7767,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `rack.set_macro_variation_excluded`
+
+**Exclude Macro from Variations**. Permission: `edit`. Contexts: `device-view`.
+
+Leaves macro `macro_number` out of variations (`excluded` true), so no launch changes it, or puts it back (false). Storing and overwriting still record its value, so switching the exclusion off lets the next launch set it. One undo step, saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `excluded` | boolean | yes | Whether it's left out. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `rack.set_mapped_value`
 
 **Change parameter**. Permission: `edit`. Contexts: `device-view`.
@@ -7563,6 +7860,39 @@ Arguments:
 | `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `rack.show_variations`
+
+**Show or Hide Macro Variations**. Permission: `read`. Contexts: `device-view`.
+
+Shows or hides a rack's Macro Variations view, the selected device's or `rack`'s, as the Show/Hide Macro Variations view selector does. It changes only the view: it isn't an undo step, and the set keeps which views each rack shows. `rack.set_view` with the `variations` view does the same.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+| `shown` | boolean or null | no | Show the Macro Variations view (true) or hide it (false); switches if left out. |
+
+Result: [`MacroState`](#macrostate).
+
+#### `rack.store_variation`
+
+**Store Macro Variation**. Permission: `edit`. Contexts: `device-view`.
+
+Stores every one of a rack's 16 macros' values as a new variation at the end of its list, named "Variation N", N one more than the highest number among the rack's variations named that way. A rack holds any number of variations. One undo step, `Store Macro Variation`. `rack.macros` reports the variations.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `rack.switch_hot_swap_target`
 
@@ -8815,6 +9145,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_sample_editor`
+
+**Sample Editor**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the sample editor on the Settings window's File & Folder page: the command the Edit button in the Clip View's Audio Utilities panel opens a clip's file in. `path` is the command: the program, its arguments, and the clip's file as the last one, or `null` for none, when Edit opens the File & Folder page instead. Run by a person from the Browse button without a `path`, it asks for a program. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the editor in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The editor's command: the program, its arguments, and the clip's file as the last one. `null` for none, when Edit opens the File & Folder page instead. |
+
+Result: [`SampleEditorResult`](#sampleeditorresult).
+
 #### `settings.set_select_next_scene_on_launch`
 
 **Select Next Scene on Launch**. Permission: `edit`. Contexts: `settings`.
@@ -9197,6 +9543,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.clear_frozen`
+
+**Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Plays tracks through their devices and clips again, dropping their frozen audio and restoring the clip data the freeze kept. `tracks` names them. `track.unfreeze` is the command a person and an agent run.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks to unfreeze. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `track.create`
 
 **Insert Track**. Permission: `edit`. Contexts: `global`.
@@ -9259,6 +9621,26 @@ Arguments:
 
 Result: [`TracksDuplicated`](#tracksduplicated).
 
+#### `track.freeze`
+
+**Freeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and plays that instead of their devices: an audio or MIDI track's Arrangement from 1.1.1 to the end of its last tail, and each Session clip on its own, taken after the devices and before the mixer. `tracks` names them (left out, the selected tracks). A group renders its tracks through their mixers and devices and, for each return they send to, the sum of those sends; a return renders from 1.1.1 to the end of the set. The track keeps its mixer, and its clips keep their places; its devices and clip settings are locked while frozen. The freeze runs offline through the processed-file writer, one undo step when every file is whole. It's an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-TRACK-017 | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` | `track-headers` | Freeze or unfreeze the selected tracks | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
+
 #### `track.group`
 
 **Group Tracks**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
@@ -9317,6 +9699,55 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.set_devices_enabled`
+
+**Deactivate All Devices**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
+
+Switches every top-level device on the tracks (`tracks`, or the selected tracks) off, or on with `enabled`: true, as the track context menu's Deactivate All Devices does. It reaches only the tracks' own devices, not the devices inside a rack. With `enabled` left out it switches: off, unless every top-level device on the tracks is already off and there is one, when it turns them on. One undo step either way, named Deactivate All Devices or Activate All Devices.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Switch the devices on (true) or off (false); when left out, off unless every top-level device on the tracks is already off, when on. |
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`DevicesEnabled`](#devicesenabled).
+
+#### `track.set_frozen`
+
+**Set Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Marks tracks frozen with the files a freeze rendered, and makes their clips play those files instead of running the track's devices. `frozen` names each track and the audio its freeze rendered. `track.freeze` is the command a person and an agent run: it renders the files and applies this one. Used directly, it names files the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of pair of [`TrackId`](#trackid) and [`FrozenTrack`](#frozentrack) | yes | Each track and the audio its freeze rendered. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.unfreeze`
+
+**Unfreeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Plays the selected frozen tracks through their devices and clips again, from the set as it now is, so edits made while frozen stay. Their freeze files stay on disk, so undoing the unfreeze freezes them again without rendering. `tracks` names them (left out, the selected tracks). It's an edit.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
 
 #### `track.ungroup`
 
@@ -9706,6 +10137,18 @@ Arguments:
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.close_plug_in_windows`
+
+**Close All Plug-in Windows**. Permission: `read`. Contexts: `global`.
+
+Closes every open plug-in editor window at once, as View ▸ Close All Plug-in Windows does. It closes editors only: floating native device windows stay as they are, so it changes nothing in the set, isn't an undo step, and is in the read class. It has no key. Returns how many editor windows it closed.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ClosedPlugInWindows`](#closedpluginwindows).
+
 #### `view.draw_mode`
 
 **Draw Mode**. Permission: `read`. Contexts: `global`.
@@ -10039,6 +10482,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.edit_sample`](#clipedit_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -10050,6 +10494,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.quantize_audio`](#clipquantize_audio) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.replace_sample`](#clipreplace_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
@@ -10080,6 +10525,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_warp_mode`](#clipset_warp_mode) | the query tool's `clip` | `data.audio.warp_mode` |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | the query tool's `song` | `tracks` |
 | [`clip.slide_contents`](#clipslide_contents) | the query tool's `clip` | `data.audio.start` |
 | [`clip.stretch`](#clipstretch) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
@@ -10091,6 +10537,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
 | [`device.add_slice`](#deviceadd_slice) | the query tool's `device` | `slices` |
+| [`device.autosample`](#deviceautosample) | the query tool's `track` | `devices` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
@@ -10209,21 +10656,29 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`plugin.set_panel_param`](#pluginset_panel_param) | `device_view.state` | `devices` |
 | [`plugin.settings`](#pluginsettings) | `settings.state` | `plug_ins` |
 | [`plugin.unconfigure_param`](#pluginunconfigure_param) | `device.parameters` | `params` |
+| [`rack.delete_variation`](#rackdelete_variation) | `rack.macros` | `variations` |
+| [`rack.duplicate_variation`](#rackduplicate_variation) | `rack.macros` | `variations` |
 | [`rack.invert_mapping`](#rackinvert_mapping) | `rack.macros` | `macros` |
+| [`rack.launch_variation`](#racklaunch_variation) | `rack.macros` | `macros` |
 | [`rack.map_macro`](#rackmap_macro) | `rack.macros` | `macros` |
 | [`rack.map_mode`](#rackmap_mode) | `device_view.state` | `map_mode` |
+| [`rack.overwrite_variation`](#rackoverwrite_variation) | `rack.macros` | `variations` |
 | [`rack.randomize_macros`](#rackrandomize_macros) | `rack.macros` | `macros` |
 | [`rack.rename_macro`](#rackrename_macro) | `rack.macros` | `macros` |
+| [`rack.rename_variation`](#rackrename_variation) | `rack.macros` | `variations` |
 | [`rack.select_macro`](#rackselect_macro) | `rack.macros` | `macros` |
+| [`rack.select_variation`](#rackselect_variation) | `rack.macros` | `variations` |
 | [`rack.set_auto_select`](#rackset_auto_select) | `device_view.state` | `devices` |
 | [`rack.set_macro_colour`](#rackset_macro_colour) | `rack.macros` | `macros` |
 | [`rack.set_macro_count`](#rackset_macro_count) | `rack.macros` | `count` |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | `rack.macros` | `macros` |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | `rack.macros` | `macros` |
+| [`rack.set_macro_variation_excluded`](#rackset_macro_variation_excluded) | `rack.macros` | `macros` |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | `rack.macros` | `macros` |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | `rack.macros` | `macros` |
 | [`rack.set_view`](#rackset_view) | `device_view.state` | `devices` |
 | [`rack.set_zone_editor`](#rackset_zone_editor) | `device_view.state` | `devices` |
+| [`rack.store_variation`](#rackstore_variation) | `rack.macros` | `variations` |
 | [`rack.unmap_macro`](#rackunmap_macro) | `rack.macros` | `macros` |
 | [`routing.set_cue_out`](#routingset_cue_out) | the query tool's `track` | `routing.cue_out` |
 | [`routing.set_input`](#routingset_input) | the query tool's `track` | `routing.input` |
@@ -10268,6 +10723,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | `settings.state` | `file_folder.sample_editor` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
@@ -10288,12 +10744,17 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
+| [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
+| [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
+| [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
 | [`transport.set_loop_enabled`](#transportset_loop_enabled) | `transport.state` | `loop_on` |
@@ -10331,6 +10792,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
@@ -11816,6 +12278,214 @@ One of:
 
 </details>
 
+### `AutosampleCancelled`
+
+What `device.autosample_cancel` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cancelled` | boolean | yes | Whether a sample was running and has been stopped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_cancel` returns.",
+  "properties": {
+    "cancelled": {
+      "description": "Whether a sample was running and has been stopped.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cancelled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosampleFile`
+
+One sample the autosampler made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the file is. |
+| `note` | integer from 0 to 255 | yes | The note it holds. |
+| `velocity` | integer from 0 to 255 | yes | The velocity it was played at. |
+| `round_robin` | integer from 0 to 255 | yes | Which round robin of them it is, from 1. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer it became. |
+| `loop_end` | integer or null | no | Where its loop ends, in frames, when it has one. |
+| `loop_start` | integer or null | no | Where its loop begins, in frames, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One sample the autosampler made.",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/LayerId",
+      "description": "The layer it became."
+    },
+    "loop_end": {
+      "description": "Where its loop ends, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "loop_start": {
+      "description": "Where its loop begins, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "The note it holds.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Where the file is.",
+      "type": "string"
+    },
+    "round_robin": {
+      "description": "Which round robin of them it is, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The velocity it was played at.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "note",
+    "velocity",
+    "round_robin",
+    "layer"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Autosampled`
+
+What `device.autosample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of [`AutosampleFile`](#autosamplefile) | yes | The samples made, in note, velocity and round robin order. |
+| `without_loops` | array of string | yes | The samples left without a loop, named. |
+| `took` | number | yes | How long it took, in seconds. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler, once the samples are made. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track the multisampler is on, once the samples are made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample` returns.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The multisampler, once the samples are made."
+    },
+    "files": {
+      "description": "The samples made, in note, velocity and round robin order.",
+      "items": {
+        "$ref": "#/$defs/AutosampleFile"
+      },
+      "type": "array"
+    },
+    "took": {
+      "description": "How long it took, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track the multisampler is on, once the samples are made."
+    },
+    "without_loops": {
+      "description": "The samples left without a loop, named.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "files",
+    "without_loops",
+    "took"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosamplerOpened`
+
+What `device.autosample_open` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The instrument the dialog is open for. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_open` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The instrument the dialog is open for."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BandResult`
 
 One octave band.
@@ -12782,6 +13452,113 @@ A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), taken af
 
 </details>
 
+### `ChainStrip`
+
+A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack the chain belongs to. |
+| `rack_name` | string | yes | The rack's name. |
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | The chain's name. |
+| `volume` | number | yes | The chain's Volume as linear gain: 1 is 0 dB. |
+| `pan` | number | yes | The chain's Pan, from −1 to 1. |
+| `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
+| `enabled` | boolean | yes | Whether the chain's activator is on. |
+| `solo` | boolean | yes | Whether the chain is soloed. |
+| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "colour": {
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "enabled": {
+      "description": "Whether the chain's activator is on.",
+      "type": "boolean"
+    },
+    "has_mixer": {
+      "description": "Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The chain's name.",
+      "type": "string"
+    },
+    "nested": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RackFold"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains."
+    },
+    "pan": {
+      "description": "The chain's Pan, from −1 to 1.",
+      "format": "double",
+      "type": "number"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack the chain belongs to."
+    },
+    "rack_name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "solo": {
+      "description": "Whether the chain is soloed.",
+      "type": "boolean"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    },
+    "volume": {
+      "description": "The chain's Volume as linear gain: 1 is 0 dB.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "rack_name",
+    "chain",
+    "name",
+    "volume",
+    "pan",
+    "has_mixer",
+    "enabled",
+    "solo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ChainZones`
 
 A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values its fades span: `key` (0 to 127), `velocity` (1 to 127) and `select` (the chain select zone, 0 to 127). One left out passes everything: every note, every velocity, and chain select 0 alone.
@@ -13641,6 +14418,36 @@ What `arrangement.copy` put on the clipboard.
     "clips",
     "tracks",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClosedPlugInWindows`
+
+What `view.close_plug_in_windows` returns: how many editor windows it closed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `closed` | integer, at least 0 | yes | The editor windows it closed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.close_plug_in_windows` returns: how many editor windows it closed.",
+  "properties": {
+    "closed": {
+      "description": "The editor windows it closed.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "closed"
   ],
   "type": "object"
 }
@@ -15666,6 +16473,43 @@ Warp settings for a device that plays media (WP-5.15b, Simpler).
 
 </details>
 
+### `DevicesEnabled`
+
+What `track.set_devices_enabled` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it reached, in the order given. |
+| `enabled` | boolean | yes | Whether their devices are on afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.set_devices_enabled` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether their devices are on afterwards.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "The tracks it reached, in the order given.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DialogStatus`
 
 The open dialog.
@@ -16436,6 +17280,52 @@ What an edit did, and what's selected afterwards.
 
 </details>
 
+### `EditedSample`
+
+What `clip.edit_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose file was opened. |
+| `file` | string | yes | The file that was opened. |
+| `editor` | string | yes | The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor. |
+| `opened` | boolean | yes | Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.edit_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose file was opened."
+    },
+    "editor": {
+      "description": "The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor.",
+      "type": "string"
+    },
+    "file": {
+      "description": "The file that was opened.",
+      "type": "string"
+    },
+    "opened": {
+      "description": "Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "editor",
+    "opened"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EditorSize`
 
 How tall the zone editor's rows are (R10): a right-click offers Small, Medium and Large, which change only the view.
@@ -16948,6 +17838,7 @@ File & Folder's settings in `settings.state`.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
+| `sample_editor` | string | yes | The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16955,13 +17846,18 @@ File & Folder's settings in `settings.state`.
 {
   "description": "File & Folder's settings in `settings.state`.",
   "properties": {
+    "sample_editor": {
+      "description": "The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named.",
+      "type": "string"
+    },
     "temporary_folder": {
       "description": "The Temporary Folder in use: the setting, or the default.",
       "type": "string"
     }
   },
   "required": [
-    "temporary_folder"
+    "temporary_folder",
+    "sample_editor"
   ],
   "type": "object"
 }
@@ -17401,6 +18297,304 @@ On a scene, `linked` is the Longest button: the time is the multiplier times the
       "$ref": "#/$defs/Ticks",
       "default": 2822400,
       "description": "The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `FreezeResult`
+
+What a freeze did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of [`TrackId`](#trackid) | yes | The tracks that were frozen. |
+| `files` | array of string | no | The files the freeze wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a freeze did.",
+  "properties": {
+    "files": {
+      "description": "The files the freeze wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "frozen": {
+      "description": "The tracks that were frozen.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "frozen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenClip`
+
+One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip in the set. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `start` | number | yes | Where the clip starts in the file, in seconds. |
+| `end` | number | yes | Where it ends in the file, in seconds. |
+| `tempo` | number | yes | The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6). |
+| `length` | [`Ticks`](#ticks) | yes | The clip's length in ticks, for the warp map. |
+| `cycle` | number or null | no | For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop. |
+| `original` | [`ClipData`](#clipdata) | no | The clip's own data before the freeze, kept so unfreezing plays it again (R10). |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot it belongs to; `null` for an Arrangement clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip in the set."
+    },
+    "cycle": {
+      "description": "For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The clip's length in ticks, for the warp map."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "original": {
+      "$ref": "#/$defs/ClipData",
+      "default": {
+        "midi": {
+          "notes": []
+        }
+      },
+      "description": "The clip's own data before the freeze, kept so unfreezing plays it again (R10)."
+    },
+    "scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Session slot it belongs to; `null` for an Arrangement clip."
+    },
+    "start": {
+      "description": "Where the clip starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6).",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "media",
+    "start",
+    "end",
+    "tempo",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenOutput`
+
+A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ClipId`](#clipid) | yes | The clip ID the frozen output plays under in the Arrangement. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `tempo` | number | yes | The tempo the render was taken at, in BPM. |
+| `start` | [`Ticks`](#ticks) | yes | The first song frame the file holds. |
+| `length` | [`Ticks`](#ticks) | yes | The song length the file covers. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip ID the frozen output plays under in the Arrangement."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The song length the file covers."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The first song frame the file holds."
+    },
+    "tempo": {
+      "description": "The tempo the render was taken at, in BPM.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "media",
+    "tempo",
+    "start",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTail`
+
+A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip the tail follows. |
+| `id` | [`ClipId`](#clipid) | yes | The ID the Arrangement gives the tail region. Tail regions aren't clips of the set. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts in the song. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `file_start` | number | yes | Where it starts in the file, in seconds. |
+| `file_end` | number | yes | Where it ends in the file, in seconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip the tail follows."
+    },
+    "file_end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "file_start": {
+      "description": "Where it starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The ID the Arrangement gives the tail region. Tail regions aren't clips of the set."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts in the song."
+    }
+  },
+  "required": [
+    "clip",
+    "id",
+    "start",
+    "length",
+    "media",
+    "file_start",
+    "file_end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTrack`
+
+A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`FrozenClip`](#frozenclip) | no | The stretch of frozen audio each clip plays, in clip order. |
+| `output` | [`FrozenOutput`](#frozenoutput) or null | no | A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track. |
+| `tails` | array of [`FrozenTail`](#frozentail) | no | The tails that follow the Arrangement clips (R3). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.",
+  "properties": {
+    "clips": {
+      "description": "The stretch of frozen audio each clip plays, in clip order.",
+      "items": {
+        "$ref": "#/$defs/FrozenClip"
+      },
+      "type": "array"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FrozenOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track."
+    },
+    "tails": {
+      "description": "The tails that follow the Arrangement clips (R3).",
+      "items": {
+        "$ref": "#/$defs/FrozenTail"
+      },
+      "type": "array"
     }
   },
   "type": "object"
@@ -19662,7 +20856,7 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
 
 ### `Macro`
 
-One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.
+One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30). A macro's value is a parameter of its rack, in `Device::params`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -19670,12 +20864,13 @@ One macro's saved settings beside its value (macros spec, R10, R14 and R16). A m
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
+| `variation_excluded` | boolean | no | Whether a variation launch leaves it alone (R30). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.",
+  "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
       "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
@@ -19698,6 +20893,10 @@ One macro's saved settings beside its value (macros spec, R10, R14 and R16). A m
     "randomize_excluded": {
       "description": "Whether Randomize leaves it alone (R16).",
       "type": "boolean"
+    },
+    "variation_excluded": {
+      "description": "Whether a variation launch leaves it alone (R30).",
+      "type": "boolean"
     }
   },
   "type": "object"
@@ -19718,6 +20917,7 @@ One macro as `rack.macros` reports it.
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
 | `randomize_excluded` | boolean | yes | Whether Randomize leaves it alone (R16). |
+| `variation_excluded` | boolean | yes | Whether a variation launch leaves it alone (R30). |
 | `mappings` | array of [`MacroMappingInfo`](#macromappinginfo) | yes | What it drives, in the order the mappings were made (R9). |
 
 <details><summary>JSON Schema</summary>
@@ -19766,6 +20966,11 @@ One macro as `rack.macros` reports it.
       "description": "Its value, from 0 to 1.",
       "format": "double",
       "type": "number"
+    },
+    "variation_excluded": {
+      "default": false,
+      "description": "Whether a variation launch leaves it alone (R30).",
+      "type": "boolean"
     }
   },
   "required": [
@@ -19775,6 +20980,7 @@ One macro as `rack.macros` reports it.
     "value",
     "text",
     "randomize_excluded",
+    "variation_excluded",
     "mappings"
   ],
   "type": "object"
@@ -19904,19 +21110,20 @@ One mapping as `rack.macros` reports it.
 
 ### `MacroState`
 
-What `rack.macros` reports (macros spec, R19).
+What `rack.macros` reports (macros spec, R19 and R32).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
 | `count` | integer from 0 to 255 | yes | How many macros the Macro Controls show. |
 | `macros` | array of [`MacroInfo`](#macroinfo) | yes | Each of the 16 macros, in number order. |
+| `variations` | array of [`VariationInfo`](#variationinfo) | yes | The rack's variations, in the order they were made (macros spec, R31). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What `rack.macros` reports (macros spec, R19).",
+  "description": "What `rack.macros` reports (macros spec, R19 and R32).",
   "properties": {
     "count": {
       "description": "How many macros the Macro Controls show.",
@@ -19935,12 +21142,21 @@ What `rack.macros` reports (macros spec, R19).
     "rack": {
       "$ref": "#/$defs/DeviceId",
       "description": "The rack."
+    },
+    "variations": {
+      "default": [],
+      "description": "The rack's variations, in the order they were made (macros spec, R31).",
+      "items": {
+        "$ref": "#/$defs/VariationInfo"
+      },
+      "type": "array"
     }
   },
   "required": [
     "rack",
     "count",
-    "macros"
+    "macros",
+    "variations"
   ],
   "type": "object"
 }
@@ -20748,12 +21964,15 @@ What `mixer_view.state` and the other view commands return.
 | `in_out` | boolean | yes | Whether the In/Out section shows, in both mixers. |
 | `sends` | boolean | yes | Whether the Sends section shows. |
 | `volume` | boolean | yes | Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
-| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
+| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
+| `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
+| `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
+| `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20765,9 +21984,24 @@ What `mixer_view.state` and the other view commands return.
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Arrangement View's mixer."
     },
+    "chains": {
+      "description": "The chains folded out as strips, in the mixers' column order (racks spec, R27).",
+      "items": {
+        "$ref": "#/$defs/ChainStrip"
+      },
+      "type": "array"
+    },
     "crossfader": {
-      "description": "Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set.",
+      "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
       "type": "boolean"
+    },
+    "gain_reduction": {
+      "default": [],
+      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
     },
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
@@ -20782,6 +22016,13 @@ What `mixer_view.state` and the other view commands return.
       "description": "Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31).",
       "items": {
         "$ref": "#/$defs/TrackImpact"
+      },
+      "type": "array"
+    },
+    "racks": {
+      "description": "The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out.",
+      "items": {
+        "$ref": "#/$defs/RackFold"
       },
       "type": "array"
     },
@@ -20821,7 +22062,8 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks",
     "track_options",
     "performance_impact",
-    "performance_impact_values"
+    "performance_impact_values",
+    "gain_reduction"
   ],
   "type": "object"
 }
@@ -23463,6 +24705,52 @@ One of:
 
 </details>
 
+### `RackFold`
+
+A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `name` | string | yes | The rack's name. |
+| `folded` | boolean | yes | Whether its chains are folded out as strips now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.",
+  "properties": {
+    "folded": {
+      "description": "Whether its chains are folded out as strips now.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "name",
+    "folded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RackFrame`
 
 A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view column of selectors, then each view that's shown, left to right.
@@ -23637,18 +24925,19 @@ One of:
 
 ### `RackMacros`
 
-A rack's macros' settings and mappings (macros spec, R17). The values themselves are the rack's parameters.
+A rack's macros' settings, mappings and variations (macros spec, R17 and R31). The values themselves are the rack's parameters.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `mappings` | array of [`MacroMapping`](#macromapping) | no | The mappings, in the order they were made (R9). |
 | `settings` | array of [`Macro`](#macro) | no | Each macro's settings, in macro order; a macro left off keeps the defaults. |
+| `variations` | array of [`Variation`](#variation) | no | The variations, in the order they were made (R25, R31). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A rack's macros' settings and mappings (macros spec, R17). The values themselves are the rack's parameters.",
+  "description": "A rack's macros' settings, mappings and variations (macros spec, R17 and R31). The values themselves are the rack's parameters.",
   "properties": {
     "mappings": {
       "description": "The mappings, in the order they were made (R9).",
@@ -23661,6 +24950,13 @@ A rack's macros' settings and mappings (macros spec, R17). The values themselves
       "description": "Each macro's settings, in macro order; a macro left off keeps the defaults.",
       "items": {
         "$ref": "#/$defs/Macro"
+      },
+      "type": "array"
+    },
+    "variations": {
+      "description": "The variations, in the order they were made (R25, R31).",
+      "items": {
+        "$ref": "#/$defs/Variation"
       },
       "type": "array"
     }
@@ -23678,6 +24974,7 @@ One of the views a rack's frame can show (racks spec, R18).
 One of:
 
 - `"macros"`: The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).
+- `"variations"`: The Macro Variations (macros spec, R25).
 - `"chain_list"`: The chain list.
 - `"devices"`: The selected chain's devices.
 - `"pads"`: A drum rack's pad view (drum racks spec, R11).
@@ -23695,6 +24992,11 @@ One of:
     {
       "const": "macros",
       "description": "The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).",
+      "type": "string"
+    },
+    {
+      "const": "variations",
+      "description": "The Macro Variations (macros spec, R25).",
       "type": "string"
     },
     {
@@ -23740,7 +25042,7 @@ One of:
 
 ### `RackViews`
 
-Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders) and `returns` (the return chains' section), all off in a new rack. Every rack has `zone_editor` (`key`, `velocity` or `select`, none in a new rack; not a drum rack) and `auto_select` (the chain list follows the notes, off in a new rack).
+Which views of a rack are shown: `macros` (the Macro Controls), `variations` (the Macro Variations, off in a new rack), `chain_list` and `devices` (the selected chain's devices), the last three on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders) and `returns` (the return chains' section), all off in a new rack. Every rack has `zone_editor` (`key`, `velocity` or `select`, none in a new rack; not a drum rack) and `auto_select` (the chain list follows the notes, off in a new rack).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -23754,13 +25056,14 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
 | `pads` | boolean | no | A drum rack's pad view. |
 | `returns` | boolean | no | A drum rack's Return switch. |
 | `send` | boolean | no | A drum rack's Send switch. |
+| `variations` | boolean | no | The Macro Variations (macros spec, R25): hidden in a new rack. |
 | `zone_editor` | [`ZoneKind`](#zonekind) or null | no | The zone editor beside the chain list (racks spec, R35): the Key, Vel (`velocity`) or Chain (`select`) editor, or none while Hide is on, as in a new rack. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders) and `returns` (the return chains' section), all off in a new rack. Every rack has `zone_editor` (`key`, `velocity` or `select`, none in a new rack; not a drum rack) and `auto_select` (the chain list follows the notes, off in a new rack).",
+  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `variations` (the Macro Variations, off in a new rack), `chain_list` and `devices` (the selected chain's devices), the last three on in a new rack. A drum rack also has `pads` (the pad view, on in a new rack) with `first_pad` (the lowest note it shows, a multiple of 4, 36 in a new rack), and the switches `input_output` (each chain's Preview, Receive, Play and Choke), `send` (its send sliders) and `returns` (the return chains' section), all off in a new rack. Every rack has `zone_editor` (`key`, `velocity` or `select`, none in a new rack; not a drum rack) and `auto_select` (the chain list follows the notes, off in a new rack).",
   "properties": {
     "auto_select": {
       "description": "Auto Select: the chain list selects the chains that are processing (racks spec, R37; drum racks follow their notes). Off in a new rack.",
@@ -23809,6 +25112,10 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
     },
     "send": {
       "description": "A drum rack's Send switch.",
+      "type": "boolean"
+    },
+    "variations": {
+      "description": "The Macro Variations (macros spec, R25): hidden in a new rack.",
       "type": "boolean"
     },
     "zone_editor": {
@@ -24477,6 +25784,46 @@ One of:
 
 </details>
 
+### `ReplacedSample`
+
+What `clip.replace_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The file the clip plays now. |
+| `media` | [`ContentHash`](#contenthash) | yes | The media it plays, by its content hash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.replace_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "file": {
+      "description": "The file the clip plays now.",
+      "type": "string"
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The media it plays, by its content hash."
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReturnChoice`
 
 An entry of a return chain's Audio To chooser.
@@ -24747,6 +26094,34 @@ What `device.edit_sample` returns.
     "device",
     "edits",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleEditorResult`
+
+What `settings.set_sample_editor` returns: the editor in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The sample editor's path, empty when none is named. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_sample_editor` returns: the editor in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The sample editor's path, empty when none is named.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }
@@ -26259,6 +27634,181 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
 
 </details>
 
+### `SliceBy`
+
+How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.
+
+One of:
+
+- `"eight_bars"`: A slice every 8 bars.
+- `"four_bars"`: A slice every 4 bars.
+- `"two_bars"`: A slice every 2 bars.
+- `"one_bar"`: A slice every bar.
+- `"half"`: A slice every half note.
+- `"quarter"`: A slice every quarter note.
+- `"eighth"`: A slice every eighth note.
+- `"sixteenth"`: A slice every sixteenth note: the dialog's default (R2).
+- `"thirty_second"`: A slice every thirty-second note.
+- `"transients"`: A slice at each of the clip's file's transients inside the region.
+- `"warp_markers"`: A slice at each of the clip's warp markers inside the region.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.",
+  "oneOf": [
+    {
+      "const": "eight_bars",
+      "description": "A slice every 8 bars.",
+      "type": "string"
+    },
+    {
+      "const": "four_bars",
+      "description": "A slice every 4 bars.",
+      "type": "string"
+    },
+    {
+      "const": "two_bars",
+      "description": "A slice every 2 bars.",
+      "type": "string"
+    },
+    {
+      "const": "one_bar",
+      "description": "A slice every bar.",
+      "type": "string"
+    },
+    {
+      "const": "half",
+      "description": "A slice every half note.",
+      "type": "string"
+    },
+    {
+      "const": "quarter",
+      "description": "A slice every quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "eighth",
+      "description": "A slice every eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "sixteenth",
+      "description": "A slice every sixteenth note: the dialog's default (R2).",
+      "type": "string"
+    },
+    {
+      "const": "thirty_second",
+      "description": "A slice every thirty-second note.",
+      "type": "string"
+    },
+    {
+      "const": "transients",
+      "description": "A slice at each of the clip's file's transients inside the region.",
+      "type": "string"
+    },
+    {
+      "const": "warp_markers",
+      "description": "A slice at each of the clip's warp markers inside the region.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SliceDialogStatus`
+
+The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `clip` | [`ClipId`](#clipid) or null | no | The clip it would slice, if one is chosen. |
+| `presets` | array of string | no | The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip it would slice, if one is chosen."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "presets": {
+      "description": "The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SliceResult`
+
+What `clip.slice_to_midi_track` made (R13).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The new MIDI track, directly after the clip's track (R7). |
+| `clip` | [`ClipId`](#clipid) | yes | The MIDI clip on it, at the audio clip's place (R9). |
+| `slices` | integer, at least 0 | yes | How many slices it made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.slice_to_midi_track` made (R13).",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The MIDI clip on it, at the audio clip's place (R9)."
+    },
+    "slices": {
+      "description": "How many slices it made.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The new MIDI track, directly after the clip's track (R7)."
+    }
+  },
+  "required": [
+    "track",
+    "clip",
+    "slices"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SlotGroup`
 
 The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).
@@ -27361,6 +28911,41 @@ One of:
 
 </details>
 
+### `TrackGainReduction`
+
+One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `reduction` | number | yes | The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).",
+  "properties": {
+    "reduction": {
+      "description": "The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "reduction"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TrackId`
 
 The ID of a track: a positive integer, unique within the project and never reused.
@@ -27939,6 +29524,82 @@ What `device.ungroup` returns.
   },
   "required": [
     "devices"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Variation`
+
+One stored macro variation (macros spec, R25 to R31): its name and the value of each of the 16 macros, in number order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, "Variation N" until Rename changes it. |
+| `values` | array of number | yes | Each macro's value from 0 to 1, in number order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One stored macro variation (macros spec, R25 to R31): its name and the value of each of the 16 macros, in number order.",
+  "properties": {
+    "name": {
+      "description": "Its name, \"Variation N\" until Rename changes it.",
+      "type": "string"
+    },
+    "values": {
+      "description": "Each macro's value from 0 to 1, in number order.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "values"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `VariationInfo`
+
+One stored macro variation as `rack.macros` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `values` | array of number | yes | Each macro's value from 0 to 1, in number order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One stored macro variation as `rack.macros` reports it.",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "values": {
+      "description": "Each macro's value from 0 to 1, in number order.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "values"
   ],
   "type": "object"
 }

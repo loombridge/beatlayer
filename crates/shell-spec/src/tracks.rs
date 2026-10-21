@@ -35,9 +35,19 @@ pub const UNGROUP: &str = "track.ungroup";
 /// The undo step's name: Live's "Ungroup Tracks" (observed in Live 12.4.3).
 pub const UNGROUP_STEP: &str = "Ungroup Tracks";
 
+/// `track.set_devices_enabled`: switch every top-level device on the selected
+/// tracks on or off as one undo step (IMP-25).
+pub const SET_DEVICES_ENABLED: &str = "track.set_devices_enabled";
+
+/// The undo step's name when it switches the devices off.
+pub const DEACTIVATE_ALL_DEVICES_STEP: &str = "Deactivate All Devices";
+
+/// The undo step's name when it switches them on.
+pub const ACTIVATE_ALL_DEVICES_STEP: &str = "Activate All Devices";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[DUPLICATE_WITHOUT_CLIPS, GROUP, UNGROUP];
+pub const IDS: &[&str] = &[DUPLICATE_WITHOUT_CLIPS, GROUP, UNGROUP, SET_DEVICES_ENABLED];
 
 /// Whether `id` is one of these track commands.
 #[must_use]
@@ -95,6 +105,28 @@ pub struct TracksUngrouped {
     pub tracks: Vec<TrackId>,
 }
 
+/// Arguments of `track.set_devices_enabled`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetDevicesEnabledArgs {
+    /// The tracks; the selected tracks if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// Switch the devices on (true) or off (false); when left out, off unless
+    /// every top-level device on the tracks is already off, when on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// What `track.set_devices_enabled` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DevicesEnabled {
+    /// The tracks it reached, in the order given.
+    pub tracks: Vec<TrackId>,
+    /// Whether their devices are on afterwards.
+    pub enabled: bool,
+}
+
 /// Adds the track commands to a registry.
 ///
 /// # Errors
@@ -144,5 +176,21 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .binding("S-TRACK-007")
             .args::<UngroupTracksArgs>()
             .result::<TracksUngrouped>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_DEVICES_ENABLED, "Deactivate All Devices")
+            .description(
+                "Switches every top-level device on the tracks (`tracks`, or the selected \
+                 tracks) off, or on with `enabled`: true, as the track context menu's \
+                 Deactivate All Devices does. It reaches only the tracks' own devices, not \
+                 the devices inside a rack. With `enabled` left out it switches: off, unless \
+                 every top-level device on the tracks is already off and there is one, when \
+                 it turns them on. One undo step either way, named Deactivate All Devices or \
+                 Activate All Devices.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Arrangement, Session, TrackHeaders])
+            .args::<SetDevicesEnabledArgs>()
+            .result::<DevicesEnabled>(),
     )
 }

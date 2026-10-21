@@ -510,6 +510,14 @@ fn the_preview_strip_follows_the_preview() {
     h.wait("the preview to play", |h| {
         h.shell.browser_preview().position_seconds > 0.0
     });
+    // The strip shows the file's name and how far it has played (R11).
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let strip = Harness::node(&nodes, "Preview Strip");
+    assert!(
+        strip.value.starts_with("Loop.wav, ") && strip.value.contains("of 2.0 seconds"),
+        "{}",
+        strip.value
+    );
     assert!(h.shell.browser_view().preview_overview().is_some());
     // The switch turns preview off, which stops it.
     let toggle = h

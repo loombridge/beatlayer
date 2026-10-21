@@ -459,66 +459,19 @@ fn arrangement_end(doc: &Document) -> Ticks {
     end
 }
 
-/// A copy of `doc` that renders `track` Post FX: the track soloed, its
-/// sends silenced, the returns muted, Main's devices off and its fader at
-/// unity, and the track's own mixer at rest (R2).
+/// A copy of `doc` that renders `track` Post FX: the export's preparation
+/// (so a track inside a group leaves it, a return keeps what is sent to it,
+/// Main's devices are off at unity, and every send and return around the
+/// track is silenced), with the track's own mixer at rest, since its volume,
+/// pan, activator and sends act on the render afterwards (R2, R14, R15).
 fn prepared_track(doc: &Document, track: TrackId) -> Result<Document, String> {
-    let held = doc.track(track).ok_or_else(|| "no such track".to_owned())?;
-    let sends: Vec<TrackId> = held.sends().map(|(to, _)| to).collect();
-    let mut doc = doc.clone();
-    let apply = |doc: &mut Document, command: Command| {
-        doc.apply(&command).map_err(|error| error.to_string())
-    };
-    if doc.main_id() != track {
-        apply(&mut doc, Command::SoloExclusive { track })?;
-    }
-    for ret in doc.returns().collect::<Vec<_>>() {
-        apply(
-            &mut doc,
-            Command::SetMute {
-                track: ret,
-                mute: true,
-            },
-        )?;
-    }
-    for to in sends {
-        apply(
-            &mut doc,
-            Command::SetSend {
-                track,
-                to,
-                level: 0.0,
-            },
-        )?;
-    }
-    for device in doc.main().devices().map(|d| d.id).collect::<Vec<_>>() {
-        apply(
-            &mut doc,
-            Command::SetDeviceEnabled {
-                device,
-                enabled: false,
-            },
-        )?;
-    }
-    let main = doc.main_id();
-    apply(
-        &mut doc,
-        Command::SetVolume {
-            track: main,
-            volume: 1.0,
-        },
-    )?;
-    apply(
-        &mut doc,
-        Command::SetPan {
-            track: main,
-            pan: 0.0,
-        },
-    )?;
-    if track != main {
-        apply(&mut doc, Command::SetVolume { track, volume: 1.0 })?;
-        apply(&mut doc, Command::SetPan { track, pan: 0.0 })?;
-        apply(&mut doc, Command::SetMute { track, mute: false })?;
+    let mut doc = crate::export::prepare_document_for_track(doc, track, false)?;
+    for command in [
+        Command::SetVolume { track, volume: 1.0 },
+        Command::SetPan { track, pan: 0.0 },
+        Command::SetMute { track, mute: false },
+    ] {
+        doc.apply(&command).map_err(|error| error.to_string())?;
     }
     Ok(doc)
 }

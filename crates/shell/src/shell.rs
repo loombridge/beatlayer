@@ -5220,12 +5220,18 @@ impl Shell {
     /// The frozen track that refuses `id`, if any (the freeze and bounce
     /// spec, R8).
     fn frozen_blocks(&self, id: &str, args: &Value) -> Option<TrackId> {
+        // R7 keeps a frozen track's mixer live: volume, pan, sends, the
+        // activator, solo and the crossfader all work; only its devices, its
+        // clips' own settings, arming and new clips are locked (R8).
         if !(id.starts_with("device.")
             || id.starts_with("clip.")
-            || id.starts_with("mixer.")
             || matches!(
                 id,
-                "browser.add_to_arrangement" | "browser.insert" | "track.create"
+                "mixer.set_arm"
+                    | "mixer.arm_exclusive"
+                    | "browser.add_to_arrangement"
+                    | "browser.insert"
+                    | "track.create"
             ))
         {
             return None;

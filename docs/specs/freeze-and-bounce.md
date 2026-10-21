@@ -81,7 +81,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R4 | not yet tested | shell test |
 | R5 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `a_mono_track_freezes_to_a_mono_file` | shell test |
 | R6 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |
-| R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming` | shell test |
+| R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_still_mixes` (volume, pan, sends, the activator and solo) | shell test |
 | R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming` | shell test |
 | R9 | not yet tested | shell test |
 | R10 | `crates/shell/tests/freeze.rs`, `unfreezing_keeps_edits_made_while_frozen` | shell test |
@@ -89,7 +89,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R12 | not yet tested | shell test |
 | R13 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `the_clip_view_reports_a_frozen_track` | shell test |
 | R14 | not yet tested | shell test |
-| R15 | not yet tested | shell test |
+| R15 | `crates/shell/tests/freeze.rs`, `a_frozen_return_renders_what_is_sent_to_it` (the render's content; playing it in time isn't tested) | shell test |
 | R16 | not yet tested | shell test |
 | R17 | not yet tested | shell test |
 | R27 | `crates/shell/tests/freeze.rs`, `a_frozen_track_nulls_against_its_live_output` | shell test |

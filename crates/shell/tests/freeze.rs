@@ -326,3 +326,136 @@ fn a_group_freezes_as_one_track() {
         .unwrap();
     assert!(std::fs::metadata(&out).unwrap().len() > 44);
 }
+
+#[test]
+fn a_frozen_track_still_mixes() {
+    let scratch = Scratch::new("mixes");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    place(&mut shell, track, &file, 0);
+    freeze(&mut shell, track);
+    let ret = shell
+        .editor()
+        .document()
+        .returns()
+        .next()
+        .expect("the default set has a return track");
+
+    // R7: volume, pan, sends, the Track Activator and solo still work.
+    for (id, args) in [
+        ("mixer.set_volume", json!({ "track": track, "volume": 0.5 })),
+        ("mixer.set_pan", json!({ "track": track, "pan": 0.3 })),
+        (
+            "mixer.set_send",
+            json!({ "track": track, "to": ret, "level": 1.0 }),
+        ),
+        ("mixer.set_mute", json!({ "track": track, "mute": true })),
+        ("mixer.set_solo", json!({ "track": track, "solo": true })),
+    ] {
+        shell
+            .run(id, args)
+            .unwrap_or_else(|error| panic!("{id} on a frozen track: {error}"));
+    }
+    let doc = shell.editor().document();
+    let held = doc.track(track).unwrap();
+    assert_eq!(held.mixer().volume, 0.5);
+    assert_eq!(held.mixer().pan, 0.3);
+    assert!(held.mixer().mute && held.mixer().solo);
+    assert_eq!(held.send(ret), 1.0);
+    // R8 still refuses arming.
+    assert!(
+        shell
+            .run("mixer.set_arm", json!({ "track": track, "arm": true }))
+            .is_err(),
+        "a frozen track can't be armed"
+    );
+}
+
+#[test]
+fn a_frozen_track_inside_a_group_nulls_against_its_live_output() {
+    let scratch = Scratch::new("grouped-null");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip = place(&mut shell, track, &file, 4 * 705_600);
+    let grouped = shell
+        .run("track.group", json!({ "tracks": [track] }))
+        .unwrap();
+    let group: TrackId = serde_json::from_value(grouped["track"].clone()).unwrap();
+    // The group's mixer acts on the frozen track's playback, not on its
+    // render (R2), so it mustn't be applied twice.
+    shell
+        .run("mixer.set_volume", json!({ "track": group, "volume": 0.5 }))
+        .unwrap();
+
+    let (start, end) = {
+        let doc = shell.editor().document();
+        let clip = doc.clip(clip).unwrap();
+        (clip.start, clip.end())
+    };
+    shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": start.get(), "end": end.get() }),
+        )
+        .unwrap();
+    let live = scratch.path("live.wav");
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": live.display().to_string(), "bit_depth": 32,
+                    "sample_rate": 48_000 }),
+        )
+        .unwrap();
+    freeze(&mut shell, track);
+    let frozen = scratch.path("frozen.wav");
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": frozen.display().to_string(), "bit_depth": 32,
+                    "sample_rate": 48_000 }),
+        )
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        std::fs::read(&frozen).unwrap(),
+        "a track frozen inside a group gives the frames the live track gave"
+    );
+}
+
+#[test]
+fn a_frozen_return_renders_what_is_sent_to_it() {
+    let scratch = Scratch::new("return");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    place(&mut shell, track, &file, 0);
+    let ret = shell
+        .editor()
+        .document()
+        .returns()
+        .next()
+        .expect("the default set has a return track");
+    shell
+        .run(
+            "mixer.set_send",
+            json!({ "track": track, "to": ret, "level": 1.0 }),
+        )
+        .unwrap();
+
+    let result = freeze(&mut shell, ret);
+    let written = result["files"][0].as_str().unwrap();
+    let decoded = bl_media::decode_file(Path::new(written)).unwrap();
+    let loud = (0..decoded.channel_count()).any(|channel| {
+        decoded
+            .channel(channel)
+            .unwrap()
+            .iter()
+            .any(|sample| sample.abs() > 1e-6)
+    });
+    assert!(loud, "R15: a frozen return's file holds what is sent to it");
+}

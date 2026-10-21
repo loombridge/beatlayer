@@ -242,7 +242,12 @@ fn a_racks_views_sit_left_to_right_in_its_brackets() {
             .iter()
             .map(|(v, _)| *v)
             .collect::<Vec<_>>(),
-        [RackView::Macros, RackView::ChainList, RackView::Devices]
+        [
+            RackView::Macros,
+            RackView::Variations,
+            RackView::ChainList,
+            RackView::Devices
+        ]
     );
 
     // The nested rack is a bracket inside its parent's.
@@ -295,7 +300,12 @@ fn hiding_every_view_folds_the_rack() {
     }
     let narrower = frame_of(&mut h, rack).width();
     assert!(narrower < wide, "each hidden view narrows it");
-    let devices = layout_of(&mut h, rack).selectors[2].1;
+    let devices = layout_of(&mut h, rack)
+        .selectors
+        .iter()
+        .find(|(v, _)| *v == RackView::Devices)
+        .unwrap()
+        .1;
     click(&mut h, devices.center());
     assert!(rack_state(&h, rack).is_strip());
     assert_eq!(
@@ -1145,21 +1155,10 @@ fn the_zone_editor_moves_resizes_and_fades_a_zone() {
     assert_eq!(Harness::node(&nodes, "Hide").role, Role::Button);
 }
 
-/// Runs frames, at a display's pace, until `done` holds, for up to five
-/// seconds.
+/// Runs frames until `done` holds: the engine advances with them on the
+/// manually paced null stream.
 fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        h.frame(vec![]);
-        if done(h) {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < until,
-            "timed out waiting for {what}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(4));
-    }
+    h.wait(what, done);
 }
 
 // Spec: racks R37
@@ -1167,7 +1166,7 @@ fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
 fn auto_select_follows_the_notes() {
     use bl_core::time::Ticks;
     use bl_model::{Clip, ClipData, Command, MidiData, Note};
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     h.settle();
     let midi: TrackId = h.shell.editor().document().top_level().next().unwrap();
     h.shell

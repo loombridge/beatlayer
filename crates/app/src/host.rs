@@ -1328,6 +1328,17 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickSampleEditor => {
+                // Spec: sample-editor R16. The File & Folder page's Sample
+                // Editor row names the program Edit opens a clip's file in.
+                let dialog = rfd::FileDialog::new().set_title("Sample Editor");
+                if let Some(path) = dialog.pick_file() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::commands::SETTINGS_SET_SAMPLE_EDITOR,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;
@@ -1344,6 +1355,7 @@ impl Host {
             Effect::RenameDevice(_)
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
+            | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
@@ -1838,6 +1850,10 @@ impl ApplicationHandler<UserEvent> for Host {
                 self.shell.set_focused_window(kind);
                 if kind == WindowKind::Main {
                     self.shell.set_focused_area(self.shell.focused_area());
+                    // Spec: sample-editor R16. A file opened in the external
+                    // editor is looked at again when Beatlayer comes to the
+                    // front.
+                    self.shell.check_edited_samples();
                 }
                 self.after_commands(event_loop);
             }

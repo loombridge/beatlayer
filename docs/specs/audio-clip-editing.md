@@ -1,7 +1,7 @@
 # Audio clip editing: Reverse, Crop, Consolidate, and Consolidate Time to New Scene
 
-- **Status:** partial (R1 to R6, WP-4.20, R7 to R13, WP-4.7, and R14 to R28, WP-4.13, are built)
-- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28, built). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
+- **Status:** partial (R1 to R6, WP-4.20, R7 to R13, WP-4.7, and R14 to R28, WP-4.13, are built; R29 for WP-6.22)
+- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28, built), WP-6.22 (Crop and Consolidate on take lanes, R29). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
 - **Parity-matrix row:** Audio clips and warping: Clip pitch, reverse, RAM mode, high-quality interpolation (reverse); Split, Crop, Crop to Time Selection (crop); Consolidate
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -29,6 +29,7 @@ This spec covers what each edit does to the clip and to the disk, where its file
 | S12 | Beatlayer | [05-improvements.md](../05-improvements.md), rule G3; [recording](recording.md) R3; [file management](file-management.md) R4; [audio import](audio-import.md); the architecture's "The media store" and "Agent control" (D17) | Bounces keep their source's channel count; recordings are 32-bit float WAVs named with a UTC stamp; a name already taken gets ` 2`, ` 3`; media is named by the BLAKE3 hash of its bytes; every action is a registered command with a schema, a description, a permission class, and a readback. |
 | S13 | Spec | [arrangement-editing](arrangement-editing.md) R1, R6, R8, R13, R16; [audio-clips](audio-clips.md) R3, R4, R9, R12; [agent-permissions](agent-permissions.md) R1, R11 | Selecting clips makes their span the time selection; a clip placed over another replaces what it covers; Split keeps what each part plays; a gesture is one undo step; how a clip's markers and loop place its file; a mono file plays on both channels; clip edits reach the engine as node data; a call's class can rise with its arguments. |
 | S14 | Manual | Chapter 38 "Computer Audio Resources and Strategies", section 38.1.4 "Track Freeze" | Consolidating clips is among what a frozen track still allows; its clip settings are locked. |
+| S15 | Manual and spec | Live 12 reference manual, chapter 21 "Comping", section 21.6 "Creating a Comp", read 20 October 2026; [comping](comping.md) R1, R2, R20, R27 | A take-lane clip takes the Arrangement's usual edits, consolidating and cropping among them; a take lane's clips are clips of their own, and play only while it's auditioned |
 
 ## Rules
 
@@ -78,6 +79,10 @@ This spec covers what each edit does to the clip and to the disk, where its file
 
 - **R28.** Each item sits at its menus.md row with its keys, as the menus' and context menus' specs place them: enabled when what it acts on is selected (an audio clip or a selection holding audio for Reverse; a clip for Crop; clips or a selection holding clips for Consolidate; a time selection holding clips for Consolidate Time to New Scene), and disabled otherwise, as the Edit and Create menus show them in a new set. R, Cmd-J, and Cmd-Shift-J are bound in their contexts (S-ARR-029, S-ARR-002, S-ARR-003, S-SES-028), and the Audio panel's Reverse is a button in L-CLIP-008's place. (S10, S11)
 
+**Take lanes (WP-6.22)**
+
+- **R29.** Crop and Consolidate act on a take lane as on a main lane ([comping](comping.md) R27). Crop acts on a take-lane clip as on any clip (R14 to R18). Consolidate with a range on take lanes replaces each selected lane's material in the range with one new clip on that lane, rendered from that lane's clips alone as R20 to R23 render a track's, whatever the main lane or another lane holds there, and whether the lane is auditioned or not; the new clip is a take like any on the lane. A range over a track's main lane and some of its take lanes consolidates each of those lanes on its own. (S6, S15)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -110,3 +115,4 @@ This spec covers what each edit does to the clip and to the disk, where its file
 | R26 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_fills_a_new_scene_and_leaves_the_arrangement` | shell test |
 | R27 | `crates/shell/tests/audio_editing.rs`, `consolidate_time_to_new_scene_chooses_the_scene_it_follows`; `crates/cli/tests/agent_audio_editing.rs`, `an_agent_crops_and_consolidates_by_command_id_and_reads_them_back` | shell test, agent test |
 | R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `xtask/src/keymap.rs`, `the_repository_keymap_is_in_sync` (S-ARR-002, S-ARR-003, S-SES-028 bound) | unit, keymap test |
+| R29 | to be written in WP-6.22 | shell test |

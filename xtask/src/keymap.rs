@@ -281,9 +281,12 @@ const WIDGET: &[(&str, &str)] = &[
 /// no command and no package here, or if this names WP-1.7 itself.
 const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
-    ("S-FILE-007", "WP-1.12"),
+    ("S-FILE-007", "WP-6.71"),
     ("S-EDIT-012", "WP-1.8b"),
-    ("S-ENV-004", "WP-1.8b"),
+    ("S-ENV-004", "WP-6.51"),
+    ("S-ARR-008", "WP-6.51"),
+    ("S-ARR-009", "WP-6.51"),
+    ("S-ARR-010", "WP-6.51"),
     ("S-ZOOM-003", "WP-1.8a"),
     ("S-ZOOM-004", "WP-1.8a"),
     ("S-ZOOM-005", "WP-1.8a"),

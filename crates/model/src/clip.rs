@@ -515,7 +515,7 @@ pub struct AudioData {
     pub transpose: i32,
     /// The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given.
     /// It shifts the clip's pitch in every mode but Re-Pitch (R10, R26).
-    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     #[schemars(range(min = -50.0, max = 50.0))]
     pub detune: f64,
     /// The clip's edits to its file's detected transients (the warping spec,
@@ -756,10 +756,6 @@ pub struct TakeLane {
 }
 
 fn is_zero(value: &f64) -> bool {
-    *value == 0.0
-}
-
-fn is_zero_f64(value: &f64) -> bool {
     *value == 0.0
 }
 

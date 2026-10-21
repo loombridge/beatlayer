@@ -83,7 +83,7 @@ fn harness(scratch: &Scratch) -> (Harness, PathBuf) {
     wav(&root.join("Samples").join("Drums").join("Kick.wav"), 4_800);
     wav(&root.join("Samples").join("Drums").join("Snare.wav"), 4_800);
     wav(&root.join("Loop.wav"), 96_000);
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     h.shell.set_user_library(Some(root.clone()));
     h.shell
         .run(ids::OPEN_PLACE, json!({ "label": "user_library" }))
@@ -507,18 +507,17 @@ fn the_preview_strip_follows_the_preview() {
     let (mut h, _) = harness(&scratch);
     assert!(h.shell.audio().is_running(), "the null device");
     h.click(row(5));
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        h.shell.poll();
-        let output = h.frame(vec![]);
-        let nodes = Harness::nodes(&output);
-        let strip = Harness::node(&nodes, "Preview Strip");
-        if strip.value.starts_with("Loop.wav, ") && strip.value.contains("of 2.0 seconds") {
-            break;
-        }
-        assert!(Instant::now() < deadline, "never played: {}", strip.value);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    h.wait("the preview to play", |h| {
+        h.shell.browser_preview().position_seconds > 0.0
+    });
+    // The strip shows the file's name and how far it has played (R11).
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let strip = Harness::node(&nodes, "Preview Strip");
+    assert!(
+        strip.value.starts_with("Loop.wav, ") && strip.value.contains("of 2.0 seconds"),
+        "{}",
+        strip.value
+    );
     assert!(h.shell.browser_view().preview_overview().is_some());
     // The switch turns preview off, which stops it.
     let toggle = h

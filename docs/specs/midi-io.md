@@ -1,7 +1,7 @@
 # MIDI I/O: ports, track inputs, monitoring, timestamps, and the computer MIDI keyboard
 
 - **Status:** draft
-- **Work packages:** WP-2.2
+- **Work packages:** WP-2.2; WP-6.17 (the MPE switch and a track's input from an MPE port: R27 and R28)
 - **Parity-matrix row:** Control and mapping: Computer MIDI keyboard; Recording: Monitoring In, Auto, Off (the monitoring switch only; recording is WP-2.13 and WP-2.14)
 - **Checked against:** the Live 12 reference manual as the UI parity reference cites it (read 10 October 2026), and the parity reference's observations of Live 12.4.3 (10 October 2026).
 
@@ -11,7 +11,7 @@ Live lists every MIDI port the computer offers in its Settings, inputs and outpu
 
 Beatlayer keeps the port switches in its preferences and the track's input and monitoring in the set. Messages arrive on the MIDI system's own thread, are stamped with the time they arrived, and cross to the audio thread on a lock-free queue; the engine places each one in the next block at the sample its time gives, and hands it to every MIDI track whose input it matches.
 
-This spec covers ports and their switches, a MIDI track's input and channel, the monitoring switch, how incoming messages reach the engine, and the computer MIDI keyboard. It leaves to other packages: what a track's devices do with the notes (WP-2.1), recording them (WP-2.14), an audio track's input and audio monitoring (WP-2.13), routing MIDI from one track to another (WP-2.19), MIDI output from tracks, MIDI clock and MIDI mapping (Phase 7, M7), control surfaces and Takeover Mode (Phase 7), and MPE (the MPE column and MPE input, with the packages that play MPE).
+This spec covers ports and their switches, a MIDI track's input and channel, the monitoring switch, how incoming messages reach the engine, and the computer MIDI keyboard. It leaves to other packages: what a track's devices do with the notes (WP-2.1), recording them (WP-2.14), an audio track's input and audio monitoring (WP-2.13), routing MIDI from one track to another (WP-2.19), MIDI output from tracks, MIDI clock and MIDI mapping (Phase 7, M7), control surfaces and Takeover Mode (Phase 7), and how an MPE port's messages become each note's own expressions ([MPE](mpe.md), WP-6.17). The MPE switch itself, and a track's input from an MPE port, are R27 and R28.
 
 ## Sources
 
@@ -25,6 +25,7 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 | S6 | Manual | Live 12 reference manual, section 42.24 (computer keyboard and map mode keys), as recorded in [shortcuts.toml](../ui-parity/shortcuts.toml) S-MAP-003 to S-MAP-007 | M switches the computer MIDI keyboard on and off; Z and X move its octave down and up; C and V lower and raise its velocity; the home-row letters play white keys and the row above plays black keys (shown as a figure); a single-letter shortcut is reached with Shift while the keyboard is on. |
 | S7 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in layout.md L-CTRL-020 and L-CTRL-026 and [menus.md](../ui-parity/menus.md) M-OPT-004 | The Control Bar's Computer MIDI Keyboard switch, and its MIDI track input and output indicators; the Options menu's Computer MIDI Keyboard item, showing M. |
 | S8 | Paper | Fons Adriaensen, "Using a DLL to filter time", Linux Audio Conference 2005 | A second-order delay-locked loop that turns noisy callback times into a smooth estimate of when each audio block starts. |
+| S9 | Manual | Live 12 reference manual, chapter 12 "Editing MPE", its introduction | A controller's MPE Mode is switched on in the Link, Tempo & MIDI settings; with an MPE controller as a track's input, the track's input channel is fixed to All Channels |
 
 ## Rules
 
@@ -66,6 +67,11 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 - **R25.** The Control Bar's MIDI track input indicator (L-CTRL-026) lights for a moment whenever a message reaches the tracks' inputs. The lower lamp is the output indicator: it lights the same way whenever a message leaves for a port ([external devices](external-devices.md) R7). (S7)
 - **R26.** No note hangs: every note-on a track's devices received from its input gets a note-off on the first frame of the block after the edit that ends it, when monitoring stops (Monitor Off, or Auto with the track disarmed), or the track's input or channel changes. A track that is deleted takes its devices with it. Edits that change none of these keep the notes sounding. (Beatlayer's design)
 
+### MPE input (WP-6.17)
+
+- **R27.** Each input port has a fourth switch, MPE, after Remote in the ports table (L-SET-014), off for a port seen for the first time, kept in the preferences by port name as the others are (R3), set by `midi.set_port`'s `mpe` and read back by `midi.ports`. With it on, the port's messages reach tracks as MPE ([MPE](mpe.md) R10 and R11). It opens nothing by itself: a port whose only switch on is MPE stays closed (R4). Output ports have no MPE switch: a track sends MPE out through its MIDI To ([MPE](mpe.md) R19). (S1, S2, S9; outputs and opening are Beatlayer's own)
+- **R28.** A MIDI track whose input is a port with MPE on takes every channel of it: the channel chooser shows All Channels and can't be changed, and a channel the track had chosen stays in the set for when MPE is off again. Under All Ins, each port's messages are read as its own MPE switch says. (S9; keeping the chosen channel is Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -82,3 +88,5 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 | R22 | `bl-ui` `midi_input::m_switches_the_keyboard_on_and_its_letters_play_notes` | UI |
 | R23 | `bl-shell` `midi_io::the_computer_keyboard_reaches_tracks_set_to_it_or_all_ins_only` | integration |
 | R6, R24 | `bl-cli` `agent_midi_io` (each `midi.*` command by ID through `bl-cli mcp`; `midi.set_port` refused without `--autonomous`) | agent API |
+| R27 | to be written in WP-6.17 | integration, UI |
+| R28 | to be written in WP-6.17 | integration |

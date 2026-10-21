@@ -65,3 +65,11 @@ These don't come from Live; they follow from [the architecture](../02-architectu
 | Selection, scroll position, zoom, and other view state aren't in the document, so they're never undo steps. Live agrees for the insert marker, clip selection, and time selection (item 12). | (none: there is no such state in `bl-model`) |
 
 The document itself lets clips on a track overlap. The Arrangement's edits (WP-1.8b) keep them from doing so with Live's rule: whatever is placed over part of a clip replaces that part ([arrangement-editing](arrangement-editing.md) R6).
+
+## The Undo History panel
+
+The panel that lists the history and jumps through it is [undo-history.md](undo-history.md) (WP-6.28). It adds one choice of Beatlayer's own to the history itself:
+
+| Choice | Test |
+|---|---|
+| Each step records who made it: the person, an agent by the name the agent API knows it by, or the built-in assistant ([undo-history.md](undo-history.md) R9). | to be written in WP-6.28 |

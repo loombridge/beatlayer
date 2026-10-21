@@ -1,7 +1,7 @@
 # The Sample Editor in the Clip View: the waveform, its markers, editing them by mouse and keys, and the Audio Utilities panel
 
-- **Status:** partial (R1 and R3 to R13 and R19 to R22 each have a passing test, with S-SAMPLE-001 and S-SAMPLE-002 and the context menu's Set 1.1.1, Warp From Here, Warp as x-Bar Loop, Quantize and Crop Clip Sample items waiting for their packages; R2 and R14 to R18 are WP-4.10b's)
-- **Work packages:** WP-4.10 (the editor, its markers and keys: R1 to R13 and R19 to R22), WP-4.10b (the Audio Utilities panel, Edit, Save Default Clip, and replacing a clip's sample: R14 to R18)
+- **Status:** partial (R1 and R3 to R13 and R19 to R22 each have a passing test, with S-SAMPLE-001 and S-SAMPLE-002 and the context menu's Set 1.1.1, Warp From Here, Warp as x-Bar Loop, Quantize and Crop Clip Sample items waiting for their packages; R2 and R14 to R18 have passing tests of WP-4.10b's, with R14's Reverse and Transpose and Detune of WP-4.7's)
+- **Work packages:** WP-4.10 (the editor, its markers and keys: R1 to R13 and R19 to R22), WP-4.10b (the Audio Utilities panel, Edit, Save Default Clip, and replacing a clip's sample: R14 to R18), WP-4.7 (the panel's Reverse and its Transpose and Detune: R14)
 - **Parity-matrix row:** Audio clips and warping: "Warp markers, transient markers, pseudo-warp markers" (editing them in the Clip View); "Clip pitch, reverse, RAM mode, high-quality interpolation" (their controls in the Audio Utilities panel)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 8 (8.1 to 8.1.3, 8.4 to 8.4.7, 8.7, 8.8, 8.10, 8.12, 8.13), chapter 9 (9.1.4, 9.2.3 to 9.2.5.1) and chapter 42 (42.8, 42.10, 42.11); and the UI parity reference's Clip View rows, recorded from Live 12.4.3 on macOS on 10 October 2026
 
@@ -59,7 +59,7 @@ Every gesture, key and menu item runs a registered command, so an agent reaches 
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/shell/tests/sample_editor.rs`, `an_audio_clip_shows_the_sample_editor_and_the_tabs_are_view_state`; `crates/ui/tests/sample_editor.rs`, `the_sample_editor_takes_the_note_editors_place`, `the_envelopes_tab_shows_an_audio_clips_envelopes` | unit, UI script |
-| R2 | `crates/shell/tests/sample_editor.rs`, `show_in_browser_selects_the_file_in_the_place_it_lies_in` (the header is WP-4.10b's) | unit |
+| R2 | `crates/ui/tests/audio_panel.rs`, `the_header_shows_the_files_details`; `crates/shell/tests/sample_editor.rs`, `show_in_browser_selects_the_file_in_the_place_it_lies_in` | UI script, unit |
 | R3, R4 | `crates/ui/tests/sample_editor.rs`, `a_warped_clips_waveform_lines_up_with_its_beats`, `an_unwarped_clip_runs_along_time_in_the_file`; `crates/ui/tests/arrangement.rs`, `a_warped_clip_is_drawn_through_its_warp_map` | UI script |
 | R5 | `crates/ui/tests/sample_editor.rs`, `markers_transients_and_the_pseudo_warp_marker_are_drawn`, `the_start_and_end_markers_and_the_loop_brace_drag_in_one_step` | UI script |
 | R6, R7 | `crates/ui/tests/sample_editor.rs`, `double_clicks_make_and_delete_warp_markers`, `dragging_a_marker_stretches_the_audio_in_one_step`, `a_drag_stops_short_of_a_neighbour_and_moves_every_selected_marker`, `shift_dragging_moves_the_waveform_under_a_marker`, `esc_cancels_a_marker_drag` | UI script |
@@ -68,10 +68,10 @@ Every gesture, key and menu item runs a registered command, so an agent reaches 
 | R10 | `crates/ui/tests/sample_editor.rs`, `the_sample_editor_keys_run_their_commands`, `the_other_arrow_keys_move_the_insert_marker_the_region_and_the_selection`; `crates/shell/tests/sample_editor.rs`, `selected_markers_follow_the_map_through_edits_and_the_keys_act_on_them`; `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it` | UI script, unit, keymap test |
 | R11 | `crates/ui/tests/sample_editor.rs`, `z_x_w_and_h_zoom_and_follow_pauses_on_an_edit`, `the_wheel_scrolls_and_the_ruler_zooms`, `follow_scrolls_the_editor_to_the_playhead_until_an_edit_pauses_it` | UI script |
 | R12, R13 | `crates/ui/tests/sample_editor.rs`, `the_context_menu_runs_the_warp_commands_and_disables_refused_ones`, `the_create_menu_holds_the_marker_items_while_the_sample_editor_has_focus` | UI script |
-| R14, R15 | `crates/ui/tests/sample_editor.rs`, `the_audio_utilities_panel_runs_each_controls_command`, `warp_off_disables_the_tempo_controls_and_the_loop_switch`; `crates/ui/src/layout.rs`, `the_audio_utilities_panel_follows_layout_md` (WP-4.10b) | UI script, unit |
-| R16 | `crates/shell/tests/sample_editor.rs`, `an_edited_file_reaches_every_clip_of_it_in_one_step` (the editor faked by a test process that rewrites the file; WP-4.10b) | unit |
-| R17 | `crates/shell/tests/sample_editor.rs`, `save_default_clip_runs_for_each_selected_clip` (WP-4.10b) | unit |
-| R18 | `crates/ui/tests/sample_editor.rs`, `a_file_dropped_on_the_clip_view_replaces_the_sample`; `crates/shell/tests/sample_editor.rs`, `replacing_the_sample_keeps_gain_and_pitch` (WP-4.10b) | UI script, unit |
+| R14, R15 | `crates/ui/tests/audio_panel.rs`, `the_panel_shows_its_controls_and_each_runs_its_command`, `the_pending_controls_name_their_package`, `the_pitch_and_reverse_controls_run_their_commands`, `warp_off_disables_the_tempo_controls`; `crates/cli/tests/agent.rs`, `an_agent_sets_the_audio_utilities_panel_and_reads_it_back` (WP-4.10b; WP-4.7 for the pitch and Reverse) | UI script, agent test |
+| R16 | `crates/shell/tests/audio_panel.rs`, `an_edited_file_reaches_every_clip_of_it_in_one_step` (the editor faked by a test process that rewrites the file; WP-4.10b) | unit |
+| R17 | `crates/ui/tests/audio_panel.rs`, `save_default_clip_writes_the_defaults_beside_the_file` (WP-4.10b) | UI script |
+| R18 | `crates/ui/tests/audio_panel.rs`, `a_file_dropped_on_the_clip_view_replaces_the_sample`; `crates/shell/tests/audio_panel.rs`, `replacing_the_sample_keeps_the_gain_and_the_markers_of_one_length` (WP-4.10b) | UI script, unit |
 | R19 | `crates/shell/tests/sample_editor.rs`, `marker_edits_reach_every_selected_clip_of_one_length` | unit |
 | R20 | `crates/ui/tests/accessibility.rs`, `the_sample_editors_markers_reach_assistive_technology`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
 | R21 | `crates/shell/tests/sample_editor.rs`, `every_sample_editor_action_is_a_registered_command`; `crates/cli/tests/agent.rs`, `an_agent_edits_warp_markers_as_the_sample_editor_does` | unit, agent test |

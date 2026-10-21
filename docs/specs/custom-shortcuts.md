@@ -58,8 +58,8 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/shell/tests/keymap.rs`, `with_no_file_the_keymap_is_lives`, `an_empty_file_leaves_the_keymap_alone` | unit |
-| R2 | `crates/shell/tests/keymap.rs`, `an_unbind_takes_the_keys_away_on_one_platform_only` | unit |
-| R3 | `crates/shell/tests/keymap.rs`, `a_bind_gives_a_command_other_keys`, `a_bind_over_lives_own_key_takes_it` | unit |
+| R2 | `crates/shell/tests/keymap.rs`, `an_unbind_takes_the_keys_away_on_one_platform_only`, `a_bind_keeps_the_arguments_it_fixes` | unit |
+| R3 | `crates/shell/tests/keymap.rs`, `a_bind_gives_a_command_other_keys`, `a_bind_over_lives_own_key_takes_it`, `a_replace_keeps_the_other_keys_of_lives_own_shortcut` | unit |
 | R4 | `crates/shell/tests/keymap.rs`, `a_latching_command_keeps_its_latch_on_new_keys` | unit |
 | R5 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` (the refused context) | unit |
 | R6 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` | unit |

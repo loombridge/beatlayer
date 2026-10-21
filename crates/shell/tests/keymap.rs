@@ -358,3 +358,57 @@ fn the_file_written_survives_a_reload() {
         Some("track.duplicate_without_clips".to_owned())
     );
 }
+
+#[test]
+fn a_replace_keeps_the_other_keys_of_lives_own_shortcut() {
+    // Spec: custom-shortcuts R3: a default shortcut keeps its other keys.
+    let dir = dir("replace");
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": ["Cmd+Option+B"],
+                "platform": "mac",
+                "context": "global",
+                "replace": true,
+            }),
+        )
+        .unwrap();
+    // The browser's own shortcut keeps the key that doesn't clash.
+    let browser = shell.keymap().entry_for("S-VIEW-010").unwrap();
+    assert_eq!(browser.mac, ["Cmd+Option+5"], "the other key is gone");
+}
+
+#[test]
+fn a_bind_keeps_the_arguments_it_fixes() {
+    // Spec: custom-shortcuts R2: a binding fixes the arguments it names.
+    let dir = dir("args");
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.create",
+                "keys": ["Cmd+Option+D"],
+                "platform": "mac",
+                "context": "global",
+            }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.create",
+                "args": { "kind": "audio" },
+                "keys": ["Cmd+Option+E"],
+                "platform": "mac",
+                "context": "global",
+            }),
+        )
+        .unwrap();
+    let text = std::fs::read_to_string(dir.join("keymap.toml")).unwrap();
+    assert!(text.contains("kind"), "the arguments are gone: {text}");
+}

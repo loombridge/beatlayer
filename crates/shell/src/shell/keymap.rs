@@ -150,7 +150,7 @@ impl Shell {
                     &format!("the keys already run `{other}` in {other_context}"),
                 ));
             }
-            self.take_keys_away(&other, &other_context, &chords, platform);
+            self.move_keys_away(&other, &other_context, &chords, platform, &context);
         }
         // The person's own binding for this command in this context: the
         // keys replace the ones it had on this platform.
@@ -173,9 +173,8 @@ impl Shell {
                     Platform::Mac => existing.mac = bind.mac,
                     Platform::Other => existing.win = bind.win,
                 }
-                if !existing.args.is_empty() {
-                    existing.args = bind.args;
-                }
+                // The arguments the new binding fixes are the binding's.
+                existing.args = bind.args;
             }
             None => self.user_keymap.binds.push(bind),
         }
@@ -246,6 +245,27 @@ impl Shell {
             .map(|entry| entry.context.clone())
     }
 
+    /// Moves the keys away from the command they run, so another command
+    /// can have them. A default shortcut in the bind's own context loses
+    /// only the keys that clash: the layering takes them away, and the
+    /// shortcut keeps its other keys (R3).
+    pub(super) fn move_keys_away(
+        &mut self,
+        command: &str,
+        context: &str,
+        chords: &[Chord],
+        platform: Platform,
+        bind_context: &str,
+    ) {
+        if self.take_own_binding_away(command, context, platform) {
+            return;
+        }
+        if context == bind_context {
+            return;
+        }
+        self.unbind_shortcut(command, chords, platform);
+    }
+
     /// Takes the keys away from the command they run, so another command
     /// can have them: the person's own binding loses them, or a default
     /// shortcut is unbound.
@@ -256,17 +276,31 @@ impl Shell {
         chords: &[Chord],
         platform: Platform,
     ) {
-        if let Some(index) = self.user_keymap.bind_index_for(command, context) {
-            let bind = &mut self.user_keymap.binds[index];
-            match platform {
-                Platform::Mac => bind.mac.clear(),
-                Platform::Other => bind.win.clear(),
-            }
-            if bind.mac.is_empty() && bind.win.is_empty() {
-                self.user_keymap.binds.remove(index);
-            }
+        if self.take_own_binding_away(command, context, platform) {
             return;
         }
+        self.unbind_shortcut(command, chords, platform);
+    }
+
+    /// The person's own binding for a command in a context loses its keys
+    /// on a platform. Whether the person had such a binding is the answer.
+    fn take_own_binding_away(&mut self, command: &str, context: &str, platform: Platform) -> bool {
+        let Some(index) = self.user_keymap.bind_index_for(command, context) else {
+            return false;
+        };
+        let bind = &mut self.user_keymap.binds[index];
+        match platform {
+            Platform::Mac => bind.mac.clear(),
+            Platform::Other => bind.win.clear(),
+        }
+        if bind.mac.is_empty() && bind.win.is_empty() {
+            self.user_keymap.binds.remove(index);
+        }
+        true
+    }
+
+    /// Unbinds the default shortcut that runs a command with these keys.
+    fn unbind_shortcut(&mut self, command: &str, chords: &[Chord], platform: Platform) {
         if let Some(shortcut) = self.keymap.shortcut_for(command, chords, platform) {
             let shortcut = shortcut.to_owned();
             self.user_keymap.unbinds.push(Unbind {

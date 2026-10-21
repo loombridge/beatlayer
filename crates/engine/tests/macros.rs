@@ -12,7 +12,8 @@ use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
 use bl_engine::testing::{GAIN_DESCRIBED, GAIN_PARAM};
 use bl_model::{
-    AutomationTarget, Command, DeviceId, MacroTarget, RackKind, TrackId, TrackKind, macro_param,
+    AutomationTarget, Command, DeviceId, MacroStyle, MacroTarget, RackKind, TrackId, TrackKind,
+    macro_param,
 };
 use common::{Rig, dc, effect_in, rack, track};
 
@@ -110,6 +111,72 @@ fn a_macro_envelope_drives_its_parameters_frame_by_frame() {
             out[QUARTER - 1]
         );
     }
+}
+
+// Spec: macros R22
+#[test]
+fn a_stepped_macros_envelope_plays_as_steps() {
+    for size in SIZES {
+        let (mut rig, audio, rack, _) = setup_chain_activator();
+        // Three steps: the macro takes 0, a half and 1.
+        rig.apply(Command::SetMacroStyle {
+            rack,
+            macro_number: 1,
+            style: MacroStyle::Stepped,
+            steps: Some(3),
+        });
+        let target = AutomationTarget::Device {
+            device: rack,
+            param: macro_param(1),
+        };
+        rig.apply(Command::SetAutomationBreakpoint {
+            track: audio,
+            target,
+            at: Ticks::ZERO,
+            value: 0.0,
+        });
+        rig.apply(Command::SetAutomationBreakpoint {
+            track: audio,
+            target,
+            at: Ticks::QUARTER,
+            value: 1.0,
+        });
+        rig.sender.transport(TransportCommand::Play);
+        let out = rig.render(QUARTER, size);
+        // The macro's steps play: the chain's activator is a switch, and it
+        // is muted at the macro's middle step, a quarter of the way up the
+        // envelope, not at its half.
+        let on = QUARTER / 4;
+        assert!(
+            out[..on].iter().all(|s| (s - 1.0).abs() < 1e-6),
+            "sounding until the macro's middle step: {:?}",
+            &out[on - 1..on + 1]
+        );
+        assert!(
+            out[on..].iter().all(|s| s.abs() < 1e-6),
+            "muted from the macro's middle step: {:?}",
+            &out[on - 1..on + 1]
+        );
+    }
+}
+
+// A rig whose rack's chain activator is mapped to macro 1.
+fn setup_chain_activator() -> (Rig, TrackId, DeviceId, bl_model::ChainId) {
+    let mut rig = Rig::new(4096);
+    let audio = track(&mut rig.editor, TrackKind::Audio, None);
+    dc(&mut rig.editor, audio, 1.0);
+    let (rack, chains) = rack(&mut rig.editor, audio, RackKind::AudioEffect, 1);
+    let chain = chains[0];
+    rig.apply(Command::MapMacro {
+        rack,
+        macro_number: 1,
+        target: MacroTarget::Chain {
+            chain,
+            param: bl_model::MixerParam::Mute,
+        },
+    });
+    rig.sync();
+    (rig, audio, rack, chain)
 }
 
 // A rig whose rack's two chain volumes are both mapped to macro 1.

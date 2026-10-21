@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-532 commands in 37 areas.
+533 commands in 37 areas.
 
 ## Permission classes
 
@@ -413,6 +413,7 @@ Each command has:
 | [`rack.set_macro_count`](#rackset_macro_count) | Show More or Fewer Macros | `edit` |  |  |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | Change Macro Info Text | `edit` |  |  |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | Exclude Macro from Randomization | `edit` |  |  |
+| [`rack.set_macro_style`](#rackset_macro_style) | Change Macro Style | `edit` |  |  |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | Change parameter | `edit` |  |  |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | Change Macro Mapping | `edit` |  |  |
 | [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
@@ -7471,6 +7472,25 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `rack.set_macro_style`
+
+**Change Macro Style**. Permission: `edit`. Contexts: `device-view`.
+
+Sets how macro `macro_number` is drawn and which positions it takes: `style` is `knob`, Live's continuous control, `stepped`, a knob that takes `steps` steps, or `radio_buttons`, a stepped macro drawn as its steps' buttons. A stepped macro takes from 2 to 16 steps, 8 by default, and only the positions `k / (steps - 1)`: a drag, an arrow key and `device.set_param` all move it a step at a time. A macro that becomes stepped moves to its nearest step. One undo step, saved with the set and with the rack in a preset.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `style` | [`MacroStyle`](#macrostyle) | yes | The style. |
+| `steps` | integer or null | no | How many steps a stepped macro takes, from 2 to 16; the macro's own number of steps when left out. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `rack.set_mapped_value`
 
 **Change parameter**. Permission: `edit`. Contexts: `device-view`.
@@ -10203,6 +10223,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`rack.set_macro_count`](#rackset_macro_count) | `rack.macros` | `count` |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | `rack.macros` | `macros` |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | `rack.macros` | `macros` |
+| [`rack.set_macro_style`](#rackset_macro_style) | `rack.macros` | `macros` |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | `rack.macros` | `macros` |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | `rack.macros` | `macros` |
 | [`rack.set_view`](#rackset_view) | `device_view.state` | `devices` |
@@ -19645,7 +19666,7 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
 
 ### `Macro`
 
-One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.
+One macro's saved settings beside its value (macros spec, R10, R14, R16 and R21). A macro's value is a parameter of its rack, in `Device::params`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -19653,12 +19674,14 @@ One macro's saved settings beside its value (macros spec, R10, R14 and R16). A m
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
+| `steps` | integer from 0 to 255 | no | How many steps a stepped macro takes, from 2 to 16 (R22). |
+| `style` | [`MacroStyle`](#macrostyle) | no | How it is drawn and which positions it takes (R21). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One macro's saved settings beside its value (macros spec, R10, R14 and R16). A macro's value is a parameter of its rack, in `Device::params`.",
+  "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16 and R21). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
       "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
@@ -19681,6 +19704,17 @@ One macro's saved settings beside its value (macros spec, R10, R14 and R16). A m
     "randomize_excluded": {
       "description": "Whether Randomize leaves it alone (R16).",
       "type": "boolean"
+    },
+    "steps": {
+      "description": "How many steps a stepped macro takes, from 2 to 16 (R22).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/MacroStyle",
+      "description": "How it is drawn and which positions it takes (R21)."
     }
   },
   "type": "object"
@@ -19700,6 +19734,8 @@ One macro as `rack.macros` reports it.
 | `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
+| `style` | [`MacroStyle`](#macrostyle) | yes | How it is drawn and which positions it takes (R21). |
+| `steps` | integer from 0 to 255 | yes | How many steps a stepped macro takes (R22). |
 | `randomize_excluded` | boolean | yes | Whether Randomize leaves it alone (R16). |
 | `mappings` | array of [`MacroMappingInfo`](#macromappinginfo) | yes | What it drives, in the order the mappings were made (R9). |
 
@@ -19741,6 +19777,17 @@ One macro as `rack.macros` reports it.
       "description": "Whether Randomize leaves it alone (R16).",
       "type": "boolean"
     },
+    "steps": {
+      "description": "How many steps a stepped macro takes (R22).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/MacroStyle",
+      "description": "How it is drawn and which positions it takes (R21)."
+    },
     "text": {
       "description": "How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10).",
       "type": "string"
@@ -19757,6 +19804,8 @@ One macro as `rack.macros` reports it.
     "colour",
     "value",
     "text",
+    "style",
+    "steps",
     "randomize_excluded",
     "mappings"
   ],
@@ -19926,6 +19975,43 @@ What `rack.macros` reports (macros spec, R19).
     "macros"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `MacroStyle`
+
+How a macro is drawn and which positions it takes (macros spec, R21 to R23). Every macro starts as a knob, Live's continuous control.
+
+One of:
+
+- `"knob"`: Live's continuous knob.
+- `"stepped"`: A knob that takes a number of steps.
+- `"radio_buttons"`: A stepped macro drawn as its steps' buttons.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a macro is drawn and which positions it takes (macros spec, R21 to R23). Every macro starts as a knob, Live's continuous control.",
+  "oneOf": [
+    {
+      "const": "knob",
+      "description": "Live's continuous knob.",
+      "type": "string"
+    },
+    {
+      "const": "stepped",
+      "description": "A knob that takes a number of steps.",
+      "type": "string"
+    },
+    {
+      "const": "radio_buttons",
+      "description": "A stepped macro drawn as its steps' buttons.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

@@ -17,8 +17,8 @@ use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Regis
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
     ChainId, ChainZones, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind,
-    DeviceLayout, DeviceRole, MacroTarget, ParamDescriptor, ParamId, RackKind, RackView, RackViews,
-    Tap, TrackId, TrackKind, WindowFrame, ZoneKind,
+    DeviceLayout, DeviceRole, MacroStyle, MacroTarget, ParamDescriptor, ParamId, RackKind,
+    RackView, RackViews, Tap, TrackId, TrackKind, WindowFrame, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1347,6 +1347,10 @@ pub struct MacroInfo {
     /// How it reads: its parameter's value and unit, 0 to 127, or a shared
     /// unit (R10).
     pub text: String,
+    /// How it is drawn and which positions it takes (R21).
+    pub style: MacroStyle,
+    /// How many steps a stepped macro takes (R22).
+    pub steps: u8,
     /// Whether Randomize leaves it alone (R16).
     pub randomize_excluded: bool,
     /// What it drives, in the order the mappings were made (R9).

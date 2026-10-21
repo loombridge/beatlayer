@@ -29,8 +29,8 @@ use crate::layers::{
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{
-    CHAIN_COLOURS, Chain, ChainSend, MACROS, Macro, MacroMapping, MacroTarget, RackKind, Receive,
-    macro_number,
+    CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
+    MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
 use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
@@ -2044,6 +2044,22 @@ pub enum Command {
         /// Whether it's left out.
         excluded: bool,
     },
+    /// Sets how a macro is drawn and which positions it takes (macros spec,
+    /// R21 and R22): `knob`, Live's continuous control, `stepped`, a knob
+    /// that takes `steps` steps, or `radio_buttons`, a stepped macro drawn
+    /// as its steps' buttons. A macro that becomes stepped moves to its
+    /// nearest step.
+    SetMacroStyle {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// The style.
+        style: MacroStyle,
+        /// How many steps a stepped macro takes, from 2 to 16; the macro's
+        /// own number of steps when left out.
+        steps: Option<u8>,
+    },
     /// Sets a parameter to the value a macro gives it (macros spec, R7),
     /// without overriding the parameter's own automation envelope, which
     /// waits while it's mapped (R11). The macro commands run it inside their
@@ -2311,6 +2327,7 @@ impl Command {
             Self::SetMacroInfo { .. } => "Change Macro Info Text",
             Self::RandomizeMacros { .. } => "Randomize Macros",
             Self::SetMacroRandomizeExcluded { .. } => "Exclude Macro from Randomization",
+            Self::SetMacroStyle { .. } => "Change Macro Style",
             Self::SetMappedValue { .. } => "Change parameter",
         }
     }
@@ -3216,13 +3233,15 @@ impl Document {
                 value,
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
+                // Spec: macros R22. A stepped macro takes only its steps.
+                let stepped = self.stepped_macro_value(*device, *param, *value);
                 self.check_not_held(crate::modulator::ModTarget::Device {
                     device: *device,
                     param: *param,
                 })?;
                 // Spec: modulation R16. Remote Control holds what a
                 // modulator maps; one parameter has one holder.
-                if *param == crate::modulator::MODE && *value >= 0.5 {
+                if *param == crate::modulator::MODE && stepped >= 0.5 {
                     let current = self.device_ref(*device)?;
                     if current
                         .mappings
@@ -3235,9 +3254,9 @@ impl Document {
                         ));
                     }
                 }
-                if self.device_ref(*device)?.params.get(param) != Some(value) {
+                if self.device_ref(*device)?.params.get(param) != Some(&stepped) {
                     let owner = self.device_owner(*device)?;
-                    self.device_mut(*device)?.set_param(*param, *value);
+                    self.device_mut(*device)?.set_param(*param, stepped);
                     self.track_mut(owner)?
                         .override_target(&AutomationTarget::Device {
                             device: *device,
@@ -3744,6 +3763,12 @@ impl Document {
                 macro_number,
                 excluded,
             } => self.edit_macro(*rack, *macro_number, |m| m.randomize_excluded = *excluded),
+            Command::SetMacroStyle {
+                rack,
+                macro_number,
+                style,
+                steps,
+            } => self.set_macro_style(*rack, *macro_number, *style, *steps),
             Command::SetMappedValue { target, value } => {
                 check_value("mapped value", *value, value.is_finite())?;
                 match target {
@@ -3897,6 +3922,66 @@ impl Document {
         Ok(())
     }
 
+    /// Sets a macro's style and, for a stepped one, how many steps it takes
+    /// (macros spec, R21 and R22). A macro that becomes stepped moves to its
+    /// nearest step, in the same step.
+    fn set_macro_style(
+        &mut self,
+        rack: DeviceId,
+        number: u8,
+        style: MacroStyle,
+        steps: Option<u8>,
+    ) -> Result<(), ModelError> {
+        check_macro_number(number)?;
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        let steps = steps.unwrap_or_else(|| current.macros.setting(number).steps);
+        if !(MACRO_STEPS_MIN..=MACRO_STEPS_MAX).contains(&steps) {
+            return Err(ModelError::InvalidInput(
+                "a stepped macro takes 2 to 16 steps",
+            ));
+        }
+        let mut macros = current.macros.clone();
+        let setting = macros.setting_mut(number);
+        setting.style = style;
+        setting.steps = steps;
+        let stepped = setting.is_stepped();
+        self.device_mut(rack)?.macros = macros;
+        if stepped {
+            // Spec: macros R22. A macro that becomes stepped takes its
+            // nearest step.
+            let param = crate::macro_param(number);
+            let value = self
+                .device_ref(rack)?
+                .params
+                .get(&param)
+                .copied()
+                .unwrap_or(0.0);
+            let stepped_value = crate::macro_step_position(steps, value);
+            if stepped_value != value {
+                self.device_mut(rack)?.set_param(param, stepped_value);
+            }
+        }
+        Ok(())
+    }
+
+    /// The value a stepped macro takes for `value`: its nearest step
+    /// (macros spec, R22). Any other parameter keeps the value it is given.
+    fn stepped_macro_value(&self, device: DeviceId, param: ParamId, value: f64) -> f64 {
+        let Some(number) = crate::macro_number(param) else {
+            return value;
+        };
+        let Some(device) = self.device_ref(device).ok() else {
+            return value;
+        };
+        if device.rack_kind().is_none() {
+            return value;
+        }
+        device.macros.setting(number).position_of(value)
+    }
+
     /// Sets every mapped macro of `rack` that isn't excluded to a random
     /// position (macros spec, R15), as a hand move on each.
     fn randomize_macros(&mut self, rack: DeviceId, seed: Option<u64>) -> Result<(), ModelError> {
@@ -3912,7 +3997,19 @@ impl Document {
         let values: Vec<(u8, f64)> = (1..=MACROS)
             .filter(|number| current.macros.has_mappings(*number))
             .filter(|number| !current.macros.setting(*number).randomize_excluded)
-            .map(|number| (number, next_unit(&mut state)))
+            .map(|number| {
+                let setting = current.macros.setting(number);
+                let value = next_unit(&mut state);
+                // Spec: macros R24. A stepped macro is randomised to a step.
+                let value = if setting.is_stepped() {
+                    let steps = f64::from(setting.steps);
+                    let step = (value * steps).min(steps - 1.0).floor();
+                    step / (steps - 1.0)
+                } else {
+                    value
+                };
+                (number, value)
+            })
             .collect();
         let owner = self.device_owner(rack)?;
         for (number, value) in &values {

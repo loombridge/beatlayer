@@ -415,6 +415,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("rack.set_macro_info_text", read("rack.macros", "macros")),
     ("rack.randomize_macros", read("rack.macros", "macros")),
     ("rack.set_macro_randomize_excluded", read("rack.macros", "macros")),
+    ("rack.set_macro_style", read("rack.macros", "macros")),
     ("rack.set_mapped_value", read("rack.macros", "macros")),
     ("rack.select_macro", read("rack.macros", "macros")),
     ("rack.set_view", read("device_view.state", "devices")),

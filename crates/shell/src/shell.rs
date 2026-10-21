@@ -765,6 +765,12 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A macro's style changed, so it may have moved to another step
+    /// (R21, R22).
+    Style {
+        rack: bl_model::DeviceId,
+        number: u8,
+    },
 }
 
 impl Shell {
@@ -6203,6 +6209,12 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::SetMacroStyle {
+                rack, macro_number, ..
+            } => Some(MacroEdit::Style {
+                rack: *rack,
+                number: *macro_number,
+            }),
             _ => None,
         }
     }
@@ -6250,6 +6262,9 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Style { rack, number } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.macro_commands(doc, rack, *number)
+            }),
         }
     }
 

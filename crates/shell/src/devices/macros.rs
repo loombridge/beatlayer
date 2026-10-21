@@ -204,6 +204,8 @@ impl DeviceView {
             colour: settings.colour,
             value,
             text: self.macro_text(doc, value, &mappings),
+            style: settings.style,
+            steps: settings.steps,
             randomize_excluded: settings.randomize_excluded,
             mappings: rows,
         }
@@ -225,6 +227,23 @@ impl DeviceView {
                 .map(|number| self.macro_info(doc, device, number))
                 .collect(),
         })
+    }
+
+    /// The text each of a macro's steps reads (macros spec, R23): the value
+    /// text of the position that step gives.
+    pub fn macro_step_texts(&self, doc: &Document, rack: DeviceId, number: u8) -> Vec<String> {
+        let Some(device) = doc.device(rack) else {
+            return Vec::new();
+        };
+        let settings = device.macros.setting(number);
+        let mappings: Vec<&MacroMapping> = device.macros.mappings_of(number).collect();
+        let count = settings.steps.max(2);
+        (0..count)
+            .map(|step| {
+                let value = f64::from(step) / f64::from(count - 1);
+                self.macro_text(doc, value, &mappings)
+            })
+            .collect()
     }
 
     /// The command that gives `mapping`'s target the value the macro gives

@@ -24,6 +24,10 @@ pub const STATE: &str = "settings.state";
 pub enum SettingsPage {
     /// Display & Input (L-SET-010).
     DisplayInput,
+    /// Shortcuts. Beatlayer's own page: the person's own keyboard
+    /// shortcuts (IMP-17; the custom shortcuts spec). It follows Display &
+    /// Input, the page Live keeps its keyboard settings in (L-SET-002).
+    Shortcuts,
     /// Theme & Colors (L-SET-011).
     ThemeColors,
     /// Audio (L-SET-012). The page the window first opens on.
@@ -51,8 +55,9 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// Every page, in the page chooser's order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::DisplayInput,
+        Self::Shortcuts,
         Self::ThemeColors,
         Self::Audio,
         Self::Link,
@@ -70,6 +75,7 @@ impl SettingsPage {
     pub const fn label(self) -> &'static str {
         match self {
             Self::DisplayInput => "Display & Input",
+            Self::Shortcuts => "Shortcuts",
             Self::ThemeColors => "Theme & Colors",
             Self::Audio => "Audio",
             Self::Link => "Link",
@@ -88,6 +94,7 @@ impl SettingsPage {
     pub const fn row(self) -> &'static str {
         match self {
             Self::DisplayInput => "L-SET-010",
+            Self::Shortcuts => "L-SET-002",
             Self::ThemeColors => "L-SET-011",
             Self::Audio => "L-SET-012",
             Self::Link => "L-SET-013",
@@ -115,6 +122,7 @@ impl SettingsPage {
             Self::Audio
                 | Self::ThemeColors
                 | Self::DisplayInput
+                | Self::Shortcuts
                 | Self::RecordWarpLaunch
                 | Self::PlugIns
                 | Self::Agents
@@ -520,9 +528,10 @@ mod tests {
                     .to_owned()
             })
             .collect();
-        assert_eq!(ids[2], "audio");
-        assert_eq!(ids[8], "agents");
-        assert_eq!(ids[9], "record-warp-launch");
+        assert_eq!(ids[1], "shortcuts");
+        assert_eq!(ids[3], "audio");
+        assert_eq!(ids[9], "agents");
+        assert_eq!(ids[10], "record-warp-launch");
     }
 
     #[test]

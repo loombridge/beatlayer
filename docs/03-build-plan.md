@@ -690,7 +690,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.40 | todo |  |  |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |
 | 6.42 | todo |  | Waits on IMP-16 and IMP-18's acceptance |
-| 6.43 | todo |  | Waits on IMP-17's acceptance |
+| 6.43 | done | 21 October 2026 | [#290](https://github.com/loombridge/beatlayer/pull/290); a person gives commands their own keys in `keymap.toml` beside the preferences, layered over Live's, and the Shortcuts page in Settings records them, asks before taking a key from another command, and gives Live's keys back ([custom shortcuts](specs/custom-shortcuts.md)) |
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
 | 6.46 | todo |  | Waits on IMP-23's acceptance |

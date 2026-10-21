@@ -16,6 +16,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`locator`]: the Arrangement's locators (WP-6.24): adding, deleting,
+//!   moving, renaming and describing them, looping to the next one, the
+//!   song start time, and the jumps between them.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -76,6 +79,7 @@ pub mod freeze;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
+pub mod locator;
 pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
@@ -107,6 +111,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    locator::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;

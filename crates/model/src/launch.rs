@@ -189,6 +189,35 @@ impl LaunchQuantization {
         }
     }
 
+    /// The tick of the grid line nearest `from`: where a locator set while
+    /// the song plays lands (the time editing spec, R3). Bars are counted
+    /// from the start of the arrangement, so the "1 Bar" grid has a line at
+    /// 1.1.1 and at every bar after it. With no quantisation, `from` itself.
+    #[must_use]
+    pub fn nearest_line(self, from: Ticks, signatures: &TimeSignatureMap) -> Ticks {
+        let from = from.max(Ticks::ZERO);
+        if let Some(bars) = self.bars() {
+            let (index, _) = signatures.bar_at(from);
+            let into = index.rem_euclid(bars);
+            let bar = if into * 2 <= bars {
+                index - into
+            } else {
+                index + (bars - into)
+            };
+            return signatures.bar_start(bar);
+        }
+        let bar = signatures.signature_at(from).bar_length();
+        let Some(unit) = self.ticks(bar) else {
+            return from;
+        };
+        let into = from.rem_euclid(unit);
+        if into * 2 <= unit {
+            from - into
+        } else {
+            from + (unit - into)
+        }
+    }
+
     /// This step's place in the menu.
     fn position(self) -> usize {
         Self::ALL

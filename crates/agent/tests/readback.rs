@@ -696,6 +696,21 @@ fn fixture() -> Project {
             signature: Some(TimeSignature::new(3, 4).unwrap()),
         },
     );
+    // WP-6.24: a locator and a song start time, so the format writes
+    // `locators` and `song_start`.
+    let locator: bl_model::LocatorId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::AddLocator {
+            locator: bl_model::Locator::new(locator, Ticks::WHOLE * 2, "Intro".to_owned()),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetSongStart {
+            start: Some(bl_model::SongStart::Locator(locator)),
+        },
+    );
     // WP-4.14: a frozen track, so the format writes `frozen`.
     apply(
         &mut editor,
@@ -864,6 +879,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "punch_in",
                 "punch_out",
                 "midi_overdub",
+                "locators",
+                "song_start",
             ][..],
         ),
         (

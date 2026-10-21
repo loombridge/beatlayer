@@ -120,6 +120,9 @@ pub use bl_shell_spec::devices as device_commands;
 pub use bl_shell_spec::editing as editing_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
+/// The Arrangement's locator command IDs and their argument and result
+/// types (WP-6.24).
+pub use bl_shell_spec::locator as locator_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;

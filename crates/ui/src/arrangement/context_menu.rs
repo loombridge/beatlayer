@@ -27,6 +27,12 @@ pub enum MenuKind {
     /// The time selection's (C-TIME).
     #[default]
     Time,
+    /// The scrub area's (C-TIME-022).
+    Scrub,
+    /// A locator's (C-TIME-023, C-TIME-025).
+    Locator,
+    /// The loop brace's (C-TIME-023).
+    Brace,
 }
 
 /// The two menus and which one is open.
@@ -70,6 +76,21 @@ impl ContextMenus {
         }
     }
 
+    /// A right-click in the scrub area: the locator's menu on a locator,
+    /// and the scrub area's own menu elsewhere.
+    pub fn open_scrub(&mut self, locator: Option<bl_model::LocatorId>) {
+        self.kind = if locator.is_some() {
+            MenuKind::Locator
+        } else {
+            MenuKind::Scrub
+        };
+    }
+
+    /// A right-click on the loop brace.
+    pub fn open_brace(&mut self) {
+        self.kind = MenuKind::Brace;
+    }
+
     /// The keys opened a menu (S-CTX-002): the clips' if any are selected,
     /// otherwise the time selection's.
     pub fn open_from_keys(&mut self, clips_selected: bool) {
@@ -91,6 +112,9 @@ impl ContextMenus {
             }
             MenuKind::Clip => context_menus::arrangement_clip_in(state),
             MenuKind::Time => context_menus::arrangement_time_in(state),
+            MenuKind::Scrub => context_menus::arrangement_scrub_in(),
+            MenuKind::Locator => context_menus::arrangement_locator_in(),
+            MenuKind::Brace => context_menus::arrangement_brace_in(),
         };
         let menu = &menu;
         let grid = shell.arrangement().grid();

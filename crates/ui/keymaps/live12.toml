@@ -816,6 +816,7 @@ commands = [
   { id = "chain.rename", contexts = ["rack-chains"] },
   { id = "clip.rename", contexts = ["arrangement"] },
   { id = "device.rename", contexts = ["device-view"] },
+  { id = "locator.rename", contexts = ["arrangement"] },
 ]
 
 [[shortcut]]

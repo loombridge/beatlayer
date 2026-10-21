@@ -71,6 +71,7 @@ use bl_shell_spec::export as export_ids;
 use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
+use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
@@ -4245,6 +4246,7 @@ impl Shell {
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
+                && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !clip_marker_command(&invocation.id)
@@ -4273,6 +4275,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if locator_ids::handles(&invocation.id) {
+            crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
         } else if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
@@ -4307,6 +4311,7 @@ impl Shell {
             }
         }
         self.editor.begin(label);
+        let launch = self.launch_settings();
         let run = |editor: &mut Editor,
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
@@ -4334,6 +4339,16 @@ impl Shell {
                     .map_err(|error| {
                         crate::arrangement::editing::EditFailure::Refused(error.to_string())
                     })
+            } else if locator_ids::handles(&invocation.id) {
+                // The locators' own commands (WP-6.24).
+                crate::arrangement::locator::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    &launch,
+                    None,
+                )
             } else {
                 editing::run(
                     &invocation.id,
@@ -5242,6 +5257,11 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            // Spec: time-editing R10. The loop brace's menu item is ticked
+            // while the song starts at the brace's start.
+            locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
+                self.editor.document().settings().song_start == Some(bl_model::SongStart::LoopBrace),
+            ),
             _ => None,
         }
     }
@@ -5251,6 +5271,13 @@ impl Shell {
     #[must_use]
     pub fn switch_state(&self, id: &str) -> Option<bool> {
         match id {
+            // Spec: time-editing R10. A locator's menu item is ticked while
+            // the song starts at that locator.
+            locator_ids::SET_START_TIME => {
+                let selected = self.arrangement.selected_locators().first().copied();
+                Some(self.editor.document().settings().song_start
+                    == selected.map(bl_model::SongStart::Locator))
+            }
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
@@ -5311,8 +5338,23 @@ impl Shell {
     /// The label a menu shows for a command now: Undo and Redo name the step
     /// they act on, or say there's nothing (M-EDIT-001, M-EDIT-002).
     #[must_use]
+    /// The command a menu item runs: the one its row names, or the one
+    /// that fits the state, such as Create ▸ Add Locator, which reads
+    /// Delete Locator and deletes while a locator is selected (the time
+    /// editing spec, R4).
+    pub fn menu_command<'a>(&self, id: &'a str) -> &'a str {
+        if id == locator_ids::ADD && !self.arrangement.selected_locators().is_empty() {
+            locator_ids::DELETE
+        } else {
+            id
+        }
+    }
+
     pub fn dynamic_label(&self, id: &str) -> Option<String> {
         match id {
+            // Spec: time-editing R4. The Create menu's Add Locator reads
+            // Delete Locator while a locator is selected.
+            locator_ids::DELETE => Some("Delete Locator".to_owned()),
             model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
@@ -5467,6 +5509,9 @@ impl Shell {
             }
             ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
             ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
+            // Spec: time-editing R8. Cmd-R renames the selected locators
+            // while there are any.
+            "clip.rename" => return self.arrangement.selected_locators().is_empty(),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
@@ -5659,6 +5704,9 @@ impl Shell {
                 .args
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                // Spec: time-editing R4. The Delete key deletes the
+                // selected locators while there are any.
+                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
                 && editing::can_run(
                     id,
                     &args,
@@ -5719,6 +5767,31 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.arrangement.can_run(id, &args, self.editor.document());
+        }
+        if locator_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            if !spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+            {
+                return false;
+            }
+            return match id {
+                locator_ids::DELETE => {
+                    args.get("locators").is_some()
+                        || !self.arrangement.selected_locators().is_empty()
+                }
+                // Spec: time-editing R13. The jumps need the engine.
+                locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {
+                    self.audio.engine_running()
+                }
+                _ => true,
+            };
         }
         if mixer_ids::handles(id) {
             let args = if args.is_null() {
@@ -6668,6 +6741,27 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
+        if locator_ids::handles(id) {
+            // Spec: time-editing R1 to R13. The locators are part of the
+            // set, and the jumps between them need the engine.
+            let before = self.editor.document().clone();
+            let launch = self.launch_settings();
+            let result = crate::arrangement::locator::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.arrangement,
+                &launch,
+                Some(&mut self.audio),
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {

@@ -22,8 +22,9 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
-use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, LocatorId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
+use crate::locator::{Locator, SongStart, next_locator_name};
 use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
@@ -207,6 +208,53 @@ pub enum Command {
     SetLoopEnabled {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
+    },
+    /// Adds a locator at a position, as the Set Locator button and Add
+    /// Locator do. A locator with no name of its own is named with the next
+    /// whole number.
+    AddLocator {
+        /// The locator, with a new ID.
+        locator: Locator,
+    },
+    /// Deletes a locator. A song start time on it goes with it.
+    DeleteLocator {
+        /// The locator.
+        locator: LocatorId,
+    },
+    /// Moves a locator to a new position.
+    MoveLocator {
+        /// The locator.
+        locator: LocatorId,
+        /// Where it goes: 0 (1.1.1) or later, and not where another locator
+        /// already is.
+        to: Ticks,
+    },
+    /// Renames a locator.
+    RenameLocator {
+        /// The locator.
+        locator: LocatorId,
+        /// The new name.
+        name: String,
+    },
+    /// Sets a locator's info text, which the Info View shows while the
+    /// pointer is over it.
+    SetLocatorInfoText {
+        /// The locator.
+        locator: LocatorId,
+        /// The new info text.
+        info_text: String,
+    },
+    /// Sets the Arrangement loop brace from a locator to the next one and
+    /// switches the loop on, as Loop Selection does.
+    LoopToNextLocator {
+        /// The locator.
+        locator: LocatorId,
+    },
+    /// Sets where the song starts: a locator, the loop brace's start, or
+    /// nothing, which leaves the song starting as it otherwise does.
+    SetSongStart {
+        /// Where the song starts; nothing clears it.
+        start: Option<SongStart>,
     },
     /// Switches Punch-In on or off: with it on, recording into the
     /// Arrangement starts at the loop brace's start, whether or not the Loop
@@ -2142,6 +2190,13 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::AddLocator { .. } => "Add Locator",
+            Self::DeleteLocator { .. } => "Delete Locator",
+            Self::MoveLocator { .. } => "Move Locator",
+            Self::RenameLocator { .. } => "Rename Locator",
+            Self::SetLocatorInfoText { .. } => "Edit Info Text",
+            Self::LoopToNextLocator { .. } => "Loop to Next Locator",
+            Self::SetSongStart { .. } => "Set Song Start Time",
             Self::SetPunchIn { .. } => "Punch-In",
             Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
@@ -2429,6 +2484,7 @@ impl Command {
             Self::AddChain { chain, .. } => chain.ids(),
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
+            Self::AddLocator { locator } => vec![locator.id.0],
             Self::DuplicateScene { id, clips, .. } => {
                 let mut ids = vec![id.0];
                 ids.extend(clips.iter().map(|(_, copy)| copy.0));
@@ -2510,6 +2566,18 @@ impl Document {
             }
             Command::SetLoopEnabled { enabled } => {
                 self.settings.arrangement_loop.enabled = *enabled;
+                Ok(())
+            }
+            Command::AddLocator { locator } => self.add_locator(locator.clone()),
+            Command::DeleteLocator { locator } => self.delete_locator(*locator),
+            Command::MoveLocator { locator, to } => self.move_locator(*locator, *to),
+            Command::RenameLocator { locator, name } => self.rename_locator(*locator, name.clone()),
+            Command::SetLocatorInfoText { locator, info_text } => {
+                self.set_locator_info_text(*locator, info_text.clone())
+            }
+            Command::LoopToNextLocator { locator } => self.loop_to_next_locator(*locator),
+            Command::SetSongStart { start } => {
+                self.settings.song_start = *start;
                 Ok(())
             }
             Command::SetPunchIn { enabled } => {
@@ -5942,6 +6010,133 @@ impl Document {
         if empty {
             self.track_mut(track)?.automation.remove(&target);
         }
+        Ok(())
+    }
+
+    /// Adds a locator at its position, naming it with the next whole number
+    /// when it has no name of its own.
+    fn add_locator(&mut self, mut locator: Locator) -> Result<(), ModelError> {
+        if locator.position < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(locator.position));
+        }
+        self.check_fresh(locator.id.0)?;
+        if self
+            .settings
+            .locators
+            .iter()
+            .any(|other| other.position == locator.position)
+        {
+            return Err(ModelError::ChangeInUse {
+                what: "locator",
+                at: locator.position,
+            });
+        }
+        if locator.name.is_empty() {
+            locator.name = next_locator_name(&self.settings.locators);
+        }
+        self.settings.locators.push(locator);
+        self.settings.locators.sort_by_key(|locator| locator.position);
+        Ok(())
+    }
+
+    /// Deletes a locator. A song start time on it goes with it.
+    fn delete_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
+        let position = self
+            .settings
+            .locators
+            .iter()
+            .position(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        self.settings.locators.remove(position);
+        if self.settings.song_start == Some(SongStart::Locator(id)) {
+            self.settings.song_start = None;
+        }
+        Ok(())
+    }
+
+    /// Moves a locator to `to`.
+    fn move_locator(&mut self, id: LocatorId, to: Ticks) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        if self.locator(id).is_none() {
+            return Err(ModelError::NoSuchLocator(id));
+        }
+        if self
+            .settings
+            .locators
+            .iter()
+            .any(|other| other.id != id && other.position == to)
+        {
+            return Err(ModelError::ChangeInUse {
+                what: "locator",
+                at: to,
+            });
+        }
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .expect("just found the locator");
+        locator.position = to;
+        self.settings.locators.sort_by_key(|locator| locator.position);
+        Ok(())
+    }
+
+    /// Renames a locator. An empty name keeps the old one (the time editing
+    /// spec, R8).
+    fn rename_locator(&mut self, id: LocatorId, name: String) -> Result<(), ModelError> {
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        if !name.is_empty() {
+            locator.name = name;
+        }
+        Ok(())
+    }
+
+    /// Sets a locator's info text.
+    fn set_locator_info_text(
+        &mut self,
+        id: LocatorId,
+        info_text: String,
+    ) -> Result<(), ModelError> {
+        let locator = self
+            .settings
+            .locators
+            .iter_mut()
+            .find(|locator| locator.id == id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        locator.info_text = info_text;
+        Ok(())
+    }
+
+    /// Sets the loop brace from a locator to the next one and switches the
+    /// loop on.
+    fn loop_to_next_locator(&mut self, id: LocatorId) -> Result<(), ModelError> {
+        let locator = self
+            .locator(id)
+            .ok_or(ModelError::NoSuchLocator(id))?;
+        let start = locator.position;
+        let next = self
+            .settings
+            .locators
+            .iter()
+            .map(|locator| locator.position)
+            .filter(|position| *position > start)
+            .min()
+            .ok_or(ModelError::NoChange {
+                what: "next locator",
+                at: start,
+            })?;
+        let brace = &mut self.settings.arrangement_loop;
+        brace.start = start;
+        brace.length = next - start;
+        brace.enabled = true;
         Ok(())
     }
 

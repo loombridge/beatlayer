@@ -93,6 +93,28 @@ pub struct TrackControl {
     pub slot: Slot,
 }
 
+/// Where a control sits in the Arrangement's Tab order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    /// A control in the main view that isn't a track's.
+    View,
+    /// A control above the track headers, in Live's order (accessibility
+    /// R10): Set Locator, Previous Locator, Next Locator, the locators, and
+    /// Automation Mode.
+    AboveHeaders(u8),
+}
+
+/// The controls above the track headers, in Live's order.
+pub const ABOVE_SET_LOCATOR: u8 = 0;
+/// Previous Locator.
+pub const ABOVE_PREVIOUS_LOCATOR: u8 = 1;
+/// Next Locator.
+pub const ABOVE_NEXT_LOCATOR: u8 = 2;
+/// The set's locators, in time order.
+pub const ABOVE_LOCATORS: u8 = 3;
+/// Automation Mode.
+pub const ABOVE_AUTOMATION_MODE: u8 = 4;
+
 /// One control in the focus order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Entry {
@@ -102,6 +124,8 @@ pub struct Entry {
     pub area: Area,
     /// For a track's control, which one it is.
     pub control: Option<TrackControl>,
+    /// Where it sits in the Arrangement's Tab order.
+    pub group: Group,
 }
 
 /// The controls a frame drew that the keyboard reaches, in the order drawn.
@@ -130,10 +154,25 @@ fn outline_id() -> Id {
 
 /// Adds a control the keyboard reaches to this frame's order.
 pub fn register(ctx: &Context, id: Id, area: Area, control: Option<TrackControl>) {
+    register_in(ctx, id, area, control, Group::View);
+}
+
+/// Adds a control above the track headers to this frame's order, where it
+/// takes its place in Live's order (accessibility R10).
+pub fn register_above(ctx: &Context, id: Id, area: Area, rank: u8) {
+    register_in(ctx, id, area, None, Group::AboveHeaders(rank));
+}
+
+fn register_in(ctx: &Context, id: Id, area: Area, control: Option<TrackControl>, group: Group) {
     ctx.data_mut(|d| {
         d.get_temp_mut_or_default::<Order>(order_id())
             .entries
-            .push(Entry { id, area, control });
+            .push(Entry {
+                id,
+                area,
+                control,
+                group,
+            });
     });
 }
 
@@ -217,12 +256,32 @@ impl Order {
     /// The Arrangement's Tab order: `track`'s header, then the view's other
     /// controls.
     fn arrangement(&self, track: Option<TrackId>) -> Vec<Id> {
-        let mut scope =
-            track.map_or_else(Vec::new, |track| self.track_controls(Place::Header, track));
+        // Spec: accessibility R10. The controls above the track headers come
+        // first, in Live's order, then the selected track's header, then the
+        // rest of the view's controls.
+        let mut above: Vec<&Entry> = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.area == Area::MainView && matches!(entry.group, Group::AboveHeaders(_))
+            })
+            .collect();
+        above.sort_by_key(|entry| match entry.group {
+            Group::AboveHeaders(rank) => rank,
+            Group::View => 0,
+        });
+        let mut scope: Vec<Id> = above.iter().map(|entry| entry.id).collect();
+        scope.extend(
+            track.map_or_else(Vec::new, |track| self.track_controls(Place::Header, track)),
+        );
         scope.extend(
             self.entries
                 .iter()
-                .filter(|entry| entry.area == Area::MainView && entry.control.is_none())
+                .filter(|entry| {
+                    entry.area == Area::MainView
+                        && entry.control.is_none()
+                        && !matches!(entry.group, Group::AboveHeaders(_))
+                })
                 .map(|entry| entry.id),
         );
         scope
@@ -402,6 +461,7 @@ mod tests {
                 id: Id::new(id),
                 area,
                 control,
+                group: Group::View,
             });
         };
         push("a", Area::ControlBar, None);

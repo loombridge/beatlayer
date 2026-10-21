@@ -23,6 +23,7 @@ use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::ids::{SceneId, TrackId};
 use crate::launch::LaunchSettings;
+use crate::locator::{Locator, SongStart};
 use crate::scene::{Scene, default_scenes};
 use crate::shared::Shared;
 use crate::track::{Mixer, Routing, Track, TrackDelay, TrackKind};
@@ -249,6 +250,7 @@ impl TryFrom<DocumentRepr> for Document {
             return Err(ModelError::MainTrack);
         }
         check_crossfader(settings.crossfader)?;
+        check_locators(&settings.locators)?;
         let main = loader.add(main, None)?;
         let returns = returns
             .into_iter()
@@ -285,6 +287,13 @@ impl TryFrom<DocumentRepr> for Document {
             Some(scenes) => scenes.into_iter().collect(),
             None => default_scenes(document.max_id())?.into_iter().collect(),
         };
+        // A song start time that names a locator the set doesn't hold is
+        // cleared: the locator it follows is gone.
+        if let Some(SongStart::Locator(id)) = document.settings.song_start {
+            if document.locator(id).is_none() {
+                document.settings.song_start = None;
+            }
+        }
         // Slots name their scenes, which may be the defaults just made.
         for track in document.tracks.values() {
             for scene in track.slots.keys() {
@@ -460,6 +469,24 @@ impl Loader {
             Err(ModelError::DuplicateId(id))
         }
     }
+}
+
+/// Checks the locators a saved set holds: each at 1.1.1 or later, and no
+/// two at one position.
+fn check_locators(locators: &[Locator]) -> Result<(), ModelError> {
+    let mut seen = BTreeSet::new();
+    for locator in locators {
+        if locator.position < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(locator.position));
+        }
+        if !seen.insert(locator.position) {
+            return Err(ModelError::ChangeInUse {
+                what: "locator",
+                at: locator.position,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn wrong_kind(track: &TrackRepr, needs: &'static str) -> ModelError {

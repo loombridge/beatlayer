@@ -646,8 +646,13 @@ fn every_part_reaches_assistive_technology() {
         .find(|n| n.role == Role::ComboBox && n.label == "Input Type")
         .unwrap();
     assert!(!input.disabled);
+    // Spec: time-editing R4. The Set Locator button is live now.
     let locator = Harness::node(&nodes, "Set Locator");
-    assert!(locator.disabled && locator.description.contains("M6"));
+    assert!(!locator.disabled);
+    let previous = Harness::node(&nodes, "Previous Locator");
+    assert!(!previous.disabled);
+    let next = Harness::node(&nodes, "Next Locator");
+    assert!(!next.disabled);
     for name in [
         "Optimize Height",
         "Optimize Width",

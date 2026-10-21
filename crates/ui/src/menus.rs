@@ -67,7 +67,10 @@ pub fn item_state_in(
         invocation: None,
     };
     match item.action {
-        Action::Command(id) => resolved(id, json!({}), keymap.chord_for_command(id, platform)),
+        Action::Command(id) => {
+            let id = shell.menu_command(id);
+            resolved(id, json!({}), keymap.chord_for_command(id, platform))
+        }
         Action::Shortcut(shortcuts) => {
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
             shortcuts

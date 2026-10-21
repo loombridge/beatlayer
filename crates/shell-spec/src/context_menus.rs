@@ -19,7 +19,7 @@ use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
 
-use Action::{Command as Cmd, Pending, Shortcut as Key};
+use Action::{Choice, Command as Cmd, Pending, Shortcut as Key};
 
 /// The model's command that colours a chain.
 const SET_CHAIN_COLOUR: &str = "chain.set_colour";
@@ -111,6 +111,35 @@ const TIME: &[Row] = &[
     SEPARATOR,
     ("C-TIME-017", "Triplet Grid", Key(&["S-GRID-004"])),
 ];
+
+/// The scrub area's menu (C-TIME-022).
+const SCRUB: &[Row] = &[
+    ("C-TIME-022a", "Add Locator", Cmd(crate::locator::ADD)),
+    ("C-TIME-022b", "Insert Time Signature Change", Pending(None)),
+];
+
+/// A locator's menu (C-TIME-023 and C-TIME-025).
+const LOCATOR: &[Row] = &[
+    (
+        "C-TIME-023a",
+        "Loop to Next Locator",
+        Cmd(crate::locator::LOOP_TO_NEXT),
+    ),
+    (
+        "C-TIME-023b",
+        "Set Song Start Time Here",
+        Cmd(crate::locator::SET_START_TIME),
+    ),
+    SEPARATOR,
+    ("C-TIME-025a", "Edit Info Text", Pending(None)),
+];
+
+/// The loop brace's menu (C-TIME-023).
+const BRACE: &[Row] = &[(
+    "C-TIME-023c",
+    "Set Song Start Time Here",
+    Choice(crate::locator::SET_START_TIME, "{\"loop_brace\":true}"),
+)];
 
 /// The row of Beatlayer's own Float (IMP-14, WP-2.5b), after Fold: an
 /// improvement, so not a row of menus.md, which records Live's menus. It's
@@ -484,6 +513,24 @@ pub fn arrangement_time() -> Vec<MenuItem> {
 #[must_use]
 pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
     items(&with_selection(TIME, TIME_SELECTION, "C-TIME-007", state))
+}
+
+/// The scrub area's menu (C-TIME-022).
+#[must_use]
+pub fn arrangement_scrub_in() -> Vec<MenuItem> {
+    items(SCRUB)
+}
+
+/// A locator's menu (C-TIME-023 and C-TIME-025).
+#[must_use]
+pub fn arrangement_locator_in() -> Vec<MenuItem> {
+    items(LOCATOR)
+}
+
+/// The loop brace's menu (C-TIME-023).
+#[must_use]
+pub fn arrangement_brace_in() -> Vec<MenuItem> {
+    items(BRACE)
 }
 
 /// `base` with `extra`, which a selection that holds clips brings, inserted

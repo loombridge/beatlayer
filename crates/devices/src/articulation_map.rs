@@ -13,8 +13,8 @@ use bl_model::device_layout::{
     BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
 };
 use bl_model::{
-    ArticulationEntry, ArticulationList, ArticulationOutput, DeviceDescription, DeviceRole, OrdMap,
-    ParamDescriptor, ParamId, ParamUnit, Trigger,
+    ArticulationEntry, ArticulationList, ArticulationOutput, ArticulationTrigger,
+    DeviceDescription, DeviceRole, OrdMap, ParamDescriptor, ParamId, ParamUnit,
 };
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
@@ -37,8 +37,10 @@ pub const RESEND_ON_START: ParamId = ParamId(3);
 /// The name of the display cell the list is drawn in.
 pub const LIST_CELL: &str = "Articulations";
 
-/// How many key outputs the device holds sounding at once.
-const KEY_ROOM: usize = 16;
+/// How many key outputs the device holds sounding at once: the most a list
+/// can send, every articulation's four outputs. A keyswitch past the room
+/// isn't sent, so it can't be left sounding.
+const KEY_ROOM: usize = bl_model::MAX_ARTICULATIONS * bl_model::MAX_OUTPUTS;
 
 /// Where the current articulation's number sits in the display's data.
 pub const OFF_CURRENT: usize = 0;
@@ -254,6 +256,11 @@ impl Map {
         velocity: u8,
         length: i64,
     ) {
+        if self.keys.len() >= KEY_ROOM {
+            // No room for the note-off: the keyswitch isn't sent, so it
+            // can't be left sounding.
+            return;
+        }
         if let Some(index) = self
             .keys
             .iter()
@@ -277,13 +284,11 @@ impl Map {
             velocity: f32::from(velocity) / 127.0,
             note_id: None,
         });
-        if self.keys.len() < KEY_ROOM {
-            self.keys.push(KeyOutput {
-                channel,
-                key,
-                off_at: self.router.now() + i64::from(at) + length,
-            });
-        }
+        self.keys.push(KeyOutput {
+            channel,
+            key,
+            off_at: self.router.now() + i64::from(at) + length,
+        });
     }
 
     /// Ends the keyswitches that are due before the frame `at` of the
@@ -421,10 +426,9 @@ impl NativeDevice for Map {
     }
 
     fn flush(&mut self, _events: &[bl_engine::NodeEvent], _params: &ParamBank) {
-        // The device is switched off: it passes everything through, and the
-        // notes it passed on are ended by their own note-offs.
+        // The device is switched off: it passes everything through, and
+        // ends the notes it started (device-framework R32).
         self.was_off = true;
-        self.router.forget();
     }
 
     fn release(&mut self, out: &mut NoteBuffer) {
@@ -441,6 +445,9 @@ impl NativeDevice for Map {
             });
         }
         self.keys.clear();
+        // Spec: device-framework R31, R32. The notes the device started,
+        // on the channels they went out on, are ended too.
+        self.router.release(out);
     }
 
     fn display_len(&self) -> usize {
@@ -494,8 +501,16 @@ impl Map {
                     return;
                 }
                 let out = self.on_channel(note);
-                self.router.track(&note, Some(Key::of(&out)));
-                self.router.send_now(audio, out, Key::of(&note));
+                if out.channel == note.channel {
+                    // The note keeps its channel: it isn't the device's,
+                    // and its own note-off ends it.
+                    audio.send(out);
+                } else {
+                    // The device starts the note on the articulation's
+                    // channel, and ends it there (device-framework R31).
+                    self.router.track(&note, Some(Key::of(&out)));
+                    self.router.send_now(audio, out, Key::of(&note));
+                }
             }
             NoteKind::Off | NoteKind::Choke => {
                 if self.trigger_of_key(note.key).is_some() {
@@ -594,11 +609,11 @@ pub fn display(
 /// The trigger an articulation has, as the panel shows it: the key it plays,
 /// or the controller and the range of values.
 #[must_use]
-pub fn trigger_text(trigger: &Trigger) -> String {
+pub fn trigger_text(trigger: &ArticulationTrigger) -> String {
     match *trigger {
-        Trigger::None => "-".to_owned(),
-        Trigger::Key { key } => format!("Key {key}"),
-        Trigger::Controller {
+        ArticulationTrigger::None => "-".to_owned(),
+        ArticulationTrigger::Key { key } => format!("Key {key}"),
+        ArticulationTrigger::Controller {
             controller,
             lowest,
             highest,

@@ -293,16 +293,13 @@ pub fn list_text(articulations: &[bl_model::Articulation], current: usize) -> St
                 |channel| format!("channel {channel}"),
             );
             format!(
-                "{} {}{} {}",
+                "{} {}{} {}, {}, {}",
                 index + 1,
                 articulation.name,
                 if index == current { ", current," } else { "," },
-                format!(
-                    "{}, {}, {}",
-                    bl_devices::articulation_map::trigger_text(&articulation.trigger),
-                    bl_devices::articulation_map::outputs_text(articulation),
-                    channel
-                )
+                bl_devices::articulation_map::trigger_text(&articulation.trigger),
+                bl_devices::articulation_map::outputs_text(articulation),
+                channel
             )
         })
         .collect::<Vec<_>>()

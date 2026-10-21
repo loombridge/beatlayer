@@ -332,7 +332,7 @@ fn the_articulation_map_passes_under_rtsan() {
             device: map,
             index: 0,
             name: Some("Staccato".to_owned()),
-            trigger: Some(bl_model::Trigger::Key { key: 36 }),
+            trigger: Some(bl_model::ArticulationTrigger::Key { key: 36 }),
             outputs: Some(vec![
                 bl_model::ArticulationOutput::Key {
                     key: 24,
@@ -398,7 +398,7 @@ fn the_articulation_map_passes_under_rtsan() {
                     device: map,
                     index: 1,
                     name: None,
-                    trigger: Some(bl_model::Trigger::Key { key: 37 }),
+                    trigger: Some(bl_model::ArticulationTrigger::Key { key: 37 }),
                     outputs: Some(vec![bl_model::ArticulationOutput::Key {
                         key: 25,
                         velocity: 100,

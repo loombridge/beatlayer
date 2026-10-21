@@ -350,14 +350,6 @@ impl Router {
         self.entries.retain(|e| e.sounding);
     }
 
-    /// Forgets every note it tracked, without ending any of them: the
-    /// device was switched off, and the notes it passed on are ended by
-    /// their own note-offs.
-    pub(crate) fn forget(&mut self) {
-        self.entries.clear();
-        self.queue.clear();
-    }
-
     /// Writes a note-off at offset 0 for every sounding note, and forgets
     /// them and the queue (the device framework spec, R32).
     pub(crate) fn release(&mut self, out: &mut NoteBuffer) {

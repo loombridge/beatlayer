@@ -4573,16 +4573,17 @@ impl Shell {
             for (device, row, trigger) in self.devices.learned_triggers() {
                 self.devices.stop_learning(device);
                 self.edit(|editor| {
-                    editor
-                        .apply(Command::SetArticulation {
-                            device,
-                            index: row,
-                            name: None,
-                            trigger: Some(trigger),
-                            outputs: None,
-                            channel: None,
-                        })
-                        .expect("the trigger takes the device's own articulation");
+                    // The list may have changed while the button was lit,
+                    // and then the row is gone: the trigger is dropped
+                    // rather than ending the shell.
+                    let _ = editor.apply(Command::SetArticulation {
+                        device,
+                        index: row,
+                        name: None,
+                        trigger: Some(trigger),
+                        outputs: None,
+                        channel: None,
+                    });
                 });
             }
         }

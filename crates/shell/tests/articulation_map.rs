@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use bl_model::{
-    Articulation, ArticulationOutput, Command, Device, DeviceId, DeviceKind, Document, Editor,
-    TrackId, TrackKind, Trigger,
+    Articulation, ArticulationOutput, ArticulationTrigger, Command, Device, DeviceId, DeviceKind,
+    Document, Editor, TrackId, TrackKind,
 };
 use bl_shell::audio::AudioHost;
 use bl_shell::settings::Preferences;
@@ -128,7 +128,7 @@ fn the_list_is_edited_one_undo_step_at_a_time() {
         )
         .unwrap();
     let second = list(&shell, device)[1].clone();
-    assert_eq!(second.trigger, Trigger::Key { key: 36 });
+    assert_eq!(second.trigger, ArticulationTrigger::Key { key: 36 });
     // A null channel clears it: the notes keep the channel they come in on.
     shell
         .run(
@@ -160,7 +160,7 @@ fn the_list_is_edited_one_undo_step_at_a_time() {
     }
     assert_eq!(list(&shell, device).len(), 1, "every edit is undone");
     assert_eq!(list(&shell, device)[0].name, "Articulation 1");
-    assert_eq!(list(&shell, device)[0].trigger, Trigger::None);
+    assert_eq!(list(&shell, device)[0].trigger, ArticulationTrigger::None);
 }
 
 // Spec: articulation-map R3, R4, R5, R20. A list that breaks the rules is
@@ -356,7 +356,7 @@ fn the_list_is_saved_with_the_set_and_in_the_presets() {
             device: other,
             index: 0,
             name: Some("Staccato".to_owned()),
-            trigger: Some(Trigger::Key { key: 36 }),
+            trigger: Some(ArticulationTrigger::Key { key: 36 }),
             outputs: None,
             channel: None,
         })
@@ -369,6 +369,6 @@ fn the_list_is_saved_with_the_set_and_in_the_presets() {
         .clone();
     assert_eq!(reopened.len(), 1);
     assert_eq!(reopened[0].name, "Staccato");
-    assert_eq!(reopened[0].trigger, Trigger::Key { key: 36 });
+    assert_eq!(reopened[0].trigger, ArticulationTrigger::Key { key: 36 });
     let _ = path;
 }

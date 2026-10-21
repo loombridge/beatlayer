@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        210,
+        214,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -82,7 +82,8 @@ fn every_document_command_is_registered() {
              for the macro variations: store_variation, launch_variation, \
              overwrite_variation, rename_variation, duplicate_variation, \
              delete_variation and set_macro_variation_excluded, WP-4.7 the two \
-             for a clip's pitch and its reversal, and WP-5.33 set_device_role"
+             for a clip's pitch and its reversal, WP-5.33 set_device_role, and WP-5.4b \
+             set_macro_style"
     );
 
     for op in &ops {
@@ -3100,7 +3101,7 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 index: 0,
                 name: Some("Legato".to_owned()),
-                trigger: Some(bl_model::Trigger::Key { key: 36 }),
+                trigger: Some(bl_model::ArticulationTrigger::Key { key: 36 }),
                 outputs: Some(vec![bl_model::ArticulationOutput::Key {
                     key: 24,
                     velocity: 100,

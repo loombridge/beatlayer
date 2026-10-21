@@ -93,8 +93,8 @@ mod warp;
 mod warp_settings;
 
 pub use articulation::{
-    ARTICULATION_MAP, Articulation, ArticulationOutput, Entry as ArticulationEntry,
-    List as ArticulationList, MAX_ARTICULATIONS, MAX_OUTPUTS, Trigger,
+    ARTICULATION_MAP, Articulation, ArticulationOutput, ArticulationTrigger,
+    Entry as ArticulationEntry, List as ArticulationList, MAX_ARTICULATIONS, MAX_OUTPUTS,
 };
 pub use auto_warp::{
     ClipDefaults, ClipEdge, EVEN_LOOP_BARS, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, loop_bpm,

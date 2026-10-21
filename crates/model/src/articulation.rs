@@ -29,7 +29,7 @@ pub const FIRST_NAME: &str = "Articulation 1";
 /// What makes an articulation current.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind")]
-pub enum Trigger {
+pub enum ArticulationTrigger {
     /// None: only the Articulation control chooses it.
     None,
     /// A key, 0 to 127, matched on any channel at any velocity.
@@ -49,7 +49,7 @@ pub enum Trigger {
     },
 }
 
-impl Trigger {
+impl ArticulationTrigger {
     /// The key this trigger matches, if it matches a key.
     #[must_use]
     pub fn key(&self) -> Option<u8> {
@@ -114,7 +114,7 @@ pub struct Articulation {
     /// Its name, which the panel shows and the Articulation control reads.
     pub name: String,
     /// What makes it current.
-    pub trigger: Trigger,
+    pub trigger: ArticulationTrigger,
     /// What it sends when it becomes current, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<ArticulationOutput>,
@@ -131,7 +131,7 @@ impl Articulation {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            trigger: Trigger::None,
+            trigger: ArticulationTrigger::None,
             outputs: Vec::new(),
             channel: None,
         }
@@ -144,7 +144,7 @@ impl Articulation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     /// What makes it current.
-    pub trigger: Trigger,
+    pub trigger: ArticulationTrigger,
     /// What it sends when it becomes current, in order; only the first
     /// `output_count` of them.
     pub outputs: [ArticulationOutput; MAX_OUTPUTS],
@@ -157,7 +157,7 @@ pub struct Entry {
 impl Default for Entry {
     fn default() -> Self {
         Self {
-            trigger: Trigger::None,
+            trigger: ArticulationTrigger::None,
             outputs: [ArticulationOutput::Controller {
                 controller: 0,
                 value: 0,
@@ -269,13 +269,13 @@ pub fn check(articulations: &[Articulation]) -> Result<(), &'static str> {
 /// Checks one articulation's own values.
 fn check_one(articulation: &Articulation) -> Result<(), &'static str> {
     match articulation.trigger {
-        Trigger::None => {}
-        Trigger::Key { key } => {
+        ArticulationTrigger::None => {}
+        ArticulationTrigger::Key { key } => {
             if key > 127 {
                 return Err("an articulation's trigger key is outside 0 to 127");
             }
         }
-        Trigger::Controller {
+        ArticulationTrigger::Controller {
             controller,
             lowest,
             highest,
@@ -436,7 +436,7 @@ impl Document {
         device: DeviceId,
         index: u8,
         name: Option<&str>,
-        trigger: Option<Trigger>,
+        trigger: Option<ArticulationTrigger>,
         outputs: Option<&[ArticulationOutput]>,
         channel: Option<Option<u8>>,
     ) -> Result<(), ModelError> {
@@ -514,10 +514,10 @@ mod tests {
     #[test]
     fn two_articulations_with_the_same_key_are_refused() {
         let mut list = vec![articulation("A"), articulation("B")];
-        list[0].trigger = Trigger::Key { key: 36 };
-        list[1].trigger = Trigger::Key { key: 36 };
+        list[0].trigger = ArticulationTrigger::Key { key: 36 };
+        list[1].trigger = ArticulationTrigger::Key { key: 36 };
         assert!(check(&list).is_err());
-        list[1].trigger = Trigger::Key { key: 37 };
+        list[1].trigger = ArticulationTrigger::Key { key: 37 };
         check(&list).unwrap();
     }
 
@@ -525,18 +525,18 @@ mod tests {
     #[test]
     fn two_articulations_with_overlapping_controller_ranges_are_refused() {
         let mut list = vec![articulation("A"), articulation("B")];
-        list[0].trigger = Trigger::Controller {
+        list[0].trigger = ArticulationTrigger::Controller {
             controller: 1,
             lowest: 0,
             highest: 63,
         };
-        list[1].trigger = Trigger::Controller {
+        list[1].trigger = ArticulationTrigger::Controller {
             controller: 1,
             lowest: 32,
             highest: 64,
         };
         assert!(check(&list).is_err());
-        list[1].trigger = Trigger::Controller {
+        list[1].trigger = ArticulationTrigger::Controller {
             controller: 1,
             lowest: 64,
             highest: 96,
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn the_list_the_engine_holds_keeps_the_order_and_the_own_data() {
         let mut list = vec![articulation("A"), articulation("B")];
-        list[1].trigger = Trigger::Key { key: 36 };
+        list[1].trigger = ArticulationTrigger::Key { key: 36 };
         list[1].outputs = vec![ArticulationOutput::Controller {
             controller: 7,
             value: 100,
@@ -582,7 +582,7 @@ mod tests {
         let held = List::of(&list);
         assert_eq!(held.len(), 2);
         let second = held.entry(1).unwrap();
-        assert_eq!(second.trigger, Trigger::Key { key: 36 });
+        assert_eq!(second.trigger, ArticulationTrigger::Key { key: 36 });
         assert_eq!(second.output_count, 1);
         assert_eq!(second.channel, 5);
         assert!(held.entry(2).is_none());

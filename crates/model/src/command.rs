@@ -1559,7 +1559,7 @@ pub enum Command {
         name: Option<String>,
         /// Its new trigger.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        trigger: Option<crate::articulation::Trigger>,
+        trigger: Option<crate::articulation::ArticulationTrigger>,
         /// Its new outputs, in order.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outputs: Option<Vec<crate::articulation::ArticulationOutput>>,

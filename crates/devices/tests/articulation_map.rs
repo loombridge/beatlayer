@@ -11,7 +11,7 @@ use bl_devices::articulation_map::{
     ARTICULATION, ARTICULATION_MAP, PASS_TRIGGERS, articulation_map_type,
 };
 use bl_engine::{NoteEvent, NoteKind};
-use bl_model::{Articulation, ArticulationOutput, Command, Trigger};
+use bl_model::{Articulation, ArticulationOutput, ArticulationTrigger, Command};
 use common::chain::{BEAT_FRAMES, Chain, note};
 use common::{device, node, notes_through_events, registry, set};
 
@@ -54,7 +54,7 @@ fn map(articulations: Vec<Articulation>) -> bl_model::Device {
 fn articulation() -> Articulation {
     Articulation {
         name: "Staccato".to_owned(),
-        trigger: Trigger::Key { key: 36 },
+        trigger: ArticulationTrigger::Key { key: 36 },
         outputs: vec![
             ArticulationOutput::Key {
                 key: 24,
@@ -128,7 +128,7 @@ fn pass_triggers_lets_the_trigger_through() {
 fn a_note_held_across_a_change_ends_on_its_own_channel() {
     let mut second = articulation();
     second.name = "Legato".to_owned();
-    second.trigger = Trigger::Key { key: 37 };
+    second.trigger = ArticulationTrigger::Key { key: 37 };
     second.channel = Some(6);
     let mut node = node(&registry(), &map(vec![articulation(), second]), FRAMES);
     let out = notes_through_events(
@@ -191,7 +191,7 @@ fn a_repeated_key_output_ends_the_earlier_one_first() {
 fn the_articulation_control_makes_its_articulation_current() {
     let mut second = articulation();
     second.name = "Legato".to_owned();
-    second.trigger = Trigger::Key { key: 37 };
+    second.trigger = ArticulationTrigger::Key { key: 37 };
     second.outputs = vec![ArticulationOutput::Key {
         key: 25,
         velocity: 100,
@@ -273,16 +273,16 @@ fn resend_on_start_sends_the_outputs_again_when_the_transport_plays() {
 }
 
 // Spec: articulation-map R6. An automated Articulation lane makes the
-// articulation it names current on its breakpoints' frames.
+// articulation it names current on the frame the lane's value reaches it.
 #[test]
-fn an_automated_articulation_lane_switches_on_its_breakpoints_frames() {
+fn an_automated_articulation_lane_switches_when_its_value_reaches_the_articulation() {
     use bl_core::time::{Frames, TempoMap, Ticks};
     use bl_engine::{Collector, Compiler, EngineConfig, NodeKey, TransportInfo, Update};
     use bl_model::{AutomationTarget, Editor, TrackKind};
 
     let mut second = articulation();
     second.name = "Legato".to_owned();
-    second.trigger = Trigger::Key { key: 37 };
+    second.trigger = ArticulationTrigger::Key { key: 37 };
     second.outputs = vec![ArticulationOutput::Key {
         key: 25,
         velocity: 100,
@@ -347,7 +347,7 @@ fn an_automated_articulation_lane_switches_on_its_breakpoints_frames() {
     device.set_articulations(vec![articulation(), {
         let mut second = articulation();
         second.name = "Legato".to_owned();
-        second.trigger = Trigger::Key { key: 37 };
+        second.trigger = ArticulationTrigger::Key { key: 37 };
         second.outputs = vec![ArticulationOutput::Key {
             key: 25,
             velocity: 100,
@@ -390,6 +390,72 @@ fn an_automated_articulation_lane_switches_on_its_breakpoints_frames() {
     );
 }
 
+// Spec: device-framework R31, R32. The notes the device starts, on the
+// articulation's channel, are ended when the device goes off, so they don't
+// hang on it.
+#[test]
+fn a_device_switched_off_ends_the_notes_it_started() {
+    let mut node = node(&registry(), &map(vec![articulation()]), FRAMES);
+    let out = notes_through_events(node.as_mut(), &[on(0, 60, 0)], &[], FRAMES);
+    let sent: Vec<(u32, u8)> = out
+        .iter()
+        .filter(|note| note.kind == NoteKind::On)
+        .map(|note| (note.offset, note.channel))
+        .collect();
+    assert_eq!(
+        sent,
+        vec![(0, 4)],
+        "the note goes out on the articulation's channel: {sent:?}"
+    );
+    // The device is switched off while the note is held.
+    let mut released = bl_engine::NoteBuffer::with_capacity(16);
+    node.release(&mut released);
+    let offs: Vec<(u32, u8, u8)> = released
+        .notes()
+        .iter()
+        .map(|note| (note.offset, note.key, note.channel))
+        .collect();
+    assert_eq!(
+        offs,
+        vec![(0, 60, 4)],
+        "the note it started is ended on the channel it went out on: {offs:?}"
+    );
+}
+
+// Spec: articulation-map R9, R11. Every keyswitch the device sends is ended,
+// even when more of them sound at once than the device's room took before.
+#[test]
+fn every_keyswitch_the_device_sends_is_ended() {
+    let mut articulations = Vec::new();
+    for index in 0..6u8 {
+        let mut articulation = Articulation::new(format!("A {index}"));
+        articulation.outputs = (0..4u8)
+            .map(|output| ArticulationOutput::Key {
+                key: 24 + index * 4 + output,
+                velocity: 100,
+            })
+            .collect();
+        articulations.push(articulation);
+    }
+    let mut node = node(&registry(), &map(articulations), FRAMES);
+    // The Articulation control walks the list: each change sends that
+    // articulation's four keyswitches, and the first is already current.
+    let events: Vec<_> = (1..6u8)
+        .map(|index| {
+            set(
+                10 + u32::from(index) * 10,
+                ARTICULATION,
+                f64::from(index) + 1.0,
+            )
+        })
+        .collect();
+    let out = notes_through_events(node.as_mut(), &[], &events, FRAMES);
+    let ons = out.iter().filter(|note| note.kind == NoteKind::On).count();
+    let offs = out.iter().filter(|note| note.kind == NoteKind::Off).count();
+    assert_eq!(ons, 20, "every keyswitch is sent: {out:?}");
+    assert_eq!(offs, 20, "every keyswitch is ended: {out:?}");
+}
+
 // Spec: articulation-map R14. The device sends everything on its own
 // frame, at any block size.
 #[test]
@@ -401,7 +467,7 @@ fn the_device_sends_on_its_frame_at_any_block_size() {
             device,
             index: 0,
             name: Some("Staccato".to_owned()),
-            trigger: Some(Trigger::Key { key: 36 }),
+            trigger: Some(ArticulationTrigger::Key { key: 36 }),
             outputs: Some(vec![
                 ArticulationOutput::Key {
                     key: 24,

@@ -729,7 +729,7 @@ impl DeviceView {
     /// The Articulation Map's node counts the note-ons and control changes
     /// it hears and publishes the last one; a row whose Learn button is lit
     /// takes the next one as its trigger.
-    pub fn learned_triggers(&self) -> Vec<(DeviceId, u8, bl_model::Trigger)> {
+    pub fn learned_triggers(&self) -> Vec<(DeviceId, u8, bl_model::ArticulationTrigger)> {
         use bl_devices::articulation_map::{EVENT_NOTE, OFF_EVENTS, OFF_KEY, OFF_KIND, OFF_VALUE};
         let mut learned = Vec::new();
         for (device, learn) in &self.learning {
@@ -747,9 +747,9 @@ impl DeviceView {
             let key = values[OFF_KEY].round() as u8;
             let value = values[OFF_VALUE].round().clamp(0.0, 127.0) as u8;
             let trigger = if values[OFF_KIND] == EVENT_NOTE {
-                bl_model::Trigger::Key { key }
+                bl_model::ArticulationTrigger::Key { key }
             } else {
-                bl_model::Trigger::Controller {
+                bl_model::ArticulationTrigger::Controller {
                     controller: key,
                     lowest: value,
                     highest: value,

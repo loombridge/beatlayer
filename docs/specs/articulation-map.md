@@ -67,7 +67,7 @@ This spec covers the device: its list of articulations, how the current one is c
 | R3 | `crates/model/src/articulation.rs`, `two_articulations_with_the_same_key_are_refused`, `two_articulations_with_overlapping_controller_ranges_are_refused`; `crates/shell/tests/articulation_map.rs`, `a_list_that_breaks_the_rules_is_refused` | unit, headless |
 | R4 | `crates/model/src/articulation.rs`, `values_outside_their_ranges_are_refused`; `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
 | R5 | `crates/model/src/articulation.rs`, `values_outside_their_ranges_are_refused`; `crates/devices/tests/articulation_map.rs`, `a_note_held_across_a_change_ends_on_its_own_channel` | unit |
-| R6 | `crates/devices/tests/articulation_map.rs`, `the_articulation_control_makes_its_articulation_current`, `an_automated_articulation_lane_switches_on_its_breakpoints_frames` | unit |
+| R6 | `crates/devices/tests/articulation_map.rs`, `the_articulation_control_makes_its_articulation_current`, `an_automated_articulation_lane_switches_when_its_value_reaches_the_articulation` | unit |
 | R7 | `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
 | R8 | `crates/devices/tests/articulation_map.rs`, `pass_triggers_lets_the_trigger_through` | unit |
 | R9 | `crates/devices/tests/articulation_map.rs`, `a_trigger_sends_its_outputs_before_the_notes_on_the_same_frame` | unit |
@@ -77,7 +77,7 @@ This spec covers the device: its list of articulations, how the current one is c
 | R13 | `crates/devices/tests/articulation_map.rs`, `a_device_switched_off_ends_its_sounding_keyswitch` | unit |
 | R14 | `crates/devices/tests/articulation_map.rs`, `the_device_sends_on_its_frame_at_any_block_size`; `rtsan/tests/midi_effects.rs`, `the_articulation_map_passes_under_rtsan` | unit, headless |
 | R15 | `crates/ui/tests/articulation_map.rs`, `a_click_on_a_rows_number_makes_that_articulation_current`, `a_rows_learn_button_lights_while_it_is_armed` | UI script |
-| R16 | `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time`, `the_list_is_saved_with_the_set_and_in_the_presets` | headless |
+| R16 | `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time`, `the_list_is_saved_with_the_set_and_in_the_presets`; `crates/project/src/preset.rs`, `a_preset_keeps_an_articulation_maps_list` | headless |
 | R17 | `crates/shell/tests/articulation_map.rs`, `the_display_reads_the_current_articulation` | headless |
 | R18 | `crates/cli/tests/agent.rs`, `an_agent_builds_an_articulation_map_by_command_and_reads_it_back`; `crates/shell/tests/articulation_map.rs`, `the_list_reads_back_through_the_command_and_the_query_tool` | headless |
 | R19 | `crates/shell/tests/articulation_map.rs`, `the_list_is_edited_one_undo_step_at_a_time` | headless |

@@ -435,6 +435,41 @@ mod tests {
         assert!(text.contains("\"format\": \"beatlayer-preset\""), "{text}");
     }
 
+    // Spec: articulation-map R16, R20. A preset keeps an Articulation Map's
+    // list, and one that breaks the rules doesn't load.
+    #[test]
+    fn a_preset_keeps_an_articulation_maps_list() {
+        let mut device = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Articulation Map",
+            DeviceKind::Native {
+                device_type: "beatlayer.articulation_map".to_owned(),
+            },
+        );
+        device.set_articulations(vec![bl_model::Articulation {
+            name: "Staccato".to_owned(),
+            trigger: bl_model::ArticulationTrigger::Key { key: 36 },
+            outputs: vec![bl_model::ArticulationOutput::Key {
+                key: 24,
+                velocity: 100,
+            }],
+            channel: Some(5),
+        }]);
+        let preset = Preset::of(&device);
+        let loaded = Preset::decode(&preset.encode()).unwrap();
+        assert_eq!(loaded.articulations, Some(device.articulations.clone()));
+        // A list with two articulations on the same key doesn't load.
+        let mut value: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        value["articulations"] = serde_json::json!([
+            { "name": "A", "trigger": { "kind": "key", "key": 36 } },
+            { "name": "B", "trigger": { "kind": "key", "key": 36 } },
+        ]);
+        assert!(matches!(
+            Preset::decode(&serde_json::to_vec(&value).unwrap()),
+            Err(PresetError::Invalid(_))
+        ));
+    }
+
     // Spec: device-chains R16
     #[test]
     fn a_preset_saved_under_a_devices_old_name_loads_under_its_new_one() {

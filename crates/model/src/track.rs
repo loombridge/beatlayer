@@ -1083,8 +1083,9 @@ impl Track {
     }
 
     /// Whether the track's own settings differ from another version's:
-    /// its name, mixer, sends, routing, children, automation, or the order
-    /// of its device chain, but not the clips or devices themselves.
+    /// its name, mixer, sends, routing, children, automation, its frozen
+    /// audio, or the order of its device chain, but not the clips or devices
+    /// themselves.
     pub(crate) fn own_settings_differ(&self, other: &Self) -> bool {
         self.kind != other.kind
             || self.name != other.name
@@ -1093,6 +1094,7 @@ impl Track {
             || self.delay != other.delay
             || self.keep_monitoring_latency != other.keep_monitoring_latency
             || self.removed_stop_buttons != other.removed_stop_buttons
+            || self.frozen != other.frozen
             || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)

@@ -2573,7 +2573,10 @@ fn needs_program(
                 // routing change moves routes. Monitor alone doesn't: it
                 // opens and closes routes (see `route_events`).
                 let (was, is) = (before.routing(), after.routing());
+                // A freeze takes the track's devices out of the program and
+                // hides a frozen group's tracks (WP-4.14, R6, R14).
                 if !same_chain
+                    || before.is_frozen() != after.is_frozen()
                     || !before.children().eq(after.children())
                     || before.mixer().tap != after.mixer().tap
                     || was.input != is.input

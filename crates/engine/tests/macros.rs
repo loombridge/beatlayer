@@ -12,7 +12,8 @@ use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
 use bl_engine::testing::{GAIN_DESCRIBED, GAIN_PARAM};
 use bl_model::{
-    AutomationTarget, Command, DeviceId, MacroTarget, RackKind, TrackId, TrackKind, macro_param,
+    AutomationTarget, Command, DeviceId, MacroStyle, MacroTarget, RackKind, TrackId, TrackKind,
+    macro_param,
 };
 use common::{Rig, dc, effect_in, rack, track};
 
@@ -112,6 +113,72 @@ fn a_macro_envelope_drives_its_parameters_frame_by_frame() {
     }
 }
 
+// Spec: macros R22
+#[test]
+fn a_stepped_macros_envelope_plays_as_steps() {
+    for size in SIZES {
+        let (mut rig, audio, rack, _) = setup_chain_activator();
+        // Three steps: the macro takes 0, a half and 1.
+        rig.apply(Command::SetMacroStyle {
+            rack,
+            macro_number: 1,
+            style: MacroStyle::Stepped,
+            steps: Some(3),
+        });
+        let target = AutomationTarget::Device {
+            device: rack,
+            param: macro_param(1),
+        };
+        rig.apply(Command::SetAutomationBreakpoint {
+            track: audio,
+            target,
+            at: Ticks::ZERO,
+            value: 0.0,
+        });
+        rig.apply(Command::SetAutomationBreakpoint {
+            track: audio,
+            target,
+            at: Ticks::QUARTER,
+            value: 1.0,
+        });
+        rig.sender.transport(TransportCommand::Play);
+        let out = rig.render(QUARTER, size);
+        // The macro's steps play: the chain's activator is a switch, and it
+        // is muted at the macro's middle step, a quarter of the way up the
+        // envelope, not at its half.
+        let on = QUARTER / 4;
+        assert!(
+            out[..on].iter().all(|s| (s - 1.0).abs() < 1e-6),
+            "sounding until the macro's middle step: {:?}",
+            &out[on - 1..on + 1]
+        );
+        assert!(
+            out[on..].iter().all(|s| s.abs() < 1e-6),
+            "muted from the macro's middle step: {:?}",
+            &out[on - 1..on + 1]
+        );
+    }
+}
+
+// A rig whose rack's chain activator is mapped to macro 1.
+fn setup_chain_activator() -> (Rig, TrackId, DeviceId, bl_model::ChainId) {
+    let mut rig = Rig::new(4096);
+    let audio = track(&mut rig.editor, TrackKind::Audio, None);
+    dc(&mut rig.editor, audio, 1.0);
+    let (rack, chains) = rack(&mut rig.editor, audio, RackKind::AudioEffect, 1);
+    let chain = chains[0];
+    rig.apply(Command::MapMacro {
+        rack,
+        macro_number: 1,
+        target: MacroTarget::Chain {
+            chain,
+            param: bl_model::MixerParam::Mute,
+        },
+    });
+    rig.sync();
+    (rig, audio, rack, chain)
+}
+
 // A rig whose rack's two chain volumes are both mapped to macro 1.
 fn setup_chain_volume() -> (Rig, TrackId, DeviceId, Vec<DeviceId>) {
     let mut rig = Rig::new(4096);
@@ -182,6 +249,62 @@ fn a_hidden_macro_still_drives_its_parameters() {
     let (mut rig, _, rack, _) = setup(9);
     set_macro(&mut rig, rack, 9, 0.25);
     assert!((settled(&mut rig, 64) - 1.0).abs() < 1e-6);
+}
+
+// Spec: macros R27
+#[test]
+fn launching_a_variation_moves_every_macro_on_one_frame() {
+    for size in SIZES {
+        let mut rig = Rig::new(4096);
+        let audio = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, audio, 1.0);
+        let (rack, chains) = rack(&mut rig.editor, audio, RackKind::AudioEffect, 2);
+        let gains: Vec<DeviceId> = chains
+            .iter()
+            .map(|chain| effect_in(&mut rig.editor, *chain, GAIN_DESCRIBED, &[]))
+            .collect();
+        // Macro 1 drives the first chain's gain, macro 2 the second's.
+        for (number, gain) in [(1u8, gains[0]), (2, gains[1])] {
+            rig.apply(Command::MapMacro {
+                rack,
+                macro_number: number,
+                target: MacroTarget::Device {
+                    device: gain,
+                    param: GAIN_PARAM,
+                },
+            });
+        }
+        // Macro 2 is left out of variations.
+        rig.apply(Command::SetMacroVariationExcluded {
+            rack,
+            macro_number: 2,
+            excluded: true,
+        });
+        // A variation of both macros at 0, then both macros raised.
+        rig.apply(Command::StoreVariation { rack });
+        rig.apply(Command::SetDeviceParam {
+            device: rack,
+            param: macro_param(1),
+            value: 1.0,
+        });
+        rig.apply(Command::SetDeviceParam {
+            device: rack,
+            param: macro_param(2),
+            value: 1.0,
+        });
+        rig.sync();
+        assert!(
+            (settled(&mut rig, size) - 4.0).abs() < 1e-6,
+            "both gains at 2, block {size}"
+        );
+        // The launch sets macro 1 back to 0 and leaves excluded macro 2 alone.
+        rig.apply(Command::LaunchVariation { rack, index: 0 });
+        rig.sync();
+        assert!(
+            (settled(&mut rig, size) - 2.0).abs() < 1e-6,
+            "one gain left, block {size}"
+        );
+    }
 }
 
 // Spec: macros R4

@@ -169,6 +169,12 @@ fn render_locating(
 }
 
 fn estimate_pitch(samples: &[f32], rate: f64) -> f64 {
+    estimate_pitch_in(samples, rate, 100.0, 600.0)
+}
+
+/// The strongest partial of a signal between `low` and `high` hertz, by a
+/// scan of its spectrum with a parabolic peak.
+fn estimate_pitch_in(samples: &[f32], rate: f64, low: f64, high: f64) -> f64 {
     let n = samples.len().min(9600);
     let windowed: Vec<f64> = samples[..n]
         .iter()
@@ -191,10 +197,10 @@ fn estimate_pitch(samples: &[f32], rate: f64) -> f64 {
         (re * re + im * im).sqrt()
     };
 
-    let mut best_f = 100.0;
+    let mut best_f = low;
     let mut best_mag = 0.0f64;
-    let mut f = 100.0;
-    while f <= 600.0 {
+    let mut f = low;
+    while f <= high {
         let mag = dft_mag(f);
         if mag > best_mag {
             best_mag = mag;
@@ -206,7 +212,7 @@ fn estimate_pitch(samples: &[f32], rate: f64) -> f64 {
     let mut fine_best_f = best_f;
     let mut fine_best_mag = 0.0f64;
     let mut f = best_f - 2.0;
-    let end_f = best_f + 2.0;
+    let end_f = (best_f + 2.0).min(high);
     while f <= end_f {
         let mag = dft_mag(f);
         if mag > fine_best_mag {
@@ -432,6 +438,57 @@ fn texture_sine_and_pink_noise_targets() {
                     rel_diff <= 1.5,
                     "tempo {tempo}, band {:.0} Hz: rel diff {rel_diff:.2} dB > 1.5 dB (out {db_out:.2} vs ref {db_ref:.2})",
                     b_out.centre
+                );
+            }
+        }
+    }
+}
+
+// Spec: warp-modes R26. A clip's transposition lands within 1 cent of its
+// target in every mode that takes it: Beats, Tones and Texture. Re-Pitch
+// ignores it (R10), and Complex and Complex Pro take it in their
+// stretcher when their package lands.
+#[test]
+fn transpose_and_detune_land_within_1_cent_in_every_mode() {
+    let media = test_media();
+    // The sine's own pitch, and the changes to measure.
+    const SINE: f64 = 440.0;
+    let changes: [(i32, f64); 6] = [
+        (-12, 0.0),
+        (-7, 0.0),
+        (7, 0.0),
+        (12, 0.0),
+        (0, -25.0),
+        (0, 25.0),
+    ];
+    for mode in [WarpMode::Beats, WarpMode::Tones, WarpMode::Texture] {
+        for (transpose, detune) in changes {
+            let semitones = f64::from(transpose) + detune / 100.0;
+            let want = SINE * 2f64.powf(semitones / 12.0);
+            for tempo in [120.0, 60.0] {
+                let mut editor = build_song(tempo, HASH_SINE, mode, None, None, true);
+                let clip = editor
+                    .document()
+                    .tracks()
+                    .flat_map(|track| track.clips())
+                    .next()
+                    .unwrap()
+                    .id;
+                editor
+                    .apply(Command::SetClipPitch {
+                        clip,
+                        transpose: Some(transpose),
+                        detune: Some(detune),
+                    })
+                    .unwrap();
+                let out = render(&editor, &media, 96_000, 512);
+                let steady = &out[24_000..72_000];
+                let got = estimate_pitch_in(steady, 48_000.0, want * 0.5, want * 2.0);
+                let cents = 1200.0 * (got / want).log2();
+                assert!(
+                    cents.abs() < 1.0,
+                    "{mode:?} at {transpose} semitones and {detune} cents, tempo {tempo}: \\
+                     {got:.3} Hz, {cents:.3} cents from the target {want:.3} Hz"
                 );
             }
         }

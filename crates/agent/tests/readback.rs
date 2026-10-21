@@ -536,6 +536,8 @@ fn fixture() -> Project {
             ram: true,
             high_quality: false,
             tempo_leader: true,
+            transpose: 7,
+            detune: -12.5,
             transient_edits: TransientEdits {
                 added: vec![0.5],
                 removed: vec![1.25],
@@ -695,6 +697,13 @@ fn fixture() -> Project {
         Command::SetSceneTimeSignature {
             scene: scenes[0],
             signature: Some(TimeSignature::new(3, 4).unwrap()),
+        },
+    );
+    // WP-4.14: a frozen track, so the format writes `frozen`.
+    apply(
+        &mut editor,
+        Command::FreezeTracks {
+            frozen: vec![(vox, bl_model::FrozenTrack::default())],
         },
     );
     editor.clear_history().unwrap();

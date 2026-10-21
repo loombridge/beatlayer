@@ -55,6 +55,11 @@ pub fn device(id: u64, params: &[(u32, f64)]) -> Device {
     device
 }
 
+/// A Test Gain Echo device with `params` set, placed with `role` (IMP-24).
+pub fn device_with_role(id: u64, params: &[(u32, f64)], role: bl_model::DeviceRole) -> Device {
+    device(id, params).with_role(role)
+}
+
 pub fn set(offset: u32, param: u32, value: f64) -> NodeEvent {
     NodeEvent {
         offset,
@@ -121,6 +126,12 @@ pub fn vst3_device(id: u64, params: &[(u32, f64)]) -> Device {
         device.params.insert(ParamId(*param), *value);
     }
     device
+}
+
+/// A VST3 Test Gain Echo device with `params` (plain values) set, placed
+/// with `role` (IMP-24).
+pub fn vst3_device_with_role(id: u64, params: &[(u32, f64)], role: bl_model::DeviceRole) -> Device {
+    vst3_device(id, params).with_role(role)
 }
 
 /// The engine's node for a device, running block after block on its own

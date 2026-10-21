@@ -557,6 +557,30 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_frozen",
+        action: Action::Apply("freeze_tracks"),
+        label: "Set Tracks Frozen",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Marks tracks frozen with the files a freeze rendered, and makes their \
+            clips play those files instead of running the track's devices. `frozen` names each \
+            track and the audio its freeze rendered. `track.freeze` is the command a person and \
+            an agent run: it renders the files and applies this one. Used directly, it names \
+            files the caller has already written.",
+    },
+    Entry {
+        id: "track.clear_frozen",
+        action: Action::Apply("unfreeze_tracks"),
+        label: "Clear Tracks Frozen",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Plays tracks through their devices and clips again, dropping their frozen \
+            audio and restoring the clip data the freeze kept. `tracks` names them. \
+            `track.unfreeze` is the command a person and an agent run.",
+    },
+    Entry {
         id: "mixer.set_volume",
         action: Action::Apply("set_volume"),
         label: "Set Track Volume",
@@ -1601,6 +1625,36 @@ const ENTRIES: &[Entry] = &[
             changes nothing.",
     },
     Entry {
+        id: "clip.reverse_file",
+        action: Action::Apply("reverse_clip"),
+        label: "Reverse Clip",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Reverses an audio clip's file: the clip plays `media`, a reversed copy of \
+            its file, with its Start and End markers, loop brace and warp markers mirrored about \
+            the file, so it plays the same stretch of sound backwards. Its clip envelopes stay \
+            where they are, and its loop switch, gain, transpose, detune, warp mode and fades \
+            don't change. `seconds` is the length of the file the markers are mirrored about. \
+            `clip.reverse` is the command a person and an agent run: it writes the new file \
+            through the processed-file writer and applies this one.",
+    },
+    Entry {
+        id: "clip.set_pitch",
+        action: Action::Apply("set_clip_pitch"),
+        label: "Set Clip Pitch",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets an audio clip's pitch: `transpose`, in whole semitones from -48 to 48, \
+            and `detune`, in cents from -50 to 50 (`data.audio.transpose` and \
+            `data.audio.detune`; a new clip has neither). Give either of them, or both, in one \
+            undo step; a value out of range refuses the whole command. The clip's pitch moves \
+            by the sum, and its timing stays with its warp map. In Re-Pitch the two are drawn \
+            switched off and don't act, and their values stay with the clip. With Warp off the \
+            clip's speed changes with its pitch, as a tape running faster does.",
+    },
+    Entry {
         id: "clip.set_tempo_leader",
         action: Action::Apply("set_tempo_leader"),
         label: "Switch Lead/Follow",
@@ -2083,6 +2137,21 @@ const ENTRIES: &[Entry] = &[
             keyboard (Option-F on macOS, Ctrl-Alt-F on Windows and Linux, with the Device View \
             or a floating device's window focused) and the menu it switches the selected \
             device.",
+    },
+    Entry {
+        id: "device.set_role",
+        action: Action::Apply("set_device_role"),
+        label: "Use as MIDI Effect",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Places a device in another position of its chain (IMP-24): a plug-in that \
+            sends notes on from a note output can sit in the MIDI-effect position, before the \
+            instrument; `role` is where it goes (`midi_effect`, `instrument` or \
+            `audio_effect`), or left out to take the other position. A plug-in without a note \
+            output is refused, as is a role that \
+            breaks the chain's order (MIDI effects, then the instrument, then audio effects). \
+            The device keeps where it was placed, saved with the set. One undo step.",
     },
     Entry {
         id: "device.set_param",
@@ -2768,6 +2837,15 @@ const ENTRIES: &[Entry] = &[
         description: "Leaves macro `macro_number` out of Randomize (`excluded` true), or puts it back (false). A new rack's macros aren't excluded. One undo step, saved with the set.",
     },
     Entry {
+        id: "rack.set_macro_style",
+        action: Action::Apply("set_macro_style"),
+        label: "Change Macro Style",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets how macro `macro_number` is drawn and which positions it takes: `style` is `knob`, Live's continuous control, `stepped`, a knob that takes `steps` steps, or `radio_buttons`, a stepped macro drawn as its steps' buttons. A stepped macro takes from 2 to 16 steps, 8 by default, and only the positions `k / (steps - 1)`: a drag, an arrow key and `device.set_param` all move it a step at a time. A macro that becomes stepped moves to its nearest step. One undo step, saved with the set and with the rack in a preset.",
+    },
+    Entry {
         id: "rack.set_mapped_value",
         action: Action::Apply("set_mapped_value"),
         label: "Change parameter",
@@ -2775,6 +2853,69 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets a parameter a rack's macro drives to `value`, in the parameter's own units, without overriding its own automation envelope, which waits while the macro drives it. The macro commands run it inside their own undo step; run it directly only to correct a mapped value.",
+    },
+    Entry {
+        id: "rack.store_variation",
+        action: Action::Apply("store_variation"),
+        label: "Store Macro Variation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Stores every one of a rack's 16 macros' values as a new variation at the end of its list, named \"Variation N\", N one more than the highest number among the rack's variations named that way. A rack holds any number of variations. One undo step, `Store Macro Variation`. `rack.macros` reports the variations.",
+    },
+    Entry {
+        id: "rack.launch_variation",
+        action: Action::Apply("launch_variation"),
+        label: "Launch Macro Variation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets every macro of a rack that isn't excluded from variations to the value the variation at `index` holds, at once and on one frame, as the Launch Macro Variation button does. Excluded macros keep their values. Each macro moved is a hand move on it, so its automation envelope is overridden and, while Automation Arm records, the move is written as its envelope. Continuous mapped parameters glide to their new values. One undo step, `Launch Macro Variation`.",
+    },
+    Entry {
+        id: "rack.overwrite_variation",
+        action: Action::Apply("overwrite_variation"),
+        label: "Overwrite Macro Variation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces every value the variation at `index` holds with the macros' values now, keeping its name and place, as the Overwrite Macro Variation button does. One undo step, `Overwrite Macro Variation`.",
+    },
+    Entry {
+        id: "rack.rename_variation",
+        action: Action::Apply("rename_variation"),
+        label: "Rename Macro Variation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Gives the variation at `index` the `name` of its own. One undo step, `Rename Macro Variation`.",
+    },
+    Entry {
+        id: "rack.duplicate_variation",
+        action: Action::Apply("duplicate_variation"),
+        label: "Duplicate Macro Variation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Puts a copy of the variation at `index`, with the same name and values, straight after it. One undo step, `Duplicate Macro Variation`.",
+    },
+    Entry {
+        id: "rack.delete_variation",
+        action: Action::Apply("delete_variation"),
+        label: "Delete Macro Variation",
+        permission: Permission::Destructive,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Deletes the variation at `index`. One undo step, `Delete Macro Variation`.",
+    },
+    Entry {
+        id: "rack.set_macro_variation_excluded",
+        action: Action::Apply("set_macro_variation_excluded"),
+        label: "Exclude Macro from Variations",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Leaves macro `macro_number` out of variations (`excluded` true), so no launch changes it, or puts it back (false). Storing and overwriting still record its value, so switching the exclusion off lets the next launch set it. One undo step, saved with the set.",
     },
     Entry {
         id: "device.wrap_in_rack",

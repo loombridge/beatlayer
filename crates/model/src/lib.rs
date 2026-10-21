@@ -115,6 +115,7 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
+pub mod freeze;
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
@@ -122,6 +123,7 @@ pub use follow::{
     FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
     FollowPatch,
 };
+pub use freeze::{FrozenClip, FrozenOutput, FrozenTail, FrozenTrack};
 pub use ids::{
     ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
 };
@@ -137,10 +139,11 @@ pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound}
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
-    DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACROS, MAX_RETURN_CHAINS, Macro,
-    MacroMapping, MacroTarget, RackKind, RackMacros, RackView, RackViewMap, RackViews, Receive,
-    SHOWN_MACROS, default_macro_name, description as rack_description, general_midi_drum,
-    macro_number, macro_param, note_name, receive_choices, receive_label,
+    DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACRO_STEPS_DEFAULT, MACRO_STEPS_MAX,
+    MACRO_STEPS_MIN, MACROS, MAX_RETURN_CHAINS, Macro, MacroMapping, MacroStyle, MacroTarget,
+    RackKind, RackMacros, RackView, RackViewMap, RackViews, Receive, SHOWN_MACROS,
+    default_macro_name, description as rack_description, general_midi_drum, macro_number,
+    macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
@@ -151,6 +154,7 @@ pub use track::{
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{
-    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
-    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN,
+    Preserve, TRANSPOSE_MAX, TRANSPOSE_MIN, TextureSettings, TextureUpdate, TonesSettings,
+    TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
 };

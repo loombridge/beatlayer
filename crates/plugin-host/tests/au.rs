@@ -65,9 +65,10 @@ fn set(offset: u32, param: u32, value: f64) -> NodeEvent {
     }
 }
 
-/// What a block put out.
+/// What a block put out: each channel, and the notes the node sent on.
 struct Output {
     channels: Vec<Vec<f32>>,
+    notes: Vec<NoteEvent>,
 }
 
 /// Runs one block of `input` on every channel through `node`, with
@@ -91,6 +92,7 @@ fn run(node: &mut dyn Node, input: &[f32], events: &[NodeEvent], notes: &[NoteEv
     }
     Output {
         channels: data.chunks(frames).map(<[f32]>::to_vec).collect(),
+        notes: out.notes().to_vec(),
     }
 }
 
@@ -413,4 +415,94 @@ fn a_unit_that_cant_be_found_leaves_its_device_passing_through() {
     assert!(status.failure.is_some(), "and says why: {status:?}");
     let again = run(node.as_mut(), &vec![0.5; FRAMES], &[], &[]);
     assert!(again.channels[0].iter().all(|s| *s == 0.5));
+}
+
+/// The first installed MIDI processor (`aumi`) unit's component
+/// description, or `None` when this machine has none.
+fn first_midi_processor() -> Option<(String, String, String)> {
+    use objc2_audio_toolbox::{
+        AudioComponentDescription, AudioComponentFindNext, AudioComponentGetDescription,
+    };
+    use std::ptr::NonNull;
+
+    /// A four-character code as its four characters.
+    fn four_cc(code: u32) -> String {
+        let bytes = code.to_be_bytes();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    let mut wanted = AudioComponentDescription {
+        // 'aumi': a MIDI processor.
+        componentType: u32::from_be_bytes(*b"aumi"),
+        componentSubType: 0,
+        componentManufacturer: 0,
+        componentFlags: 0,
+        componentFlagsMask: 0,
+    };
+    // SAFETY: the description is a plain value the system understands, and
+    // each returned component is one the system owns.
+    let mut component =
+        unsafe { AudioComponentFindNext(std::ptr::null_mut(), NonNull::from(&wanted)) };
+    while !component.is_null() {
+        // SAFETY: an all-zero description is valid; the system fills it.
+        let mut found = unsafe { std::mem::zeroed::<AudioComponentDescription>() };
+        // SAFETY: the component came from the system and the out pointer is
+        // live.
+        if unsafe { AudioComponentGetDescription(component, NonNull::from(&mut found)) } == 0 {
+            return Some((
+                four_cc(found.componentType),
+                four_cc(found.componentSubType),
+                four_cc(found.componentManufacturer),
+            ));
+        }
+        // SAFETY: as above.
+        component = unsafe { AudioComponentFindNext(component, NonNull::from(&mut wanted)) };
+    }
+    None
+}
+
+// Spec: au-hosting R1, R4; IMP-24
+#[test]
+fn an_aumi_unit_passes_its_notes_on() {
+    let Some((kind, subtype, manufacturer)) = first_midi_processor() else {
+        eprintln!(
+            "no `aumi` Audio Unit is installed on this machine, so this test has nothing to \
+             load: the MIDI-output path (IMP-24) is exercised by the unit the build machine \
+             installs"
+        );
+        return;
+    };
+    let host = AuHost::new();
+    let found = host
+        .load(&kind, &subtype, &manufacturer)
+        .expect("the MIDI processor loads");
+    assert_eq!(found.device_type.role, DeviceRole::MidiEffect);
+    assert!(
+        found.device_type.note_output,
+        "an aumi unit has a note output"
+    );
+
+    let device = device(1, &format!("{kind}/{subtype}/{manufacturer}"), &[]);
+    let mut node = host
+        .factory()
+        .create(&device, &config())
+        .expect("a node for a MIDI processor");
+    let notes = [
+        note(100, NoteKind::On, 60, 0.8),
+        note(400, NoteKind::Off, 60, 0.0),
+    ];
+    let out = run(node.as_mut(), &vec![0.0; FRAMES], &[], &notes);
+    let played: Vec<(u32, NoteKind, u8)> = out
+        .notes
+        .iter()
+        .map(|note| (note.offset, note.kind, note.key))
+        .collect();
+    assert!(
+        played.contains(&(100, NoteKind::On, 60)),
+        "the unit's notes go on: {played:?}"
+    );
+    assert!(
+        played.contains(&(400, NoteKind::Off, 60)),
+        "the unit's notes go on: {played:?}"
+    );
 }

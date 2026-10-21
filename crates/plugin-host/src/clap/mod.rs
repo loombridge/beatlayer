@@ -41,6 +41,7 @@
 
 mod describe;
 mod events;
+mod gain;
 mod handlers;
 mod node;
 
@@ -55,7 +56,7 @@ use std::time::{Duration, Instant};
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
 use bl_model::{
-    Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat, PluginState,
+    Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamId, PluginFormat, PluginState,
 };
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
 use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
@@ -409,6 +410,7 @@ impl ClapHost {
             let mut probe = new_instance(&entry, id, &self.inner.info)?;
             let params = describe::params(&mut probe.plugin_handle());
             let outputs = describe::outputs(&mut probe.plugin_handle());
+            let note_output = describe::note_output(&mut probe.plugin_handle());
             drop(probe);
             found.push(ClapType {
                 path: path.to_owned(),
@@ -421,6 +423,7 @@ impl ClapHost {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    note_output,
                     outputs,
                 },
                 vendor,
@@ -963,7 +966,11 @@ impl NodeFactory for LoanFactory {
         else {
             return None;
         };
-        let (node, ends) = ClapNode::new(config, extra_outputs(&self.inner, &device.kind));
+        let (node, ends) = ClapNode::new(
+            config,
+            extra_outputs(&self.inner, &device.kind),
+            device.role == DeviceRole::MidiEffect,
+        );
         let mut guard = lock(&self.inner.main);
         let problem = match guard.get() {
             Ok(main) if main.lending => borrow(main, device, *config, ends, &self.inner).err(),
@@ -1006,7 +1013,11 @@ impl NodeFactory for ClapFactory {
         else {
             return None;
         };
-        let (node, ends) = ClapNode::new(config, extra_outputs(&self.inner, &device.kind));
+        let (node, ends) = ClapNode::new(
+            config,
+            extra_outputs(&self.inner, &device.kind),
+            device.role == DeviceRole::MidiEffect,
+        );
         lock(&self.inner.requests).push(Request {
             device: device.clone(),
             config: *config,

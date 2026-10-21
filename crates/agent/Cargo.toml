@@ -24,6 +24,8 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 serde_json = "1"
 
 [dev-dependencies]
+# The tests that drive the null device by hand (T199).
+bl-audio-io.workspace = true
 # The perception tests' fixtures (WP-1.16): signals with known answers,
 # written as WAV files the browser adds, and the previews read back.
 bl-analysis.workspace = true
@@ -39,6 +41,9 @@ bl-plugin-host.workspace = true
 # The VST3 test plug-in, built from source, which the agent's VST3 test
 # loads by path.
 bl-test-vst3 = { path = "../test-vst3" }
+# The CLAP test plug-in, built from source, which the agent's MIDI-effect
+# test loads by path (IMP-24).
+bl-test-clap = { path = "../test-clap" }
 lspk-example-gain.workspace = true
 lspk-plugin = { workspace = true, features = ["clap"] }
 lspk-plugin-agent.workspace = true

@@ -46,6 +46,12 @@ fn through() -> Value {
     json!({ "kind": t.kind, "name": t.name, "role": t.role })
 }
 
+/// A native instrument, for the menus that only instruments offer (R64).
+fn instrument() -> Value {
+    let t = bl_devices::polysynth_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role })
+}
+
 fn add(h: &mut Harness, device: Value) -> DeviceId {
     let added: DeviceAdded = serde_json::from_value(
         h.shell
@@ -267,6 +273,47 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
         node.description.contains("WP-2.24"),
         "Edit Info Text: {}",
         node.description
+    );
+}
+
+// Spec: multisampler R64 (C-DEVICE-015)
+#[test]
+fn an_instruments_menu_offers_autosample() {
+    let mut h = harness();
+    // An effect's menu doesn't offer it.
+    let effect = add(&mut h, gain());
+    let frame = frame_of(&mut h, effect);
+    let out = right_click(&mut h, title_rect(frame, false).center());
+    assert!(
+        !Harness::nodes(&out)
+            .iter()
+            .any(|node| node.label.starts_with("Autosample")),
+        "an effect's menu doesn't offer Autosample…"
+    );
+    // An instrument's does, and choosing it opens the dialog for that
+    // instrument.
+    let instrument = add(&mut h, instrument());
+    let frame = frame_of(&mut h, instrument);
+    let out = right_click(&mut h, title_rect(frame, false).center());
+    let nodes = Harness::nodes(&out);
+    let item = nodes
+        .iter()
+        .find(|node| node.label.starts_with("Autosample"))
+        .expect("the instrument's menu offers Autosample…");
+    assert!(!item.disabled, "Autosample… works");
+    let bounds = item.bounds.expect("the item's bounds");
+    let at = pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    h.click(at);
+    let dialog = h
+        .shell
+        .autosampler_dialog()
+        .expect("the autosampler's dialog opens");
+    assert_eq!(
+        dialog.device, instrument,
+        "the dialog is open for the instrument it was chosen on"
     );
 }
 

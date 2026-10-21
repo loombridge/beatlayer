@@ -6,7 +6,7 @@ use std::any::Any;
 use std::sync::LazyLock;
 
 use bl_core::midi::MidiMessage;
-use bl_core::time::{Frames, SampleRate, TempoMap};
+use bl_core::time::{Frames, SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
@@ -258,6 +258,29 @@ impl NoteEvent {
         })
     }
 
+    /// A note or a channel message at `offset`, from a MIDI message: a note
+    /// on or off, or a control change, channel pressure or pitch bend;
+    /// `None` for any other message (IMP-24; au-hosting R4). A note-on at
+    /// velocity 0 is a note-off.
+    #[must_use]
+    pub fn from_midi(offset: u32, message: &MidiMessage) -> Option<Self> {
+        if message.is_note_on() || message.is_note_off() {
+            return Some(Self {
+                offset,
+                kind: if message.is_note_on() {
+                    NoteKind::On
+                } else {
+                    NoteKind::Off
+                },
+                channel: message.channel()?,
+                key: message.data1(),
+                velocity: f32::from(message.data2()) / 127.0,
+                note_id: None,
+            });
+        }
+        Self::from_message(offset, message)
+    }
+
     /// The MIDI message of a control change, channel pressure or pitch
     /// bend; `None` for a note or an expression. The inverse of
     /// [`from_message`](Self::from_message) for the values it makes.
@@ -487,6 +510,15 @@ pub trait Node: Send + 'static {
         0
     }
 
+    /// The gain the node took off the last block it processed, in dB, as a
+    /// compressor's Gain Reduction reads it: zero for a node that reduces
+    /// nothing, negative for a reduction, positive for a device that adds
+    /// gain. The engine reads it after every block for the track's
+    /// gain-reduction meter (the mixer view spec, R40). The default is zero.
+    fn gain_reduction(&self) -> f32 {
+        0.0
+    }
+
     /// The reader of the node's display data, if it has a display (the
     /// device framework spec, R26): the compiler asks once, when it makes
     /// the node, and the shell reads the newest values the node publishes
@@ -510,6 +542,9 @@ pub struct Block<'a> {
     pub(crate) transport: TransportInfo,
     pub(crate) sample_rate: SampleRate,
     pub(crate) tempo: &'a TempoMap,
+    /// The song's time-signature map, which places bar lines on ticks
+    /// (WP-5.26b: a device that follows the launch quantisation needs it).
+    pub(crate) signatures: &'a TimeSignatureMap,
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
@@ -547,6 +582,9 @@ pub struct Block<'a> {
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
 static DEFAULT_TEMPO: LazyLock<TempoMap> = LazyLock::new(TempoMap::default);
+
+/// The time-signature map of a block made outside a program: 4/4 throughout.
+static DEFAULT_SIGNATURES: LazyLock<TimeSignatureMap> = LazyLock::new(TimeSignatureMap::default);
 
 impl<'a> Block<'a> {
     /// A block over planar audio: `channels` channels of `frames` frames,
@@ -589,6 +627,7 @@ impl<'a> Block<'a> {
             transport,
             sample_rate,
             tempo: &DEFAULT_TEMPO,
+            signatures: &DEFAULT_SIGNATURES,
             sidechain: None,
             external: None,
             external_out: None,
@@ -719,6 +758,12 @@ impl<'a> Block<'a> {
         Self { tempo, ..self }
     }
 
+    /// The same block under another time-signature map.
+    #[must_use]
+    pub fn with_signatures(self, signatures: &'a TimeSignatureMap) -> Self {
+        Self { signatures, ..self }
+    }
+
     /// Frames in the block.
     pub fn frames(&self) -> usize {
         self.frames
@@ -778,6 +823,14 @@ impl<'a> Block<'a> {
     /// Its conversions allocate nothing, so a node may call them.
     pub fn tempo(&self) -> &'a TempoMap {
         self.tempo
+    }
+
+    /// The song's time-signature map, which places bar lines on ticks: the
+    /// song position of a bar line is
+    /// `tempo().ticks_to_frames(signatures().bar_start(bar), sample_rate())`.
+    /// A device that follows the launch quantisation needs it.
+    pub fn signatures(&self) -> &'a TimeSignatureMap {
+        self.signatures
     }
 
     /// The parameter changes in this block, in the order they take effect.
@@ -1102,6 +1155,36 @@ mod tests {
             let message = MidiMessage::from_bytes(bytes).unwrap();
             assert_eq!(NoteEvent::from_message(0, &message), None);
         }
+    }
+
+    // Spec: device-framework R39; au-hosting R4 (IMP-24)
+    #[test]
+    fn notes_and_channel_messages_become_note_events() {
+        let on =
+            NoteEvent::from_midi(5, &MidiMessage::from_bytes(&[0x92, 60, 100]).unwrap()).unwrap();
+        assert_eq!(on.offset, 5);
+        assert_eq!(on.kind, NoteKind::On);
+        assert_eq!(on.channel, 2);
+        assert_eq!(on.key, 60);
+        assert_eq!(on.velocity, 100.0_f32 / 127.0);
+        // A note-on at velocity 0 is a note-off, as a note-off is.
+        for bytes in [&[0x92, 60, 0][..], &[0x82, 60, 64]] {
+            let off = NoteEvent::from_midi(6, &MidiMessage::from_bytes(bytes).unwrap()).unwrap();
+            assert_eq!(off.kind, NoteKind::Off, "{bytes:?}");
+            assert_eq!(off.key, 60);
+        }
+        // A channel message is a message.
+        let control =
+            NoteEvent::from_midi(7, &MidiMessage::from_bytes(&[0xB2, 1, 64]).unwrap()).unwrap();
+        assert_eq!(
+            control.kind,
+            NoteKind::Control {
+                controller: 1,
+                value: 64.0_f32 / 127.0
+            }
+        );
+        // A program change is neither a note nor a message.
+        assert!(NoteEvent::from_midi(8, &MidiMessage::from_bytes(&[0xC0, 5]).unwrap()).is_none());
     }
 
     // Spec: device-framework R39

@@ -1061,7 +1061,7 @@ fn track_makes_audio(track: &bl_model::Track) -> bool {
 ///
 /// When `include_return_and_main_effects` is true, the track renders as it does
 /// soloed in the set.
-fn prepare_document_for_track(
+pub(crate) fn prepare_document_for_track(
     document: &Document,
     track_id: TrackId,
     include_return_and_main_effects: bool,

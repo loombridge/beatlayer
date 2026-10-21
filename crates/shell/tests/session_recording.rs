@@ -14,9 +14,8 @@
 bl_rt::install_trap!();
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_engine::SlotState;
 use bl_model::{Clip, ClipData, MidiData, Note, SceneId, TrackId};
@@ -24,6 +23,7 @@ use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use serde_json::{Value, json};
 
 struct TestDir(PathBuf);
@@ -61,6 +61,7 @@ fn rig() -> (Shell, NullControl) {
         NullOptions {
             dropout_after: None,
             channels: 4,
+            pacing: Pacing::Manual,
             ..NullOptions::default()
         },
         &[("null", "Null")],
@@ -76,6 +77,7 @@ fn rig() -> (Shell, NullControl) {
         audio,
         Box::new(ProjectFiles::new()),
     );
+    shell.use_test_clock(control.clock().expect("manual pacing"));
     shell
         .run("audio.configure", json!({ "input_device": "null:null" }))
         .unwrap();
@@ -108,28 +110,25 @@ fn first_scene(shell: &Shell) -> SceneId {
     shell.editor().document().scenes().next().unwrap().id
 }
 
-fn poll_until(shell: &mut Shell, what: &str, done: impl Fn(&mut Shell) -> bool) {
-    let until = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < until {
-        shell.poll_engine();
-        if done(shell) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("timed out waiting for {what}");
+/// Advances the set until `done` holds, up to about ten seconds of test
+/// time. The null device is paced by hand (T199), so this lands on the same
+/// frames however busy the machine is.
+fn poll_until(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&mut Shell) -> bool,
+) {
+    testing::wait_for(control, shell, what, done);
 }
 
-fn pass_time(shell: &mut Shell, millis: u64) {
-    let until = Instant::now() + Duration::from_millis(millis);
-    while Instant::now() < until {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+/// Advances the set by `millis` of test time.
+fn pass_time(control: &NullControl, shell: &mut Shell, millis: u64) {
+    testing::advance(control, shell, millis);
 }
 
 /// Plays the keyboard's A key for `millis`.
-fn play_a(shell: &mut Shell, millis: u64) {
+fn play_a(control: &NullControl, shell: &mut Shell, millis: u64) {
     for pressed in [true, false] {
         shell
             .run(
@@ -138,7 +137,7 @@ fn play_a(shell: &mut Shell, millis: u64) {
             )
             .unwrap();
         if pressed {
-            pass_time(shell, millis);
+            pass_time(control, shell, millis);
         }
     }
 }
@@ -165,7 +164,7 @@ fn recorded(shell: &mut Shell) -> bool {
 // while the take runs, loops, and is one undo step.
 #[test]
 fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     let before = shell.editor().undo_history().len();
@@ -175,7 +174,7 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
         started["slots"],
         json!([{ "track": keys, "scene": scene, "overdub": false }])
     );
-    poll_until(&mut shell, "the clip to appear", |shell| {
+    poll_until(&control, &mut shell, "the clip to appear", |shell| {
         slot_clip(shell, keys, scene).is_some()
     });
     assert!(
@@ -189,13 +188,13 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
         "transport.state reads the recording back"
     );
     assert!(!state["arrangement_record"].as_bool().unwrap());
-    play_a(&mut shell, 150);
+    play_a(&control, &mut shell, 150);
     let short = slot_clip(&shell, keys, scene).unwrap().length;
-    pass_time(&mut shell, 150);
+    pass_time(&control, &mut shell, 150);
     let longer = slot_clip(&shell, keys, scene).unwrap().length;
     assert!(longer > short, "the clip grows as it records");
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
 
     let clip = slot_clip(&shell, keys, scene).expect("the recorded clip");
     let notes = midi_notes(&clip);
@@ -214,7 +213,7 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
     // The slot launched where the take ended, and plays on as a loop. The
     // launch is applied in the block after the take ends, so the poll that
     // ends the recording may still see it queued.
-    poll_until(&mut shell, "the recorded slot to play", |shell| {
+    poll_until(&control, &mut shell, "the recorded slot to play", |shell| {
         shell
             .session_states()
             .iter()
@@ -235,7 +234,7 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
 // end, in the same undo step.
 #[test]
 fn a_taken_slot_sends_the_recording_to_the_next_empty_one_or_a_new_scene() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scenes: Vec<SceneId> = shell
         .editor()
@@ -256,11 +255,11 @@ fn a_taken_slot_sends_the_recording_to_the_next_empty_one_or_a_new_scene() {
     }
     let first = shell.run("session.record", json!({})).unwrap();
     assert_eq!(first["slots"][0]["scene"], json!(scenes[2]));
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     shell.run("session.stop_all", json!({})).unwrap();
-    poll_until(&mut shell, "the clips to stop", |shell| {
+    poll_until(&control, &mut shell, "the clips to stop", |shell| {
         shell.session_states().is_empty()
     });
 
@@ -271,9 +270,9 @@ fn a_taken_slot_sends_the_recording_to_the_next_empty_one_or_a_new_scene() {
     let scene = shell.editor().document().scenes().last().unwrap().id;
     assert_eq!(shell.editor().document().scenes().len(), count + 1);
     assert_eq!(second["slots"][0]["scene"], json!(scene));
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     assert!(slot_clip(&shell, keys, scene).is_some());
     assert_eq!(
         shell.editor().undo_history().len(),
@@ -286,7 +285,7 @@ fn a_taken_slot_sends_the_recording_to_the_next_empty_one_or_a_new_scene() {
 // of an armed track, and refuses an occupied slot or an unarmed track.
 #[test]
 fn a_slots_record_button_needs_an_armed_track_and_an_empty_slot() {
-    let (mut shell, _control) = rig();
+    let (mut shell, _) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     shell
@@ -314,7 +313,7 @@ fn a_slots_record_button_needs_an_armed_track_and_an_empty_slot() {
 // plays, a loop pass at a time, and each pass is one undo step.
 #[test]
 fn an_overdub_adds_each_loop_pass_as_an_undo_step() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     // A fast tempo keeps the loop short: 240 BPM is a quarter per 250 ms.
@@ -326,16 +325,16 @@ fn an_overdub_adds_each_loop_pass_as_an_undo_step() {
     // Record a half-second clip with one note; it loops from where the take
     // ends.
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 100);
-    play_a(&mut shell, 50);
-    pass_time(&mut shell, 250);
+    pass_time(&control, &mut shell, 100);
+    play_a(&control, &mut shell, 50);
+    pass_time(&control, &mut shell, 250);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     let clip = slot_clip(&shell, keys, scene).unwrap();
     assert_eq!(midi_notes(&clip).len(), 1);
     // The loop's length in milliseconds at 240 BPM.
     let loop_ms = clip.length.get() as f64 / Ticks::QUARTER.get() as f64 * 250.0;
-    poll_until(&mut shell, "the clip to play", |shell| {
+    poll_until(&control, &mut shell, "the clip to play", |shell| {
         shell
             .session_states()
             .iter()
@@ -346,14 +345,14 @@ fn an_overdub_adds_each_loop_pass_as_an_undo_step() {
     let started = shell.run("session.record", json!({})).unwrap();
     assert_eq!(started["slots"][0]["overdub"], json!(true));
     // The take begins on the engine's next block.
-    pass_time(&mut shell, 60);
+    pass_time(&control, &mut shell, 60);
     // Three notes 1.3 loops apart land in three different passes.
     for _ in 0..3 {
-        play_a(&mut shell, 30);
-        pass_time(&mut shell, (loop_ms * 1.3) as u64);
+        play_a(&control, &mut shell, 30);
+        pass_time(&control, &mut shell, (loop_ms * 1.3) as u64);
     }
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
 
     let added = shell.editor().undo_history().len() - steps;
     let notes = midi_notes(&slot_clip(&shell, keys, scene).unwrap());
@@ -408,9 +407,9 @@ fn an_armed_audio_track_records_a_looping_audio_clip_into_the_slot() {
             json!({ "track": track, "scene": scene }),
         )
         .unwrap();
-    pass_time(&mut shell, 300);
+    pass_time(&control, &mut shell, 300);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
 
     let clip = slot_clip(&shell, track, scene).expect("an audio clip in the slot");
     let ClipData::Audio(audio) = &clip.data else {
@@ -435,7 +434,7 @@ fn an_armed_audio_track_records_a_looping_audio_clip_into_the_slot() {
 // armed tracks.
 #[test]
 fn launching_a_scene_records_only_when_start_recording_on_scene_launch_is_on() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     let state = shell.run("settings.state", json!({})).unwrap();
@@ -447,7 +446,7 @@ fn launching_a_scene_records_only_when_start_recording_on_scene_launch_is_on() {
     shell
         .run("session.launch_scene", json!({ "scene": scene }))
         .unwrap();
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     assert!(shell.running_recording().is_none(), "off: nothing records");
 
     shell
@@ -462,23 +461,23 @@ fn launching_a_scene_records_only_when_start_recording_on_scene_launch_is_on() {
     let running = shell.running_recording().expect("on: the scene records");
     assert_eq!(running.session_slots.len(), 1);
     assert_eq!(running.session_slots[0].track, keys);
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     assert!(slot_clip(&shell, keys, scene).is_some());
 }
 
 // Spec: session-recording R4. Session Record again ends the recording.
 #[test]
 fn session_record_again_ends_the_recording() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     let ended = shell.run("session.record", json!({})).unwrap();
     assert_eq!(ended["slots"], json!([]));
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     assert!(
         slot_clip(&shell, keys, scene).is_some(),
         "an empty recording is kept as a clip"
@@ -489,11 +488,11 @@ fn session_record_again_ends_the_recording() {
 // recording runs, and the Session recording goes on.
 #[test]
 fn arrangement_record_waits_for_a_session_recording_to_end() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     assert!(
         shell
             .run("transport.set_recording", json!({ "recording": true }))
@@ -501,6 +500,6 @@ fn arrangement_record_waits_for_a_session_recording_to_end() {
     );
     assert!(shell.running_recording().is_some(), "still recording");
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the recording to end", recorded);
     assert!(slot_clip(&shell, keys, scene).is_some());
 }

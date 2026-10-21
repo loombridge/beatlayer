@@ -197,6 +197,11 @@ pub struct EngineProgram {
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
+    /// How long each task ran, in nanoseconds, smoothed: the engine times
+    /// each task on the thread that ran it, and the share of the set's
+    /// processing time a task's is what the Performance Impact indicator
+    /// shows (the mixer spec, R31).
+    pub(crate) task_times: Vec<core::sync::atomic::AtomicU64>,
 }
 
 /// The frames a late row (WP-5.11) lags its modulator's by, and the longest
@@ -957,6 +962,82 @@ impl EngineProgram {
         }
     }
 
+    /// How long the task ran, smoothed over the blocks, in nanoseconds: the
+    /// engine times each task on the thread that ran it (the mixer spec,
+    /// R31). The first measure is the value; the ones after it move a
+    /// eighth of the way towards the last, so the indicator moves rather
+    /// than jumps. Real-time safe: an atomic read and a write.
+    pub(crate) fn record_time(&self, task: usize, took: std::time::Duration) {
+        let Some(slot) = self.task_times.get(task) else {
+            return;
+        };
+        let nanos = took.as_nanos() as u64;
+        let previous = slot.load(core::sync::atomic::Ordering::Relaxed);
+        let smoothed = if previous == 0 {
+            nanos
+        } else {
+            let difference = nanos as i64 - previous as i64;
+            (previous as i64 + difference / 8).max(0) as u64
+        };
+        slot.store(smoothed, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How long the tasks ran in all, in nanoseconds: the set's processing
+    /// time, which the Performance Impact indicator's shares are of (the
+    /// mixer spec, R31).
+    pub(crate) fn total_time(&self) -> u64 {
+        self.task_times
+            .iter()
+            .map(|time| time.load(core::sync::atomic::Ordering::Relaxed))
+            .sum()
+    }
+
+    /// The task's share of the set's processing time, from 0 to 1: what the
+    /// Performance Impact indicator shows (the mixer spec, R31).
+    pub(crate) fn impact(&self, task: u32, total: u64) -> f32 {
+        if total == 0 {
+            return 0.0;
+        }
+        let time = self.task_times[task as usize].load(core::sync::atomic::Ordering::Relaxed);
+        (time as f64 / total as f64) as f32
+    }
+
+    /// The most gain reduction any of a task's track's compressors or
+    /// limiters reported for the last block, in dB, as a compressor's Gain
+    /// Reduction reads it: zero when none of them reduced. It reaches every
+    /// device at any depth inside a rack (the mixer view spec, R40).
+    pub(crate) fn gain_reduction(&self, task: u32) -> f32 {
+        let mut most = 0.0f32;
+        self.chain_gain_reduction(self.tasks[task as usize].chain, &mut most);
+        most
+    }
+
+    /// Folds the gain reduction of every device in `chain`, racks at any
+    /// depth included, into `most` (the mixer view spec, R40). A device
+    /// that's switched off processes nothing, so it counts as reducing
+    /// nothing.
+    fn chain_gain_reduction(&self, chain: Span, most: &mut f32) {
+        for &step in &self.steps[chain.range()] {
+            match step {
+                Step::Node(slot) => {
+                    let Some(slot) = self.slots.get(slot as usize) else {
+                        continue;
+                    };
+                    if let Some(Instance::Device(node)) = &slot.node
+                        && !slot.bypass
+                    {
+                        *most = most.min(node.gain_reduction());
+                    }
+                }
+                Step::Rack(rack) => {
+                    for chain in self.racks[rack as usize].all().range() {
+                        self.chain_gain_reduction(self.rack_chains[chain].steps, most);
+                    }
+                }
+            }
+        }
+    }
+
     /// Moves the nodes that survive from `old` into this program. Real-time
     /// safe: it swaps pointers, so whatever was in either slot stays owned
     /// by one of the two programs. Returns `false`, and moves nothing, if
@@ -1032,6 +1113,40 @@ impl EngineProgram {
                 })
                 .count() as u32
         };
+        // Spec: IMP-15. A device that was switched off in this swap left the
+        // chain: it ends the notes it started, and they enter the chain in
+        // front of the node that followed it.
+        for s in 0..old.slots.len() {
+            let slot = s as u32;
+            if !matches!(old.slots[s].key, NodeKey::Device(_)) {
+                continue;
+            }
+            let Some(from_task) = old_task_of(old, slot) else {
+                continue;
+            };
+            let Some(to) = self
+                .migrations
+                .iter()
+                .find(|m| m.from == slot)
+                .map(|m| m.to)
+            else {
+                continue;
+            };
+            if !self.slots[to as usize].bypass {
+                continue;
+            }
+            let Some(task) = self
+                .tasks
+                .iter()
+                .position(|t| t.track == old.tasks[from_task].track)
+            else {
+                continue;
+            };
+            let at = gap(self, old, task, from_task, slot);
+            if let Some(Instance::Device(node)) = self.slots[to as usize].node.as_mut() {
+                self.releases.take(node.as_mut(), task as u32, at);
+            }
+        }
         // Removed: the old program still holds the node.
         for s in 0..old.slots.len() {
             let slot = s as u32;
@@ -1145,6 +1260,9 @@ impl EngineProgram {
     ) -> u64 {
         let t = t as usize;
         let task = self.tasks[t];
+        // Spec: the mixer spec, R31. The task is timed on the thread that
+        // ran it, so the pool's workers' work counts too.
+        let began = std::time::Instant::now();
         // SAFETY: the caller's promises are the turn's.
         let turn = unsafe { Turn::new(self, t) };
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
@@ -1192,6 +1310,7 @@ impl EngineProgram {
                     transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    signatures: &self.time_signatures,
                     sidechain: None,
                     external: None,
                     external_out: None,
@@ -1356,6 +1475,7 @@ impl EngineProgram {
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                signatures: &self.time_signatures,
                 sidechain: None,
                 external: None,
                 external_out: None,
@@ -1367,6 +1487,7 @@ impl EngineProgram {
                 rows: None,
             });
         }
+        self.record_time(t, began.elapsed());
         delivered
     }
 
@@ -2088,6 +2209,7 @@ impl EngineProgram {
                 transport: block.transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                signatures: &self.time_signatures,
                 sidechain: heard.map(|(at, _)| turn.sidechain(at)),
                 external: returned,
                 external_out: external_out.map(|at| turn.keep(at)),
@@ -2328,6 +2450,7 @@ impl EngineProgram {
             transport: block.transport,
             sample_rate: self.sample_rate,
             tempo: &self.tempo,
+            signatures: &self.time_signatures,
             sidechain: None,
             notes: &[],
             notes_out: None,
@@ -2521,6 +2644,7 @@ impl EngineProgram {
                     transport: block.transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    signatures: &self.time_signatures,
                     sidechain: None,
                     external: None,
                     external_out: None,

@@ -6,11 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
+use bl_audio_io::NullControl;
 use bl_model::{LaunchMode, LaunchQuantization, LaunchSettings, TrackKind};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::session_launch_commands as ids;
 use bl_shell::settings::{LaunchPrefs, Preferences};
+use bl_shell::testing;
 use bl_shell::{Shell, ShellError};
 use serde_json::json;
 
@@ -240,11 +242,12 @@ fn stop_selected_stops_the_tracks_with_a_selected_slot() {
 /// first MIDI track, and the ids of that track and the first two scenes.
 fn shell_with_a_slot_clip() -> (
     Shell,
+    NullControl,
     bl_model::TrackId,
     bl_model::SceneId,
     bl_model::SceneId,
 ) {
-    let mut shell = Shell::headless();
+    let (mut shell, control) = testing::rig();
     shell.start_audio();
     assert!(shell.audio().engine_running());
     let track = shell
@@ -265,13 +268,13 @@ fn shell_with_a_slot_clip() -> (
             json!({ "track": track, "scene": scenes[0] }),
         )
         .unwrap();
-    (shell, track, scenes[0], scenes[1])
+    (shell, control, track, scenes[0], scenes[1])
 }
 
 // Spec: launch-quantisation R16.
 #[test]
 fn a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one() {
-    let (mut shell, track, first, second) = shell_with_a_slot_clip();
+    let (mut shell, _control, track, first, second) = shell_with_a_slot_clip();
     let selected = |shell: &mut Shell| shell.run("session.state", json!({})).unwrap();
 
     // Select on Launch: the launched slot is selected.
@@ -315,7 +318,7 @@ fn a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one() {
 // Spec: launch-quantisation R16.
 #[test]
 fn launching_an_empty_slot_or_the_last_scene_selects_nothing_new() {
-    let (mut shell, track, first, _) = shell_with_a_slot_clip();
+    let (mut shell, _control, track, first, _) = shell_with_a_slot_clip();
     let scenes: Vec<_> = shell.editor().document().scenes().map(|s| s.id).collect();
     let last = *scenes.last().unwrap();
     shell
@@ -493,16 +496,16 @@ fn a_new_clip_takes_the_default_launch_mode_and_the_mode_is_one_saved_undo_step(
     assert_eq!(clip(&shell).launch.mode, LaunchMode::Toggle);
 }
 
-/// Polls the engine until the slots it publishes satisfy `done`.
-fn wait_for_slots(shell: &mut Shell, what: &str, done: impl Fn(&[bl_engine::SlotStatus]) -> bool) {
-    for _ in 0..500 {
-        shell.poll_engine();
-        if done(shell.session_states()) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("timed out waiting for {what}: {:?}", shell.session_states());
+/// Advances the set until the slots the engine publishes satisfy `done`.
+/// The null device is paced by hand (T199), so this lands on the same frames
+/// however busy the machine is.
+fn wait_for_slots(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&[bl_engine::SlotStatus]) -> bool,
+) {
+    testing::wait_for(control, shell, what, |shell| done(shell.session_states()));
 }
 
 // Spec: session-view R32 (S-SES-001). Enter's command launches the selected
@@ -510,7 +513,7 @@ fn wait_for_slots(shell: &mut Shell, what: &str, done: impl Fn(&[bl_engine::Slot
 // launches and stops by the same command IDs.
 #[test]
 fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
-    let (mut shell, track, first, second) = shell_with_a_slot_clip();
+    let (mut shell, control, track, first, second) = shell_with_a_slot_clip();
     shell
         .run(ids::SET_QUANTIZATION, json!({ "quantization": "none" }))
         .unwrap();
@@ -530,7 +533,7 @@ fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
         .run("session.select", json!({ "track": track, "scene": first }))
         .unwrap();
     shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap();
-    wait_for_slots(&mut shell, "the selected clip", |slots| {
+    wait_for_slots(&control, &mut shell, "the selected clip", |slots| {
         slots.len() == 1 && slots[0].track == track && slots[0].scene == first
     });
 
@@ -538,18 +541,18 @@ fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
     shell
         .run("session.stop_track", json!({ "track": track }))
         .unwrap();
-    wait_for_slots(&mut shell, "the stop", <[_]>::is_empty);
+    wait_for_slots(&control, &mut shell, "the stop", <[_]>::is_empty);
     shell
         .run("session.launch", json!({ "track": track, "scene": first }))
         .unwrap();
-    wait_for_slots(&mut shell, "the launch", |slots| slots.len() == 1);
+    wait_for_slots(&control, &mut shell, "the launch", |slots| slots.len() == 1);
 
     // A selected scene launches its clips.
     shell.run("session.stop_all", json!({})).unwrap();
-    wait_for_slots(&mut shell, "stop all", <[_]>::is_empty);
+    wait_for_slots(&control, &mut shell, "stop all", <[_]>::is_empty);
     shell
         .run("session.select", json!({ "scene": first }))
         .unwrap();
     shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap();
-    wait_for_slots(&mut shell, "the scene", |slots| slots.len() == 1);
+    wait_for_slots(&control, &mut shell, "the scene", |slots| slots.len() == 1);
 }

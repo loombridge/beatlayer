@@ -84,6 +84,10 @@ struct TrackRepr {
     keep_monitoring_latency: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
+    /// The track's frozen audio (WP-4.14). Sets saved before it have none,
+    /// which loads unfrozen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    frozen: Option<crate::freeze::FrozenTrack>,
 }
 
 /// Whether an envelope drives its parameter: on unless a hand move turned
@@ -211,6 +215,7 @@ impl TrackRepr {
             take_lanes: track.take_lanes().cloned().collect(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
+            frozen: track.frozen.clone(),
             children: if with_children {
                 track
                     .children
@@ -361,6 +366,7 @@ impl Loader {
             });
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
+        track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }
@@ -1879,5 +1885,96 @@ mod tests {
             external.hardware_latency,
             HardwareLatency::Samples { value: 64 }
         );
+    }
+
+    // Spec: macros R31
+    #[test]
+    fn variations_save_with_the_set_and_load_back() {
+        use crate::{Chain, RackKind, macro_param};
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: "Audio".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let rack: DeviceId = editor.new_id();
+        let chain = Chain::new(editor.new_id(), "Chain");
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::rack(rack, RackKind::AudioEffect).with_chain(chain),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetDeviceParam {
+                device: rack,
+                param: macro_param(1),
+                value: 0.25,
+            })
+            .unwrap();
+        editor.apply(Command::StoreVariation { rack }).unwrap();
+        editor
+            .apply(Command::SetDeviceParam {
+                device: rack,
+                param: macro_param(1),
+                value: 0.75,
+            })
+            .unwrap();
+        editor.apply(Command::StoreVariation { rack }).unwrap();
+        editor
+            .apply(Command::RenameVariation {
+                rack,
+                index: 0,
+                name: "Quiet".to_owned(),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetMacroVariationExcluded {
+                rack,
+                macro_number: 2,
+                excluded: true,
+            })
+            .unwrap();
+
+        let saved = editor.document().clone();
+        let back = load(serde_json::to_value(&saved).unwrap()).expect("the set loads");
+        let rack_back = back.device(rack).unwrap();
+        assert_eq!(rack_back.macros.variations.len(), 2);
+        assert_eq!(rack_back.macros.variations[0].name, "Quiet");
+        assert_eq!(rack_back.macros.variations[0].values[0], 0.25);
+        assert_eq!(rack_back.macros.variations[1].name, "Variation 2");
+        assert_eq!(rack_back.macros.variations[1].values[0], 0.75);
+        assert!(rack_back.macros.setting(2).variation_excluded);
+
+        // Spec: macros R31. A stored value outside 0 to 1 doesn't load.
+        fn set_first_value(value: &mut Value, to: f64) -> bool {
+            match value {
+                Value::Object(map) => {
+                    if let Some(Value::Array(variations)) = map.get_mut("variations")
+                        && let Some(Value::Object(first)) = variations.first_mut()
+                        && let Some(Value::Array(values)) = first.get_mut("values")
+                        && let Some(slot) = values.first_mut()
+                    {
+                        *slot = json!(to);
+                        return true;
+                    }
+                    map.values_mut().any(|value| set_first_value(value, to))
+                }
+                Value::Array(items) => items.iter_mut().any(|value| set_first_value(value, to)),
+                _ => false,
+            }
+        }
+        let mut broken = serde_json::to_value(&saved).unwrap();
+        assert!(
+            set_first_value(&mut broken, 2.0),
+            "the variations are saved"
+        );
+        assert!(load(broken).is_err(), "a value outside 0 to 1 doesn't load");
     }
 }

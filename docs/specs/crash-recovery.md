@@ -1,9 +1,9 @@
 # Crash recovery and Save Continuously
 
-- **Status:** partial (R11, the switch in Settings, waits on the Settings window's File & Folder page; every other rule has a passing test)
-- **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it); the history browser for save points is Phase 6 (IMP-05).
+- **Status:** partial (R11, the switch in Settings, waits on the Settings window's File & Folder page; R12 to R20 are WP-6.39's and R21 to R28 WP-6.62's; every other rule has a passing test, in the library the app uses)
+- **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands: R1 to R11). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it). WP-6.62 puts the service in the app: the shell journals every edit, the recovery prompt at launch, and the Save Continuously switch (R21 to R28). WP-6.39 builds the save history, which lists the save points and saved versions and restores them (R12 to R20).
 - **Parity-matrix row:** Files and export: Crash recovery; (Beatlayer only) Save Continuously
-- **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026.
+- **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026; for R12 to R28, the manual's chapter 5 again and the Live 12 release notes, read 20 October 2026, and the UI parity reference's menus.md (M-FILE-008, M-VIEW-008) and layout.md (L-WIN-008, L-OTH-001) rows.
 
 ## The behaviour
 
@@ -11,7 +11,7 @@ You're working on a set and Live stops: it crashes, you force it to quit, the po
 
 Beatlayer does the same, always: while a set is open, every finished edit is written to a journal beside the set within a second, and a set that was open when Beatlayer stopped without closing it is offered at the next launch, exactly as it was after its last journalled edit. Beatlayer adds one option Live doesn't have (IMP-05): **Save Continuously**, off by default. With it on, every finished edit of a set that has a file is saved within a second, so reopening the set shows it without any question, and the set keeps a history of save points since its last normal save. Save (Cmd-S) works as it always does.
 
-This spec covers when edits reach the disk, when a set is offered, what recovering and declining do, what several running instances do, and the Save Continuously option. How the prompt looks is the app shell's, and the history browser is Phase 6's.
+This spec covers when edits reach the disk, when a set is offered, what recovering and declining do, what several running instances do, the Save Continuously option, and the save history: a list of the set's save points and saved versions, newest first, any of which a person restores as one undo step. How the prompt looks is the app shell's.
 
 ## Sources
 
@@ -24,6 +24,9 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | S5 | Release notes | Live 12 release notes: 12.3, 12.4, 12.4.1, 12.4.3 | Several fixes to crashes while a set was being restored after a crash; the one in 12.3 concerns a restored set that had two undo steps. Recovery restores a set, and seems to bring its undo steps with it. |
 | S6 | Support article | Ableton Help, "Recovering a Set manually after a crash" (help.ableton.com, article 115001878844), read through a search engine's summary on 10 October 2026; the page itself refused the fetch | Recovery is started on the next launch by an undo file Live keeps in its preferences folder, and a dialog asks whether to restore. Answering no moves the recovery files into a Crash folder in the preferences folder, from which they can still be recovered by hand with the same Live version. |
 | S7 | Beatlayer | [Improvements](../05-improvements.md), IMP-05; [the architecture](../02-architecture.md), "Project files and interop" | Save Continuously: every finished edit journalled to disk within a second, a history of save points, crash recovery always on whatever the setting, off by default as Live has no such mode. The journal sits beside the set, each entry naming the revision it follows; a normal save writes the next revision and retires the journal, so the set format stays as it is. A new setting goes where Live keeps related settings. |
+| S8 | Reference | [menus.md](../ui-parity/menus.md) M-FILE-008 (Open Live Set Backups) and M-VIEW-008 (Undo History); [layout.md](../ui-parity/layout.md) L-WIN-008 and L-OTH-001 (the Undo History opens in the right-hand area where the Learn View sits, newest action first, a click going back to it) | Where Live keeps a set's older versions and its history, and how its history lists them |
+| S9 | Beatlayer | [app-shell.md](app-shell.md) R3 and R19 (a save keeps the version it replaces in the project's `Backup` folder); [tracks-and-undo.md](tracks-and-undo.md); [accessibility.md](accessibility.md); [the architecture](../02-architecture.md), "Agent control" | A set's backups and where they are; every edit is one undo step; every control reaches assistive technology; every action is a registered command with a permission class and a readback |
+| S10 | Beatlayer | [app-shell.md](app-shell.md) R1, R4 and R23; [layout.md](../ui-parity/layout.md) L-SET-015 (File & Folder); [accessibility.md](accessibility.md); [the architecture](../02-architecture.md), "Processes and threads", "Agent control" and "Testing" | The set the app starts with; New, Open and Quit ask about unsaved changes and an agent's command never asks; `settings.state` reports the preferences; the File & Folder page's rows; every dialog reaches assistive technology and the keyboard; nothing slow runs on the UI or audio thread; every action is a registered command reachable through the agent API |
 
 ## Rules
 
@@ -39,6 +42,29 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 - **R10.** Save works as before whatever the setting: it writes the next revision of the set file, with its backup, and retires the save points. (S1, S7)
 - **R11.** The setting is a switch labelled Save Continuously on the Settings window's File & Folder page (L-SET-015), where Live keeps its file settings; its command is `settings.set_continuous_save`. (S7)
 
+**The save history (IMP-05; WP-6.39)**
+
+- **R12.** File ▸ Save History, straight after Open Beatlayer Set Backups (M-FILE-008), runs `view.toggle_save_history`, which shows the open set's save history in the right-hand area where the Undo History opens (L-WIN-008, L-OTH-001), and hides it again; its close button hides it too. Whether it shows is view state: not saved with the set and no undo step. The item's name and place are Beatlayer's own. (S7, S8)
+- **R13.** The history lists, newest first: the set's save points (R9), each named by its edit's label as the undo history names it, with the time it was journalled; then the set as last saved, the revision its file holds, labelled Saved with the time of that save; then each of the set's backups in its project folder's `Backup` folder (S9), labelled Saved with the time in its name. Times show in local time, with seconds for save points, and with the date for any not of today. A set never saved has no history. (S7, S8, S9)
+- **R14.** With Save Continuously off the history has no save points, only the saved versions, and a line above them says that Save Continuously keeps a save point after every edit, with a button that opens Settings at the File & Folder page (R11). (S7)
+- **R15.** The history follows the set while it shows: each save point appears at the top as it's journalled (R1, R8), and a normal save, which retires the save points (R10), clears them from the list and puts the new save at the top, the version it replaced among the backups. (S7, S9)
+- **R16.** Selecting a row and clicking Restore at the history's foot, or double-clicking the row, or pressing Return with it selected, runs `set.restore` for it: the song becomes exactly the song that row holds (a save point's saved form, the set file's song, or a backup's song, migrated as opening it would migrate it), as one undo step named `Restore Save Point` or `Restore Saved Version`, which Undo takes back. The set keeps its file, its name and its project folder, and the transport isn't stopped. The undo names are Beatlayer's own. (S7, S9)
+- **R17.** A restore is an edit like any other: it's journalled (R1), and with Save Continuously on it's a new save point at the top of the history, so every row listed before stays listed and can still be restored. (S7)
+- **R18.** A row whose song can't be read any more (its journal damaged, a backup moved away) restores nothing: the song stays as it was and the Status Bar says why. (S7)
+- **R19.** The history is a list for assistive technology, each row reading its label and its time, and Restore a button; every part works from the keyboard. (S9)
+- **R20.** `set.save_history` (read) reports the rows R13 lists, newest first, each with its `id`, its kind (`save_point`, `saved` or `backup`), its time in UTC (RFC 3339) and its label, and whether Save Continuously is on. `set.restore { "id": … }` restores one, in the `destructive` class, since it replaces the whole song and an agent asks first; it's read back through the query tool's `song` (`undo.next_undo` names the restore). `view.toggle_save_history` is in the read class, and `view.state` reports whether the history shows, as it reports the Undo History. (S7, S9)
+
+**Crash recovery and Save Continuously in the app (WP-6.62)**
+
+- **R21.** The app runs crash recovery from its start: before the first set opens it registers its session in the recovery folder in the user's application data, and while a set is open it journals every finished edit as R1 says, whoever makes it (a gesture, a key, a menu item, an undo or a redo, an agent or the assistant), on the journal's own thread, so neither the interface nor the audio waits on the disk. Opening, saving, Save As, New and closing tell the journal what R6 and R7 need; quitting after the person has answered the save question closes the set, so nothing is offered at the next launch. (S6, S7, S10)
+- **R22.** When the app starts and R2 finds sets to offer, a dialog over the main window, once the start-up set (app-shell R1) has opened, lists them newest first, each with its name, its file or "never saved", how many edits follow its last save, the time and name of its last edit, and a warning when the set file has been saved since by something else; each has Recover and Discard buttons, and the dialog has a Later button. Recover runs `set.recover` for that set (R3), in place of the start-up set; Discard runs `set.discard_recovery` (R4); Later closes the dialog and leaves every set still listed to be offered at the next launch. The dialog closes by itself once nothing is left in it. Its wording and the Later button are Beatlayer's own. (S6, S10)
+- **R23.** The dialog reaches assistive technology as a dialog naming each set, its buttons in the keyboard's Tab order, Recover on the newest set focused first; Esc does what Later does. (S10)
+- **R24.** Settings ▸ File & Folder has the Save Continuously switch R11 names, off on a new install; it's kept between launches in the preferences, `settings.set_continuous_save` sets it, and `settings.state` reports it as `file_folder.save_continuously`. Turning it on commits the open set's edits (R8). (S7, S10)
+- **R25.** With Save Continuously on, a set that has a file has no unsaved changes once its last edit is committed (R8): the query tool's `set.unsaved_changes` reads false, and New Set, Open Set and Quit don't ask whether to save it (app-shell R4). A set never saved still asks. This is Beatlayer's own. (S7, S10)
+- **R26.** `set.list_recoverable`, `set.recover` and `set.discard_recovery` run against the app's own recovery, through the agent API as from the dialog, with their permission classes (R2 to R4). `bl-cli` sessions journal only when given a recovery folder (`--recovery-dir`), so headless runs leave nothing in the app's. (S7, S10)
+- **R27.** When the journal can't be written (the disk full, the folder gone), the Status Bar says once that edits aren't being kept for recovery, the app goes on working, and each later edit tries again; the message goes when a write succeeds. The wording is Beatlayer's own. (S7)
+- **R28.** A session killed at any moment while the app runs with a set open is offered at the next launch with every edit the app journalled before it was killed, recovered through the dialog to the same song as the library's recovery gives (R2, R3). (S6, S7)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -53,6 +79,23 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | R9 | `crates/project/src/journal.rs`, `committed_entries_are_save_points`; `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
 | R10 | `crates/project/src/autosave.rs`, `saving_retires_the_journal_and_continuous_save_commits` | unit |
 | R11 | None yet: the File & Folder page isn't built. `crates/project/src/registry.rs`, `every_command_is_registered_and_complete` covers the command. | |
+| R12 | to be written in WP-6.39 | |
+| R13 | to be written in WP-6.39 | |
+| R14 | to be written in WP-6.39 | |
+| R15 | to be written in WP-6.39 | |
+| R16 | to be written in WP-6.39 | |
+| R17 | to be written in WP-6.39 | |
+| R18 | to be written in WP-6.39 | |
+| R19 | to be written in WP-6.39 | |
+| R20 | to be written in WP-6.39 | |
+| R21 | to be written in WP-6.62 | |
+| R22 | to be written in WP-6.62 | |
+| R23 | to be written in WP-6.62 | |
+| R24 | to be written in WP-6.62 | |
+| R25 | to be written in WP-6.62 | |
+| R26 | to be written in WP-6.62 | |
+| R27 | to be written in WP-6.62 | |
+| R28 | to be written in WP-6.62 | |
 
 ## Beatlayer's own choices
 

@@ -11,6 +11,7 @@
 //! knobs' sizes, which no observation has measured yet, are Beatlayer's
 //! ([`unmeasured`]).
 
+use bl_model::{ChainId, DeviceId};
 use egui::{Rect, pos2};
 
 pub use bl_shell::mixer_view_commands::COLUMN_WIDTH;
@@ -151,6 +152,10 @@ pub const CROSSFADER_HEIGHT: f32 = 28.0;
 /// The Track Options section's height under the strip (L-MIX-005).
 pub const TRACK_OPTIONS_HEIGHT: f32 = 26.0;
 
+/// The Performance Impact section's height under the strip (L-MIX-007;
+/// its segments' sizes are [`unmeasured`]).
+pub const PERFORMANCE_IMPACT_HEIGHT: f32 = 12.0;
+
 /// The Main track's column width (L-SES-006: 1487 to 1591).
 pub const MAIN_COLUMN: f32 = 104.0;
 
@@ -201,6 +206,10 @@ pub struct Sections {
     /// The tracks' Track Options sections: the Track Delay with its unit
     /// switch and Keep Monitoring Latency. Hidden by default (observed).
     pub track_options: bool,
+    /// The Performance Impact section: the six segments under each strip
+    /// that light up with the track's share of the set's processing time.
+    /// Hidden by default (observed).
+    pub performance_impact: bool,
 }
 
 impl Sections {
@@ -212,6 +221,7 @@ impl Sections {
         crossfader: false,
         returns: true,
         track_options: false,
+        performance_impact: false,
     };
 
     /// The height of the sections that show, stacked, with the colour strip
@@ -231,6 +241,9 @@ impl Sections {
         if self.track_options {
             height += TRACK_OPTIONS_HEIGHT;
         }
+        if self.performance_impact {
+            height += PERFORMANCE_IMPACT_HEIGHT;
+        }
         if self.crossfader {
             height += CROSSFADER_HEIGHT;
         }
@@ -243,10 +256,45 @@ impl Sections {
 pub enum ColumnKind {
     /// An audio, MIDI, or group track.
     Track,
+    /// A rack's chain folded out as a strip after its track's column (racks
+    /// spec, R27).
+    Chain(ChainColumn),
     /// A return track.
     Return,
     /// The Main track.
     Main,
+}
+
+/// A chain's column: the chain and the rack it belongs to (racks spec,
+/// R27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChainColumn {
+    /// The chain.
+    pub chain: ChainId,
+    /// The rack the chain belongs to.
+    pub rack: DeviceId,
+}
+
+/// One column of a mixer's track area: a track's, or a chain's strip folded
+/// out after it (racks spec, R27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TrackColumn {
+    /// The chain the column shows, for a chain's column.
+    pub chain: Option<ChainColumn>,
+}
+
+impl TrackColumn {
+    /// A track's column.
+    #[must_use]
+    pub const fn track() -> Self {
+        Self { chain: None }
+    }
+
+    /// A chain's column, folded out after its track's.
+    #[must_use]
+    pub const fn chain(chain: ChainColumn) -> Self {
+        Self { chain: Some(chain) }
+    }
 }
 
 /// One column of a mixer: its kind, its index among its kind, and its
@@ -288,6 +336,8 @@ pub struct MixerLayout {
     pub crossfader: Option<(f32, f32)>,
     /// The Track Options section's, if it shows.
     pub track_options: Option<(f32, f32)>,
+    /// The Performance Impact section's, if it shows.
+    pub performance_impact: Option<(f32, f32)>,
     /// The strip's, if it shows.
     pub strip: Option<(f32, f32)>,
     /// The colour strip's, at the bottom (L-MIX-009).
@@ -299,13 +349,15 @@ pub struct MixerLayout {
 impl MixerLayout {
     /// Lays out a mixer in `area` with `tracks` track columns and `returns`
     /// return columns, scrolled `scroll` points (kept within the tracks).
+    /// A track's column may be followed by the chain strips folded out of
+    /// its rack (racks spec, R27), which are columns of their own.
     /// The sections stack up from the area's bottom: the colour strip, then
     /// the strip, Sends, and In/Out above it; any that don't fit are cut at
     /// the area's top.
     #[must_use]
     pub fn compute(
         area: Rect,
-        tracks: usize,
+        tracks: &[TrackColumn],
         returns: usize,
         sections: Sections,
         scroll: f32,
@@ -328,16 +380,30 @@ impl MixerLayout {
             .collect();
         let track_area =
             Rect::from_min_max(area.min, pos2(returns_left.max(area.left()), area.bottom()));
-        let content = COLUMN_WIDTH * tracks as f32;
+        let content = COLUMN_WIDTH * tracks.len() as f32;
         let max_scroll = (content - track_area.width()).max(0.0);
         let scroll = scroll.clamp(0.0, max_scroll);
         let first = (scroll / COLUMN_WIDTH).floor() as usize;
-        let columns: Vec<Column> = (first..tracks)
+        // The track each column shows: the track's own column, and the chain
+        // strips folded out after it (racks spec, R27).
+        let mut seen = 0usize;
+        let mut track_of: Vec<usize> = Vec::with_capacity(tracks.len());
+        for column in tracks {
+            if column.chain.is_none() {
+                seen += 1;
+            }
+            track_of.push(seen - 1);
+        }
+        let columns: Vec<Column> = (first..tracks.len())
             .map(|index| {
                 let left = track_area.left() + COLUMN_WIDTH * index as f32 - scroll;
+                let kind = match tracks[index].chain {
+                    Some(chain) => ColumnKind::Chain(chain),
+                    None => ColumnKind::Track,
+                };
                 Column {
-                    kind: ColumnKind::Track,
-                    index,
+                    kind,
+                    index: track_of[index],
                     rect: Rect::from_min_max(
                         pos2(left, area.top()),
                         pos2(left + COLUMN_WIDTH, area.bottom()),
@@ -365,10 +431,12 @@ impl MixerLayout {
         };
         // L-SES-009's order from the bottom: the colour strip, then the
         // Crossfader section under the strips (L-MIX-006), then the Track
-        // Options under the strips (L-MIX-005), then the strips, Sends, and
-        // In/Out above them.
+        // Options under the strips (L-MIX-005), then the Performance Impact
+        // under the strips (L-MIX-007), then the strips, Sends, and In/Out
+        // above them.
         let crossfader = stack(sections.crossfader, CROSSFADER_HEIGHT);
         let track_options = stack(sections.track_options, TRACK_OPTIONS_HEIGHT);
+        let performance_impact = stack(sections.performance_impact, PERFORMANCE_IMPACT_HEIGHT);
         let strip = stack(sections.volume, STRIP_HEIGHT);
         let sends = stack(sections.sends, SENDS_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
@@ -387,6 +455,7 @@ impl MixerLayout {
             sends,
             crossfader,
             track_options,
+            performance_impact,
             strip,
             colour,
             scroll,
@@ -443,6 +512,9 @@ impl MixerLayout {
         }
         if let Some(span) = self.track_options {
             rows.push(super::row("L-MIX-005", "Track Options", across(span)));
+        }
+        if let Some(span) = self.performance_impact {
+            rows.push(super::row("L-MIX-007", "Performance Impact", across(span)));
         }
         if let Some(span) = self.strip {
             rows.push(super::row("L-MIX-003", "Mixer Strip", across(span)));
@@ -589,6 +661,9 @@ pub struct StripLayout {
     pub fader: Rect,
     /// The meter (x 60 to 71, y 11 to 119).
     pub meter: Rect,
+    /// The gain-reduction bar, a thin bar beside the meter (x 71 to 74, y 11
+    /// to 119; IMP-25, the mixer view spec R40).
+    pub gain_reduction: Rect,
     /// The scale's labels' column (x 74 to 86).
     pub labels: (f32, f32),
     /// The strip section's top, which [`SCALE_LABELS`] count from.
@@ -610,6 +685,7 @@ impl StripLayout {
             arm: at(column, top, 15.0, 106.0, 36.0, 119.0),
             fader: at(column, top, 46.0, travel_top, 59.0, travel_bottom),
             meter: at(column, top, 60.0, 11.0, 71.0, 119.0),
+            gain_reduction: at(column, top, 71.5, 11.0, 73.5, 119.0),
             labels: (column.left() + 74.0, column.left() + 86.0),
             top,
         }
@@ -617,7 +693,7 @@ impl StripLayout {
 
     /// Every control, for checks.
     #[must_use]
-    pub fn parts(&self) -> [Rect; 8] {
+    pub fn parts(&self) -> [Rect; 9] {
         [
             self.peak_field,
             self.pan_triangle,
@@ -627,7 +703,45 @@ impl StripLayout {
             self.arm,
             self.fader,
             self.meter,
+            self.gain_reduction,
         ]
+    }
+}
+
+/// The controls in a chain's strip in a mixer (racks spec, R27): the chain's
+/// name, its Volume and Pan sliders, its activator and its Solo button, in
+/// the strip section, where a track's strip has its controls. The fold
+/// button of the rack inside the chain is at the strip's top right.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChainStripLayout {
+    /// The chain's name, at the strip's top left.
+    pub name: Rect,
+    /// The fold button of the rack inside the chain, at the strip's top
+    /// right; empty while the chain holds none.
+    pub fold: Rect,
+    /// The Volume slider.
+    pub volume: Rect,
+    /// The Pan slider.
+    pub pan: Rect,
+    /// The Chain Activator.
+    pub activator: Rect,
+    /// The Solo button.
+    pub solo: Rect,
+}
+
+impl ChainStripLayout {
+    /// The chain's controls in `column` across the strip section's span.
+    #[must_use]
+    pub fn compute(column: Rect, span: (f32, f32)) -> Self {
+        let top = span.0;
+        Self {
+            name: at(column, top, 8.0, 13.0, 42.0, 24.0),
+            fold: at(column, top, 78.0, 13.0, 90.0, 25.0),
+            volume: at(column, top, 8.0, 33.0, 86.0, 42.0),
+            pan: at(column, top, 8.0, 45.0, 86.0, 54.0),
+            activator: at(column, top, 15.0, 64.0, 36.0, 85.0),
+            solo: at(column, top, 15.0, 91.0, 36.0, 102.5),
+        }
     }
 }
 
@@ -653,6 +767,22 @@ pub fn track_options(column: Rect, span: (f32, f32)) -> [Rect; 3] {
         pos2(column.right() - PAD, bottom),
     );
     [delay, unit, keep]
+}
+
+/// The Performance Impact section's six segments in a column across the
+/// section's span (L-MIX-007): a row of six rectangles, lit from the left
+/// with the track's share of the set's processing time. No observation has
+/// measured these yet, so their sizes are [`unmeasured`].
+#[must_use]
+pub fn performance_impact(column: Rect, span: (f32, f32)) -> [Rect; 6] {
+    use unmeasured::PAD;
+    let top = span.0 + 2.0;
+    let bottom = span.1 - 2.0;
+    let width = (column.width() - 2.0 * PAD) / 6.0;
+    std::array::from_fn(|i| {
+        let left = column.left() + PAD + width * i as f32;
+        Rect::from_min_max(pos2(left, top), pos2(left + width, bottom))
+    })
 }
 
 /// The two Split Stereo Pan Mode controls beside the pan knob in a strip
@@ -750,6 +880,11 @@ mod tests {
     use crate::layout::{REFERENCE, ShellLayout, TITLE_BAR};
     use egui::vec2;
 
+    /// `count` track columns, with no chain strips folded out.
+    fn tracks(count: usize) -> Vec<TrackColumn> {
+        vec![TrackColumn::track(); count]
+    }
+
     fn main_view() -> Rect {
         ShellLayout::compute(REFERENCE, true, true)
             .translate(vec2(0.0, TITLE_BAR))
@@ -761,7 +896,13 @@ mod tests {
     fn columns_follow_layout_md_and_scroll_under_the_returns() {
         let view = main_view();
         let session = SessionLayout::compute(view, Some(Sections::DEFAULT));
-        let mixer = MixerLayout::compute(session.mixer.unwrap(), 4, 2, Sections::DEFAULT, 0.0);
+        let mixer = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(4),
+            2,
+            Sections::DEFAULT,
+            0.0,
+        );
         // L-SES-001: from x 320, 94 points each.
         let lefts: Vec<f32> = mixer.columns.iter().map(|c| c.rect.left()).collect();
         assert_eq!(lefts, [320.0, 414.0, 508.0, 602.0]);
@@ -776,7 +917,13 @@ mod tests {
         let drop = mixer.drop_area.unwrap();
         assert!((drop.left() - 700.0).abs() <= 4.0 && (drop.right() - 1297.0).abs() <= 2.0);
         // Many tracks scroll under the returns, which stay put.
-        let many = MixerLayout::compute(session.mixer.unwrap(), 200, 2, Sections::DEFAULT, 940.0);
+        let many = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(200),
+            2,
+            Sections::DEFAULT,
+            940.0,
+        );
         assert_eq!(many.columns[0].index, 10);
         assert_eq!(many.columns[0].rect.left(), 320.0);
         assert!(many.columns.len() <= 12);
@@ -784,16 +931,28 @@ mod tests {
         assert_eq!(many.returns, mixer.returns);
         assert_eq!(many.drop_area, None);
         // The scroll stays within the tracks.
-        let far = MixerLayout::compute(session.mixer.unwrap(), 200, 2, Sections::DEFAULT, 1e9);
+        let far = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(200),
+            2,
+            Sections::DEFAULT,
+            1e9,
+        );
         assert_eq!(far.columns.last().unwrap().index, 199);
-        let few = MixerLayout::compute(session.mixer.unwrap(), 4, 2, Sections::DEFAULT, 500.0);
+        let few = MixerLayout::compute(
+            session.mixer.unwrap(),
+            &tracks(4),
+            2,
+            Sections::DEFAULT,
+            500.0,
+        );
         assert_eq!(few.scroll, 0.0);
         // Without the returns, the tracks run to Main.
         let no_returns = Sections {
             returns: false,
             ..Sections::DEFAULT
         };
-        let alone = MixerLayout::compute(session.mixer.unwrap(), 4, 2, no_returns, 0.0);
+        let alone = MixerLayout::compute(session.mixer.unwrap(), &tracks(4), 2, no_returns, 0.0);
         assert!(alone.returns.is_empty());
         assert_eq!(alone.tracks.right(), 1487.0);
     }
@@ -811,7 +970,7 @@ mod tests {
         assert_eq!((mixer.top(), mixer.bottom()), (465.5, 766.0));
         assert_eq!(session.status_row.bottom(), 465.5);
         assert_eq!(session.status_row.height(), 17.0);
-        let layout = MixerLayout::compute(mixer, 4, 2, Sections::DEFAULT, 0.0);
+        let layout = MixerLayout::compute(mixer, &tracks(4), 2, Sections::DEFAULT, 0.0);
         assert_eq!(layout.in_out, Some((465.5, 580.5)));
         assert_eq!(layout.sends, Some((580.5, 636.5)));
         assert_eq!(layout.strip, Some((636.5, 759.5)));
@@ -866,6 +1025,7 @@ mod tests {
         assert_eq!(rel(strip.solo), (15.0, 91.0, 36.0, 102.5));
         assert_eq!(rel(strip.arm), (15.0, 106.0, 36.0, 119.0));
         assert_eq!(rel(strip.meter), (60.0, 11.0, 71.0, 119.0));
+        assert_eq!(rel(strip.gain_reduction), (71.5, 11.0, 73.5, 119.0));
         assert_eq!(
             (strip.fader.left() - 320.0, strip.fader.right() - 320.0),
             (46.0, 59.0)

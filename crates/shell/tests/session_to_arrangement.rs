@@ -13,15 +13,14 @@
 
 bl_rt::install_trap!();
 
-use std::time::{Duration, Instant};
-
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Clip, ClipData, MixerParam, SceneId, TrackId};
 use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use serde_json::json;
 
 /// A shell on a null device, with launches taking effect at once.
@@ -30,6 +29,7 @@ fn rig() -> (Shell, NullControl) {
         NullOptions {
             dropout_after: None,
             channels: 4,
+            pacing: Pacing::Manual,
             ..NullOptions::default()
         },
         &[("null", "Null")],
@@ -45,6 +45,7 @@ fn rig() -> (Shell, NullControl) {
         audio,
         Box::new(ProjectFiles::new()),
     );
+    shell.use_test_clock(control.clock().expect("manual pacing"));
     shell.start_audio();
     shell
         .run(
@@ -75,24 +76,20 @@ fn first_scene(shell: &Shell) -> SceneId {
     shell.editor().document().scenes().next().unwrap().id
 }
 
-fn pass_time(shell: &mut Shell, millis: u64) {
-    let until = Instant::now() + Duration::from_millis(millis);
-    while Instant::now() < until {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+/// Advances the set by `millis` of test time, so the recording's positions
+/// land on their frames however busy the machine is (T199).
+fn pass_time(control: &NullControl, shell: &mut Shell, millis: u64) {
+    testing::advance(control, shell, millis);
 }
 
-fn poll_until(shell: &mut Shell, what: &str, done: impl Fn(&mut Shell) -> bool) {
-    let until = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < until {
-        shell.poll_engine();
-        if done(shell) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("timed out waiting for {what}");
+/// Advances the set until `done` holds, up to about ten seconds of test time.
+fn poll_until(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&mut Shell) -> bool,
+) {
+    testing::wait_for(control, shell, what, done);
 }
 
 fn arrangement(shell: &Shell, track: TrackId) -> Vec<Clip> {
@@ -115,36 +112,36 @@ fn arrangement(shell: &Shell, track: TrackId) -> Vec<Clip> {
 // under them, and the tracks stay taken over.
 #[test]
 fn session_clips_launched_during_arrangement_record_land_in_the_arrangement() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let first = track_with_clip(&mut shell, "First");
     let second = track_with_clip(&mut shell, "Second");
     let scene = first_scene(&shell);
     let slot = |track: TrackId| json!({ "track": track, "scene": scene });
     shell.run("session.launch", slot(first)).unwrap();
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     let steps = shell.editor().undo_history().len();
 
     shell
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
-    poll_until(&mut shell, "the take to begin", |shell| {
+    poll_until(&control, &mut shell, "the take to begin", |shell| {
         shell.run("transport.state", json!({})).unwrap()["take_running"] == true
     });
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("session.launch", slot(second)).unwrap();
-    pass_time(&mut shell, 50);
+    pass_time(&control, &mut shell, 50);
     // Automation Arm is off, and the Session clip has taken the track over.
     let volume = |value: f64| json!({ "track": second, "volume": value });
     shell.run("mixer.set_volume", volume(0.25)).unwrap();
-    pass_time(&mut shell, 50);
+    pass_time(&control, &mut shell, 50);
     shell.run("mixer.set_volume", volume(0.75)).unwrap();
-    pass_time(&mut shell, 50);
+    pass_time(&control, &mut shell, 50);
     shell
         .run("session.stop_track", json!({ "track": second }))
         .unwrap();
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("transport.stop", json!({})).unwrap();
-    poll_until(&mut shell, "the copies", |shell| {
+    poll_until(&control, &mut shell, "the copies", |shell| {
         shell.running_recording().is_none() && !shell.editor().in_transaction()
     });
 

@@ -2034,12 +2034,15 @@ impl Processor {
         }
         if let Some(program) = &self.program {
             let program = program.get();
+            let total = program.total_time();
             for &task in program.order.iter().filter(|&&t| Some(t) != program.cue) {
                 let reading = program.meters(task);
                 let meter = TrackMeter {
                     track: program.tasks[task as usize].track,
                     peak: reading.peak,
                     rms: reading.rms,
+                    impact: program.impact(task, total),
+                    gain_reduction: program.gain_reduction(task),
                 };
                 if state.meters.len() < state.meters.capacity() {
                     state.meters.push(meter);

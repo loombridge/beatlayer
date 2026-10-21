@@ -1,9 +1,9 @@
 # Export audio: the range, file types, bit depth, sample rate, dither, and normalise
 
-- **Status:** partial (R1 to R23 each have a passing test; Render as Loop, R24 to R27, is WP-4.17's; the dialog is not built yet)
-- **Work packages:** WP-1.12; WP-4.17 (Render as Loop, R24 to R27)
+- **Status:** partial (R1 to R27 each have a passing test, R22 apart; the Export Audio/Video dialog, R28 to R45, and the changes it makes to R12, R15 and R16 are WP-6.71's)
+- **Work packages:** WP-1.12; WP-2.26 (R17 to R23); WP-4.17 (Render as Loop, R24 to R27); WP-6.71 (the Export Audio/Video dialog, Convert to Mono and Create Analysis File: R28 to R45, and R12, R15 and R16 as they now read)
 - **Parity-matrix row:** Files and export: Export (Main; normalise); Export formats (WAV, AIFF, FLAC at 16, 24, or 32 bits)
-- **Checked against:** the Live 12 reference manual (online edition), section 5.1.3, read 11 October 2026, and the UI parity reference's observations of Live 12.4.3 (10 October 2026).
+- **Checked against:** the Live 12 reference manual (online edition), section 5.1.3, read 11 October 2026 and again, with sections 5.1.3.1 to 5.1.3.5, on 20 October 2026; the UI parity reference's observations of Live 12.4.3 (10 October 2026) and its rows M-FILE-015, S-FILE-007 and L-OTH-003.
 
 ## The behaviour
 
@@ -11,7 +11,7 @@ Export Audio/Video, in the File menu (⇧⌘R, Ctrl-Shift-R), renders the set's 
 
 Beatlayer renders the range through the same engine code that plays the set on a device (`bl_engine::Offline`, the code behind `bl-cli render` and the golden tests), converts the sample rate where needed, normalises, dithers, quantises, and encodes, writing to a hidden file beside the destination that's moved into place only when it's complete. So a cancelled or failed export leaves nothing behind, and an export at the engine's rate holds exactly the samples a golden render holds.
 
-This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, sample rate, dither (the non-proprietary kinds), normalise, Render as Loop (WP-4.17), cancelling, and the commands that reach them (`export.audio`, `bl-cli export`). It leaves to other packages: exporting each track, the selected tracks, or one track, and Include Return and Main Effects (WP-2.26); MP3 (WP-2.26); Convert to Mono and Create Analysis File (see "Not built yet" below); video (Phase 9); real-time rendering through external hardware, which is in the [external devices](external-devices.md) spec; and the dialog itself, whose controls the UI parity reference doesn't record yet (L-OTH-003 says only that it's modal; see R16).
+This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, sample rate, dither (the non-proprietary kinds), normalise, Render as Loop (WP-4.17), cancelling, and the commands that reach them (`export.audio`, `bl-cli export`). It also covers exporting each track, the selected tracks, or one track, Include Return and Main Effects, and MP3 (WP-2.26, R17 to R23), and the Export Audio/Video dialog with Convert to Mono and Create Analysis File (WP-6.71, R28 to R45). It leaves to other specs: video, whose section the dialog draws disabled (Phase 9), and real-time rendering through external hardware, whose window an export from the dialog goes on into ([external-devices.md](external-devices.md) R22 to R26).
 
 ## Sources
 
@@ -27,6 +27,8 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 | S8 | Spec | [transport.md](transport.md), R1, R2, R13; [musical-time.md](musical-time.md) | Playback from a position starts on the frame the tempo map gives it; the Arrangement loop wraps playback. Positions are ticks from 1.1.1. |
 | S9 | Spec | [audio-import.md](audio-import.md), R6 | Sample-rate conversion keeps aliasing below −100 dB in the passband. |
 | S10 | Beatlayer | [05-improvements.md](../05-improvements.md), rule G3; the architecture, "Offline rendering" and "Determinism" | Exports keep their source's channel count unless the user chooses otherwise. An offline render is bit-identical across runs, with seeded randomness. |
+| S11 | Manual | Section 5.1.3.4 "Video Rendering Options" | Create Video writes a video file beside the audio, offered only when the set has video clips in the Arrangement and only with a PCM file; the Video Encoder chooser lists the encoders the computer has, and the Edit button beside Encoder Settings opens an encoder's own settings, disabled for one that has none. Audio renders first, then video, and a multi-pass encoder restarts the progress bar for each pass |
+| S12 | Beatlayer | [waveform-peaks.md](waveform-peaks.md) R3; [warping.md](warping.md) (each file's analysis kept by content hash); [control-bar-transport.md](control-bar-transport.md) R5; [offline-plugin-renders.md](offline-plugin-renders.md) R7; [external-devices.md](external-devices.md) R22 to R26; [app-shell.md](app-shell.md) R22; [accessibility.md](accessibility.md); the architecture, D17 | Peaks and analysis are kept by content hash in the cache, never beside a file; the Loop Start and Loop Length fields' form; an export stops the song first; real-time renders and their window; the Save As dialog's folder; what assistive technology reads; every action is a command an agent reaches with the same result |
 
 ## Rules
 
@@ -41,11 +43,11 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 - **R9.** The render runs offline, block after block on one thread, as fast as the computer allows, with no audio device. Its speed, the song's length divided by the time the render took, is reported. (S5)
 - **R10.** The file is written to `.<name>.partial` beside the destination, and moved into place only when it's complete; with Normalize, the render first goes to a scratch file, `.<name>.render`, beside it. Cancelling, or any failure (a disk error, a render that isn't finite), deletes both and leaves the destination as it was: no file, or the file that was there before. (S5)
 - **R11.** A file already at the destination is replaced only when the export is told to replace it; otherwise the export is refused before anything renders.
-- **R12.** The file has the engine's channels: two, the Main output's left and right. (S10, rule G3; Convert to Mono isn't offered)
+- **R12.** The file has the engine's channels, two, the Main output's left and right, unless Convert to Mono makes it one (R33). (S3, S10, rule G3)
 - **R13.** A clip whose audio file is missing or changed plays silence, as on a device, and the result names its media. (S5; [audio-clips.md](audio-clips.md), R14)
 - **R14.** The same set and settings export the same bytes every time, at any block size. (S10)
-- **R15.** `export.audio` runs an export by ID with JSON arguments (D17): the destination `path`, `bit_depth` and `sample_rate` (required), and optionally `file_type`, `dither` (Triangular), `normalize` (off), `start` and `length` (R1's range), and `replace` (R11). It's in the `external` class, because it writes a file outside the project, so an agent asks first; its result says where the file went, its format, range, length, peak, the normalise gain, the render's speed, and any missing media. `bl-cli export` runs the same command on a headless shell. (S1)
-- **R16.** The File menu shows Export Audio/Video... (M-FILE-015) in Live's place with ⇧⌘R, and ⇧⌘R (Ctrl-Shift-R) is kept for it (S-FILE-007). Both open the Export Audio/Video dialog (L-OTH-003), which isn't built yet, so the item is shown disabled and the key does nothing. (S6, S7)
+- **R15.** `export.audio` runs an export by ID with JSON arguments (D17): the destination `path`, `bit_depth` and `sample_rate` (24 bits and the engine's rate when they're left out, R44), and optionally `file_type`, `dither` (Triangular), `normalize` (off), `start` and `length` (R1's range), and `replace` (R11). It's in the `external` class, because it writes a file outside the project, so an agent asks first; its result says where the file went, its format, range, length, peak, the normalise gain, the render's speed, and any missing media. `bl-cli export` runs the same command on a headless shell. (S1)
+- **R16.** The File menu shows Export Audio/Video... (M-FILE-015) in Live's place with ⇧⌘R, and ⇧⌘R (Ctrl-Shift-R) is bound to it (S-FILE-007). Both open the Export Audio/Video dialog (L-OTH-003, R28). (S6, S7)
 - **R17.** `export.audio` takes `rendered_track`: `main` (the default), `all_tracks`, `selected_tracks`, or `{ "track": <id> }`, as Live's Rendered Track does. A single track renders its post-fader output: its own devices, volume and pan, without the processing of a group it sits in, its sends' return tracks, or the Main's devices and fader. (S2, S3; WP-2.26 part 1, [#2](https://github.com/loombridge/beatlayer/pull/2))
 - **R18.** `include_return_and_main_effects` renders an individual track with its sends' return tracks and the Main's devices and fader, as it sounds soloed in the set; it's refused with `rendered_track: main`. (S3)
 - **R19.** `all_tracks` exports every audio, group and return track and the Main, and every MIDI track with an instrument or an audio effect, each to its own file; a MIDI track with neither is skipped, and one with an audio effect but no instrument renders silence. `selected_tracks` follows the same rules for the selected tracks. Every file in one export has the same range and length. (S2)
@@ -57,6 +59,27 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 - **R25.** The tail is what the song sounds after the range's end with nothing new played: the render goes on past the end as if Stop were pressed there, every note ended and every clip stopped, automation holding its value at the end, while the devices run on. It lasts until the output has stayed below −120 dBFS for 100 ms, and at most 60 s (Beatlayer's own bounds). Without Render as Loop, nothing past the range is rendered (R3). (S3)
 - **R26.** The tail is added at the file's rate, after any conversion down (R6), and before Normalize (R8), dither, and quantisation (R4, R7), so Normalize's peak is the looped file's. In a multi-track export each file adds its own track's tail (R19, R22), and an MP3 export adds its tail before encoding (R23). (S3)
 - **R27.** A Render as Loop export repeats bit for bit at any block size (R14), and cancelling it or a failure leaves nothing behind (R10, R21). (S3)
+
+**The Export Audio/Video dialog (WP-6.71)**
+
+- **R28.** Export Audio/Video... (M-FILE-015) and ⇧⌘R, Ctrl-Shift-R (S-FILE-007) open the Export Audio/Video dialog (L-OTH-003; `export.open_dialog`), a modal window over the main window: while it's open nothing else in the main window takes a click or a key. Cancel, and Esc, close it without exporting (`export.close_dialog`); Return presses Export when Export is enabled. The keys are Beatlayer's own. (S1, S6, S7)
+- **R29.** The dialog holds, in the manual's order, each section under its name: Selection (Rendered Track, Render Start, Render Length); Rendering Options (Include Return and Main Effects, Render as Loop, Convert to Mono, Normalize, Create Analysis File, Sample Rate); Encoding (Encode PCM with File Type, Bit Depth and Dither Options, then Encode MP3); and Video (Create Video, Video Encoder, and Encoder Settings with its Edit button); then Cancel and Export. Each control takes Live's label. Include Return and Main Effects, Render as Loop, Convert to Mono, Normalize, Create Analysis File, Encode PCM, Encode MP3 and Create Video are on/off switches, Render Start and Render Length are fields, Edit is a button, and the rest are choosers. (S2, S3, S4, S11)
+- **R30.** Rendered Track (`rendered_track`, R17, R19) lists Main, All Individual Tracks and Selected Tracks Only, then each audio, MIDI and group track by name in display order, then the returns. Main is chosen in a new install. With Selected Tracks Only chosen and no track selected, Export is disabled and the dialog says why. (S2)
+- **R31.** Render Start (`start`) is a position in bars, beats and sixteenths and Render Length (`length`) a length in bars, beats and sixteenths counted from 0, each typed, dragged or stepped as the Control Bar's Loop Start and Loop Length fields are ([control-bar-transport.md](control-bar-transport.md) R5). Each time the dialog opens they show the Arrangement's time selection if there is one, and the whole set otherwise (R1). A length of zero disables Export. (S2, S12)
+- **R32.** Include Return and Main Effects (`include_return_and_main_effects`, R18) is disabled while Rendered Track is Main. It, Render as Loop (`render_as_loop`, R24) and Normalize (`normalize`, R8) are off in a new install. (S3)
+- **R33.** Convert to Mono (`convert_to_mono`), off in a new install, makes each file one channel: the average of the render's two, (left + right) / 2, taken before Normalize, dither and quantisation, and an MP3 is written mono. The law is Beatlayer's own. (S3, S10)
+- **R34.** Create Analysis File (`create_analysis_file`), off in a new install, has Beatlayer build each written file's peaks ([waveform-peaks.md](waveform-peaks.md) R3) and its analysis (its transients, tempo and beats, [warping.md](warping.md)) as soon as the file is complete, kept by the file's content hash where they'd be kept for an imported file, so the file brought into a set needs no analysis. Nothing is written beside the file. (S3, S12)
+- **R35.** Sample Rate (`sample_rate`, R6) lists 22,050, 32,000, 44,100, 48,000, 88,200, 96,000, 176,400 and 192,000 Hz, and in a new install shows the engine's rate when it's on the list, and 48,000 Hz otherwise. The list is Beatlayer's own. (S3)
+- **R36.** Encode PCM is on in a new install, and while it's off File Type, Bit Depth and Dither Options are disabled. File Type (`file_type`) lists WAV, AIFF and FLAC, WAV in a new install; Bit Depth (`bit_depth`) lists 16, 24 and 32, 24 in a new install, with 32 disabled while File Type is FLAC (R5), and choosing FLAC with 32 chosen sets 24. Dither Options (`dither`, R7) lists No Dither, Rectangular, Triangular and Noise Shaped, Triangular in a new install, and is disabled at 32 bits. (S4)
+- **R37.** Encode MP3 (`encode_mp3`), off in a new install, also writes an MP3 of the same render (R23) beside the PCM file, with its name and `.mp3`; with Encode PCM off it writes the MP3 alone (`file_type` `mp3`). Export is disabled while neither is on, and while Encode MP3 is on with a Sample Rate MP3 can't hold (R23), the dialog saying why. (S4)
+- **R38.** The Video section's Create Video switch, Video Encoder chooser and Edit button are drawn disabled, as for a set without video clips, since a set holds none. (S11)
+- **R39.** Export keeps the dialog's choices, Render Start and Render Length apart, as preferences, and the dialog opens with them next time, in any set; a single track chosen before that no longer exists falls back to Main. A new install opens with the defaults R30 to R37 give. Beatlayer's own. (S12)
+- **R40.** Export closes the dialog and opens a save dialog that suggests the set's name with the file type's extension (`.mp3` when only Encode MP3 is on), in the folder of the last export, else the set's project folder ([app-shell.md](app-shell.md) R22), else where the system leaves it. Choosing a file runs `export.audio` with the dialog's choices and that path; the save dialog's own question about a file already there sets `replace`, and where the export also writes other files (each track's, R20, or the MP3, R37) and any of them exists, one question lists them first, declining returning to the save dialog. Cancelling the save dialog goes back to the Export dialog with its choices. Beatlayer's own. (S5, S12)
+- **R41.** While an export runs, a modal progress window shows the name of the file being written, a bar of the share rendered across every file, and Cancel, which Esc presses too: it stops the export and leaves nothing behind (R10, R21), without reopening the dialog. When the export ends the window closes and the Status Bar says where the file went, and how many media files were missing if any were (R13); a failure shows its reason in a message, and nothing is written. An export the set needs to render in real time goes on into the real-time render's window ([external-devices.md](external-devices.md) R23). (S5, S12)
+- **R42.** The export stops the song first ([offline-plugin-renders.md](offline-plugin-renders.md) R7) and renders the set as it was when the save dialog closed, on a worker thread, so the main window goes on drawing; one export runs at a time, and `export.audio` while one runs is refused, naming it. (S5, S10, S12)
+- **R43.** The dialog's choices are its own until Export sends them in `export.audio`: choosing them changes nothing in the set and is no undo step, and neither is an export. (S12)
+- **R44.** A person and an agent export the same way: each control of R30 to R37 is an argument of `export.audio`, and an argument left out takes a new install's default (`rendered_track` `main`, `bit_depth` 24, `sample_rate` the engine's rate, `dither` `triangular`, every switch off), so the dialog's Export and an agent's call write the same file with the same result and refusals. An agent's call shows the same progress window in the app and returns when the export ends. `export.status` (`read`) reports whether the dialog is open and its choices, and the export under way, if one is: its files and the share rendered. `export.cancel` (`read`) stops it as Cancel does, and `export.open_dialog` and `export.close_dialog` are `read`. (S1, S12)
+- **R45.** The dialog's controls take the keyboard focus in R29's order with Tab; assistive technology reads each section as a group with its name, each control by its label and value, a disabled control as unavailable with the reason in its description, and the progress window's bar as a progress indicator with its share. (S12)
 
 ## Tests
 
@@ -72,10 +95,10 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 | R9 | `crates/cli/tests/export.rs`, `an_export_runs_faster_than_real_time` (reports the ratio) | unit |
 | R10 | `crates/cli/tests/export.rs`, `cancelling_leaves_nothing_behind`, `a_failure_leaves_nothing_behind` | unit |
 | R11 | `crates/shell/tests/export.rs`, `an_existing_file_is_replaced_only_when_asked` | unit |
-| R12, R13 | `crates/cli/tests/export.rs`, `every_fixture_exports_as_its_golden_reference_to_the_bit` (two channels); `crates/shell/tests/export.rs`, `missing_media_plays_silence_and_is_named` | unit |
+| R12, R13 | `crates/cli/tests/export.rs`, `every_fixture_exports_as_its_golden_reference_to_the_bit` (two channels); `crates/shell/tests/export.rs`, `missing_media_plays_silence_and_is_named`; Convert to Mono's one channel: to be written in WP-6.71 | unit |
 | R14 | `crates/cli/tests/export.rs`, `the_same_export_is_the_same_bytes_at_any_block_size` (blocks of 61, 512, and 4,096, with each dither) | unit |
-| R15 | `crates/model/tests/command_registry.rs` and `xtask/src/commands.rs` (every command complete, the reference in sync); `crates/cli/tests/export.rs`, `bl_cli_export_writes_what_the_command_does`; `crates/cli/tests/agent_export.rs`, `an_agent_exports_the_set_it_built_and_the_file_nulls_against_its_render`, `without_autonomous_an_export_is_refused_and_writes_nothing`; `crates/shell-spec/src/export.rs`, `every_listed_id_is_registered_and_complete` | unit, agent API |
-| R16 | `crates/shell/tests/menus.rs` (the File menu in Live's order, pending items disabled); `crates/shell-spec/src/export.rs`, `every_listed_id_is_registered_and_complete` (no binding); `xtask/src/keymap.rs` (S-FILE-007 pending) | unit |
+| R15 | `crates/model/tests/command_registry.rs` and `xtask/src/commands.rs` (every command complete, the reference in sync); `crates/cli/tests/export.rs`, `bl_cli_export_writes_what_the_command_does`; `crates/cli/tests/agent_export.rs`, `an_agent_exports_the_set_it_built_and_the_file_nulls_against_its_render`, `without_autonomous_an_export_is_refused_and_writes_nothing`; `crates/shell-spec/src/export.rs`, `every_listed_id_is_registered_and_complete`; the defaults for a left-out `bit_depth` and `sample_rate`: to be written in WP-6.71 | unit, agent API |
+| R16 | `crates/shell/tests/menus.rs` (the File menu in Live's order, pending items disabled); `crates/shell-spec/src/export.rs`, `every_listed_id_is_registered_and_complete` (no binding); `xtask/src/keymap.rs` (S-FILE-007 pending); the item and the key opening the dialog: to be written in WP-6.71 (the keymap test, `crates/shell/tests/menus.rs`) | unit |
 | R17 | `crates/shell/tests/export.rs`, `single_track_export_renders_dry_or_with_return_and_main_effects`, `grouped_track_renders_dry_without_group_device_or_fader_and_group_holds_children_signal`, `track_export_refusals` | unit |
 | R18 | `crates/shell/tests/export.rs`, `single_track_export_renders_dry_or_with_return_and_main_effects`, `track_export_refusals` | unit |
 | R19 | `crates/shell/tests/export.rs`, `all_tracks_and_selected_tracks_write_one_file_per_track`, `return_track_file_holds_signal_through_return_devices_and_nothing_from_main`, `midi_track_with_audio_effect_and_no_instrument_renders_silence` | unit |
@@ -87,11 +110,27 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 | R25 | `crates/cli/tests/export.rs`, `the_tail_is_what_the_devices_sound_after_the_end_stops` (a reverb and a delay with feedback, the tail bounded at 60 s) | golden render |
 | R26 | `crates/cli/tests/export.rs`, `the_tail_is_added_after_conversion_and_before_normalize_and_dither`; `crates/shell/tests/export.rs`, `each_track_of_a_loop_render_adds_its_own_tail` | golden render, unit |
 | R27 | `crates/cli/tests/export.rs`, `a_loop_render_is_the_same_bytes_at_any_block_size` (blocks of 61, 512, and 4,096, with each dither), `cancelling_a_loop_render_leaves_nothing_behind` (while the range renders and while the tail does) | unit |
+| R28 | to be written in WP-6.71 | UI script |
+| R29 | to be written in WP-6.71 | UI script |
+| R30 | to be written in WP-6.71 | UI script |
+| R31 | to be written in WP-6.71 | UI script |
+| R32 | to be written in WP-6.71 | unit |
+| R33 | to be written in WP-6.71 | unit |
+| R34 | to be written in WP-6.71 | unit |
+| R35 | to be written in WP-6.71 | unit |
+| R36 | to be written in WP-6.71 | UI script |
+| R37 | to be written in WP-6.71 | UI script |
+| R38 | to be written in WP-6.71 | UI script |
+| R39 | to be written in WP-6.71 | unit |
+| R40 | to be written in WP-6.71 | UI script |
+| R41 | to be written in WP-6.71 | UI script |
+| R42 | to be written in WP-6.71 | unit |
+| R43 | to be written in WP-6.71 | unit |
+| R44 | to be written in WP-6.71 | unit |
+| R45 | to be written in WP-6.71 | UI script |
 
 The real-time rules hold throughout: every block of an export runs under the allocation trap in test builds, and an export that touched the heap inside a block fails its test.
 
 ## Not built yet
 
-- The Export Audio/Video dialog (L-OTH-003): the File menu item is shown disabled and the key does nothing (R16).
-- Convert to Mono: Beatlayer doesn't offer it (R12).
-- Create Analysis File: the option keeps Live's control and place in the dialog. Beatlayer writes its own analysis file beside the export (the waveform overview it already makes for imported audio, in Beatlayer's format) instead of Live's `.asd`. It is built with the dialog.
+- Video export (Phase 9): the dialog draws its Video section disabled (R38).

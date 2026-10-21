@@ -11,6 +11,7 @@
 
 use bl_commands::Context::{Arrangement, Global};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::{ChainId, DeviceId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -34,10 +35,16 @@ pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
 /// `mixer_view.track_options`: show or hide the tracks' Track Options
 /// sections.
 pub const TRACK_OPTIONS: &str = "mixer_view.track_options";
+/// `mixer_view.performance_impact`: show or hide the Performance Impact
+/// section.
+pub const PERFORMANCE_IMPACT: &str = "mixer_view.performance_impact";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
 pub const SCROLL: &str = "mixer_view.scroll";
 /// `mixer_view.focus`: move the keyboard focus to the Arrangement's mixer.
 pub const FOCUS: &str = "mixer_view.focus";
+/// `mixer_view.fold_chains`: fold a rack's chains out as strips in the
+/// mixers, or fold them back in (racks spec, R27).
+pub const FOLD_CHAINS: &str = "mixer_view.fold_chains";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -51,8 +58,10 @@ pub const IDS: &[&str] = &[
     SCENE_TEMPO,
     RETURN_TRACKS,
     TRACK_OPTIONS,
+    PERFORMANCE_IMPACT,
     SCROLL,
     FOCUS,
+    FOLD_CHAINS,
 ];
 
 /// Whether `id` is one of the Mixer view's commands.
@@ -86,8 +95,20 @@ pub struct ViewMixerState {
     pub scroll: f64,
 }
 
-/// What `mixer_view.state` and the other view commands return.
+/// One track's gain reduction, as `mixer_view.state` reports it (IMP-25,
+/// the mixer view spec R40).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackGainReduction {
+    /// The track.
+    pub track: TrackId,
+    /// The most reduction any of the track's compressors or limiters
+    /// reported for the last block, in dB, as a compressor's Gain Reduction
+    /// reads it: zero when none of them reduced.
+    pub reduction: f32,
+}
+
+/// What `mixer_view.state` and the other view commands return.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MixerViewState {
     /// The Session View's mixer.
     pub session: ViewMixerState,
@@ -100,7 +121,7 @@ pub struct MixerViewState {
     /// Whether the mixer strips (volume, pan, the meter, the activator,
     /// Solo, Arm) show.
     pub volume: bool,
-    /// Whether the Crossfader section shows: the tracks' A/B assign buttons
+    /// Whether the Crossfader section shows: the tracks' A and B assign buttons
     /// and Main's crossfader. Hidden in a new set.
     pub crossfader: bool,
     /// Whether the Session View's Main column shows the scenes' tempo and
@@ -113,6 +134,103 @@ pub struct MixerViewState {
     /// Keep Monitoring Latency). Shown only while this shows; hidden in a
     /// new set.
     pub track_options: bool,
+    /// Whether the Performance Impact section shows: under each strip, the
+    /// six segments that light up from the left with the track's share of
+    /// the set's processing time. Hidden in a new set.
+    pub performance_impact: bool,
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track, how many of its six segments are lit, and its share of
+    /// the set's processing time (the mixer spec, R31).
+    #[serde(default)]
+    pub performance_impact_values: Vec<TrackImpact>,
+    /// Each track's gain reduction, in the order the tracks run (IMP-25,
+    /// R40); empty when no engine has published meters.
+    #[serde(default)]
+    pub gain_reduction: Vec<TrackGainReduction>,
+    /// The racks whose chains fold out in the mixers (racks spec, R27): the
+    /// track each is on, the rack, and whether its chains are folded out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub racks: Vec<RackFold>,
+    /// The chains folded out as strips, in the mixers' column order (racks
+    /// spec, R27).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chains: Vec<ChainStrip>,
+}
+
+/// One track's Performance Impact: the six segments the mixer draws under
+/// its strip, and the share of the set's processing time they show (the
+/// mixer spec, R31).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackImpact {
+    /// The track.
+    pub track: TrackId,
+    /// How many of the six segments are lit, from 0 to 6.
+    pub segments: u8,
+    /// The track's share of the set's processing time, from 0 to 1.
+    pub share: f32,
+}
+
+/// How many of the six Performance Impact segments a track's share of the
+/// set's processing time lights, from the left: the share of the whole set
+/// a sixth at a time, rounded up, so a track with any of it lights one
+/// (the mixer spec, R31).
+#[must_use]
+pub fn impact_segments(share: f32) -> u8 {
+    if !share.is_finite() || share <= 0.0 {
+        return 0;
+    }
+    ((share * 6.0).ceil() as u8).min(6)
+}
+
+/// A rack whose chains fold out in the mixers as strips (racks spec, R27):
+/// the track it is on, the rack itself, and whether its chains are folded
+/// out now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RackFold {
+    /// The track the rack is on.
+    pub track: TrackId,
+    /// The rack.
+    pub rack: DeviceId,
+    /// The rack's name.
+    pub name: String,
+    /// Whether its chains are folded out as strips now.
+    pub folded: bool,
+}
+
+/// A chain folded out as a strip in the mixers (racks spec, R27): the
+/// chain, the rack it belongs to, and the mixer controls the chain list
+/// shows for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainStrip {
+    /// The track the rack is on.
+    pub track: TrackId,
+    /// The rack the chain belongs to.
+    pub rack: DeviceId,
+    /// The rack's name.
+    pub rack_name: String,
+    /// The chain.
+    pub chain: ChainId,
+    /// The chain's name.
+    pub name: String,
+    /// The chain's Volume as linear gain: 1 is 0 dB.
+    pub volume: f64,
+    /// The chain's Pan, from −1 to 1.
+    pub pan: f64,
+    /// Whether the chain has Volume and Pan: all but a MIDI effect rack's
+    /// chains do.
+    pub has_mixer: bool,
+    /// Whether the chain's activator is on.
+    pub enabled: bool,
+    /// Whether the chain is soloed.
+    pub solo: bool,
+    /// The chain's colour, a swatch of the palette of 5 rows of 14, if it
+    /// has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<u8>,
+    /// The rack inside this chain, if it has one whose chains fold out too
+    /// (racks spec, R27): a fold button on this strip shows its chains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<RackFold>,
 }
 
 /// Arguments of `mixer_view.toggle`.
@@ -147,6 +265,17 @@ pub struct ScrollArgs {
     pub x: f64,
 }
 
+/// Arguments of `mixer_view.fold_chains`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldChainsArgs {
+    /// The rack whose chains fold out.
+    pub rack: DeviceId,
+    /// Show them (true) or hide them (false); switches them if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
 /// Adds the Mixer view's commands to a registry.
 ///
 /// # Errors
@@ -174,10 +303,12 @@ fn specs() -> Vec<CommandSpec> {
             "Mixer View State",
             "Reports what the mixers show: whether the Session View's and the Arrangement \
              View's mixers are shown and how far each is scrolled, and which sections (In/Out, \
-             Sends, the volume strips, the return tracks) show. Track values (volume, pan, the \
-             activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; \
-             read them with the query tool: a track with `detail: \"full\"` returns them as \
-             the set saves them. Changes nothing.",
+             Sends, the volume strips, the return tracks, the Performance Impact) show. The \
+             Performance Impact values are the engine's last, one entry per track: how many of \
+             the six segments are lit and the track's share of the set's processing time. \
+             Track values (volume, pan, the activator, Solo, Arm, routing, sends, the \
+             crossfader assignment) are in the set; read them with the query tool: a track with \
+             `detail: \"full\"` returns them as the set saves them. Changes nothing.",
         )
         .context(Global)
         .args::<NoArgs>(),
@@ -268,6 +399,17 @@ fn specs() -> Vec<CommandSpec> {
         .context(Global)
         .args::<SectionArgs>(),
         view(
+            PERFORMANCE_IMPACT,
+            "Performance Impact",
+            "Shows or hides the mixers' Performance Impact section, as View > Mixer Controls > \
+             Performance Impact does: under each strip, the six segments that light up from the \
+             left with the track's share of the set's processing time. Hidden in a new set. \
+             Switches unless `shown` says which. Changes only the view; the shares themselves \
+             are in `mixer_view.state`, as `performance_impact_values`.",
+        )
+        .context(Global)
+        .args::<SectionArgs>(),
+        view(
             SCROLL,
             "Scroll Mixer",
             "Scrolls a mixer's track columns sideways by `x` points (positive towards the last \
@@ -288,6 +430,19 @@ fn specs() -> Vec<CommandSpec> {
         .context(Arrangement)
         .binding("S-ARR-035")
         .args::<NoArgs>(),
+        view(
+            FOLD_CHAINS,
+            "Fold Rack Chains",
+            "Folds a rack's chains out in the mixers as strips after the track's, as the fold \
+             button in the track's title bar does, or folds them back in. `rack` is the rack: a \
+             rack of more than one chain, on a track or inside another rack's chain. A track's \
+             fold button is for the instrument or drum rack it holds; a chain's is for the rack \
+             inside it. A rack of one chain has no chains to fold out. Switches unless `shown` \
+             says which. Changes only the view, and isn't saved with the set; the chains it \
+             shows read back in `mixer_view.state`.",
+        )
+        .context(Global)
+        .args::<FoldChainsArgs>(),
     ]
 }
 

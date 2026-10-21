@@ -72,6 +72,10 @@ use clack_plugin::stream::{InputStream, OutputStream};
 use clack_plugin::utils::Cookie;
 use std::io::{Read, Write};
 
+mod gain;
+
+use gain::{PluginGainAdjustmentMetering, PluginGainAdjustmentMeteringImpl};
+
 /// The plug-in's CLAP ID.
 pub const PLUGIN_ID: &str = "io.beatlayer.test.gain-echo";
 /// The plug-in's name.
@@ -132,6 +136,32 @@ pub const TEST_SCAN_VAR: &str = "BL_TEST_CLAP_SCAN";
 /// for the one port every other test sees. A test sets it before it loads
 /// the host: nextest runs each test in its own process.
 pub const OUTPUTS_VAR: &str = "BL_TEST_CLAP_OUTPUTS";
+
+/// The environment variable a test sets to the features the plug-in
+/// declares (IMP-24): `note-effect` for a note effect that isn't an audio
+/// effect, `note-and-audio` for one that is both, and unset for the audio
+/// effect every other test sees. A test sets it before it loads the host.
+pub const FEATURES_VAR: &str = "BL_TEST_CLAP_FEATURES";
+
+/// The features the plug-in declares, from [`FEATURES_VAR`].
+fn features() -> Vec<&'static CStr> {
+    use clack_plugin::plugin::features::{AUDIO_EFFECT, NOTE_EFFECT, STEREO};
+    match std::env::var(FEATURES_VAR).as_deref() {
+        Ok("note-effect") => vec![NOTE_EFFECT, STEREO],
+        Ok("note-and-audio") => vec![AUDIO_EFFECT, NOTE_EFFECT, STEREO],
+        _ => vec![AUDIO_EFFECT, STEREO],
+    }
+}
+
+/// The environment variable a test sets to `none` so the plug-in declares no
+/// note output (IMP-24): a plug-in the MIDI-effect position is refused.
+/// Unset for the note output every other test sees.
+pub const NOTE_PORTS_VAR: &str = "BL_TEST_CLAP_NOTE_PORTS";
+
+/// Whether the plug-in declares no note output, from [`NOTE_PORTS_VAR`].
+fn no_note_output() -> bool {
+    std::env::var(NOTE_PORTS_VAR).as_deref() == Ok("none")
+}
 
 /// What an extra output port carries, as a share of the main output's
 /// signal: a quarter, so a test can tell the two apart.
@@ -295,7 +325,16 @@ impl Plugin for GainEcho {
             .register::<PluginParams>()
             .register::<PluginState>()
             .register::<PluginLatency>()
-            .register::<PluginGui>();
+            .register::<PluginGui>()
+            .register::<PluginGainAdjustmentMetering>();
+    }
+}
+
+impl PluginGainAdjustmentMeteringImpl for MainThread<'_> {
+    fn gain_adjustment(&self) -> f64 {
+        // The plug-in multiplies by its gain, so the adjustment it applied
+        // to the block's last sample is that gain in dB.
+        20.0 * self.shared.gain().max(1e-6).log10()
     }
 }
 
@@ -312,11 +351,10 @@ impl DefaultPluginFactory for GainEcho {
             },
             _ => {}
         }
-        use clack_plugin::plugin::features::{AUDIO_EFFECT, STEREO};
         PluginDescriptor::new(PLUGIN_ID, PLUGIN_NAME)
             .with_vendor("Beatlayer tests")
             .with_version("1.0.0")
-            .with_features([AUDIO_EFFECT, STEREO])
+            .with_features(features())
     }
 
     fn new_shared(host: HostSharedHandle<'_>) -> Result<Shared<'_>, PluginError> {
@@ -589,12 +627,17 @@ impl PluginAudioPortsImpl for MainThread<'_> {
 }
 
 impl PluginNotePortsImpl for MainThread<'_> {
-    fn count(&self, _is_input: bool) -> u32 {
+    fn count(&self, is_input: bool) -> u32 {
+        // IMP-24: a test can take the note output away, for a plug-in the
+        // MIDI-effect position is refused.
+        if !is_input && no_note_output() {
+            return 0;
+        }
         1
     }
 
-    fn get(&self, index: u32, _is_input: bool, writer: &mut NotePortInfoWriter<'_>) {
-        if index == 0 {
+    fn get(&self, index: u32, is_input: bool, writer: &mut NotePortInfoWriter<'_>) {
+        if index == 0 && (is_input || !no_note_output()) {
             writer.set(&NotePortInfo {
                 id: ClapId::new(0),
                 name: b"Notes",

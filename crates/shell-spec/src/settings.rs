@@ -408,6 +408,9 @@ pub struct AgentsPageSettings {
 pub struct FileFolderSettings {
     /// The Temporary Folder in use: the setting, or the default.
     pub temporary_folder: String,
+    /// The sample editor the Edit button in the Clip View's Audio Utilities
+    /// panel opens a clip's file in: its path, empty when none is named.
+    pub sample_editor: String,
 }
 
 /// What `settings.state` returns: the Settings window's preferences by

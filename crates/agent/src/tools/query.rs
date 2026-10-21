@@ -239,6 +239,7 @@ impl View<'_> {
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "clips": track.clips().len(),
             "devices": track.devices().len(),
+            "frozen": track.frozen(),
             "tracks_inside": track.children().len(),
         })
     }
@@ -354,6 +355,7 @@ impl View<'_> {
             "id": device.id,
             "name": device.name,
             "kind": device.kind,
+            "role": device.role,
             "enabled": device.enabled,
             "params_set": device.params.len(),
         });

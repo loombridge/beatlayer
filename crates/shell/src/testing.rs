@@ -4,12 +4,47 @@
 
 use std::time::Duration;
 
-use bl_audio_io::NullControl;
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 
 use crate::Shell;
+use crate::audio::{AudioHost, AudioSettings};
+use crate::files::ProjectFiles;
+use crate::settings::Preferences;
 
 /// How much test time one step of [`advance`] and [`wait_for`] covers.
 pub const STEP_MS: u64 = 5;
+
+/// A shell on the null device paced by hand (T199), with the test clock
+/// driving its MIDI stamps and its blocks, and the control that runs the
+/// blocks. The audio isn't open yet: set the shell up the way the test
+/// needs, then call [`Shell::start_audio`].
+#[must_use]
+pub fn rig() -> (Shell, NullControl) {
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            ..NullOptions::default()
+        },
+        &[("null", "Null device")],
+    );
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    // Headless runs and tests touch no real keychain.
+    shell.use_keychain(std::sync::Arc::new(
+        bl_assistant::keychain::MemoryKeychain::new(),
+    ));
+    shell.use_test_clock(control.clock().expect("manual pacing"));
+    (shell, control)
+}
 
 /// Runs `blocks` blocks on the null stream and lets the shell read what the
 /// engine published.

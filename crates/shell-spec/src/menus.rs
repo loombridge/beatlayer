@@ -21,19 +21,20 @@ use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
-    APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
-    FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
-    FOCUS_TOGGLE_TAB_NAVIGATION, FOCUS_TOGGLE_WRAP_NAVIGATION, SET_COLLECT_ALL, SET_NEW, SET_OPEN,
-    SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE,
-    VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW,
-    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
-    VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, CLOSE_PLUG_IN_WINDOWS,
+    FOCUS_ARRANGEMENT, FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS,
+    FOCUS_PREVIOUS_NEIGHBOR, FOCUS_TOGGLE_TAB_NAVIGATION, FOCUS_TOGGLE_WRAP_NAVIGATION,
+    SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT,
+    SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS,
+    VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
-    RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
-    TOGGLE as MIXER_TOGGLE, TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
+    PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
+    SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
+    TRACK_OPTIONS as MIXER_TRACK_OPTIONS, VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -107,6 +108,10 @@ pub const D24: &str = "D24";
 /// next to Duplicate: an improvement, so not a row of menus.md, which
 /// records Live's menus.
 pub const IMP_12: &str = "IMP-12";
+
+/// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
+/// Plug-In Windows: an improvement, so not a row of menus.md.
+pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
 
 /// The rows of the Create menu's Sample Editor items, which menus.md's note
 /// under the Create menu names but gives no rows (WP-4.10).
@@ -427,7 +432,11 @@ const CREATE: &[Row] = &[
     (SAMPLE_INSERT, "Insert Transient", Key(&["S-SAMPLE-011"])),
     (SAMPLE_DELETE, "Delete Transient", Key(&["S-SAMPLE-012"])),
     SEPARATOR,
-    ("M-CREATE-011", "Slice to New MIDI Track", Pending(None)),
+    (
+        "M-CREATE-011",
+        "Slice to New MIDI Track",
+        Cmd(crate::slice::OPEN),
+    ),
     (
         "M-CREATE-012",
         "Convert Harmony to New MIDI Track",
@@ -566,6 +575,12 @@ const VIEW: &[Row] = &[
         "Plug-In Windows",
         Cmd(VIEW_TOGGLE_PLUG_IN_WINDOWS),
     ),
+    // IMP-25 places it straight after Plug-In Windows, with no key.
+    (
+        IMP_25_CLOSE_WINDOWS,
+        "Close All Plug-in Windows",
+        Cmd(CLOSE_PLUG_IN_WINDOWS),
+    ),
     ("M-VIEW-029", "Video Window", Key(&["S-VIEW-009"])),
     SEPARATOR,
     (
@@ -584,7 +599,11 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Cmd(MIXER_TRACK_OPTIONS)),
     ("M-VIEW-032e", "Crossfader", Cmd(MIXER_CROSSFADER)),
-    ("M-VIEW-032f", "Performance Impact", Pending(None)),
+    (
+        "M-VIEW-032f",
+        "Performance Impact",
+        Cmd(MIXER_PERFORMANCE_IMPACT),
+    ),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),

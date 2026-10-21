@@ -6,8 +6,6 @@
 
 mod common;
 
-use std::time::{Duration, Instant};
-
 use bl_shell::settings::{SettingsPage, ThemeChoice};
 use common::{Harness, Window};
 use egui::accesskit::{Action, Role};
@@ -41,7 +39,7 @@ fn with_live_s_title_bar_drawn_the_page_chooser_sits_where_live_s_does() {
 }
 
 fn open_settings() -> Harness {
-    let mut h = Harness::new(Window::Settings);
+    let mut h = Harness::manual(Window::Settings);
     h.shell.invoke("app.settings", json!({})).unwrap();
     h.shell.take_effects();
     h.settings.refresh();
@@ -49,16 +47,12 @@ fn open_settings() -> Harness {
     h
 }
 
-/// Waits for the stream to deliver buffers of `frames`.
+/// Waits, driving the frames, for the stream to deliver buffers of `frames`.
 fn wait_for_buffer(h: &mut Harness, frames: u32) -> Option<u32> {
-    let until = Instant::now() + Duration::from_secs(5);
-    loop {
-        let actual = h.shell.audio().status().buffer_size;
-        if actual == Some(frames) || Instant::now() > until {
-            return actual;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    h.wait(&format!("buffers of {frames} samples"), |h| {
+        h.shell.audio().status().buffer_size == Some(frames)
+    });
+    h.shell.audio().status().buffer_size
 }
 
 #[test]

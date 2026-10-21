@@ -4,7 +4,7 @@
 
 use core::ops::Range;
 
-use bl_core::time::{Frames, SampleRate, TempoMap};
+use bl_core::time::{Frames, SampleRate, TempoMap, TimeSignatureMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::modbus::{Bus, Control};
@@ -64,6 +64,15 @@ pub trait NativeDevice: Send + 'static {
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// The gain the device took off the last block it processed, in dB:
+    /// zero for a device that reduces nothing, negative for a compressor or
+    /// a limiter, positive for one that adds gain. The engine reads it after
+    /// every block for the track's gain-reduction meter (the mixer view
+    /// spec, R40). The default is zero.
+    fn gain_reduction(&self) -> f32 {
+        0.0
     }
 
     /// Whether the device is a modulator (WP-5.10): the engine works its
@@ -278,6 +287,13 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn song_position(&self) -> Frames {
         Frames(self.block.transport().position.get() + self.range.start as i64)
+    }
+
+    /// The song's time-signature map, which places bar lines on ticks: the
+    /// launch quantisation grid is counted on it.
+    #[must_use]
+    pub fn signatures(&self) -> &'a TimeSignatureMap {
+        self.block.signatures()
     }
 
     /// Whether the song is playing, so a tempo-synced device locks to the
@@ -767,6 +783,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 
     fn latency(&self) -> u32 {
         self.device.latency()
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.device.gain_reduction()
     }
 
     fn display(&mut self) -> Option<DisplayReader> {

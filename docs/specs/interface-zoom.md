@@ -1,7 +1,7 @@
 # Interface zoom
 
-- **Status:** implemented (R1 to R10 each have a passing test)
-- **Work packages:** WP-1.17 (global zoom); the second window's own zoom comes with the second window in M6
+- **Status:** partial (R1 to R10 each have a passing test; R11 to R15 come with WP-6.29)
+- **Work packages:** WP-1.17 (global zoom: R1 to R10); WP-6.29 (each window's own zoom, with the second window: R11 to R15)
 - **Parity-matrix row:** Views and workflow: Interface zoom, per window
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual and release notes as published on 11 October 2026
 
@@ -9,7 +9,7 @@
 
 The interface zoom makes everything Beatlayer draws larger or smaller together, from 50% to 200%, for people who want bigger text and controls on a large screen or more on a small one. Display & Input, the first page of the Settings window, has it under Display, after Language; the View menu's Zoom submenu has Zoom In, Zoom Out, and Reset Zoom to 100%; and Cmd with plus or minus (Ctrl on Windows and Linux) zooms in and out. Each pane and control keeps its place relative to the others, so the layout looks the same at every zoom, only bigger or smaller, and text is drawn at the zoomed size so it stays sharp. The zoom is kept for the next start.
 
-This spec covers one zoom for every window, as Beatlayer has only the main and Settings windows until M6; Live 12 gives the second window a zoom of its own (S5), which comes with the second window. Where each pane and control sits at 100% is in [layout.md](../ui-parity/layout.md); the Arrangement View's own time and track-height zoom is in [arrangement-view](arrangement-view.md).
+R1 to R10 cover one zoom for every window. Live 12 gives the second window a zoom of its own (S5): R11 to R15 add it, with the second window ([second-window.md](second-window.md)). Where each pane and control sits at 100% is in [layout.md](../ui-parity/layout.md); the Arrangement View's own time and track-height zoom is in [arrangement-view](arrangement-view.md).
 
 ## Sources
 
@@ -21,6 +21,7 @@ This spec covers one zoom for every window, as Beatlayer has only the main and S
 | S4 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in menus.md (M-VIEW-003 to 003c) | The View menu's third item is a Zoom submenu with Zoom In, Zoom Out, and Reset Zoom to 100%, in that order. The submenu wasn't opened, so its keys and which items are disabled weren't seen (ui-parity README, "Pending" 1) |
 | S5 | Release notes | Live 12 release notes, 12.0 and 12.1 | 12.0: the first and second windows can have different zooms, set in Display & Input. 12.1: Cmd (Ctrl) with plus or minus zooms the interface, as an accessibility improvement |
 | S6 | Beatlayer | [The architecture](../02-architecture.md), "UI" and "Agent control"; [the parity matrix](../04-parity-matrix.md), "Interface zoom, per window"; D17 and D22 in the decisions log; ADR-001 | A global zoom scales the whole UI from 50% to 200%, per-window zoom in M6; every action is a registered command with a permission class, and a preference that's trivially changed back is edit-class; Beatlayer draws Live's 23-point title bar on macOS, with the system's window buttons in it; the UI is egui, which scales through its points-per-pixel |
+| S7 | Beatlayer | [second-window.md](second-window.md) R1, R10, R14 and R17 | The second window, the window with the focus, what the preferences keep of the second window, and its layout |
 
 ## Rules
 
@@ -34,6 +35,11 @@ This spec covers one zoom for every window, as Beatlayer has only the main and S
 - **R8.** The Settings window is Live's 562 × 617 points at 100%, its content scaled by the zoom (562 × 594 points times the zoom, plus the title bar where Beatlayer draws it), within its screen. (S1, S2)
 - **R9.** On macOS the title bar Beatlayer draws (D22) stays 23 points tall at every zoom, with its title at its 100% size, since the system's window buttons in it don't scale; only the content under it scales. (S6)
 - **R10.** egui's own zoom keys are off, so only the keymap zooms: Cmd-0 is Live's key for turning launch quantisation off (S-GQ-005, M3), not a zoom, and Cmd-= reaches Zoom In through the keymap rather than around it. (S3, S6)
+- **R11.** While the second window is open, the main window and the second window each have a zoom of their own, from 50% to 200% in R3's steps; the Settings window takes the main window's (R1, R8). The second window opens the first time at the main window's zoom, and afterwards at its own, kept in the preferences file as R6 keeps the main window's (Beatlayer's own). (S1, S5, S7)
+- **R12.** While the second window is open, Display & Input's Display section shows a second number box after Zoom, Second Window Zoom, which behaves as R4's Zoom does for the second window; Zoom stays the main window's and the Settings window's (Beatlayer's own label and place). (S1, S2, S5)
+- **R13.** View ▸ Zoom's three items and Cmd-plus and Cmd-minus zoom the window with the focus ([second-window.md](second-window.md) R10), and R3's disabled ends are that window's (Beatlayer's own). (S3, S4, S7)
+- **R14.** `view.zoom_in`, `view.zoom_out`, `view.zoom_reset` and `view.set_zoom` take an optional `window`, `main` or `second`, and act on the window with the focus without it; `second` while the second window is closed sets the zoom it will open at (Beatlayer's own). `view.state` reports the second window's zoom under `second_window.zoom`, beside the main window's `window.zoom`. They stay `edit`-class preferences, no undo step (R5). (S6, S7)
+- **R15.** The second window lays out by its own zoom as R1 says of every window. Its smallest size is 640 × 400 points times its zoom, plus the title bar where Beatlayer draws it, since its Control Bar is cut off at its right edge rather than setting a smallest width ([second-window.md](second-window.md) R2); zooming it keeps its size unless it's under the new smallest, when it grows as R7 says (Beatlayer's own size). (S6, S7)
 
 ## Tests
 
@@ -49,3 +55,8 @@ This spec covers one zoom for every window, as Beatlayer has only the main and S
 | R8 | `crates/ui/tests/zoom.rs`, `the_settings_window_scales_with_the_zoom`, `the_settings_window_draws_its_rows_scaled_at_every_step` | unit, UI script |
 | R9 | `crates/ui/tests/zoom.rs`, `the_main_window_draws_every_row_scaled_at_every_step` (with the title bar drawn), `the_settings_window_draws_its_rows_scaled_at_every_step` | UI script |
 | R10 | `crates/ui/tests/zoom.rs`, `the_zoom_keys_zoom_every_layout_point_and_egui_s_own_keys_are_off` | UI script |
+| R11 | to be written in WP-6.29 | |
+| R12 | to be written in WP-6.29 | |
+| R13 | to be written in WP-6.29 | |
+| R14 | to be written in WP-6.29 | |
+| R15 | to be written in WP-6.29 | |

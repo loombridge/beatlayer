@@ -38,6 +38,9 @@ fn scanning_rescanning_and_the_set_list_work_through_commands() {
     assert_eq!(scan.scanned, 1);
     assert_eq!(scan.plugins.len(), 1);
     assert_eq!(scan.plugins[0].plugin_id, bl_test_clap::PLUGIN_ID);
+    // Spec: plugin-scanning R1; IMP-24. The scan says whether it sends notes
+    // on from a note output.
+    assert!(scan.plugins[0].note_output);
 
     // Spec: plugin-scanning R2. A second scan is answered from the cache.
     let cached: PluginScan = serde_json::from_value(

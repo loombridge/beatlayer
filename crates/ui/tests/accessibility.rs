@@ -500,7 +500,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         focused_id(&h),
         Some(bl_ui::arrangement::optimize_width_id())
     );
-    for _ in 0..4 {
+    for _ in 0..5 {
         press(&mut h, Key::Tab, Modifiers::SHIFT);
     }
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));

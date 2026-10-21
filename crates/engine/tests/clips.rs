@@ -900,3 +900,125 @@ fn the_media_store_supplies_a_file_at_the_engines_rate() {
     offline.sync(editor.document());
     assert_eq!(offline.missing_media(), &[media]);
 }
+
+// Spec: warp-modes R27. With Warp off, Transpose and Detune change the
+// clip's speed and its pitch together, as a tape running faster does: the
+// file is read at the pitch ratio, so a clip transposed up an octave runs
+// through its file twice as fast and sounds an octave up.
+#[test]
+fn an_unwarped_clip_transposed_changes_speed_and_pitch() {
+    let mut editor = Editor::new();
+    let track = track(&mut editor, TrackKind::Audio, None);
+    // A ramp: frame `i` says where it is, so a render shows which frame of
+    // the file each frame of the song played.
+    let mut media = MediaMap::new();
+    media.insert(hash(3), ramp(4_096, RATE.hz()));
+    let mut audio = AudioData::new(hash(3));
+    audio.transpose = 12;
+    let clip = clip(&mut editor, track, Ticks::ZERO, Ticks::WHOLE, audio);
+    let [left, _] = play(&editor, &media, 512, 64, &[]);
+    // Twice as fast: the song's frame `i` plays the file's frame `2 * i`.
+    for (i, &sample) in left.iter().enumerate() {
+        assert_eq!(sample, at(2 * i as i64), "frame {i}");
+    }
+    // Untransposed, the file is read frame for frame.
+    editor
+        .apply(Command::SetClipPitch {
+            clip,
+            transpose: Some(0),
+            detune: Some(0.0),
+        })
+        .unwrap();
+    let [left, _] = play(&editor, &media, 512, 64, &[]);
+    for (i, &sample) in left.iter().enumerate() {
+        assert_eq!(sample, at(i as i64), "frame {i}");
+    }
+}
+
+// Spec: warp-modes R12, R27. The interpolator reads the file where it is
+// read at a rate other than 1: HiQ on is the band-limited one.
+#[test]
+fn an_unwarped_clip_transposed_reads_through_the_interpolator() {
+    // A sine of 440 Hz, so a transposition up an octave doubles its pitch.
+    let rate = RATE.hz();
+    let left: Vec<f32> = (0..8_192)
+        .map(|i| (2.0 * std::f64::consts::PI * 440.0 * f64::from(i) / f64::from(rate)).sin() as f32)
+        .collect();
+    let mut media = MediaMap::new();
+    media.insert(
+        hash(4),
+        Arc::new(SampleData::new(rate, vec![left]).unwrap()),
+    );
+    let mut editor = Editor::new();
+    let track = track(&mut editor, TrackKind::Audio, None);
+    let mut audio = AudioData::new(hash(4));
+    audio.transpose = 12;
+    clip(&mut editor, track, Ticks::ZERO, Ticks::WHOLE, audio);
+    let [played, _] = play(&editor, &media, 4_096, 64, &[]);
+    // The strongest spectral peak of the played audio is at twice the
+    // sine's own frequency: the clip sounds an octave up.
+    let peak = strongest(&played);
+    assert!(
+        (peak - 880.0).abs() < 5.0,
+        "the clip plays at {peak} Hz, not 880 Hz"
+    );
+}
+
+// The frequency of the strongest peak of a signal, by a coarse scan of its
+// spectrum.
+fn strongest(signal: &[f32]) -> f64 {
+    let rate = f64::from(RATE.hz());
+    // Goertzel over a set of candidate frequencies, in 10 Hz steps.
+    let mut best = (0.0, 0.0);
+    let mut frequency = 100.0;
+    while frequency < 4_000.0 {
+        let w = 2.0 * std::f64::consts::PI * frequency / rate;
+        let coefficient = 2.0 * w.cos();
+        let (mut s1, mut s2) = (0.0, 0.0);
+        for &sample in signal {
+            let s0 = f64::from(sample) + coefficient * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        let power = s1 * s1 + s2 * s2 - coefficient * s1 * s2;
+        if power > best.1 {
+            best = (frequency, power);
+        }
+        frequency += 10.0;
+    }
+    best.0
+}
+
+// Spec: audio-clip-editing R7. A clip whose file is a reversed copy plays
+// it backwards, to the bit, at any block size.
+#[test]
+fn a_reversed_clip_plays_its_audio_backwards() {
+    let frames = 4_096;
+    // The file: a ramp backwards.
+    let left: Vec<f32> = (0..frames).map(|i| (frames - i) as f32 * STEP).collect();
+    let right: Vec<f32> = left.iter().map(|s| -s).collect();
+    let mut media = MediaMap::new();
+    media.insert(
+        hash(5),
+        Arc::new(SampleData::new(RATE.hz(), vec![left, right]).unwrap()),
+    );
+    let mut editor = Editor::new();
+    let track = track(&mut editor, TrackKind::Audio, None);
+    clip(
+        &mut editor,
+        track,
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        AudioData::new(hash(5)),
+    );
+    for block in [1, 61, 512, 4_096] {
+        let [played, _] = play(&editor, &media, 1_024, block, &[]);
+        for (i, &sample) in played.iter().enumerate() {
+            assert_eq!(
+                sample,
+                (frames - i) as f32 * STEP,
+                "block {block}, frame {i}"
+            );
+        }
+    }
+}

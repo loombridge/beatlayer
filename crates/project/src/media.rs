@@ -178,6 +178,11 @@ pub struct MediaRef {
     /// Its size in bytes, a quick first test when searching for it by
     /// content.
     pub size: u64,
+    /// The file this one is a reversed copy of, when Beatlayer made it (the
+    /// audio clip editing spec, R10): reversing the clip again gives it
+    /// back that file, writing nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reversed_from: Option<ContentHash>,
 }
 
 /// The project's media table: at most one [`MediaRef`] per content hash.
@@ -208,6 +213,13 @@ impl Media {
     #[must_use]
     pub fn get(&self, hash: &ContentHash) -> Option<&MediaRef> {
         self.files.get(hash)
+    }
+
+    /// The file a reversed copy was made from, if the table says so (the
+    /// audio clip editing spec, R10).
+    #[must_use]
+    pub fn reversed_from(&self, hash: &ContentHash) -> Option<ContentHash> {
+        self.files.get(hash).and_then(|file| file.reversed_from)
     }
 
     /// Removes and returns the entry for a hash.
@@ -416,6 +428,7 @@ mod tests {
             hash: ContentHash([byte; 32]),
             path: MediaPath::new(path).unwrap(),
             size: u64::from(byte) * 1000,
+            reversed_from: None,
         };
         let media: Media = [file(9, "b.wav"), file(1, "a.wav")].into_iter().collect();
         let json = serde_json::to_value(&media).unwrap();

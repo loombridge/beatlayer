@@ -154,6 +154,7 @@ pub use track::{
 };
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{
-    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, Preserve, TextureSettings,
-    TextureUpdate, TonesSettings, TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
+    BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN,
+    Preserve, TRANSPOSE_MAX, TRANSPOSE_MIN, TextureSettings, TextureUpdate, TonesSettings,
+    TonesUpdate, TransientLoopMode, WarpMode, WarpSettings,
 };

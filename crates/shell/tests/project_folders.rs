@@ -239,11 +239,13 @@ fn save_as_to_another_project_keeps_using_the_same_media() {
         hash: ContentHash([1; 32]),
         path: MediaPath::new("Samples/Imported/Kick.wav").unwrap(),
         size: 3,
+        reversed_from: None,
     });
     project.media.insert(MediaRef {
         hash: ContentHash([2; 32]),
         path: MediaPath::new("../Library/Pad.wav").unwrap(),
         size: 4,
+        reversed_from: None,
     });
     SetFile::new(tango.set_path("Tango"))
         .save(&project)

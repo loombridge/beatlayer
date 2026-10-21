@@ -98,23 +98,3 @@ fn move_to(path: &Path, trash: &Path) -> Result<(), String> {
     }
 }
 
-/// Moves a file into a trash folder, under a name nothing is using.
-#[cfg(windows)]
-fn move_to(path: &Path, trash: &Path) -> Result<(), String> {
-    let name = path
-        .file_name()
-        .ok_or_else(|| format!("{} names no file", path.display()))?;
-    let mut destination = trash.join(name);
-    let mut n = 2;
-    while destination.exists() {
-        destination = trash.join(format!("{} {n}", name.to_string_lossy()));
-        n += 1;
-    }
-    std::fs::rename(path, &destination).map_err(|error| {
-        format!(
-            "couldn't move {} into {}: {error}",
-            path.display(),
-            trash.display()
-        )
-    })
-}

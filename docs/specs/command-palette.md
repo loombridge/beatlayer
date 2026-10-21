@@ -1,0 +1,77 @@
+# Command search and track search
+
+- **Status:** draft
+- **Work packages:** WP-6.42 (R1 to R16: the search field, its Commands scope and its Tracks scope)
+- **Parity-matrix row:** none (Beatlayer's own); [the improvements](../05-improvements.md), IMP-16 (command palette) and IMP-18 (track search)
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [menus.md](../ui-parity/menus.md) (Help, Navigate) and [shortcuts.toml](../ui-parity/shortcuts.toml)
+
+## The behaviour
+
+Beatlayer adds one search field with two scopes. In its Commands scope a person types a few letters of what they want to do, sees the commands that match with the menu each sits in and its shortcut, and runs one with Return: the same command, with the same selection, as its menu item or key would run. In its Tracks scope the same field finds tracks by their name or by the name of a device or plug-in on them: every match is outlined in the Arrangement, the Session View and the mixers, Return selects the next one and brings it into view, and a switch hides every track that doesn't match until the search ends.
+
+Live has neither. It has the system's search field at the top of the Help menu on macOS, which searches menu item names (S-MENU-005), and the browser's search (Cmd-F), and both stay as they are. The field is Beatlayer's own: it opens over the main window from Help ▸ Search Commands (Cmd-Shift-P) or Navigate ▸ Find Track (Cmd-Shift-O), two keys Live 12 leaves unbound on both platforms. Nothing it does is saved with the set or is an undo step, except the commands it runs.
+
+This spec covers the field, what each scope lists and matches, what Return does, the outlines and Show Only Matches, and the commands an agent uses. The commands it runs are their own specs'; which keys they have is the keymap's, with a person's own keys from [custom-shortcuts.md](custom-shortcuts.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Beatlayer | [The improvements](../05-improvements.md), IMP-16 and IMP-18, and rules 1 to 4 (add, don't move; a changed default is an option; new things where Live users would look; agents reach it) | Search every registered command by label and description, see its shortcut and run it, from the Help menu beside Search, on a key Live 12 leaves unbound; find tracks by name, device or plug-in in the Arrangement, Session and Mixer, matches highlighted, Return jumping to and selecting the next, and an option to show only the matches; one search field for both |
+| S2 | Manual | Live 12 reference manual, chapter 42 "Live Keyboard Shortcuts", sections 42.22 (browser) and 42.28 (menus), through [shortcuts.toml](../ui-parity/shortcuts.toml) S-BRW-006 and S-MENU-005 | Cmd-F (Ctrl-F) searches the browser; on macOS a key opens the system's search of the menus. The chapter has no shortcut that searches commands or finds tracks |
+| S3 | Reference | [shortcuts.toml](../ui-parity/shortcuts.toml), every entry, recorded from Live 12.4.3 | No entry binds Cmd-Shift-P or Cmd-Shift-O on macOS, or Ctrl-Shift-P or Ctrl-Shift-O on Windows, in any context |
+| S4 | Reference | [menus.md](../ui-parity/menus.md), "Help" (M-HELP-001 to 010, the system's search field above them on macOS) and "Navigate" (M-NAV-001 to 019) | The Help menu's items and the field macOS adds at its top; the Navigate menu's groups, Previous Neighbor and Next Neighbor ending its track group |
+| S5 | Release notes | Live 12 release notes, 12.0 to 12.4.6, read 20 October 2026 | No release adds a search of commands or of tracks; the search changes they list are the browser's |
+| S6 | Beatlayer | [app-shell.md](app-shell.md) R11 and R15; [arrangement-view.md](arrangement-view.md) R2 and R15; [session-view.md](session-view.md) R15 and R17; [mixer-view.md](mixer-view.md) R1, R2 and R13; [accessibility.md](accessibility.md); [interface-zoom.md](interface-zoom.md) R1 | How a key press reaches a command; the menus' words; where tracks' title bars sit in each view and how a click selects a track; that every control reaches assistive technology; that every row scales with the zoom |
+| S7 | Beatlayer | [The architecture](../02-architecture.md), "Layout, commands, and key bindings" and "Agent control"; decisions D16 and D17 | Every action is a registered command with an ID, a label, a description written for a model, and its contexts; menus and keys run commands by ID; a view command changes no set and is in the read class |
+
+## Rules
+
+**The field (WP-6.42)**
+
+- **R1.** Help ▸ Search Commands… is the Help menu's first item, after the field macOS adds above it, with a separator after it; it, and Cmd-Shift-P (Ctrl-Shift-P on Windows and Linux), run `search.open` with the Commands scope. Navigate ▸ Find Track, straight after Next Neighbor (M-NAV-015), and Cmd-Shift-O (Ctrl-Shift-O), run it with the Tracks scope. Both keys work wherever the keyboard focus is, a text field's included, since no narrower context binds them. The item names, their places and the keys are Beatlayer's own. (S1, S3, S4, S6)
+- **R2.** The search field opens over the main view, centred at its top edge, 480 points wide with its result list under it (at most 12 rows, scrolling beyond that), with the keyboard focus in the field and the text it held empty. It sits above every pane and moves nothing. Two scope buttons at its left, Commands and Tracks, show which scope it's in; clicking one, or pressing the other scope's key while the field is open, switches scope and keeps the text. The sizes are Beatlayer's own. (S1)
+- **R3.** Esc, a click outside the field, or running a command closes the field and gives the keyboard focus back to where it was before it opened. Opening, typing, switching scope and closing change nothing in the set, aren't undo steps, and aren't saved. (S1, S7)
+
+**Commands (IMP-16)**
+
+- **R4.** The Commands scope lists the commands a person can run from a menu item, a context-menu item or a shortcut, each once, with the arguments that item or shortcut fixes (Insert Audio Track and Insert MIDI Track are two rows of `track.create`). A command that needs a value typed or dragged (a volume, a tempo, a name) and has no item or shortcut that runs it isn't listed. (S1, S7)
+- **R5.** Each row shows the item's label as the menu shows it (Beatlayer's words where a menu item has them, app-shell R15), or the shortcut's action where only a key runs it; then the menu or context it belongs to (`Edit`, `View ▸ Mixer Controls`, `Arrangement`); and at its right the keys the keymap binds to it now, a person's own included ([custom-shortcuts.md](custom-shortcuts.md) R10), or nothing. While a row is highlighted the Info View shows its command's description. (S1, S6)
+- **R6.** A row matches when every word typed matches, ignoring case: each word must start a word of the row's label or its menu, or appear anywhere in its command's description. Rows whose label matches every word come first, those whose label starts with the first word before the rest; then rows matched through their menu; then rows matched only through the description; within each, in the label's alphabetical order. With nothing typed the list is empty. The ranking is Beatlayer's own. (S1)
+- **R7.** A row whose item would be disabled now (nothing selected that it acts on, nothing to undo) is listed after the rows that can run, drawn dimmed. Choosing it runs nothing and the Status Bar says it isn't available now. (S1, S6)
+- **R8.** The first row is highlighted whenever the list changes; Up and Down move the highlight, wrapping at the ends. Return, or a click on a row, runs its command exactly as its menu item or shortcut runs it, with the selection as it was before the field opened, as the same undo steps, and then closes the field (R3). A command that opens a window or a dialog opens it. (S1, S6)
+
+**Tracks (IMP-18)**
+
+- **R9.** In the Tracks scope a track matches when the text typed, ignoring case, appears anywhere in its name, or in the name or the own name of any device on it at any depth (inside racks and their chains), plug-ins included. Audio, MIDI, group and return tracks and Main can all match. The list shows the matches in display order (the Arrangement's order, returns and then Main last), each with its name and, when a device matched, that device's name; with nothing typed it's empty, and a text that matches nothing shows "No tracks match". (S1, S6)
+- **R10.** While the Tracks scope has text that matches, each matching track's title bar is outlined in the theme's search colour wherever it shows: the Arrangement's headers, pinned returns and Main included, the Session View's title bars, and both mixers' title bars. The outlines follow the set as it changes while the field is open (a rename, a device added or removed). Closing the field, clearing the text, or switching to the Commands scope removes them. (S1, S6)
+- **R11.** Return selects the next matching track after the selected one in display order, or the first match when no track is selected, wrapping from the last to the first, as clicking its title bar would ([arrangement-view.md](arrangement-view.md) R15, [session-view.md](session-view.md) R17), and scrolls the view in front so its title bar is in view, opening any folded group that holds it. Shift-Return selects the previous match the same way. The field stays open. A click on a row in the list selects that row's track the same way. Selecting through the field is a selection, not an undo step. (S1, S6)
+- **R12.** The Show Only Matches switch sits at the field's right in the Tracks scope, off each time the field opens. While it's on and the text matches, the Arrangement's lanes, the Session View's columns and both mixers show only the matching tracks and the groups that hold them, unfolded; return tracks that don't match are hidden too, and Main always shows. Hiding is view state: the hidden tracks play, record and take edits as before, nothing in the set changes, and it's no undo step. Turning the switch off, clearing the text, switching scope or closing the field shows every track again, with each group folded as it was. While the text matches nothing, nothing is hidden. (S1)
+
+**Reaching it**
+
+- **R13.** The field is a search box for assistive technology, named Search Commands or Find Track by its scope; the scope buttons are a pair of toggle buttons; the list is a list box whose options read the row's label, menu or matched device, and keys; and the number of rows is announced each time it changes. Every part works from the keyboard alone: Tab moves between the field, the scope buttons and Show Only Matches. (S6)
+- **R14.** At every interface zoom from 50% to 200% the field and its list scale by the zoom and keep their place at the main view's top (interface-zoom R1). (S6)
+- **R15.** Every action here is a registered command in the read class, with a schema and a description: `search.open` (`scope`: `commands` or `tracks`), `search.close`, `search.set_text`, `search.set_scope`, `search.next` and `search.previous` (Return and Shift-Return in the Tracks scope), `search.set_only_matches`, and `search.state`, which reports whether the field is open, its scope, its text, the highlighted row, Show Only Matches, and the rows listed with each one's command ID and arguments or track ID. (S7)
+- **R16.** `search.commands { "text": … }` returns the rows R4 to R7 give for a text, with each command's ID, the arguments the row fixes, its label, menu, keys, and whether it can run now; `search.tracks { "text": … }` returns the tracks R9 gives, with what matched. Both are read commands that work with the field closed, so an agent or a test reads what a person would see. (S1, S7)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.42 | |
+| R2 | to be written in WP-6.42 | |
+| R3 | to be written in WP-6.42 | |
+| R4 | to be written in WP-6.42 | |
+| R5 | to be written in WP-6.42 | |
+| R6 | to be written in WP-6.42 | |
+| R7 | to be written in WP-6.42 | |
+| R8 | to be written in WP-6.42 | |
+| R9 | to be written in WP-6.42 | |
+| R10 | to be written in WP-6.42 | |
+| R11 | to be written in WP-6.42 | |
+| R12 | to be written in WP-6.42 | |
+| R13 | to be written in WP-6.42 | |
+| R14 | to be written in WP-6.42 | |
+| R15 | to be written in WP-6.42 | |
+| R16 | to be written in WP-6.42 | |

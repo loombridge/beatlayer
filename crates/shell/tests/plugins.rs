@@ -702,6 +702,49 @@ fn plug_in_windows_hides_and_shows_every_editor() {
         "both shown again"
     );
 }
+
+// Spec: device-chains R40; IMP-25. Close All Plug-in Windows closes every
+// open editor window at once; it changes nothing in the set and is never an
+// undo step.
+#[test]
+fn close_all_plug_in_windows_closes_every_editor_without_an_undo_step() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let a = load(&mut shell, track);
+    let b = load(&mut shell, track);
+    wait(&mut shell, a, |i| i.active);
+    wait(&mut shell, b, |i| i.active);
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+    assert!(info(&mut shell, a).window_open && info(&mut shell, b).window_open);
+
+    assert!(shell.can_invoke("view.close_plug_in_windows", &json!({})));
+    let before = shell.editor().document().clone();
+    let steps = shell.editor().undo_history().len();
+    let closed: bl_shell_spec::commands::ClosedPlugInWindows = serde_json::from_value(
+        shell
+            .invoke("view.close_plug_in_windows", json!({}))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(closed.closed, 2, "both editors closed");
+    assert!(!info(&mut shell, a).window_open && !info(&mut shell, b).window_open);
+    assert_eq!(*shell.editor().document(), before, "the set is unchanged");
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        steps,
+        "closing a window is no undo step"
+    );
+
+    // With no editor open the item is disabled: it never changes a floating
+    // native device window.
+    assert!(!shell.can_invoke("view.close_plug_in_windows", &json!({})));
+}
+
 // Spec: vst3-hosting R1, R3, R4, R9. A VST3 plug-in loads by path through
 // the commands as an agent runs them, the Device View describes it, and it
 // processes a block through the shell's host with its parameters.

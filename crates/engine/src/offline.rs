@@ -455,6 +455,68 @@ mod tests {
     }
 
     #[test]
+    fn freezing_a_track_drops_its_devices_from_the_program() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let mut device = Device::new(
+            editor.new_id(),
+            "",
+            DeviceKind::Native {
+                device_type: TEST_TONE.to_owned(),
+            },
+        );
+        device.params.insert(test_tone::FREQUENCY, 440.0);
+        device.params.insert(test_tone::LEVEL, -30.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        let mut offline = Offline::new(
+            EngineConfig::new(SampleRate::HZ_48000, 256),
+            Registry::new(),
+        );
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::Play);
+        let peak = |offline: &mut Offline| {
+            offline
+                .process(4096)
+                .channel(0)
+                .iter()
+                .fold(0.0f32, |peak, sample| peak.max(sample.abs()))
+        };
+        assert!(
+            peak(&mut offline) > 0.0,
+            "the tone plays through its device"
+        );
+        // A freeze takes the track's devices out of the program (WP-4.14,
+        // R6), which needs a new one: with no clip regions the frozen track
+        // plays nothing at all.
+        editor
+            .apply(Command::FreezeTracks {
+                frozen: vec![(track, bl_model::FrozenTrack::default())],
+            })
+            .unwrap();
+        offline.sync(editor.document());
+        assert_eq!(
+            peak(&mut offline),
+            0.0,
+            "a frozen track runs none of its devices"
+        );
+    }
+
+    #[test]
     fn a_dropped_engine_frees_its_nodes_on_the_spot() {
         // An offline render's nodes go when it does, so whatever they hold
         // (a plug-in borrowed from its host, WP-2.6b) is back at once.

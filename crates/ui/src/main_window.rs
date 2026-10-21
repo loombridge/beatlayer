@@ -325,6 +325,11 @@ impl MainWindowUi {
                 // slot.
                 self.devices.start_macro_rename(*rack, *number);
             }
+            Effect::RenameVariation(rack, index) => {
+                // Spec: macros R29. Rename types the name in the variation's
+                // row.
+                self.devices.start_variation_rename(*rack, *index);
+            }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
                 backwards,
@@ -434,11 +439,18 @@ impl MainWindowUi {
             // takes the files dropped on it itself.
             let zone_editor =
                 crate::device_view::DeviceViewUi::zone_editor_rect(shell, layout.detail);
+            // The Clip View takes a file dropped on it: it replaces the
+            // clip's sample (R18).
+            let clip_view = if shell.clip_view().visible() {
+                layout.device_view
+            } else {
+                Rect::NOTHING
+            };
             self.browser.drop_overlay(
                 ui,
                 shell,
                 theme,
-                (layout.main_view, zone_editor),
+                (layout.main_view, zone_editor, clip_view),
                 &mut events,
             );
             // The Status Bar draws before the Info View, so the elements
@@ -490,9 +502,16 @@ impl MainWindowUi {
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
         // window while it's open.
         crate::stems_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: multisampler R64. The autosampler's dialog sits over the
+        // window while it's open.
+        crate::autosampler::show(ctx, shell, theme, &mut events);
+        crate::slice_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
-        // An open menu, or Separate Stems' dialog, keeps the keys.
-        self.menu_open = egui::Popup::is_any_open(ctx) || shell.stems_dialog().is_some();
+        // An open menu, or a dialog, keeps the keys.
+        self.menu_open = egui::Popup::is_any_open(ctx)
+            || shell.stems_dialog().is_some()
+            || shell.autosampler_dialog().is_some()
+            || shell.slice_dialog().is_some();
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);
@@ -504,14 +523,14 @@ impl MainWindowUi {
         if track != shell.focused_track() {
             events.push(UiEvent::FocusTrack(track));
         }
-        let metering = shell
-            .meters()
-            .iter()
-            .any(|m| m.peak.iter().chain(&m.rms).any(|level| *level > 0.0));
+        let metering = shell.meters().iter().any(|m| {
+            m.peak.iter().chain(&m.rms).any(|level| *level > 0.0) || m.gain_reduction < 0.0
+        });
         if shell.playing() || metering {
             // The playhead and the Arrangement Position fields move with
             // the engine every frame (control-bar-transport R14), and the
-            // meters until they're silent (mixer-view R10).
+            // meters and the gain-reduction bars until they're silent
+            // (mixer-view R10, R40).
             ctx.request_repaint();
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.

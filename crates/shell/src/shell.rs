@@ -39,9 +39,9 @@ use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
     LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
-    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -62,11 +62,13 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -83,19 +85,24 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 pub(crate) mod audio_editing;
+mod audio_panel;
+pub mod autosample;
 mod capture;
+mod freeze;
 mod multisampler;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
 mod session_recording;
+mod slice;
 mod stems;
 mod warping;
 
@@ -238,6 +245,9 @@ pub enum Effect {
     /// Ask for a folder, then run `settings.set_temporary_folder` with it
     /// (WP-4.20).
     PickTemporaryFolder,
+    /// Ask for a program, then run `settings.set_sample_editor` with it
+    /// (WP-4.10b).
+    PickSampleEditor,
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -247,6 +257,9 @@ pub enum Effect {
     /// Start renaming a macro in its Macro Controls slot; Return runs
     /// `rack.rename_macro` with the new name (WP-5.4).
     RenameMacro(bl_model::DeviceId, u8),
+    /// Start renaming a variation in its Macro Variations row; Return runs
+    /// `rack.rename_variation` with the new name (WP-5.5).
+    RenameVariation(bl_model::DeviceId, usize),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -443,6 +456,15 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The autosampler at work (WP-5.16, IMP-27).
+    autosample: Option<autosample::Job>,
+    /// The autosampler's dialog, open for an instrument.
+    autosample_dialog: Option<autosample::Dialog>,
+    /// What the last autosample made, for the command's result.
+    autosample_result_value: Option<bl_shell_spec::autosampler::Autosampled>,
+    /// The Slice to New MIDI Track dialog (WP-4.16): its clip and the
+    /// slicing presets it offers. Never part of the set.
+    slice_dialog: Option<bl_shell_spec::slice::SliceDialogStatus>,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -453,6 +475,10 @@ pub struct Shell {
     analysis: Option<bl_analysis::cache::AnalysisCache>,
     /// The files whose analysis has been started this session.
     analysed: std::collections::HashSet<bl_media::ContentHash>,
+    /// The files opened in the external sample editor, and the content they
+    /// held then (WP-4.10b): the shell looks at them again when Beatlayer
+    /// comes to the front.
+    editing: Vec<audio_panel::Editing>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -765,6 +791,8 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A variation launch set the macros (R27).
+    Variation { rack: bl_model::DeviceId },
 }
 
 impl Shell {
@@ -842,10 +870,15 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            autosample: None,
+            autosample_dialog: None,
+            autosample_result_value: None,
+            slice_dialog: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
             analysed: std::collections::HashSet::new(),
+            editing: Vec::new(),
             registry,
             editor,
             saved,
@@ -1862,6 +1895,7 @@ impl Shell {
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
+                sample_editor: self.sample_editor().unwrap_or_default(),
             },
             launch: self.prefs.launch,
             record_session_automation_in: self.prefs.record_session_automation_in,
@@ -3021,6 +3055,29 @@ impl Shell {
             || !self.au.open_editors().is_empty()
     }
 
+    /// Whether any plug-in editor window is open (IMP-25).
+    fn any_plug_in_editor(&self) -> bool {
+        !self.plugins.open_editors().is_empty() || !self.au.open_editors().is_empty()
+    }
+
+    /// Closes every open plug-in editor window and says how many it closed
+    /// (View ▸ Close All Plug-in Windows, IMP-25). It closes editors only,
+    /// so a floating native device window stays as it is.
+    fn close_plug_in_windows(&mut self) -> usize {
+        let mut closed = 0;
+        for device in self.plugins.open_editors() {
+            if self.plugins.close_editor(device).is_ok() {
+                closed += 1;
+            }
+        }
+        for device in self.au.open_editors() {
+            if self.au.close_editor(device).is_ok() {
+                closed += 1;
+            }
+        }
+        closed
+    }
+
     /// Hides and shows the open plug-in editor windows to follow View ▸
     /// Plug-In Windows and Auto-Hide Plug-In Windows, as their tracks'
     /// floating windows do (R31, R33): a hidden editor stays open.
@@ -3376,8 +3433,77 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&track_ids::TracksUngrouped { tracks: children }))
             }
+            track_ids::SET_DEVICES_ENABLED => {
+                // Spec: device-chains R39. Deactivate All Devices switches
+                // off every top-level device on the selected tracks, and
+                // switches them back on when they are all off already; it
+                // reaches no rack's contents. One undo step either way.
+                let track_ids::SetDevicesEnabledArgs { tracks, enabled } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let on = enabled.unwrap_or_else(|| self.all_devices_off(&tracks));
+                let step = if on {
+                    track_ids::ACTIVATE_ALL_DEVICES_STEP
+                } else {
+                    track_ids::DEACTIVATE_ALL_DEVICES_STEP
+                };
+                let opened = !self.gesture;
+                if opened {
+                    self.begin_gesture(step);
+                }
+                let mut result = Ok(());
+                for &track in &tracks {
+                    let devices: Vec<bl_model::DeviceId> = self
+                        .editor
+                        .document()
+                        .track(track)
+                        .into_iter()
+                        .flat_map(|track| track.devices().map(|device| device.id))
+                        .collect();
+                    for device in devices {
+                        result = self
+                            .run(
+                                "device.set_enabled",
+                                json!({ "device": device, "enabled": on }),
+                            )
+                            .map(|_| ());
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                if opened {
+                    self.end_gesture();
+                }
+                result?;
+                Ok(to_value(&track_ids::DevicesEnabled {
+                    tracks,
+                    enabled: on,
+                }))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// Whether every top-level device on `tracks` is switched off, with at
+    /// least one device among them (IMP-25, the device chains spec R39).
+    fn all_devices_off(&self, tracks: &[TrackId]) -> bool {
+        let doc = self.editor.document();
+        let mut any = false;
+        for &track in tracks {
+            let Some(track) = doc.track(track) else {
+                continue;
+            };
+            for device in track.devices() {
+                any = true;
+                if device.enabled {
+                    return false;
+                }
+            }
+        }
+        any
     }
 
     /// Loads a plug-in the browser lists (WP-2.9b): onto the selected track
@@ -3660,6 +3786,28 @@ impl Shell {
         self.meters.iter().find(|meter| meter.track == track)
     }
 
+    /// One track's gain reduction in dB, as its compressors and limiters
+    /// last reported it: zero when the engine published no meter for the
+    /// track, or none of them reduced (the mixer view spec, R40).
+    #[must_use]
+    pub fn gain_reduction(&self, track: TrackId) -> f32 {
+        self.meter(track).map_or(0.0, |meter| meter.gain_reduction)
+    }
+
+    /// Every track's gain reduction, as `mixer_view.state` reports it: one
+    /// entry per track the engine published a meter for, in the order the
+    /// tracks run (IMP-25, the mixer view spec R40).
+    #[must_use]
+    pub fn gain_reductions(&self) -> Vec<crate::mixer_view::TrackGainReduction> {
+        self.meters
+            .iter()
+            .map(|meter| crate::mixer_view::TrackGainReduction {
+                track: meter.track,
+                reduction: meter.gain_reduction,
+            })
+            .collect()
+    }
+
     /// Sets the meters the windows draw, as [`Shell::poll_engine`] does with
     /// the engine's: for benchmarks and tests with no engine running (while
     /// one runs, the next poll takes its meters instead).
@@ -3748,6 +3896,9 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: multisampler R73. The autosampler makes one sample at a
+        // time, so the dialog sees its progress and Cancel stops it.
+        self.poll_autosample();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
@@ -4002,6 +4153,7 @@ impl Shell {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
                 || audio_ids::handles(id)
+                || freeze_ids::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || multisampler_ids::handles(id)
@@ -5231,6 +5383,64 @@ impl Shell {
         contexts
     }
 
+    /// The frozen track that refuses `id`, if any (the freeze and bounce
+    /// spec, R8).
+    fn frozen_blocks(&self, id: &str, args: &Value) -> Option<TrackId> {
+        // R7 keeps a frozen track's mixer live: volume, pan, sends, the
+        // activator, solo and the crossfader all work; only its devices, its
+        // clips' own settings, arming and new clips are locked (R8).
+        if !(id.starts_with("device.")
+            || id.starts_with("clip.")
+            || matches!(
+                id,
+                "mixer.set_arm"
+                    | "mixer.arm_exclusive"
+                    | "browser.add_to_arrangement"
+                    | "browser.insert"
+                    | "track.create"
+            ))
+        {
+            return None;
+        }
+        // R7: moving, copying, deleting, trimming and launching a frozen
+        // clip still work.
+        if matches!(
+            id,
+            "clip.move"
+                | "clip.move_by"
+                | "clip.move_to_slot"
+                | "clip.delete"
+                | "clip.set_length"
+                | "clip.trim_start"
+                | "clip.set_launch_mode"
+                | "clip.set_launch_quantization"
+                | "clip.set_legato"
+                | "clip.set_follow_actions"
+        ) {
+            return None;
+        }
+        let doc = self.editor.document();
+        if let Some(clip) = args
+            .get("clip")
+            .and_then(|value| serde_json::from_value::<bl_model::ClipId>(value.clone()).ok())
+        {
+            return doc
+                .clip_track(clip)
+                .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()));
+        }
+        if let Some(device) = args
+            .get("device")
+            .and_then(|value| serde_json::from_value::<bl_model::DeviceId>(value.clone()).ok())
+        {
+            return doc
+                .device_track(device)
+                .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()));
+        }
+        args.get("track")
+            .and_then(|value| serde_json::from_value::<TrackId>(value.clone()).ok())
+            .filter(|track| doc.track(*track).is_some_and(|t| t.is_frozen()))
+    }
+
     /// [`Shell::can_invoke`] with `active` as the contexts that apply.
     #[must_use]
     pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
@@ -5243,6 +5453,9 @@ impl Shell {
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
+        }
+        if freeze_ids::handles(id) {
+            return self.can_freeze(id, args);
         }
         if audio_ids::handles(id) {
             // Spec: audio-clip-editing R28. The menus' enabled states.
@@ -5286,6 +5499,9 @@ impl Shell {
             // main window open, Close Window is disabled (M-FILE-004).
             // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_plug_in_window(),
+            // IMP-25. Close All Plug-in Windows is disabled with no editor
+            // open: it never closes a floating native device window.
+            ids::CLOSE_PLUG_IN_WINDOWS => return self.any_plug_in_editor(),
             ids::WINDOW_CLOSE => {
                 return match self.focused_window {
                     WindowKind::Settings => self.settings_open,
@@ -5304,6 +5520,14 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if autosampler_ids::handles(id) {
+            return self.can_autosampler(id, args);
+        }
+        if slice_ids::handles(id) {
+            // Spec: slice-to-midi R1. The menus' enabled states: one audio
+            // clip selected, in either view.
+            return self.can_slice(id, args);
         }
         if id == CUE_MODE {
             // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
@@ -5359,6 +5583,21 @@ impl Shell {
                         named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
                     return !crate::tracks::groupable(self.editor.document(), &tracks).is_empty();
                 }
+                track_ids::SET_DEVICES_ENABLED => {
+                    // IMP-25. It works while the selected tracks hold a
+                    // top-level device to switch.
+                    let named: Option<Vec<TrackId>> = args
+                        .get("tracks")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let tracks =
+                        named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    return tracks.iter().any(|&track| {
+                        self.editor
+                            .document()
+                            .track(track)
+                            .is_some_and(|track| track.devices().next().is_some())
+                    });
+                }
                 track_ids::UNGROUP => {
                     let named: Option<TrackId> = args
                         .get("track")
@@ -5373,8 +5612,12 @@ impl Shell {
             }
         }
         if id == "device.rename" && args.get("name").is_none() {
-            // A person names the device in its title bar.
-            return self.devices.selected().is_some();
+            // A person names the device in its title bar; with a macro or a
+            // variation selected, Rename names that instead (macros spec,
+            // R14, R29).
+            return self.devices.selected().is_some()
+                || self.devices.macro_selected().is_some()
+                || self.devices.variation_selected().is_some();
         }
         if id == "chain.rename" && args.get("name").is_none() {
             // A person names the chain in its row.
@@ -5845,6 +6088,10 @@ impl Shell {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)
             }
+            ids::SETTINGS_SET_SAMPLE_EDITOR if !has("path") => {
+                self.effects.push(Effect::PickSampleEditor);
+                Ok(Value::Null)
+            }
             _ if self.is_sample_key(id, &args) => {
                 // Spec: sample-editor R10. A key or a menu item acts on what
                 // the Sample Editor has selected.
@@ -5898,6 +6145,13 @@ impl Shell {
             }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
+                // Spec: macros R29. With a variation selected, Rename names
+                // it, not the device.
+                if let Some((rack, index)) = self.devices.variation_selected() {
+                    self.effects.push(Effect::RenameVariation(rack, index));
+                    self.touch();
+                    return Ok(Value::Null);
+                }
                 // Spec: macros R14. With a macro selected, Rename names it,
                 // not the device.
                 if let Some((rack, number)) = self.devices.macro_selected() {
@@ -5944,6 +6198,30 @@ impl Shell {
                 self.effects.push(Effect::RenameMacro(rack, number));
                 self.touch();
                 Ok(Value::Null)
+            }
+            "device.duplicate" if !has("device") && self.devices.variation_selected().is_some() => {
+                // Spec: macros R29. With a variation selected, Duplicate
+                // copies it, not the device.
+                let (rack, index) = self
+                    .devices
+                    .variation_selected()
+                    .expect("checked to be selected");
+                self.run(
+                    "rack.duplicate_variation",
+                    json!({ "rack": rack, "index": index }),
+                )
+            }
+            "device.remove" if !has("device") && self.devices.variation_selected().is_some() => {
+                // Spec: macros R29. With a variation selected, Delete removes
+                // it, not the device.
+                let (rack, index) = self
+                    .devices
+                    .variation_selected()
+                    .expect("checked to be selected");
+                self.run(
+                    "rack.delete_variation",
+                    json!({ "rack": rack, "index": index }),
+                )
             }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;
@@ -6220,6 +6498,9 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::LaunchVariation { rack, .. } => {
+                Some(MacroEdit::Variation { rack: *rack })
+            }
             _ => None,
         }
     }
@@ -6267,6 +6548,12 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                (1..=bl_model::MACROS)
+                    .filter(|number| !rack.macros.setting(*number).variation_excluded)
+                    .flat_map(|number| self.devices.macro_commands(doc, rack, number))
+                    .collect()
+            }),
         }
     }
 
@@ -6419,9 +6706,19 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if let Some(track) = self.frozen_blocks(id, &args) {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: format!(
+                    "the track {} is frozen; unfreeze it to change its devices or clip settings",
+                    track.0
+                ),
+            });
+        }
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || audio_ids::handles(id)
+                || freeze_ids::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
@@ -6429,6 +6726,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
+                || slice_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
@@ -6441,6 +6739,9 @@ impl Shell {
         }
         if audio_ids::handles(id) {
             return self.run_audio_editing(id, args);
+        }
+        if freeze_ids::handles(id) {
+            return self.run_freeze(id, args);
         }
         if edit_ids::handles(id) {
             let before = self.editor.document().clone();
@@ -6511,33 +6812,39 @@ impl Shell {
                 && self.automation_recording)
                 .then(|| model::command_from_args(id, args.clone()).ok())
                 .flatten()
-                .and_then(|command| {
-                    crate::automation_record::moved(self.editor.document(), &command)
-                });
+                .map(|command| {
+                    crate::automation_record::moved_all(self.editor.document(), &command)
+                })
+                .unwrap_or_default();
             // Spec: session-automation R1. With Automation Arm on and a
             // Session recording running, a control move is noted for the
             // clip it goes into.
-            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
-                .then(|| model::command_from_args(id, args.clone()).ok())
-                .flatten()
-                .and_then(|command| {
-                    let (track, target, value) =
-                        crate::automation_record::moved(self.editor.document(), &command)?;
-                    let before = crate::modulation::control_value(
-                        self.editor.document(),
-                        &self.devices,
-                        track,
-                        &target,
-                    )?;
-                    Some((track, target, before, value))
-                });
+            let session_moved: Vec<(TrackId, AutomationTarget, f64, f64)> =
+                (self.arrangement.automation_arm() && self.session_run.is_some())
+                    .then(|| model::command_from_args(id, args.clone()).ok())
+                    .flatten()
+                    .map(|command| {
+                        crate::automation_record::moved_all(self.editor.document(), &command)
+                            .into_iter()
+                            .filter_map(|(track, target, value)| {
+                                let before = crate::modulation::control_value(
+                                    self.editor.document(),
+                                    &self.devices,
+                                    track,
+                                    &target,
+                                )?;
+                                Some((track, target, before, value))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
             let changes = self.run_document_edit(id, args)?;
             // Spec: sample-editor R11. An edit in the Sample Editor pauses
             // Follow until playback starts or stops.
             if sample_edit_command(id) {
                 self.clip_view.sample_follow(true);
             }
-            if let Some((track, target, value)) = moved {
+            for (track, target, value) in moved {
                 self.automation_take.write(
                     track,
                     target,
@@ -6545,7 +6852,7 @@ impl Shell {
                     value,
                 );
             }
-            if let Some((track, target, before, value)) = session_moved {
+            for (track, target, before, value) in session_moved {
                 self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
@@ -6695,7 +7002,13 @@ impl Shell {
                         command: id.to_owned(),
                         message,
                     },
-                );
+                )
+                .map(|mut state| {
+                    // Spec: mixer-view R40. The strips' gain-reduction bars
+                    // read with the meters.
+                    state.gain_reduction = self.gain_reductions();
+                    state
+                });
             if result.is_ok() && id == mixer_ids::FOCUS {
                 // Spec: mixer-view R13.
                 self.focused_window = WindowKind::Main;
@@ -6883,6 +7196,9 @@ impl Shell {
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);
         }
+        if autosampler_ids::handles(id) {
+            return self.run_autosampler(id, args);
+        }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
         }
@@ -6898,6 +7214,9 @@ impl Shell {
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
         }
+        if bl_shell_spec::audio_panel::handles(id) {
+            return self.run_audio_panel(id, args);
+        }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
             return Ok(to_value(&crate::modulation::state(
@@ -6910,6 +7229,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if slice_ids::handles(id) {
+            return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time
@@ -7646,6 +7968,14 @@ impl Shell {
                     on: self.plug_in_windows,
                 }))
             }
+            ids::CLOSE_PLUG_IN_WINDOWS => {
+                // Spec: device-chains R40. It closes editors only, so it
+                // changes nothing in the set and is never an undo step.
+                Self::args::<NoArgs>(id, args)?;
+                let closed = self.close_plug_in_windows();
+                self.touch();
+                Ok(to_value(&ids::ClosedPlugInWindows { closed }))
+            }
             ids::VIEW_TOGGLE_BROWSER => {
                 Self::args::<NoArgs>(id, args)?;
                 self.browser = !self.browser;
@@ -7884,6 +8214,17 @@ impl Shell {
                 self.save_preferences();
                 Ok(to_value(&TemporaryFolderResult {
                     path: self.temporary_folder().to_string_lossy().into_owned(),
+                }))
+            }
+            ids::SETTINGS_SET_SAMPLE_EDITOR => {
+                let SampleEditorArgs { path } = Self::args(id, args)?;
+                let path = path
+                    .map(|path| path.trim().to_owned())
+                    .filter(|path| !path.is_empty());
+                self.prefs.sample_editor = path;
+                self.save_preferences();
+                Ok(to_value(&SampleEditorResult {
+                    path: self.sample_editor().unwrap_or_default(),
                 }))
             }
             ids::SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES => {

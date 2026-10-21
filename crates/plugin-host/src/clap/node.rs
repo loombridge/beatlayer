@@ -23,6 +23,7 @@ use clack_host::utils::{BeatTime, SecondsTime};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use super::events::{InputList, Out, OutputList};
+use super::gain;
 use super::handlers::Host;
 
 /// The most channels a plug-in's main port has that Beatlayer feeds.
@@ -100,6 +101,10 @@ pub struct ClapNode {
     midi_effect: bool,
     max_frames: usize,
     steady: u64,
+    /// The gain adjustment, in dB, the plug-in reported for the last block
+    /// (the mixer view spec, R40): zero when it reports none or reduces
+    /// nothing.
+    reduction: f32,
 }
 
 impl ClapNode {
@@ -140,6 +145,7 @@ impl ClapNode {
             midi_effect,
             max_frames,
             steady: 0,
+            reduction: 0.0,
         };
         let ends = HostEnds {
             to_node,
@@ -294,6 +300,8 @@ fn transport(block: &Block<'_>) -> TransportEvent {
 impl Node for ClapNode {
     fn process(&mut self, block: &mut Block<'_>) {
         self.receive();
+        // A block the plug-in doesn't process reduces nothing (R40).
+        self.reduction = 0.0;
         let frames = block.frames();
         let Some(processor) = self.processor.as_mut() else {
             // Not running: keep the changes for it, and pass the input
@@ -420,6 +428,9 @@ impl Node for ClapNode {
             Some(&transport),
         );
         self.steady = self.steady.wrapping_add(frames as u64);
+        // Spec: mixer-view R40. The gain adjustment, in dB, the plug-in
+        // reports for the block it just processed.
+        self.reduction = gain::reduction(&started.plugin_handle()).map_or(0.0, |db| db as f32);
         if result.is_err() {
             self.output.events.clear();
             self.fail(block);
@@ -487,6 +498,10 @@ impl Node for ClapNode {
 
     fn latency(&self) -> u32 {
         self.status.latency.load(Relaxed)
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.reduction
     }
 }
 

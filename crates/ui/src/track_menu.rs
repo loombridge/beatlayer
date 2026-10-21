@@ -91,6 +91,21 @@ impl TrackMenus {
             time_selection: in_arrangement
                 && view.time_selection().is_some()
                 && view.selected_tracks().contains(&track),
+            // IMP-25: Deactivate All Devices reads Activate All Devices when
+            // every top-level device on the selection is already off.
+            devices_off: {
+                let mut any = false;
+                let mut all_off = true;
+                for &selected in view.selected_tracks() {
+                    if let Some(track) = doc.track(selected) {
+                        for device in track.devices() {
+                            any = true;
+                            all_off &= !device.enabled;
+                        }
+                    }
+                }
+                any && all_off
+            },
         });
         let contexts = shell.track_menu_contexts();
         for item in shown(&menu) {

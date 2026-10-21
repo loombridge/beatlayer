@@ -482,3 +482,109 @@ fn a_floating_window_grows_the_display_and_draws_it_there_too() {
         "drawn at the larger size: {paths} {rects}"
     );
 }
+
+// Spec: spectrum-analyser R8, device-framework R36
+#[test]
+fn the_spectrums_cell_draws_in_docked_and_floating_windows() {
+    let mut h = display_harness();
+    let spec = add_native(&mut h, bl_devices::spectrum_analyser::SPECTRUM);
+    let mut bands = vec![-80.0f32; bl_devices::spectrum_analyser::DISPLAY_BINS];
+    bands[128] = -3.0;
+    h.shell.set_device_display_data(spec, &bands);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Spectrum");
+    assert_eq!(node.role, Role::Image);
+    assert!(
+        node.value.contains("Spectrum peak"),
+        "expected peak reading, got {}",
+        node.value
+    );
+
+    // Floating window
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": spec, "floating": true }),
+        )
+        .unwrap();
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(spec);
+    h.size = vec2(min_width + 200.0, min_height + 150.0);
+    let grown = h.settle();
+    let grown_cell = cell_in(&h, spec, Rect::from_min_size(Pos2::ZERO, h.size));
+    let (_, _, rects) = painted(&grown, grown_cell);
+    assert!(rects > 0, "spectrum bars painted in floating window");
+}
+
+// Spec: tuner R7, device-framework R36
+#[test]
+fn the_tuners_cell_draws_in_docked_and_floating_windows() {
+    let mut h = display_harness();
+    let tun = add_native(&mut h, bl_devices::tuner::TUNER);
+    h.shell
+        .set_device_display_data(tun, &[440.0, 69.0, 0.0, 1.0, 1.0]);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Tuner");
+    assert_eq!(node.role, Role::Image);
+    assert!(
+        node.value.contains("Note A4"),
+        "expected note reading, got {}",
+        node.value
+    );
+
+    // Floating window
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": tun, "floating": true }),
+        )
+        .unwrap();
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(tun);
+    h.size = vec2(min_width + 200.0, min_height + 150.0);
+    h.settle();
+    let grown_cell = cell_in(&h, tun, Rect::from_min_size(Pos2::ZERO, h.size));
+    assert!(grown_cell.width() > 100.0);
+}
+
+// Spec: oscilloscope R7, device-framework R36
+#[test]
+fn the_oscilloscopes_cell_draws_in_docked_and_floating_windows() {
+    let mut h = display_harness();
+    let osc = add_native(&mut h, bl_devices::oscilloscope::OSCILLOSCOPE);
+    let wave = vec![0.5f32; bl_devices::oscilloscope::WAVEFORM_POINTS];
+    h.shell.set_device_display_data(osc, &wave);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Waveform");
+    assert_eq!(node.role, Role::Image);
+
+    // Floating window
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": osc, "floating": true }),
+        )
+        .unwrap();
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(osc);
+    h.size = vec2(min_width + 200.0, min_height + 150.0);
+    let grown = h.settle();
+    let grown_cell = cell_in(&h, osc, Rect::from_min_size(Pos2::ZERO, h.size));
+    let (paths, _, _) = painted(&grown, grown_cell);
+    assert!(paths >= 1, "waveform painted in floating window");
+}

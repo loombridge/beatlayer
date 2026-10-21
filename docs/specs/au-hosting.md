@@ -1,7 +1,7 @@
 # Audio Unit hosting
 
-- **Status:** built (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units)
-- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and units (WP-4.21, built) as [offline plug-in renders](offline-plugin-renders.md) say; VST3 is WP-2.7
+- **Status:** partial (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units; per-note expression and MPE, R19 and R20, are WP-6.17b's)
+- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and units (WP-4.21, built) as [offline plug-in renders](offline-plugin-renders.md) say; VST3 is WP-2.7; per-note expression and MPE are WP-6.17b's (R19 and R20, with [MPE](mpe.md) R14 to R21)
 - **Parity-matrix row:** Audio Units v2 and v3 (M2, macOS; built in WP-2.8)
 - **Checked against:** Apple's AudioToolbox documentation (`AudioComponent`, `AUAudioUnit`, render blocks, parameter trees, `fullState`, latency), read 15 October 2026; the architecture's "Plug-in hosting" and "Real-time rules"; the CLAP hosting spec, whose rules this mirrors where the formats allow; Live 12.4.6 on macOS, 12 October 2026 (Plug-In Sources lists Use Audio Units v2 and Use Audio Units v3, both Off by default); Apple's built-in units on this machine (macOS 27, Apple silicon)
 
@@ -22,6 +22,8 @@ A unit's own editor window opens and closes through `plugin.show_window` (R13), 
 | S3 | Observation | Live 12.4.6 on macOS, 12 October 2026: Settings ▸ Plug-Ins' Plug-In Sources lists Use Audio Units v2 and Use Audio Units v3, both Off by default | Live treats v2 and v3 units as two sources, switchable off; the switches themselves are WP-2.9's and the Settings window's |
 | S4 | Observation | Live 12.4.6 on macOS, 12 October 2026: AUDelay on an audio track (recorded in the CLAP hosting spec, S3 and S4) | A unit's device behaves as a plug-in device does: its own window opens from the device's wrench, and a change made in it is one undo step |
 | S5 | Beatlayer | The CLAP hosting spec's rules and tests, and `crates/plugin-host/src/clap/` | The same host shape: a main-thread host with a factory for the engine's registry, nodes that pass their input through until the unit arrives, state taken into the set at each save, a `plugin.info` report, and a contained failure |
+| S7 | Standard | The MIDI Polyphonic Expression specification (MIDI Manufacturers Association and AMEI, RP-053, 2018) | A note's pitch, slide and pressure travel as its own member channel's pitch bend, controller 74 and channel pressure |
+| S8 | Beatlayer | [MPE](mpe.md) R14 to R17 | A plug-in device's MPE Mode, and MPE MIDI's layout |
 
 ## Rules
 
@@ -43,6 +45,11 @@ A unit's own editor window opens and closes through `plugin.show_window` (R13), 
 - **R16.** `plugin.load_au`, and `plugin.info` and `plugin.show_window` for an AU device, are the registered commands agents run: `plugin.load_au` is External, like `plugin.load`; `plugin.info` is a read. (S1, S5)
 - **R17.** Nothing the node does on the audio thread allocates, locks, or blocks: its buffers are made with the node, and the unit is set and given notes at segment boundaries on that thread, as a host's automation and MIDI are; the unit's own code is its own. A node that fails a call is silent and reports it. (S1, S2)
 - **R18.** A control change, pitch bend or channel pressure reaches a unit through its MIDI block as the message's raw bytes (two for channel pressure), scheduled with the notes at its frame ([device framework](device-framework.md) R39). (S6)
+
+**Per-note expression and MPE (WP-6.17b)**
+
+- **R19.** While the device's MPE Mode is off ([MPE](mpe.md) R14, R15), a note's per-note pressure reaches the unit through its MIDI block as polyphonic key pressure on the note's key and channel, scheduled with the notes at its frame; its per-note pitch and slide don't reach it. (S7, S8)
+- **R20.** While MPE Mode is on, the unit gets the notes and their expressions as MPE MIDI ([MPE](mpe.md) R17) through its MIDI block, every message scheduled at its frame in the order MPE MIDI lays them out. (S7, S8)
 
 ## Tests
 
@@ -67,4 +74,6 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
 | R17 | every block in `crates/plugin-host/tests/` runs as a real-time section under the allocation trap | real-time trap |
 | R18 | `crates/plugin-host/tests/au.rs`, `a_control_change_reaches_the_unit_with_its_notes` | unit, real-time trap |
+| R19 | to be written in WP-6.17b | unit, real-time trap |
+| R20 | to be written in WP-6.17b | unit, real-time trap |
 | — | The scanner lists the units: `crates/plugin-host/tests/scan.rs`, `a_scan_finds_apples_built_in_audio_units`; `crates/shell/tests/plugin_scanning.rs`, `scanning_finds_audio_units_and_they_join_the_browser` (plugin-scanning R1, R7) | unit |

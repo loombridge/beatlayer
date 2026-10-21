@@ -78,6 +78,8 @@ pub struct DeviceViewUi {
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
     /// The macro being renamed in its Macro Controls slot (WP-5.4).
     pub(crate) renaming_macro: Option<crate::rack_view::MacroRenaming>,
+    /// The variation being renamed in its Macro Variations row (WP-5.5).
+    pub(crate) renaming_variation: Option<crate::rack_view::VariationRenaming>,
     /// A drag on a chain's zone bar in a rack's zone editor (WP-5.3).
     pub(crate) zone_drag: Option<crate::rack_view::RackZoneDrag>,
     scroll: f32,
@@ -265,6 +267,7 @@ impl DeviceViewUi {
             renaming: None,
             renaming_chain: None,
             renaming_macro: None,
+            renaming_variation: None,
             zone_drag: None,
             scroll: 0.0,
             seen_selected: None,
@@ -280,7 +283,10 @@ impl DeviceViewUi {
     /// Whether a device's name is being typed, so keys go to it.
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.renaming.is_some() || self.renaming_chain.is_some() || self.renaming_macro.is_some()
+        self.renaming.is_some()
+            || self.renaming_chain.is_some()
+            || self.renaming_macro.is_some()
+            || self.renaming_variation.is_some()
     }
 
     /// Starts typing a new name for macro `number` of `rack` in its slot
@@ -289,6 +295,17 @@ impl DeviceViewUi {
         self.renaming_macro = Some(crate::rack_view::MacroRenaming {
             rack,
             number,
+            text: None,
+            focused: false,
+        });
+    }
+
+    /// Starts typing a new name for the variation at `index` of `rack` in its
+    /// row (Rename, S-EDIT-008), from the name it has now.
+    pub fn start_variation_rename(&mut self, rack: DeviceId, index: usize) {
+        self.renaming_variation = Some(crate::rack_view::VariationRenaming {
+            rack,
+            index,
             text: None,
             focused: false,
         });
@@ -1167,6 +1184,22 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
+        }
+        // Spec: multisampler R64. Autosample… is in an instrument's title
+        // bar menu, among its device-specific options.
+        if frame.role == bl_model::DeviceRole::Instrument {
+            ui.separator();
+            let response = ui.button("Autosample…");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(
+                    events,
+                    bl_shell::autosampler_commands::AUTOSAMPLE_OPEN,
+                    json!({ "device": frame.id }),
+                );
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
         }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it

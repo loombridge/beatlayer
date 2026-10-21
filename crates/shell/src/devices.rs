@@ -32,9 +32,9 @@ use bl_shell_spec::devices::{
     HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MapModeArgs,
     MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame,
     RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs, SelectChainArgs, SelectDeviceArgs,
-    SelectMacroArgs, SelectSlotArgs, SetAutoSelectArgs, SetMacroCountArgs, SetRackViewArgs,
-    SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, SidechainSection, SoloChainArgs,
-    Ungrouped,
+    SelectMacroArgs, SelectSlotArgs, SelectVariationArgs, SetAutoSelectArgs, SetMacroCountArgs,
+    SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, ShowVariationsArgs,
+    SidechainSection, SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -92,6 +92,9 @@ pub struct DeviceView {
     /// selected in its mappings list: view state (WP-5.4).
     macro_selected: Option<(DeviceId, u8)>,
     mapping_selected: Option<(DeviceId, bl_model::MacroTarget)>,
+    /// The variation selected in a rack's Macro Variations view: view state
+    /// (WP-5.5).
+    variation_selected: Option<(DeviceId, usize)>,
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
@@ -282,11 +285,13 @@ impl DeviceView {
     }
 
     /// Chooses the device the Device View shows as selected, ending a macro's
-    /// selection with it (macros spec, R14): Rename acts on one selection, so
-    /// choosing a device takes Rename back from the macro it named.
+    /// or a variation's selection with it (macros spec, R14, R29): Rename,
+    /// Duplicate and Delete act on one selection, so choosing a device takes
+    /// them back from the macro or the variation they acted on.
     fn choose(&mut self, device: Option<DeviceId>) {
         self.selected = device;
         self.macro_selected = None;
+        self.variation_selected = None;
     }
 
     /// Whether a device is folded.
@@ -607,6 +612,12 @@ impl DeviceView {
         // names a device again.
         self.map_mode = self.map_mode.filter(exists);
         self.macro_selected = self.macro_selected.filter(|(rack, _)| exists(rack));
+        // Spec: macros R29. A variation selected in a rack that's gone goes
+        // with it.
+        self.variation_selected = self.variation_selected.filter(|(rack, index)| {
+            doc.device(*rack)
+                .is_some_and(|device| *index < device.macros.variations.len())
+        });
         self.hot_swap = self.hot_swap.filter(exists);
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
@@ -1014,6 +1025,26 @@ impl DeviceView {
     /// Selects a macro in a rack's Macro Controls, or none.
     pub fn select_macro(&mut self, macro_selected: Option<(DeviceId, u8)>) {
         self.macro_selected = macro_selected;
+        // Spec: macros R29. One selection at a time: choosing a macro ends a
+        // variation selection, and the other way round.
+        if macro_selected.is_some() {
+            self.variation_selected = None;
+        }
+    }
+
+    /// The variation selected in a rack's Macro Variations view, if one is
+    /// (macros spec, R29).
+    #[must_use]
+    pub fn variation_selected(&self) -> Option<(DeviceId, usize)> {
+        self.variation_selected
+    }
+
+    /// Selects a variation in a rack's Macro Variations view, or none.
+    pub fn select_variation(&mut self, variation_selected: Option<(DeviceId, usize)>) {
+        self.variation_selected = variation_selected;
+        if variation_selected.is_some() {
+            self.macro_selected = None;
+        }
     }
 
     /// The mapping selected in a rack's mappings list, if one is.
@@ -1345,14 +1376,22 @@ impl DeviceView {
         let DeviceKind::Native { device_type } = &device.kind else {
             return empty_display(device.id);
         };
+        let view = self.display_view(device);
         let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
         let mut display = self
             .description(&device.kind)
             .and_then(|description| {
-                bl_devices::display(device_type, device.id, description, &device.params, data)
+                bl_devices::display_for_view(
+                    device_type,
+                    device.id,
+                    description,
+                    &device.params,
+                    data,
+                    view.as_deref(),
+                )
             })
             .unwrap_or_else(|| empty_display(device.id));
-        display.view = self.display_view(device);
+        display.view = view;
         display
     }
 
@@ -1388,10 +1427,15 @@ impl DeviceView {
                 doc.device(device)
                     .is_some_and(|d| d.sidechain.is_some() || d.midi_sidechain.is_some())
             }),
-            ids::DUPLICATE => self.target(doc, named).is_ok_and(|device| {
-                doc.device(device)
-                    .is_some_and(|d| d.role != DeviceRole::Instrument)
-            }),
+            ids::DUPLICATE => {
+                // Spec: macros R29. With a variation selected, Duplicate
+                // copies it, whatever the device is.
+                self.variation_selected().is_some()
+                    || self.target(doc, named).is_ok_and(|device| {
+                        doc.device(device)
+                            .is_some_and(|d| d.role != DeviceRole::Instrument)
+                    })
+            }
             ids::HOT_SWAP => has_target() || (args.get("on") == Some(&Value::Bool(false))),
             ids::PASTE => self.clipboard.as_ref().is_some_and(|device| {
                 track
@@ -1468,7 +1512,9 @@ impl DeviceView {
             ids::RACK_SET_MACRO_COUNT
             | ids::RACK_MAP_MODE
             | ids::RACK_MACROS
-            | ids::RACK_SELECT_MACRO => args
+            | ids::RACK_SELECT_MACRO
+            | ids::RACK_SHOW_VARIATIONS
+            | ids::RACK_SELECT_VARIATION => args
                 .get("rack")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .and_then(|d| doc.device(d))
@@ -1992,6 +2038,11 @@ impl DeviceView {
                 let views = self.views_of(rack);
                 let shown = shown.unwrap_or(!views.shown(view));
                 self.rack_views.insert(rack, views.with(view, shown));
+                // Spec: macros R29. Hiding the Macro Variations view takes the
+                // selection of a variation in it with it.
+                if view == bl_model::RackView::Variations && !shown {
+                    self.variation_selected = self.variation_selected.filter(|(r, _)| *r != rack);
+                }
                 outcome.view_changed = true;
             }
             ids::RACK_SET_ZONE_EDITOR => {
@@ -2056,7 +2107,39 @@ impl DeviceView {
                         "a rack's macros are numbered 1 to 16".to_owned(),
                     ));
                 }
-                self.macro_selected = macro_number.map(|number| (rack, number));
+                self.select_macro(macro_number.map(|number| (rack, number)));
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
+            ids::RACK_SHOW_VARIATIONS => {
+                let ShowVariationsArgs { rack, shown } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                let views = self.views_of(rack);
+                let shown = shown.unwrap_or(!views.shown(bl_model::RackView::Variations));
+                self.rack_views
+                    .insert(rack, views.with(bl_model::RackView::Variations, shown));
+                if !shown {
+                    self.variation_selected = self.variation_selected.filter(|(r, _)| *r != rack);
+                }
+                outcome.view_changed = true;
+                outcome.value = self.macros_state(editor.document(), rack);
+                return Ok(outcome);
+            }
+            ids::RACK_SELECT_VARIATION => {
+                let SelectVariationArgs { rack, index } = parse(args)?;
+                let (rack, _) = self.rack_to_view(editor.document(), rack)?;
+                if let Some(index) = index
+                    && index
+                        >= editor
+                            .document()
+                            .device(rack)
+                            .map_or(0, |d| d.macros.variations.len())
+                {
+                    return Err(DeviceError::InvalidArgs(
+                        "no such macro variation".to_owned(),
+                    ));
+                }
+                self.select_variation(index.map(|index| (rack, index)));
                 outcome.value = self.macros_state(editor.document(), rack);
                 return Ok(outcome);
             }

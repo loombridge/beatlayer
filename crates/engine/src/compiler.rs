@@ -1094,6 +1094,9 @@ impl Compiler {
             midi,
             modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
             lagged: mod_rows.any_late(document),
+            task_times: (0..tasks)
+                .map(|_| core::sync::atomic::AtomicU64::new(0))
+                .collect(),
             bus: Shared::new(vec![
                 0.0;
                 (build.modulators.len() + build.signals.len())

@@ -3786,6 +3786,21 @@ impl Shell {
         self.meters.iter().find(|meter| meter.track == track)
     }
 
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track's share of the set's processing time and how many of the
+    /// six segments it lights (the mixer spec, R31).
+    #[must_use]
+    pub fn impact_values(&self) -> Vec<bl_shell_spec::mixer_view::TrackImpact> {
+        self.meters
+            .iter()
+            .map(|meter| bl_shell_spec::mixer_view::TrackImpact {
+                track: meter.track,
+                segments: bl_shell_spec::mixer_view::impact_segments(meter.impact),
+                share: meter.impact,
+            })
+            .collect()
+    }
+
     /// One track's gain reduction in dB, as its compressors and limiters
     /// last reported it: zero when the engine published no meter for the
     /// track, or none of them reduced (the mixer view spec, R40).
@@ -7007,6 +7022,9 @@ impl Shell {
                     // Spec: mixer-view R40. The strips' gain-reduction bars
                     // read with the meters.
                     state.gain_reduction = self.gain_reductions();
+                    // Spec: mixer R31. The Performance Impact values the
+                    // engine last published, one per track.
+                    state.performance_impact_values = self.impact_values();
                     state
                 });
             if result.is_ok() && id == mixer_ids::FOCUS {

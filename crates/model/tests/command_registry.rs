@@ -78,7 +78,6 @@ WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 
          four for tempo leaders, stretching and sliding, and WP-5.4 ten \
          for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
          rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
-<<<<<<< HEAD
          set_macro_randomize_excluded and set_mapped_value, WP-5.5 seven \
          for the macro variations: store_variation, launch_variation, \
          overwrite_variation, rename_variation, duplicate_variation, \

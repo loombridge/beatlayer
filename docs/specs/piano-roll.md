@@ -133,7 +133,7 @@ This spec covers drawing, selecting, moving, resizing, Fold, quantise, transpose
 | R27 | `crates/ui/tests/clip_view.rs`, `the_arrows_move_and_lengthen_the_selection` | UI script |
 | R28 | `crates/shell/tests/clip_view.rs`, `the_note_clipboard_copies_cuts_pastes_and_duplicates`; `crates/agent/tests/tools.rs`, `an_agent_copies_pastes_and_duplicates_notes_by_command` | unit, agent |
 | R29 | `crates/shell/tests/clip_view.rs`, `copying_a_note_by_dragging_leaves_the_original`; `crates/ui/tests/clip_view.rs`, `option_dragging_a_note_copies_it` | unit, UI script |
-| R30 | `crates/shell-spec/src/context_menus.rs`, `the_note_editor_menus_follow_menus_md_and_name_their_packages`; `crates/ui/tests/clip_view.rs`, `the_context_menu_lists_the_items_in_order` | unit, UI script |
+| R30 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`, `the_note_editor_menus_name_their_later_packages`; `crates/ui/tests/clip_view.rs`, `the_context_menu_lists_the_items_in_order` | unit, UI script |
 | R31 | `crates/shell/tests/clip_view.rs`, `note_edits_are_registered_with_their_classes`, `the_insert_marker_and_the_time_selection_are_view_state`; `crates/agent/tests/tools.rs`, `an_agent_copies_pastes_and_duplicates_notes_by_command` | unit, agent |
 | R32 | to be written in WP-6.54 | |
 | R33 | to be written in WP-6.54 | |

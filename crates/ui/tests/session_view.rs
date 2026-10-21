@@ -20,7 +20,7 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
 use serde_json::json;
 
 fn harness() -> Harness {
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     h.shell
         .run("view.toggle_session_arrangement", json!({}))
         .unwrap();
@@ -504,15 +504,8 @@ fn every_slot_reaches_accesskit_with_its_track_and_scene() {
 // Launching from the grid (WP-3.8). The null device runs the engine on a
 // timer, so these wait for what it publishes.
 
-fn wait(h: &mut Harness, what: &str, mut done: impl FnMut(&Harness) -> bool) {
-    for _ in 0..500 {
-        h.settle();
-        if done(h) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("timed out waiting for {what}");
+fn wait(h: &mut Harness, what: &str, done: impl FnMut(&Harness) -> bool) {
+    h.wait(what, done);
 }
 
 fn states(h: &Harness) -> Vec<bl_engine::SlotStatus> {

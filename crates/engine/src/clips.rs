@@ -45,7 +45,7 @@ use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
-    BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, Positions, Stretchers,
+    BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, PoolSpec, Positions, Stretchers,
     WarpScratch, Warped, WindowBuf, window_of,
 };
 
@@ -852,15 +852,45 @@ fn window_width(track: &Track, previous: Option<&Track>, rate: SampleRate) -> us
         .unwrap_or(0)
 }
 
-/// The clip's lane in a track's stretcher pool (R5): clips that can sound at
-/// once take different lanes, so each plays through its own Complex or Complex
-/// Pro stretcher, and the fewest lanes such an assignment needs is the pool's
-/// size. A greedy walk over the clips in song order, each taking the first
-/// lane its start has cleared. Returns how many lanes the clips need.
+/// Whether the clip sounds through the library at some point: it is in a
+/// frequency-domain mode now, or was before a mode change, so its crossfade
+/// renders through the stretcher too (R8, R21).
+fn uses_stretcher(clip: &PlacedClip) -> bool {
+    let frequency = |mode: WarpMode| matches!(mode, WarpMode::Complex | WarpMode::ComplexPro);
+    frequency(clip.playing.mode)
+        || clip
+            .past
+            .as_ref()
+            .is_some_and(|past| frequency(past.playing.mode))
+}
+
+/// The clip's lane in a track's stretcher pool (R5): the clips that can sound
+/// at once through a stretcher take different lanes, so each plays through its
+/// own Complex or Complex Pro stretcher, and the fewest lanes such an
+/// assignment needs is the pool's size. Only a clip that sounds through the
+/// library is counted — one in a frequency-domain mode, or one that was, for
+/// its crossfade (R8, R21) — so a track of Beats clips beside one Complex clip
+/// asks for one lane, not the two its Beats clips would. The track's Session
+/// slot clips share one lane, since a slot clip is launched alone and the
+/// track's Arrangement clips stay silent while it plays (R20), so they never
+/// sound at once with each other or with an Arrangement clip. A greedy walk
+/// over the clips in song order, each taking the first lane its start has
+/// cleared. Returns how many lanes the clips need.
 fn assign_lanes(clips: &mut [PlacedClip]) -> usize {
     // The song frame each lane's last clip ends at.
     let mut busy: Vec<i64> = Vec::new();
     for clip in clips.iter_mut() {
+        if !uses_stretcher(clip) {
+            continue;
+        }
+        // Every slot clip of the track plays alone, so they share a lane.
+        if clip.scene.is_some() {
+            if busy.is_empty() {
+                busy.push(i64::MIN);
+            }
+            clip.lane = 0;
+            continue;
+        }
         let lane = match busy.iter().position(|&end| end <= clip.geometry.start) {
             Some(lane) => lane,
             None => {
@@ -874,10 +904,22 @@ fn assign_lanes(clips: &mut [PlacedClip]) -> usize {
     busy.len()
 }
 
+/// Whether the pool a player holds serves a list that needs `needs`, so the
+/// list carries none and the player keeps the one it has. A list that needs no
+/// stretcher at all never keeps one: it sends an empty pool, to free the
+/// player's.
+fn keeps_pool(held: Option<PoolSpec>, needs: PoolSpec) -> bool {
+    needs.lanes > 0 && held.is_some_and(|held| held.covers(needs))
+}
+
 /// What [`ClipList::build`] made: the list, and the media it couldn't find.
 pub(crate) struct Built {
     pub(crate) list: ClipList,
     pub(crate) missing: Vec<ContentHash>,
+    /// The shape of the pool the player now holds: the one this list carries,
+    /// or the one it kept because it still serves the list (R5, R21). The
+    /// compiler remembers it, so the next list knows what the player has.
+    pub(crate) pool: PoolSpec,
 }
 
 impl ClipList {
@@ -895,6 +937,7 @@ impl ClipList {
         rate: SampleRate,
         channels: usize,
         loop_start: Option<i64>,
+        pool: Option<PoolSpec>,
         sources: &mut ClipSources,
         media: Option<&dyn MediaLibrary>,
     ) -> Built {
@@ -1101,13 +1144,30 @@ impl ClipList {
             })
         };
         let rate_hz = rate.as_f64();
-        let stretchers = Stretchers::new(
-            channels,
-            rate_hz,
+        let needs = PoolSpec {
             lanes,
-            uses(WarpMode::Complex),
-            uses(WarpMode::ComplexPro),
-        );
+            complex: uses(WarpMode::Complex),
+            pro: uses(WarpMode::ComplexPro),
+        };
+        // Keep the pool the player already has while it serves this list: a
+        // change that leaves the pool's shape alone — a clip's Formants, its
+        // gain, a move that keeps the lanes — then carries no pool, and the
+        // player keeps the one it has, so the change doesn't make the
+        // stretchers again (R21). A list that needs none sends an empty pool,
+        // to free the player's.
+        let kept = keeps_pool(pool, needs);
+        let held = if kept { pool.unwrap() } else { needs };
+        let stretchers = if kept {
+            Handoff::empty()
+        } else {
+            Handoff::new(Box::new(Stretchers::new(
+                channels,
+                rate_hz,
+                needs.lanes,
+                needs.complex,
+                needs.pro,
+            )))
+        };
         let window = WindowBuf::new(channels, window_width(track, previous, rate));
         Built {
             list: Self {
@@ -1118,9 +1178,10 @@ impl ClipList {
                 bank: Handoff::new(Box::new(bank.into_boxed_slice())),
                 histories: Handoff::new(Box::new(histories.into_boxed_slice())),
                 window: Handoff::new(Box::new(window)),
-                stretchers: Handoff::new(Box::new(stretchers)),
+                stretchers,
             },
             missing,
+            pool: held,
         }
     }
 
@@ -1741,7 +1802,9 @@ impl Node for ClipPlayer {
                 None => std::mem::forget(old_window),
             }
         }
-        if let Some(old_stretchers) = self.stretchers.take() {
+        if stretchers.is_some()
+            && let Some(old_stretchers) = self.stretchers.take()
+        {
             match self
                 .clips
                 .as_ref()
@@ -1787,7 +1850,11 @@ impl Node for ClipPlayer {
         self.bank = bank;
         self.histories = histories;
         self.window = window;
-        self.stretchers = stretchers;
+        // A list that brought no pool leaves the player's in place: the
+        // compiler kept it, since it still serves the list (R5, R21).
+        if let Some(stretchers) = stretchers {
+            self.stretchers = Some(stretchers);
+        }
         drop(self.clips.replace(data));
     }
 
@@ -1842,12 +1909,19 @@ mod tests {
         }
     }
 
-    // Spec: warp-modes R5. Clips that can sound at once take different
+    /// A clip that sounds through the library, for the lane tests.
+    fn complex_clip() -> PlacedClip {
+        let mut clip = clip(false);
+        clip.playing.mode = bl_model::WarpMode::Complex;
+        clip
+    }
+
+    // Spec: warp-modes R5, R21. Clips that can sound at once take different
     // stretcher lanes; clips that can't share one, so the pool stays as small
     // as it can be.
     #[test]
     fn clips_that_can_sound_at_once_take_different_lanes() {
-        let mut clips: Vec<PlacedClip> = (0..3).map(|_| clip(false)).collect();
+        let mut clips: Vec<PlacedClip> = (0..3).map(|_| complex_clip()).collect();
         // Three in a row: one lane between them.
         for (i, clip) in clips.iter_mut().enumerate() {
             let at = i as i64 * 1_000;
@@ -1864,6 +1938,78 @@ mod tests {
         clips[1].geometry.start = 600;
         clips[1].geometry.end = 1_000;
         assert_eq!(assign_lanes(&mut clips), 1);
+    }
+
+    // Spec: warp-modes R5, R21. Only the clips that sound through a stretcher
+    // are counted, so a track of Beats clips beside one Complex clip asks for
+    // one lane rather than the two its Beats clips alone would.
+    #[test]
+    fn a_track_counts_only_the_clips_that_use_a_stretcher() {
+        let mut clips = vec![clip(false), clip(false), complex_clip()];
+        for (i, clip) in clips.iter_mut().enumerate() {
+            let at = i as i64 * 1_000;
+            clip.geometry.start = at;
+            clip.geometry.end = at + 900;
+        }
+        // The two Beats clips overlap each other but never a stretcher, so the
+        // one Complex clip is the only lane the pool needs.
+        clips[1].geometry.start = 200;
+        clips[1].geometry.end = 1_100;
+        assert_eq!(assign_lanes(&mut clips), 1);
+        assert_eq!(clips[2].lane, 0);
+    }
+
+    // Spec: warp-modes R5, R20. The Session slot clips of a track share one
+    // lane, since a slot clip is launched alone and the Arrangement is silent
+    // while it plays: four scene slots ask for one lane, not four.
+    #[test]
+    fn session_slot_clips_share_a_lane() {
+        let mut clips: Vec<PlacedClip> = (0..4).map(|_| complex_clip()).collect();
+        for clip in &mut clips {
+            clip.scene = Some(SceneId(bl_core::id::Id::new(1).unwrap()));
+            clip.geometry.start = 0;
+            clip.geometry.end = 4_800;
+        }
+        assert_eq!(assign_lanes(&mut clips), 1);
+        assert!(clips.iter().all(|clip| clip.lane == 0));
+        // A slot clip beside an Arrangement clip that starts at the same frame
+        // shares its lane too: they never sound together.
+        let mut arrangement = complex_clip();
+        arrangement.geometry.start = 0;
+        arrangement.geometry.end = 4_800;
+        clips.push(arrangement);
+        assert_eq!(assign_lanes(&mut clips), 1);
+    }
+
+    // Spec: warp-modes R5, R21. A pool the player holds serves a list while it
+    // has the lanes and the modes the list asks for, so the list carries none
+    // and the player keeps it; a list that needs no stretcher frees it.
+    #[test]
+    fn a_pool_is_kept_while_it_serves_the_list() {
+        let two = PoolSpec {
+            lanes: 2,
+            complex: true,
+            pro: true,
+        };
+        let one = PoolSpec {
+            lanes: 1,
+            complex: true,
+            pro: false,
+        };
+        assert!(keeps_pool(Some(two), one));
+        assert!(keeps_pool(Some(two), two));
+        // Fewer lanes, or a mode the pool lacks, makes the list build one.
+        assert!(!keeps_pool(Some(one), two));
+        assert!(!keeps_pool(None, one));
+        // A list with no stretcher never keeps the pool.
+        assert!(!keeps_pool(
+            Some(two),
+            PoolSpec {
+                lanes: 0,
+                complex: false,
+                pro: false,
+            }
+        ));
     }
 
     // Spec: audio-clips R3

@@ -15,8 +15,8 @@ use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, BeatsSettings, Clip, ClipData, Command, ContentHash, Editor, Preserve,
-    TextureSettings, TonesSettings, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
+    AudioData, BeatsSettings, Clip, ClipData, Command, ComplexProUpdate, ContentHash, Editor,
+    Preserve, TextureSettings, TonesSettings, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 use common::{RATE, track};
 
@@ -537,6 +537,97 @@ fn overlapping_complex_clips_do_not_share_a_stretcher() {
             "overlapping Complex clips, blocks of {block}"
         );
     }
+}
+
+// Spec: warp-modes R5, R21. A change to a clip's Formants leaves the track's
+// stretcher pool the shape it had, so the list the change sends carries no
+// pool and the player keeps the one it has: the clip goes on sounding through
+// it rather than falling silent, and the change makes no stretcher again.
+#[test]
+fn a_formants_change_keeps_the_pool_and_goes_on_sounding() {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(120.0).unwrap()),
+        })
+        .unwrap();
+    let audio_track = track(&mut editor, TrackKind::Audio, None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: WarpMode::ComplexPro,
+        ..AudioData::new(MEDIA)
+    };
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        ClipData::Audio(audio),
+    );
+    editor
+        .apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        })
+        .unwrap();
+    let clip = editor
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips())
+        .next()
+        .unwrap()
+        .id;
+    // A control render of the same clip with no change, to compare against.
+    let control = {
+        let registry = Registry::new().with_media(Arc::new(media()));
+        let mut offline = Offline::new(EngineConfig::new(RATE, 512), registry);
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(24_000, |output| out.extend_from_slice(output.channel(0)));
+        out
+    };
+    let registry = Registry::new().with_media(Arc::new(media()));
+    let mut offline = Offline::new(EngineConfig::new(RATE, 512), registry);
+    offline.sync(editor.document());
+    offline.sender().transport(TransportCommand::Play);
+    // Play through the pool, then change Formants mid-play.
+    let mut before = Vec::new();
+    offline.render(12_000, |output| before.extend_from_slice(output.channel(0)));
+    editor
+        .apply(Command::SetClipWarpSettings {
+            clip,
+            beats: None,
+            tones: None,
+            texture: None,
+            complex_pro: Some(ComplexProUpdate {
+                formants: Some(50.0),
+                envelope: None,
+            }),
+        })
+        .unwrap();
+    offline.sync(editor.document());
+    let mut after = Vec::new();
+    offline.render(12_000, |output| after.extend_from_slice(output.channel(0)));
+    assert_eq!(offline.heap_operations(), 0);
+    assert_eq!(
+        before.as_slice(),
+        &control[..12_000],
+        "the clip before the change"
+    );
+    // R22: with no pitch change, Formants changes nothing to the bit, so the
+    // change is inaudible and the clip goes on exactly as the control render
+    // did. That pins that the player kept its pool: a player that dropped it
+    // would fall silent here.
+    assert_eq!(
+        after.as_slice(),
+        &control[12_000..],
+        "the Formants change altered the sound"
+    );
 }
 
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from

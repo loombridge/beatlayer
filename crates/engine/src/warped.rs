@@ -1013,6 +1013,30 @@ impl Stretchers {
     }
 }
 
+/// What a track's stretcher pool holds (WP-4.6, R5, R21): how many lanes, and
+/// which of the frequency-domain modes. The compiler keeps this per track, so
+/// it knows what the player already has: a list whose needs that pool still
+/// meets carries no pool of its own, and the player keeps the one it has,
+/// which is what spares a parameter drag (Formants, gain) the cost of making
+/// the stretchers again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PoolSpec {
+    /// How many lanes the pool has, one per clip that can sound at once.
+    pub(crate) lanes: usize,
+    /// Whether it holds Complex stretchers.
+    pub(crate) complex: bool,
+    /// Whether it holds Complex Pro stretchers.
+    pub(crate) pro: bool,
+}
+
+impl PoolSpec {
+    /// Whether a pool of this shape serves a list that needs `needs`: it does
+    /// while it has at least the lanes and every mode the list asks for.
+    pub(crate) fn covers(self, needs: Self) -> bool {
+        self.lanes >= needs.lanes && (!needs.complex || self.complex) && (!needs.pro || self.pro)
+    }
+}
+
 /// The player's room for warped playback: the positions of a run and what the
 /// mode rendered, both planar and made when the player was. The window of the
 /// file around the run comes with the clip list ([`WindowBuf`]), since how

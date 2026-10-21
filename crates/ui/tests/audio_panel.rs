@@ -244,6 +244,30 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
     assert_eq!(steps(&p.h), before + 1);
 }
 
+// In Re-Pitch the Transpose and the Detune don't act, and the panel draws
+// them switched off (warp-modes R10).
+#[test]
+fn re_pitch_switches_the_pitch_controls_off() {
+    let mut p = Panel::new("re-pitch");
+    p.h.shell
+        .run("clip.set_warp", json!({ "clip": p.clip, "warp": true }))
+        .unwrap();
+    p.h.shell
+        .run(
+            "clip.set_warp_mode",
+            json!({ "clip": p.clip, "mode": "re_pitch" }),
+        )
+        .unwrap();
+    p.h.settle();
+    let all = p.nodes();
+    for name in ["Transpose", "Detune"] {
+        assert!(
+            Harness::node(&all, name).disabled,
+            "{name} is switched off in Re-Pitch"
+        );
+    }
+}
+
 // The control whose command hasn't landed is drawn pending, and says which
 // package brings it (R14): the Clip Fade, on a Session clip.
 #[test]

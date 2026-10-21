@@ -84,6 +84,10 @@ struct TrackRepr {
     keep_monitoring_latency: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
+    /// The track's frozen audio (WP-4.14). Sets saved before it have none,
+    /// which loads unfrozen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    frozen: Option<crate::freeze::FrozenTrack>,
 }
 
 /// Whether an envelope drives its parameter: on unless a hand move turned
@@ -211,6 +215,7 @@ impl TrackRepr {
             take_lanes: track.take_lanes().cloned().collect(),
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
+            frozen: track.frozen.clone(),
             children: if with_children {
                 track
                     .children
@@ -361,6 +366,7 @@ impl Loader {
             });
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
+        track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }

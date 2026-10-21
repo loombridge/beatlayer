@@ -269,6 +269,10 @@ pub struct Squeeze {
     /// published, as linear amplitude.
     peak_in: f32,
     peak_out: f32,
+    /// The most gain the last block took off, in dB (the mixer view spec,
+    /// R40): the least gain the envelope reached, zero when it reduced
+    /// nothing.
+    reduction: f32,
 }
 
 impl Squeeze {
@@ -295,6 +299,7 @@ impl Squeeze {
             hold_frames: 0.0,
             peak_in: 0.0,
             peak_out: 0.0,
+            reduction: 0.0,
         }
     }
 }
@@ -383,6 +388,8 @@ impl NativeDevice for Squeeze {
         // and recovers with Release (Log scales the release step with the
         // depth of the reduction; Auto reads how long one has been held).
         let mut gain = self.gain;
+        // The least gain of the block, for the gain-reduction meter (R40).
+        let mut least = gain;
         for i in 0..frames {
             let target = self.targets[i];
             let step = if target < gain {
@@ -396,6 +403,7 @@ impl NativeDevice for Squeeze {
                 release_step
             };
             gain += (target - gain) * step;
+            least = least.min(gain);
             self.gains[i] = gain;
             if target < 1.0 {
                 self.hold_frames += 1.0;
@@ -404,6 +412,7 @@ impl NativeDevice for Squeeze {
             }
         }
         self.gain = gain;
+        self.reduction = level_db(f64::from(least)) as f32;
 
         // 3. Out: the signal from the look-ahead ago, through the envelope
         // and Out, mixed with the dry signal by Dry/Wet.
@@ -429,6 +438,10 @@ impl NativeDevice for Squeeze {
 
     fn latency(&self) -> u32 {
         self.lookahead
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.reduction
     }
 
     fn display_len(&self) -> usize {

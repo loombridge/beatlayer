@@ -125,6 +125,12 @@ pub fn meter_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-meter", place, track))
 }
 
+/// The ID of a strip's gain-reduction bar (R40).
+#[must_use]
+pub fn gain_reduction_id(place: Place, track: TrackId) -> Id {
+    Id::new(("mixer-gain-reduction", place, track))
+}
+
 /// The ID of a mixer's column, which takes the keyboard focus that
 /// Navigate ▸ Mixer gives the mixer (R13).
 #[must_use]
@@ -1215,6 +1221,7 @@ impl StripParts<'_> {
             }
             self.fader(ui, strip.fader, events);
             self.meter(ui, strip.meter);
+            self.gain_reduction(ui, strip.gain_reduction);
             self.scale(ui, strip);
         }
         match kind {
@@ -2889,6 +2896,39 @@ impl StripParts<'_> {
                 volume_text(f64::from(rms[0].max(rms[1])))
             ));
             node.set_numeric_value(controls::gain_db(f64::from(loudest)).max(-1000.0));
+        });
+    }
+
+    /// The gain-reduction bar (R40; IMP-25): a thin bar beside the meter
+    /// showing the most reduction any of the track's compressors or
+    /// limiters reported for the last block, on the meter's own 0-to-60 dB
+    /// scale, filled from the top.
+    fn gain_reduction(&self, ui: &mut Ui, rect: Rect) {
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, c.window.0);
+        let reduction = self.shell.gain_reduction(self.track);
+        if reduction < 0.0 {
+            let position = meter_position(controls::db_gain(f64::from(reduction)) as f32);
+            painter.rect_filled(
+                Rect::from_min_max(
+                    rect.min,
+                    pos2(rect.right(), rect.top() + rect.height() * position),
+                ),
+                0.0,
+                c.meter_hot.0,
+            );
+        }
+        let id = gain_reduction_id(self.place, self.track);
+        let response = ui.interact(rect, id, Sense::hover());
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::ProgressIndicator, true, "Gain Reduction")
+        });
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Meter);
+            node.set_label("Gain Reduction".to_owned());
+            node.set_value(format!("{reduction:.1} dB"));
+            node.set_numeric_value(f64::from(reduction));
         });
     }
 

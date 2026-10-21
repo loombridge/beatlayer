@@ -13,6 +13,7 @@
 //! | [`onsets`] | Transient times | Spectral flux with adaptive peak picking (after Böck, Krebs and Schedl, 2012), refined in the waveform |
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
+//! | [`loops`] | The span of a sample that repeats, for the autosampler | Rising zero crossings of the left channel, matched over 10 ms |
 //!
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
 //! Demucs network (IMP-11).
@@ -26,6 +27,7 @@
 pub mod cache;
 pub mod key;
 pub mod levels;
+pub mod loops;
 pub mod loudness;
 pub mod onsets;
 pub mod spectrum;

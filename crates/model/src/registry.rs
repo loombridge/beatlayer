@@ -557,6 +557,30 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_frozen",
+        action: Action::Apply("freeze_tracks"),
+        label: "Set Tracks Frozen",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Marks tracks frozen with the files a freeze rendered, and makes their \
+            clips play those files instead of running the track's devices. `frozen` names each \
+            track and the audio its freeze rendered. `track.freeze` is the command a person and \
+            an agent run: it renders the files and applies this one. Used directly, it names \
+            files the caller has already written.",
+    },
+    Entry {
+        id: "track.clear_frozen",
+        action: Action::Apply("unfreeze_tracks"),
+        label: "Clear Tracks Frozen",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Plays tracks through their devices and clips again, dropping their frozen \
+            audio and restoring the clip data the freeze kept. `tracks` names them. \
+            `track.unfreeze` is the command a person and an agent run.",
+    },
+    Entry {
         id: "mixer.set_volume",
         action: Action::Apply("set_volume"),
         label: "Set Track Volume",

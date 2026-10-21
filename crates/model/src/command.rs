@@ -299,6 +299,19 @@ pub enum Command {
         /// The new name.
         name: String,
     },
+    /// Marks tracks frozen with the files a freeze rendered (WP-4.14, R13).
+    /// The track's devices, clips, and their settings stay as they are, so
+    /// unfreezing plays them again (R10).
+    FreezeTracks {
+        /// Each track and the audio its freeze rendered.
+        frozen: Vec<(TrackId, crate::freeze::FrozenTrack)>,
+    },
+    /// Plays tracks through their devices and clips again, dropping their
+    /// frozen audio (WP-4.14, R10). Their freeze files stay on disk.
+    UnfreezeTracks {
+        /// The tracks to unfreeze.
+        tracks: Vec<TrackId>,
+    },
     /// Gives a scene a tempo to set when it is launched, from 20 to 999
     /// BPM, or switches it off with `None` (WP-3.5).
     SetSceneTempo {
@@ -2157,6 +2170,8 @@ impl Command {
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
             Self::RenameTrack { .. } => "Rename track",
+            Self::FreezeTracks { .. } => "Freeze tracks",
+            Self::UnfreezeTracks { .. } => "Unfreeze tracks",
             Self::SetVolume { .. } => "Change volume",
             Self::SetPan { .. } => "Change pan",
             Self::SetMute { .. } => "Mute track",
@@ -2568,6 +2583,86 @@ impl Document {
             Command::RenameTrack { track, name } => {
                 if self.track_ref(*track)?.name != *name {
                     self.track_mut(*track)?.name.clone_from(name);
+                }
+                Ok(())
+            }
+            Command::FreezeTracks { frozen } => {
+                for (track, audio) in frozen {
+                    if self.track_ref(*track)?.kind == TrackKind::Main {
+                        return Err(ModelError::MainTrack);
+                    }
+                    // The clips play the freeze files: their own data is
+                    // kept in the frozen record and restored on unfreezing
+                    // (R6, R10).
+                    let mut played: Vec<(crate::ids::ClipId, Option<SceneId>, crate::clip::Clip)> =
+                        Vec::new();
+                    for region in &audio.clips {
+                        let Some(held) = self.track_ref(*track).ok() else {
+                            continue;
+                        };
+                        let Some(clip) = (match region.scene {
+                            None => held.clips.get(&region.clip),
+                            Some(scene) => held.slots.get(&scene),
+                        }) else {
+                            continue;
+                        };
+                        let mut clip = (**clip).clone();
+                        clip.data = audio.audio_for(region);
+                        played.push((region.clip, region.scene, clip));
+                    }
+                    let held = self.track_mut(*track)?;
+                    held.frozen = Some(audio.clone());
+                    for (clip, scene, played) in played {
+                        match scene {
+                            None => {
+                                held.clips.insert(clip, Shared::new(played));
+                            }
+                            Some(scene) => {
+                                held.slots.insert(scene, Shared::new(played));
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Command::UnfreezeTracks { tracks } => {
+                for track in tracks {
+                    let originals: Vec<(
+                        crate::ids::ClipId,
+                        crate::clip::ClipData,
+                        Option<SceneId>,
+                    )> = self
+                        .track_ref(*track)?
+                        .frozen
+                        .as_ref()
+                        .map(|frozen| {
+                            frozen
+                                .clips
+                                .iter()
+                                .map(|region| (region.clip, region.original.clone(), region.scene))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let held = self.track_mut(*track)?;
+                    for (clip, data, scene) in originals {
+                        match scene {
+                            None => {
+                                if let Some(existing) = held.clips.get(&clip).cloned() {
+                                    let mut back = (*existing).clone();
+                                    back.data = data;
+                                    held.clips.insert(clip, Shared::new(back));
+                                }
+                            }
+                            Some(scene) => {
+                                if let Some(existing) = held.slots.get(&scene).cloned() {
+                                    let mut back = (*existing).clone();
+                                    back.data = data;
+                                    held.slots.insert(scene, Shared::new(back));
+                                }
+                            }
+                        }
+                    }
+                    held.frozen = None;
                 }
                 Ok(())
             }

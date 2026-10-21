@@ -138,6 +138,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::VIEW_CLIP_ENVELOPE,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
+        // The File & Folder page's Sample Editor row (the sample editor
+        // spec, R16), the Audio Utilities panel's Edit button (R16), and the
+        // file dropped on the Clip View that replaces a clip's sample (R18).
+        commands::SETTINGS_SET_SAMPLE_EDITOR,
+        bl_shell::audio_panel_commands::EDIT_SAMPLE,
+        bl_shell::audio_panel_commands::REPLACE_SAMPLE,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

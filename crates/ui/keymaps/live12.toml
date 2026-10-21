@@ -3253,7 +3253,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["Cmd+Option+Shift+F"]
 win = ["Ctrl+Alt+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "track.freeze", contexts = ["track-headers"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-018"

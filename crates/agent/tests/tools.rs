@@ -167,16 +167,26 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
         ids,
         [
             "track.add_take_lane",
+            "track.clear_frozen",
             "track.create",
             "track.delete",
             "track.duplicate_without_clips",
+            "track.freeze",
             "track.group",
             "track.move",
             "track.rename",
+            "track.set_devices_enabled",
+            "track.set_frozen",
+            "track.unfreeze",
             "track.ungroup"
         ]
     );
-    let delete = &tracks["commands"][2];
+    let delete = tracks["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["command"] == "track.delete")
+        .unwrap();
     assert_eq!(delete["permission"], "destructive");
     assert_eq!(delete["access"], "refused to agents");
 

@@ -75,6 +75,9 @@ pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
 pub const VIEW_TOGGLE_PLUG_IN_WINDOWS: &str = "view.toggle_plug_in_windows";
+/// `view.close_plug_in_windows`: close every open plug-in editor window
+/// (View ▸ Close All Plug-in Windows, IMP-25).
+pub const CLOSE_PLUG_IN_WINDOWS: &str = "view.close_plug_in_windows";
 /// `view.toggle_session_arrangement`: switch the main view.
 pub const VIEW_TOGGLE_SESSION_ARRANGEMENT: &str = "view.toggle_session_arrangement";
 /// `view.zoom_in`: zoom the interface in.
@@ -119,6 +122,9 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
+/// `settings.set_sample_editor`: choose the sample editor on the File &
+/// Folder page (WP-4.10b).
+pub const SETTINGS_SET_SAMPLE_EDITOR: &str = "settings.set_sample_editor";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
 /// `settings.set_loop_warp_short_samples`: choose Loop/Warp Short Samples
@@ -192,6 +198,7 @@ pub const IDS: &[&str] = &[
     VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
+    CLOSE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN,
     VIEW_ZOOM_OUT,
@@ -210,6 +217,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_TEMPORARY_FOLDER,
+    SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
     SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
     SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
@@ -377,6 +385,23 @@ pub struct TemporaryFolderResult {
     pub path: String,
 }
 
+/// Arguments of `settings.set_sample_editor`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SampleEditorArgs {
+    /// The editor's command: the program, its arguments, and the clip's
+    /// file as the last one. `null` for none, when Edit opens the File &
+    /// Folder page instead.
+    pub path: Option<String>,
+}
+
+/// What `settings.set_sample_editor` returns: the editor in use afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SampleEditorResult {
+    /// The sample editor's path, empty when none is named.
+    pub path: String,
+}
+
 /// Arguments of a command that switches a setting on or off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -487,6 +512,14 @@ pub struct ClipEnvelopeArgs {
 pub struct SwitchResult {
     /// Whether it's now on.
     pub on: bool,
+}
+
+/// What `view.close_plug_in_windows` returns: how many editor windows it
+/// closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ClosedPlugInWindows {
+    /// The editor windows it closed.
+    pub closed: usize,
 }
 
 /// What the view commands return: the window's view state afterwards.
@@ -740,6 +773,17 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-DEV-009")
             .args::<TogglePlugInWindowsArgs>()
             .result::<SwitchResult>(),
+        CommandSpec::new(CLOSE_PLUG_IN_WINDOWS, "Close All Plug-in Windows")
+            .description(
+                "Closes every open plug-in editor window at once, as View ▸ Close All Plug-in \
+                 Windows does. It closes editors only: floating native device windows stay as \
+                 they are, so it changes nothing in the set, isn't an undo step, and is in the \
+                 read class. It has no key. Returns how many editor windows it closed.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ClosedPlugInWindows>(),
         CommandSpec::new(VIEW_TOGGLE_BROWSER, "Browser")
             .description(
                 "Shows or hides the browser at the left of the main window; the main view \
@@ -1089,6 +1133,22 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<TemporaryFolderArgs>()
             .result::<TemporaryFolderResult>(),
+        // File & Folder (L-SET-015; WP-4.10b): the sample editor Edit opens
+        // a clip's file in.
+        CommandSpec::new(SETTINGS_SET_SAMPLE_EDITOR, "Sample Editor")
+            .description(
+                "Chooses the sample editor on the Settings window's File & Folder page: the \
+                 command the Edit button in the Clip View's Audio Utilities panel opens a clip's \
+                 file in. `path` is the command: the program, its arguments, and the clip's \
+                 file as the last one, or `null` for none, when Edit opens the File & Folder \
+                 page instead. Run by a person from the Browse button without a `path`, it asks \
+                 for a program. The setting is kept for the next start, and isn't part of the \
+                 set or an undo step. The result's `path` is the editor in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SampleEditorArgs>()
+            .result::<SampleEditorResult>(),
         // Record, Warp & Launch, Warp/Fades (IMP-02; WP-2.13).
         CommandSpec::new(SETTINGS_SET_WARP_RECORDED_AUDIO, "Warp Recorded Audio")
             .description(

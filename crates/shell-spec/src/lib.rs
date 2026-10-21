@@ -50,6 +50,8 @@
 //! - [`sample_editor`]: the Sample Editor's selections and view (WP-4.10).
 //! - [`audio_editing`]: Crop, Consolidate, and Consolidate Time to New Scene
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
+//! - [`audio_panel`]: the Audio Utilities panel's own commands
+//!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -61,6 +63,8 @@ pub mod arrangement;
 pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
+pub mod audio_panel;
+pub mod autosampler;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
@@ -68,6 +72,7 @@ pub mod context_menus;
 pub mod devices;
 pub mod editing;
 pub mod export;
+pub mod freeze;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
@@ -111,6 +116,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_io::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
+    autosampler::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
@@ -123,6 +129,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     stems::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
+    audio_panel::register(registry)?;
+    freeze::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)
 }

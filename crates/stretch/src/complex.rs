@@ -108,10 +108,19 @@ pub struct Complex {
     pro: bool,
     formants: f64,
     envelope: u32,
-    /// The song frame the last run ended at, so a jump primes afresh (R7).
+    /// The song frame the last run ended at, so a run that doesn't follow it
+    /// (a start, a locate, a jump) primes afresh (R7).
     ended: Option<i64>,
+    /// The clip the last run was for, so a run of another clip taking this
+    /// instance over primes afresh too: a pool's stretcher serves several of
+    /// the track's clips that never sound at once (R5, R7).
+    clip: u64,
     /// The file frame the input has been fed up to.
     fed: i64,
+    /// How many times the stretcher has been primed, for the loop-wrap test
+    /// (R7).
+    #[cfg(test)]
+    primes: u64,
     /// The room a prime's dropped output is written into, in frames per
     /// channel: made once, so no prime allocates (R5).
     scratch: Vec<f32>,
@@ -171,7 +180,10 @@ impl Complex {
             formants: DEFAULT_FORMANTS,
             envelope: DEFAULT_ENVELOPE,
             ended: None,
+            clip: 0,
             fed: 0,
+            #[cfg(test)]
+            primes: 0,
             scratch: vec![0.0; channels.max(1) * SCRATCH_FRAMES],
             scratch_frames: SCRATCH_FRAMES,
         }
@@ -249,6 +261,10 @@ impl Complex {
     /// own input and output latency, so the run's first frame comes out
     /// aligned to the point (R7, R24).
     fn prime(&mut self, request: &Request<'_>, window: &Window<'_>) {
+        #[cfg(test)]
+        {
+            self.primes += 1;
+        }
         let rate = request.speed.max(1e-6);
         let p0 = request.positions[0].round() as i64;
         // `output_seek` resets the stretcher itself, so the settings go on
@@ -330,24 +346,71 @@ impl WarpMode for Complex {
         if n == 0 || window.channels == 0 {
             return;
         }
-        let start = request.first;
-        if self.ended != Some(start) {
+        // Spec: warp-modes R7. One decision, here: a run of another clip, or
+        // one that doesn't follow the song frame the last run ended on (the
+        // clip's start, a locate, a jump), primes the stretcher afresh. A wrap
+        // of the clip's own loop brace keeps the song frame continuous, so it
+        // doesn't restart the mode: `render_run` re-anchors the feed at the
+        // brace's start and the stretcher goes on.
+        if self.clip != request.clip || self.ended != Some(request.first) {
             self.prime(request, window);
         }
         self.tune(request.pitch);
         self.render_run(request, window, out, stride, n);
-        self.ended = Some(start + n as i64);
+        self.clip = request.clip;
+        self.ended = Some(request.first + n as i64);
     }
 
     fn reset(&mut self) {
         self.ended = None;
+        self.clip = 0;
         self.fed = 0;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::beats::Plan;
+
     use super::*;
+
+    /// Renders one run of `n` frames whose file positions start at `at`, for
+    /// clip `clip`, through a window of `file` built as the player builds it.
+    fn run(mode: &mut Complex, file: &[f32], at: f64, first: i64, n: usize, clip: u64) -> Vec<f32> {
+        let empty = Plan::EMPTY;
+        let positions: Vec<f64> = (0..n).map(|i| at + i as f64).collect();
+        let request = Request {
+            positions: &positions,
+            first,
+            speed: 1.0,
+            neutral: false,
+            high_quality: true,
+            beats: &empty,
+            pitch: 1.0,
+            clip,
+        };
+        let (before, after) = mode.reach(&request);
+        let lo = positions[0].floor() as i64 - before as i64;
+        let hi = positions[n - 1].floor() as i64 + after as i64 + 1;
+        let len = (hi - lo) as usize;
+        let mut data = vec![0.0f32; len];
+        for (i, sample) in data.iter_mut().enumerate() {
+            let frame = lo + i as i64;
+            if frame >= 0 && (frame as usize) < file.len() {
+                *sample = file[frame as usize];
+            }
+        }
+        let window = Window {
+            data: &data,
+            stride: len,
+            channels: 1,
+            frames: len,
+            first: lo,
+        };
+        let mut out = vec![0.0f32; n];
+        mode.render(&request, &window, &mut out, n);
+        out
+    }
 
     // Spec: warp-modes R2
     #[test]
@@ -360,5 +423,28 @@ mod tests {
         );
         assert_eq!((pro.block_samples(), pro.interval_samples()), (17_280, 480));
         assert!(pro.block_samples() > complex.block_samples());
+    }
+
+    // Spec: warp-modes R7, R24. A start, a locate and a jump prime the mode
+    // afresh, but a wrap of the clip's own loop brace doesn't restart it: it
+    // goes on with the audio from the brace's start as though it followed the
+    // brace's end.
+    #[test]
+    fn a_loop_brace_wrap_goes_on_without_priming() {
+        let file: Vec<f32> = (0..48_000).map(|i| (i as f32 * 0.01).sin()).collect();
+        let mut mode = Complex::new(1, 48_000.0, false);
+        // The clip plays from file frame 40,000 for 480 song frames.
+        run(&mut mode, &file, 40_000.0, 1_000, 480, 7);
+        assert_eq!(mode.primes, 1, "the clip's first run primes once");
+        // The loop brace wraps: the file jumps back to 10,000 while the song
+        // frame runs on.
+        run(&mut mode, &file, 10_000.0, 1_480, 480, 7);
+        assert_eq!(mode.primes, 1, "the loop brace's wrap primed afresh");
+        // A locate jumps the song frame, so the mode starts afresh there.
+        run(&mut mode, &file, 30_000.0, 20_000, 480, 7);
+        assert_eq!(mode.primes, 2, "a locate must prime");
+        // Another clip taking the instance over primes too.
+        run(&mut mode, &file, 30_000.0, 20_480, 480, 8);
+        assert_eq!(mode.primes, 3, "another clip must prime");
     }
 }

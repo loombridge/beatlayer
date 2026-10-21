@@ -31,6 +31,7 @@ fn play(
             high_quality: true,
             beats: &empty,
             pitch,
+            clip: 1,
         };
         let (before, after) = mode.reach(&request);
         let lo = positions[0].floor() as i64 - before as i64;
@@ -231,9 +232,10 @@ fn vowel() -> Vec<f32> {
 // Spec: warp-modes R22, R35. The vowel's first two formants stay where they
 // were in Complex Pro at Formants 100 %, and move with the pitch in Complex.
 // At ±7 semitones both stay within 10 % of the source's. At ±12 the library's
-// formant correction reaches only 40 %: R35 records that as the tolerance
-// there, a known gap (R35's Complex Pro row). Complex, which corrects
-// nothing, still moves them within 10 % of the source's times the ratio.
+// formant correction reaches only 40 % on the first formant (1050 Hz against
+// 750) and 12.5 % on the second: R35 records those as the tolerance there, a
+// known gap (R35's Complex Pro row). Complex, which corrects nothing, still
+// moves them within 10 % of the source's times the ratio.
 #[test]
 fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
     let file = vowel();
@@ -246,12 +248,24 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
         512,
     );
     let source = [
-        formant_near(&source, 700.0, 150.0),
-        formant_near(&source, 1_220.0, 150.0),
+        formant_in(&source, (525.0, 1_050.0)),
+        formant_in(&source, (1_098.0, 1_830.0)),
     ];
+    // The window each formant is looked for in: from the place it belongs to
+    // well above it, so a formant the library has moved up is found rather than
+    // read off the window's edge, and for the second formant from above the
+    // first, which its own peak would otherwise answer for.
+    let band = |centre: f64, first: bool| {
+        if first {
+            (centre * 0.75, centre * 1.5)
+        } else {
+            (centre * 0.9, centre * 1.5)
+        }
+    };
     // The tolerance the library's formant correction reaches at each
-    // transposition, measured on this fixture (R35).
-    for (semitones, keep_tolerance) in [(7.0, 0.10), (12.0, 0.40)] {
+    // transposition, for the first and the second formant (R35): the first
+    // formant at ±12 is the library's own limit, a known gap.
+    for (semitones, keep) in [(7.0, [0.10, 0.10]), (12.0, [0.40, 0.15])] {
         let ratio = 2.0_f64.powf(semitones / 12.0);
         let mut pro = Complex::new(1, RATE, true);
         pro.set_formants(100.0);
@@ -268,33 +282,54 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
             48_000,
             512,
         );
-        for source in source {
-            let measured = formant_near(&kept, source, 150.0 * ratio);
+        for (formant, &source) in source.iter().enumerate() {
+            let measured = formant_in(&kept, band(source, formant == 0));
             let error = (measured - source).abs() / source;
+            eprintln!(
+                "{semitones} semitones, formant {}: Complex Pro keeps {source:.0} Hz at \
+                 {measured:.0} Hz, {:.0} %",
+                formant + 1,
+                error * 100.0
+            );
             assert!(
-                error <= keep_tolerance,
-                "{semitones} semitones: Complex Pro's formant {measured:.0} Hz is {:.0} % from \
-                 {source:.0} Hz, past the {:.0} % it reaches",
+                error <= keep[formant],
+                "{semitones} semitones, formant {}: Complex Pro's formant {measured:.0} Hz is \
+                 {:.0} % from {source:.0} Hz, past the {:.0} % it reaches",
+                formant + 1,
                 error * 100.0,
-                keep_tolerance * 100.0
+                keep[formant] * 100.0
             );
             let target = source * ratio;
-            let measured = formant_near(&moved, target, 150.0 * ratio);
+            let measured = formant_in(&moved, band(target, formant == 0));
             let error = (measured - target).abs() / target;
+            eprintln!(
+                "{semitones} semitones, formant {}: Complex moves {target:.0} Hz to {measured:.0} \
+                 Hz, {:.0} %",
+                formant + 1,
+                error * 100.0
+            );
             assert!(
                 error <= 0.10,
-                "{semitones} semitones: Complex's formant {measured:.0} Hz is {:.0} % from \
-                 {target:.0} Hz, where the pitch moved it",
+                "{semitones} semitones, formant {}: Complex's formant {measured:.0} Hz is {:.0} % \
+                 from {target:.0} Hz, where the pitch moved it",
+                formant + 1,
                 error * 100.0
             );
         }
     }
 }
 
-/// The formant nearest `centre`: the peak of a magnitude spectrum whose
-/// envelope is smoothed over a couple of the vowel's harmonics, so it reports
-/// the envelope and not the harmonics.
-fn formant_near(samples: &[f32], centre: f64, _f0: f64) -> f64 {
+/// The vowel's fundamental, in Hz: the spectrum's envelope is smoothed over
+/// about it, so its peaks are the formants and not the harmonics that sample
+/// them.
+const VOWEL_F0: f64 = 150.0;
+
+/// The largest peak of the smoothed spectrum inside `band` (a low and a high
+/// frequency, in Hz): how a formant is read off, in the window around the place
+/// it belongs — the source's when the formants are kept, the source's times the
+/// ratio when they move — so the figure doesn't read off the window's edge and
+/// a formant a mode has moved is still found (R22, R35).
+fn formant_in(samples: &[f32], band: (f64, f64)) -> f64 {
     let n = 8_192.min(samples.len());
     let start = (samples.len() - n) / 2;
     let windowed: Vec<f64> = samples[start..start + n]
@@ -315,7 +350,8 @@ fn formant_near(samples: &[f32], centre: f64, _f0: f64) -> f64 {
         }
         (re * re + im * im).sqrt()
     };
-    // The envelope, on a grid of 25 Hz.
+    // The envelope, on a grid of 25 Hz, smoothed over the vowel's fundamental
+    // either way.
     let step = 25.0;
     let from = 200.0;
     let to = 3_000.0;
@@ -323,16 +359,15 @@ fn formant_near(samples: &[f32], centre: f64, _f0: f64) -> f64 {
     let raw: Vec<f64> = (0..count)
         .map(|i| magnitude(from + i as f64 * step))
         .collect();
+    let half = ((VOWEL_F0 / step).round() as usize).clamp(1, count / 2);
     let smooth = |i: usize| -> f64 {
-        let lo = i.saturating_sub(6);
-        let hi = (i + 6).min(count - 1);
+        let lo = i.saturating_sub(half);
+        let hi = (i + half).min(count - 1);
         raw[lo..=hi].iter().sum::<f64>() / (hi - lo + 1) as f64
     };
-    let (first, last) = (
-        (centre * 0.75 / step) as usize,
-        (centre * 1.35 / step) as usize,
-    );
-    let mut best = (f64::MIN, centre);
+    let first = ((band.0 - from) / step).ceil().max(0.0) as usize;
+    let last = ((band.1 - from) / step).floor().max(0.0) as usize;
+    let mut best = (f64::MIN, band.0);
     for i in first..=last.min(count - 1) {
         let here = smooth(i);
         if here > best.0 {
@@ -404,6 +439,7 @@ fn a_located_complex_clip_plays_from_the_point_at_the_right_level() {
             high_quality: true,
             beats: &empty,
             pitch: 1.0,
+            clip: 1,
         };
         let (before, after) = located.reach(&request);
         let lo = positions[0].floor() as i64 - before as i64;

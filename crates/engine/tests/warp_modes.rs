@@ -426,6 +426,21 @@ fn loudest(out: &[f32], around: usize, window: usize) -> usize {
         .unwrap()
 }
 
+/// The energy centroid of `out` near `around`, in frames: where a click's
+/// energy sits. A mode that reports no latency leaves it where Re-Pitch's own,
+/// which adds none, is.
+fn click_centroid(out: &[f32], around: usize, window: usize) -> f64 {
+    let lo = around.saturating_sub(window);
+    let hi = (around + window).min(out.len());
+    let (mut weight, mut weighted) = (0.0f64, 0.0f64);
+    for (i, &s) in out[lo..hi].iter().enumerate() {
+        let w = f64::from(s) * f64::from(s);
+        weight += w;
+        weighted += w * (lo + i) as f64;
+    }
+    weighted / weight
+}
+
 /// Plays `editor` with `media` for `frames` frames in blocks of `block`, under
 /// the allocation trap, and returns the left channel.
 fn play_with(editor: &Editor, media: &MediaMap, frames: u64, block: usize) -> Vec<f32> {
@@ -441,10 +456,11 @@ fn play_with(editor: &Editor, media: &MediaMap, frames: u64, block: usize) -> Ve
 }
 
 // Spec: warp-modes R24, R35 (Complex's timing row). A Complex or Complex Pro
-// clip's click lands on the frame its warp map puts it on, within 20 ms, and
-// the mode reports no latency: it plays the same frame as the same file in
-// Re-Pitch, which adds none, so the stretcher's own read-ahead reaches the
-// mixer as no delay.
+// clip's click lands on the frame its warp map puts it on, within 20 ms (R35's
+// timing target), and the mode reports no latency: the click's energy sits on
+// the same frame as the same file in Re-Pitch, which adds none, to within a
+// couple of frames, since the prime drops the stretcher's own read-ahead. That
+// centroid is R24's measure: the frame the mixer must see.
 #[test]
 fn complex_clips_land_on_time_and_report_no_latency() {
     let click_at = 48_000usize;
@@ -458,6 +474,7 @@ fn complex_clips_land_on_time_and_report_no_latency() {
         (want as i64 - click_at as i64).abs() <= 48,
         "Re-Pitch's own click landed at {want}"
     );
+    let reference_centroid = click_centroid(&reference, click_at, 24_000);
     for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
         for block in [64, 512] {
             let out = play_with(&click_song(mode), &media, 60_000, block);
@@ -468,13 +485,57 @@ fn complex_clips_land_on_time_and_report_no_latency() {
                 "{mode:?} at blocks of {block}: its click landed at {at}, {off} frames from \
                  {click_at}, past 20 ms"
             );
-            let late = (at as i64 - want as i64).abs();
+            let late = (click_centroid(&out, click_at, 24_000) - reference_centroid).abs();
             assert!(
-                late <= 960,
-                "{mode:?}: its click landed {late} frames from Re-Pitch's own, so the mode \
-                 reports latency"
+                late <= 4.0,
+                "{mode:?} at blocks of {block}: its click's energy sits {late:.2} frames from \
+                 Re-Pitch's own, so the mode reports latency"
             );
         }
+    }
+}
+
+// Spec: warp-modes R5, R6. Two of a track's Complex clips that overlap play
+// through their own stretchers, neither the other's continuation, so the render
+// is the same at any block size: a shared stretcher would interleave the two
+// clips and make the output depend on where the block boundaries fell.
+#[test]
+fn overlapping_complex_clips_do_not_share_a_stretcher() {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(120.0).unwrap()),
+        })
+        .unwrap();
+    let audio_track = track(&mut editor, TrackKind::Audio, None);
+    // Two whole notes of the same file, the second starting a beat in, so they
+    // sound together for a whole note.
+    for at in [Ticks::ZERO, Ticks::QUARTER * 2] {
+        let audio = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(120.0),
+            warp_mode: WarpMode::Complex,
+            ..AudioData::new(MEDIA)
+        };
+        let clip = Clip::new(editor.new_id(), at, Ticks::WHOLE, ClipData::Audio(audio));
+        editor
+            .apply(Command::CreateClip {
+                track: audio_track,
+                clip,
+            })
+            .unwrap();
+    }
+    let reference = play(&editor, 96_000, 512);
+    for block in [64, 512, 4_096] {
+        assert_eq!(
+            play(&editor, 96_000, block),
+            reference,
+            "overlapping Complex clips, blocks of {block}"
+        );
     }
 }
 

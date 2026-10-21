@@ -27,22 +27,10 @@ use serde_json::json;
 
 const BAR: Ticks = Ticks::WHOLE;
 
-/// Runs frames, at a display's pace, until `done` holds, for up to five
-/// seconds.
+/// Runs frames until `done` holds. The null stream is paced by hand, so the
+/// engine advances with the frames and nothing here races the wall clock.
 fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
-    let until = Instant::now() + Duration::from_secs(5);
-    loop {
-        h.frame(vec![]);
-        if done(h) {
-            return;
-        }
-        assert!(
-            Instant::now() < until,
-            "timed out waiting for {what}: the engine shows {:?}",
-            h.engine
-        );
-        std::thread::sleep(Duration::from_millis(4));
-    }
+    h.wait(what, done);
 }
 
 fn state(shell: &mut Shell) -> TransportState {
@@ -110,7 +98,7 @@ fn drag(h: &mut Harness, from: Pos2, dy: f32, modifiers: Modifiers) {
 #[test]
 fn space_starts_and_stops_playback_in_the_app() {
     // Spec: control-bar-transport R1, R3; the acceptance's first part.
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     assert_eq!(h.shell.focused_area(), Area::MainView);
     press(&mut h, Key::Space, Modifiers::NONE);
@@ -232,7 +220,7 @@ fn the_playhead_moves_with_the_engine_within_a_frame() {
 fn follow_pages_the_view_with_the_engines_playhead() {
     // Spec: control-bar-transport R14; arrangement-view R10, driven by the
     // engine.
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     assert!(h.shell.arrangement().follow());
     h.shell
@@ -258,7 +246,7 @@ fn follow_pages_the_view_with_the_engines_playhead() {
 #[test]
 fn every_control_in_the_transport_section_is_reachable_from_the_keyboard() {
     // Spec: control-bar-transport R2, R11; the acceptance's third part.
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     // Option-0 (Alt-0) to the Control Bar; with Use Tab Key to Move Focus
     // on, Tab goes from control to control.
@@ -344,7 +332,7 @@ fn every_control_in_the_transport_section_is_reachable_from_the_agent_api() {
     // Spec: control-bar-transport R12. Each control runs a registered
     // command with a schema, a description, and a permission class; the
     // window's changes and an agent's runs are the same command.
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     for element in SECTION {
         let id = control_bar::command(*element).unwrap();
@@ -415,7 +403,7 @@ fn every_control_in_the_transport_section_is_reachable_from_the_agent_api() {
 #[test]
 fn typed_keys_go_to_the_field_and_esc_drops_them() {
     // Spec: control-bar-transport R9, R10 (I-FOCUS-002, S-VAL-005 to 008).
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     h.click(rect(Element::PositionBars).center());
     assert_eq!(h.shell.focused_area(), Area::ControlBar);
@@ -466,7 +454,7 @@ fn typed_keys_go_to_the_field_and_esc_drops_them() {
 #[test]
 fn dragging_a_field_steps_it_as_one_undo_step() {
     // Spec: control-bar-transport R8 (I-DRAG-022, S-VAL-003, I-CLICK-021).
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     h.settle();
     let tempo = rect(Element::Tempo).center();
     drag(&mut h, tempo, -30.0, Modifiers::NONE);
@@ -511,7 +499,7 @@ fn dragging_a_field_steps_it_as_one_undo_step() {
 #[test]
 fn the_section_reaches_assistive_technology() {
     // Spec: control-bar-transport R2, R11.
-    let mut h = Harness::new(Window::Main);
+    let mut h = Harness::manual(Window::Main);
     let nodes = Harness::nodes(&h.settle());
     for element in SECTION {
         let placement = bl_ui::layout::placement(*element);

@@ -83,6 +83,7 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
@@ -96,6 +97,7 @@ mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
 mod session_recording;
+mod slice;
 mod stems;
 mod warping;
 
@@ -446,6 +448,9 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Slice to New MIDI Track dialog (WP-4.16): its clip and the
+    /// slicing presets it offers. Never part of the set.
+    slice_dialog: Option<bl_shell_spec::slice::SliceDialogStatus>,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -847,6 +852,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            slice_dialog: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
@@ -3026,6 +3032,29 @@ impl Shell {
             || !self.au.open_editors().is_empty()
     }
 
+    /// Whether any plug-in editor window is open (IMP-25).
+    fn any_plug_in_editor(&self) -> bool {
+        !self.plugins.open_editors().is_empty() || !self.au.open_editors().is_empty()
+    }
+
+    /// Closes every open plug-in editor window and says how many it closed
+    /// (View ▸ Close All Plug-in Windows, IMP-25). It closes editors only,
+    /// so a floating native device window stays as it is.
+    fn close_plug_in_windows(&mut self) -> usize {
+        let mut closed = 0;
+        for device in self.plugins.open_editors() {
+            if self.plugins.close_editor(device).is_ok() {
+                closed += 1;
+            }
+        }
+        for device in self.au.open_editors() {
+            if self.au.close_editor(device).is_ok() {
+                closed += 1;
+            }
+        }
+        closed
+    }
+
     /// Hides and shows the open plug-in editor windows to follow View ▸
     /// Plug-In Windows and Auto-Hide Plug-In Windows, as their tracks'
     /// floating windows do (R31, R33): a hidden editor stays open.
@@ -3381,8 +3410,77 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&track_ids::TracksUngrouped { tracks: children }))
             }
+            track_ids::SET_DEVICES_ENABLED => {
+                // Spec: device-chains R39. Deactivate All Devices switches
+                // off every top-level device on the selected tracks, and
+                // switches them back on when they are all off already; it
+                // reaches no rack's contents. One undo step either way.
+                let track_ids::SetDevicesEnabledArgs { tracks, enabled } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let on = enabled.unwrap_or_else(|| self.all_devices_off(&tracks));
+                let step = if on {
+                    track_ids::ACTIVATE_ALL_DEVICES_STEP
+                } else {
+                    track_ids::DEACTIVATE_ALL_DEVICES_STEP
+                };
+                let opened = !self.gesture;
+                if opened {
+                    self.begin_gesture(step);
+                }
+                let mut result = Ok(());
+                for &track in &tracks {
+                    let devices: Vec<bl_model::DeviceId> = self
+                        .editor
+                        .document()
+                        .track(track)
+                        .into_iter()
+                        .flat_map(|track| track.devices().map(|device| device.id))
+                        .collect();
+                    for device in devices {
+                        result = self
+                            .run(
+                                "device.set_enabled",
+                                json!({ "device": device, "enabled": on }),
+                            )
+                            .map(|_| ());
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                if opened {
+                    self.end_gesture();
+                }
+                result?;
+                Ok(to_value(&track_ids::DevicesEnabled {
+                    tracks,
+                    enabled: on,
+                }))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// Whether every top-level device on `tracks` is switched off, with at
+    /// least one device among them (IMP-25, the device chains spec R39).
+    fn all_devices_off(&self, tracks: &[TrackId]) -> bool {
+        let doc = self.editor.document();
+        let mut any = false;
+        for &track in tracks {
+            let Some(track) = doc.track(track) else {
+                continue;
+            };
+            for device in track.devices() {
+                any = true;
+                if device.enabled {
+                    return false;
+                }
+            }
+        }
+        any
     }
 
     /// Loads a plug-in the browser lists (WP-2.9b): onto the selected track
@@ -3663,6 +3761,28 @@ impl Shell {
     #[must_use]
     pub fn meter(&self, track: TrackId) -> Option<&bl_engine::TrackMeter> {
         self.meters.iter().find(|meter| meter.track == track)
+    }
+
+    /// One track's gain reduction in dB, as its compressors and limiters
+    /// last reported it: zero when the engine published no meter for the
+    /// track, or none of them reduced (the mixer view spec, R40).
+    #[must_use]
+    pub fn gain_reduction(&self, track: TrackId) -> f32 {
+        self.meter(track).map_or(0.0, |meter| meter.gain_reduction)
+    }
+
+    /// Every track's gain reduction, as `mixer_view.state` reports it: one
+    /// entry per track the engine published a meter for, in the order the
+    /// tracks run (IMP-25, the mixer view spec R40).
+    #[must_use]
+    pub fn gain_reductions(&self) -> Vec<crate::mixer_view::TrackGainReduction> {
+        self.meters
+            .iter()
+            .map(|meter| crate::mixer_view::TrackGainReduction {
+                track: meter.track,
+                reduction: meter.gain_reduction,
+            })
+            .collect()
     }
 
     /// Sets the meters the windows draw, as [`Shell::poll_engine`] does with
@@ -5274,6 +5394,9 @@ impl Shell {
             // main window open, Close Window is disabled (M-FILE-004).
             // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_plug_in_window(),
+            // IMP-25. Close All Plug-in Windows is disabled with no editor
+            // open: it never closes a floating native device window.
+            ids::CLOSE_PLUG_IN_WINDOWS => return self.any_plug_in_editor(),
             ids::WINDOW_CLOSE => {
                 return match self.focused_window {
                     WindowKind::Settings => self.settings_open,
@@ -5292,6 +5415,11 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if slice_ids::handles(id) {
+            // Spec: slice-to-midi R1. The menus' enabled states: one audio
+            // clip selected, in either view.
+            return self.can_slice(id, args);
         }
         if id == CUE_MODE {
             // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
@@ -5346,6 +5474,21 @@ impl Shell {
                     let tracks =
                         named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
                     return !crate::tracks::groupable(self.editor.document(), &tracks).is_empty();
+                }
+                track_ids::SET_DEVICES_ENABLED => {
+                    // IMP-25. It works while the selected tracks hold a
+                    // top-level device to switch.
+                    let named: Option<Vec<TrackId>> = args
+                        .get("tracks")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let tracks =
+                        named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    return tracks.iter().any(|&track| {
+                        self.editor
+                            .document()
+                            .track(track)
+                            .is_some_and(|track| track.devices().next().is_some())
+                    });
                 }
                 track_ids::UNGROUP => {
                     let named: Option<TrackId> = args
@@ -6395,6 +6538,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
+                || slice_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
@@ -6667,7 +6811,13 @@ impl Shell {
                         command: id.to_owned(),
                         message,
                     },
-                );
+                )
+                .map(|mut state| {
+                    // Spec: mixer-view R40. The strips' gain-reduction bars
+                    // read with the meters.
+                    state.gain_reduction = self.gain_reductions();
+                    state
+                });
             if result.is_ok() && id == mixer_ids::FOCUS {
                 // Spec: mixer-view R13.
                 self.focused_window = WindowKind::Main;
@@ -6882,6 +7032,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if slice_ids::handles(id) {
+            return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time
@@ -7617,6 +7770,14 @@ impl Shell {
                 Ok(to_value(&SwitchResult {
                     on: self.plug_in_windows,
                 }))
+            }
+            ids::CLOSE_PLUG_IN_WINDOWS => {
+                // Spec: device-chains R40. It closes editors only, so it
+                // changes nothing in the set and is never an undo step.
+                Self::args::<NoArgs>(id, args)?;
+                let closed = self.close_plug_in_windows();
+                self.touch();
+                Ok(to_value(&ids::ClosedPlugInWindows { closed }))
             }
             ids::VIEW_TOGGLE_BROWSER => {
                 Self::args::<NoArgs>(id, args)?;

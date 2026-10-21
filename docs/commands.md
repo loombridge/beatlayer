@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-541 commands in 37 areas.
+547 commands in 37 areas.
 
 ## Permission classes
 
@@ -152,6 +152,7 @@ Each command has:
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
 | [`chain.set_zone`](#chainset_zone) | Change Chain Zone | `edit` |  |  |
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
+| [`clip.close_slice_dialog`](#clipclose_slice_dialog) | Close Slice to New MIDI Track | `read` |  |  |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
 | [`clip.crop`](#clipcrop) | Crop Clip | `edit` | `Cmd+Shift+J`; `Cmd+Shift+J` | `Ctrl+Shift+J`; `Ctrl+Shift+J` |
@@ -172,6 +173,7 @@ Each command has:
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
 | [`clip.move_transient`](#clipmove_transient) | Move Transient | `edit` |  |  |
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
+| [`clip.open_slice_dialog`](#clipopen_slice_dialog) | Slice to New MIDI Track | `read` |  |  |
 | [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
@@ -204,6 +206,7 @@ Each command has:
 | [`clip.set_warp_mode`](#clipset_warp_mode) | Set Warp Mode | `edit` |  |  |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | Set Warp Settings | `edit` |  |  |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | Slice to New MIDI Track | `edit` |  |  |
 | [`clip.slide_contents`](#clipslide_contents) | Slide Clip Contents | `edit` | `Shift+Option+drag` | `Shift+Alt+drag` |
 | [`clip.stretch`](#clipstretch) | Stretch Clip | `edit` | `Shift+drag the clip title bar` | `Shift+drag the clip title bar` |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
@@ -351,6 +354,7 @@ Each command has:
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | Solo Track Exclusively | `edit` |  |  |
 | [`mixer_view.crossfader`](#mixer_viewcrossfader) | Mixer Crossfader | `read` |  |  |
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
+| [`mixer_view.fold_chains`](#mixer_viewfold_chains) | Fold Rack Chains | `read` |  |  |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
@@ -531,6 +535,7 @@ Each command has:
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
 | [`transport.insert_marker_to_playhead`](#transportinsert_marker_to_playhead) | Move Insert Marker To Playhead | `read` | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
@@ -555,6 +560,7 @@ Each command has:
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
 | [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
+| [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
@@ -2751,6 +2757,18 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 ### Area `clip`
 
+#### `clip.close_slice_dialog`
+
+**Close Slice to New MIDI Track**. Permission: `read`. Contexts: `global`.
+
+Closes the Slice to New MIDI Track dialog. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
+
 #### `clip.create`
 
 **Create Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -3131,6 +3149,22 @@ Arguments:
 | `by` | [`Ticks`](#ticks) | yes | How far to move them, in ticks: negative moves them earlier. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.open_slice_dialog`
+
+**Slice to New MIDI Track**. Permission: `read`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Opens the Slice to New MIDI Track dialog for an audio clip (`clip`, or the one audio clip selected in either view). The dialog holds the Slice By chooser (the beat divisions, Transients, and Warp Markers), the Slicing Preset chooser, and Preserve warped timing, and its OK runs `clip.slice_to_midi_track`. Changes nothing in the set: an agent calls `clip.slice_to_midi_track` instead.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+
+Result: [`SliceDialogStatus`](#slicedialogstatus).
 
 #### `clip.quantize_audio`
 
@@ -3719,6 +3753,25 @@ Arguments:
 | `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.slice_to_midi_track`
+
+**Slice to New MIDI Track**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `clip-view`.
+
+Cuts an audio clip into slices on a new MIDI track. The clip is sliced over its region: from its Start marker to its End marker, or, with the loop on, from the earlier of its Start marker and its loop's start to the loop's end. `by` is a beat division (`eight_bars`, `four_bars`, `two_bars`, `one_bar`, `half`, `quarter`, `eighth`, `sixteenth` — the default — or `thirty_second`), `transients` (one slice at each of the clip's transients in the region), or `warp_markers` (one at each of its warp markers; refused for an unwarped clip). With `preserve_warped_timing` on (the default) the slices are cut from the clip's warped audio, so each sounds as it did and its note falls where it played; off, they are cut from the clip's own file, unwarped. `preset` names a slicing preset: Beatlayer's factory presets (the default makes a Drum Rack of one sampler per slice, each chain receiving a note from C1 up and playing C3; `One Sampler` makes one sampler in Slice mode) or a user preset in the User Library's Defaults/Slicing folder. The new MIDI track goes directly after the clip's track, takes the clip's name, and holds a MIDI clip with one note per slice, rising chromatically, each lasting to the next, at velocity 127. More than 128 slices are refused (64 for `One Sampler`). Slicing leaves the audio clip as it was and is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `by` | [`SliceBy`](#sliceby) or null | no | How to cut it: a beat division, `transients`, or `warp_markers`. Left out, `sixteenth` (R2). |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip to slice. Left out, the one audio clip selected in either view. |
+| `preserve_warped_timing` | boolean or null | no | Whether the slices are cut from the clip's warped audio, keeping the timing warping gave them. Left out, `true` (R2, R6). |
+| `preset` | string or null | no | The slicing preset's name: one of Beatlayer's factory presets or a user preset in the User Library's `Defaults/Slicing/` folder (R11). Left out, the default preset. |
+
+Result: [`SliceResult`](#sliceresult).
 
 #### `clip.slide_contents`
 
@@ -6353,6 +6406,23 @@ Default keys:
 | S-ARR-035 | `Option+Shift+M` | `Alt+Shift+M` | `arrangement` | Move focus to the mixer | runs it |
 
 Arguments: none (send `{}`).
+
+Result: [`MixerViewState`](#mixerviewstate).
+
+#### `mixer_view.fold_chains`
+
+**Fold Rack Chains**. Permission: `read`. Contexts: `global`.
+
+Folds a rack's chains out in the mixers as strips after the track's, as the fold button in the track's title bar does, or folds them back in. `rack` is the rack: a rack of more than one chain, on a track or inside another rack's chain. A track's fold button is for the instrument or drum rack it holds; a chain's is for the rack inside it. A rack of one chain has no chains to fold out. Switches unless `shown` says which. Changes only the view, and isn't saved with the set; the chains it shows read back in `mixer_view.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack whose chains fold out. |
+| `shown` | boolean or null | no | Show them (true) or hide them (false); switches them if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
 
@@ -9464,6 +9534,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.set_devices_enabled`
+
+**Deactivate All Devices**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
+
+Switches every top-level device on the tracks (`tracks`, or the selected tracks) off, or on with `enabled`: true, as the track context menu's Deactivate All Devices does. It reaches only the tracks' own devices, not the devices inside a rack. With `enabled` left out it switches: off, unless every top-level device on the tracks is already off and there is one, when it turns them on. One undo step either way, named Deactivate All Devices or Activate All Devices.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Switch the devices on (true) or off (false); when left out, off unless every top-level device on the tracks is already off, when on. |
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`DevicesEnabled`](#devicesenabled).
+
 #### `track.ungroup`
 
 **Ungroup Tracks**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
@@ -9852,6 +9939,18 @@ Arguments:
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.close_plug_in_windows`
+
+**Close All Plug-in Windows**. Permission: `read`. Contexts: `global`.
+
+Closes every open plug-in editor window at once, as View ▸ Close All Plug-in Windows does. It closes editors only: floating native device windows stay as they are, so it changes nothing in the set, isn't an undo step, and is in the read class. It has no key. Returns how many editor windows it closed.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ClosedPlugInWindows`](#closedpluginwindows).
+
 #### `view.draw_mode`
 
 **Draw Mode**. Permission: `read`. Contexts: `global`.
@@ -10226,6 +10325,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_warp_mode`](#clipset_warp_mode) | the query tool's `clip` | `data.audio.warp_mode` |
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.slice_to_midi_track`](#clipslice_to_midi_track) | the query tool's `song` | `tracks` |
 | [`clip.slide_contents`](#clipslide_contents) | the query tool's `clip` | `data.audio.start` |
 | [`clip.stretch`](#clipstretch) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
@@ -10448,6 +10548,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
 | [`transport.set_loop_enabled`](#transportset_loop_enabled) | `transport.state` | `loop_on` |
@@ -12936,6 +13037,113 @@ A send to the return chain `to`, as linear gain (1 is 0 dB, 0 is -inf), taken af
 
 </details>
 
+### `ChainStrip`
+
+A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack the chain belongs to. |
+| `rack_name` | string | yes | The rack's name. |
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | The chain's name. |
+| `volume` | number | yes | The chain's Volume as linear gain: 1 is 0 dB. |
+| `pan` | number | yes | The chain's Pan, from −1 to 1. |
+| `has_mixer` | boolean | yes | Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do. |
+| `enabled` | boolean | yes | Whether the chain's activator is on. |
+| `solo` | boolean | yes | Whether the chain is soloed. |
+| `colour` | integer or null | no | The chain's colour, a swatch of the palette of 5 rows of 14, if it has one. |
+| `nested` | [`RackFold`](#rackfold) or null | no | The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain folded out as a strip in the mixers (racks spec, R27): the chain, the rack it belongs to, and the mixer controls the chain list shows for it.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "colour": {
+      "description": "The chain's colour, a swatch of the palette of 5 rows of 14, if it has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "enabled": {
+      "description": "Whether the chain's activator is on.",
+      "type": "boolean"
+    },
+    "has_mixer": {
+      "description": "Whether the chain has Volume and Pan: all but a MIDI effect rack's chains do.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The chain's name.",
+      "type": "string"
+    },
+    "nested": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RackFold"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack inside this chain, if it has one whose chains fold out too (racks spec, R27): a fold button on this strip shows its chains."
+    },
+    "pan": {
+      "description": "The chain's Pan, from −1 to 1.",
+      "format": "double",
+      "type": "number"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack the chain belongs to."
+    },
+    "rack_name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "solo": {
+      "description": "Whether the chain is soloed.",
+      "type": "boolean"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    },
+    "volume": {
+      "description": "The chain's Volume as linear gain: 1 is 0 dB.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "rack_name",
+    "chain",
+    "name",
+    "volume",
+    "pan",
+    "has_mixer",
+    "enabled",
+    "solo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ChainZones`
 
 A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values its fades span: `key` (0 to 127), `velocity` (1 to 127) and `select` (the chain select zone, 0 to 127). One left out passes everything: every note, every velocity, and chain select 0 alone.
@@ -13795,6 +14003,36 @@ What `arrangement.copy` put on the clipboard.
     "clips",
     "tracks",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClosedPlugInWindows`
+
+What `view.close_plug_in_windows` returns: how many editor windows it closed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `closed` | integer, at least 0 | yes | The editor windows it closed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.close_plug_in_windows` returns: how many editor windows it closed.",
+  "properties": {
+    "closed": {
+      "description": "The editor windows it closed.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "closed"
   ],
   "type": "object"
 }
@@ -15814,6 +16052,43 @@ Warp settings for a device that plays media (WP-5.15b, Simpler).
       "type": "boolean"
     }
   },
+  "type": "object"
+}
+```
+
+</details>
+
+### `DevicesEnabled`
+
+What `track.set_devices_enabled` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it reached, in the order given. |
+| `enabled` | boolean | yes | Whether their devices are on afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.set_devices_enabled` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether their devices are on afterwards.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "The tracks it reached, in the order given.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "enabled"
+  ],
   "type": "object"
 }
 ```
@@ -20924,10 +21199,13 @@ What `mixer_view.state` and the other view commands return.
 | `in_out` | boolean | yes | Whether the In/Out section shows, in both mixers. |
 | `sends` | boolean | yes | Whether the Sends section shows. |
 | `volume` | boolean | yes | Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
-| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
+| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
+| `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
+| `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20939,13 +21217,35 @@ What `mixer_view.state` and the other view commands return.
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Arrangement View's mixer."
     },
+    "chains": {
+      "description": "The chains folded out as strips, in the mixers' column order (racks spec, R27).",
+      "items": {
+        "$ref": "#/$defs/ChainStrip"
+      },
+      "type": "array"
+    },
     "crossfader": {
-      "description": "Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set.",
+      "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
       "type": "boolean"
+    },
+    "gain_reduction": {
+      "default": [],
+      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
     },
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
       "type": "boolean"
+    },
+    "racks": {
+      "description": "The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out.",
+      "items": {
+        "$ref": "#/$defs/RackFold"
+      },
+      "type": "array"
     },
     "return_tracks": {
       "description": "Whether the return tracks' columns show.",
@@ -20981,7 +21281,8 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
-    "track_options"
+    "track_options",
+    "gain_reduction"
   ],
   "type": "object"
 }
@@ -23618,6 +23919,52 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RackFold`
+
+A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the rack is on. |
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `name` | string | yes | The rack's name. |
+| `folded` | boolean | yes | Whether its chains are folded out as strips now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A rack whose chains fold out in the mixers as strips (racks spec, R27): the track it is on, the rack itself, and whether its chains are folded out now.",
+  "properties": {
+    "folded": {
+      "description": "Whether its chains are folded out as strips now.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "The rack's name.",
+      "type": "string"
+    },
+    "rack": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The rack."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track the rack is on."
+    }
+  },
+  "required": [
+    "track",
+    "rack",
+    "name",
+    "folded"
+  ],
+  "type": "object"
 }
 ```
 
@@ -26438,6 +26785,181 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
 
 </details>
 
+### `SliceBy`
+
+How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.
+
+One of:
+
+- `"eight_bars"`: A slice every 8 bars.
+- `"four_bars"`: A slice every 4 bars.
+- `"two_bars"`: A slice every 2 bars.
+- `"one_bar"`: A slice every bar.
+- `"half"`: A slice every half note.
+- `"quarter"`: A slice every quarter note.
+- `"eighth"`: A slice every eighth note.
+- `"sixteenth"`: A slice every sixteenth note: the dialog's default (R2).
+- `"thirty_second"`: A slice every thirty-second note.
+- `"transients"`: A slice at each of the clip's file's transients inside the region.
+- `"warp_markers"`: A slice at each of the clip's warp markers inside the region.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the dialog's Slice By chooser cuts the clip (R2, R4): a beat division, the clip's transients, or its warp markers.",
+  "oneOf": [
+    {
+      "const": "eight_bars",
+      "description": "A slice every 8 bars.",
+      "type": "string"
+    },
+    {
+      "const": "four_bars",
+      "description": "A slice every 4 bars.",
+      "type": "string"
+    },
+    {
+      "const": "two_bars",
+      "description": "A slice every 2 bars.",
+      "type": "string"
+    },
+    {
+      "const": "one_bar",
+      "description": "A slice every bar.",
+      "type": "string"
+    },
+    {
+      "const": "half",
+      "description": "A slice every half note.",
+      "type": "string"
+    },
+    {
+      "const": "quarter",
+      "description": "A slice every quarter note.",
+      "type": "string"
+    },
+    {
+      "const": "eighth",
+      "description": "A slice every eighth note.",
+      "type": "string"
+    },
+    {
+      "const": "sixteenth",
+      "description": "A slice every sixteenth note: the dialog's default (R2).",
+      "type": "string"
+    },
+    {
+      "const": "thirty_second",
+      "description": "A slice every thirty-second note.",
+      "type": "string"
+    },
+    {
+      "const": "transients",
+      "description": "A slice at each of the clip's file's transients inside the region.",
+      "type": "string"
+    },
+    {
+      "const": "warp_markers",
+      "description": "A slice at each of the clip's warp markers inside the region.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SliceDialogStatus`
+
+The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `clip` | [`ClipId`](#clipid) or null | no | The clip it would slice, if one is chosen. |
+| `presets` | array of string | no | The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The slicing dialog's state, as `clip.open_slice_dialog` returns it and the window draws it (R1, R2).",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip it would slice, if one is chosen."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "presets": {
+      "description": "The Slicing Preset chooser's entries, in order: Beatlayer's factory presets, then the user's presets in `Defaults/Slicing/` (R11).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SliceResult`
+
+What `clip.slice_to_midi_track` made (R13).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The new MIDI track, directly after the clip's track (R7). |
+| `clip` | [`ClipId`](#clipid) | yes | The MIDI clip on it, at the audio clip's place (R9). |
+| `slices` | integer, at least 0 | yes | How many slices it made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.slice_to_midi_track` made (R13).",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The MIDI clip on it, at the audio clip's place (R9)."
+    },
+    "slices": {
+      "description": "How many slices it made.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The new MIDI track, directly after the clip's track (R7)."
+    }
+  },
+  "required": [
+    "track",
+    "clip",
+    "slices"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SlotGroup`
 
 The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).
@@ -27535,6 +28057,41 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `TrackGainReduction`
+
+One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `reduction` | number | yes | The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).",
+  "properties": {
+    "reduction": {
+      "description": "The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "reduction"
+  ],
+  "type": "object"
 }
 ```
 

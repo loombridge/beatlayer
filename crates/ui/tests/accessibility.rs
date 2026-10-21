@@ -1660,6 +1660,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
     );
+    let track_menu = Equivalent(
+        "the track's context menu, opened from its title bar with the context menu key \
+         (S-CTX-002), then the arrows and Enter, as in Live",
+    );
     let metronome_menu = Equivalent(
         "the Metronome settings menu, from its pop-up arrow or context menu, as in Live \
          (manual 19.4.1)",
@@ -2096,6 +2100,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  focused column into view",
             )),
         ),
+        // The fold button in a track's title bar (racks spec, R27): Live
+        // names the button (25.8) but its key isn't observed yet, and its
+        // place in the Tab order with it (the racks spec's open question
+        // 19).
+        (
+            "mixer_view.fold_chains",
+            Exception(Unobserved(
+                "the fold button in the track's title bar: Live's own key for it isn't observed \
+                 yet, and its place in the mixers' Tab order with it",
+            )),
+        ),
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
@@ -2392,6 +2407,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
+        ("track.set_devices_enabled", Exception(track_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(
@@ -3449,6 +3465,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        // Slice to New MIDI Track's dialog (WP-4.16).
+        (
+            "clip.slice_to_midi_track",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's OK, which Tab reaches",
+            )),
+        ),
+        (
+            "clip.close_slice_dialog",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's Cancel, or Esc",
+            )),
         ),
         // Gaps.
         (

@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bl_audio_io::NullControl;
 use bl_commands::{Context, Permission};
 use bl_core::time::Ticks;
 use bl_model::{ClipData, TrackId, TrackKind};
@@ -15,6 +16,7 @@ use bl_shell::browser_commands::{
     self as ids, AddResult, BrowserState, ItemKind, Label, PreviewState, Section,
 };
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use bl_shell::{Area, Effect, Shell, ShellError, commands};
 use serde_json::{Value, json};
 
@@ -141,6 +143,33 @@ fn wait_until(shell: &mut Shell, what: &str, mut done: impl FnMut(&mut Shell) ->
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// A shell on the null device paced by hand (T199), with the test clock
+/// driving it, a library to browse, and the control that runs its blocks.
+fn rig_with_library(scratch: &Scratch) -> (Shell, NullControl, PathBuf) {
+    let (mut shell, control) = testing::rig();
+    let root = library(scratch);
+    shell.set_user_library(Some(root.clone()));
+    (shell, control, root)
+}
+
+/// Advances the set and polls the shell (which reads the preview and the
+/// index) until `done` holds, up to about ten seconds of test time.
+fn advance_until(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    mut done: impl FnMut(&mut Shell) -> bool,
+) {
+    for _ in 0..2_000 {
+        shell.poll();
+        if done(shell) {
+            return;
+        }
+        testing::advance(control, shell, testing::STEP_MS);
+    }
+    panic!("timed out waiting for {what}");
 }
 
 fn wait_for_index(shell: &mut Shell) {
@@ -646,7 +675,7 @@ fn preview(shell: &mut Shell) -> PreviewState {
 #[test]
 fn selecting_a_file_previews_it_while_the_switch_is_on() {
     let scratch = Scratch::new("preview");
-    let (mut shell, root) = shell_with_library(&scratch);
+    let (mut shell, control, root) = rig_with_library(&scratch);
     shell.start_audio();
     assert!(shell.audio().is_running(), "the null device runs");
     assert!(preview(&mut shell).on, "on in a new install");
@@ -655,7 +684,7 @@ fn selecting_a_file_previews_it_while_the_switch_is_on() {
 
     run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&pad)] }));
     assert_eq!(preview(&mut shell).loading, Some(text(&pad)));
-    wait_until(&mut shell, "the preview to play", |shell| {
+    advance_until(&control, &mut shell, "the preview to play", |shell| {
         shell.browser_preview().position_seconds > 0.0
     });
     let playing = preview(&mut shell);
@@ -683,7 +712,7 @@ fn selecting_a_file_previews_it_while_the_switch_is_on() {
     shell.set_focused_area(Area::Browser);
     assert!(shell.can_invoke(ids::PREVIEW, &json!({})));
     run::<PreviewState>(&mut shell, ids::PREVIEW, json!({}));
-    wait_until(&mut shell, "the short preview to end", |shell| {
+    advance_until(&control, &mut shell, "the short preview to end", |shell| {
         let preview = shell.browser_preview();
         preview.loading.is_none() && preview.playing.is_none()
     });

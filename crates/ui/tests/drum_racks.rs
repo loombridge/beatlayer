@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 /// The default set with its first MIDI track selected.
 fn harness() -> Harness {
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     h.settle();
     let midi = h
         .shell
@@ -431,15 +431,10 @@ fn auto_select_selects_each_chain_its_note_reaches() {
         .unwrap();
     h.settle();
     h.shell.invoke("transport.play", json!({})).unwrap();
-    let mut selected = Vec::new();
-    for _ in 0..200 {
-        std::thread::sleep(std::time::Duration::from_millis(25));
-        h.settle();
-        selected = rack_state(&h, rack).selected_chains;
-        if selected == [chains[1]] {
-            break;
-        }
-    }
+    h.wait("the chain the note reached", |h| {
+        rack_state(h, rack).selected_chains == [chains[1]]
+    });
+    let selected = rack_state(&h, rack).selected_chains;
     h.shell.invoke("transport.stop", json!({})).unwrap();
     assert_eq!(
         selected,

@@ -1966,6 +1966,67 @@ fn an_agent_zones_a_rack_and_reads_it_back() {
     );
 }
 
+// Spec: racks R27, R28.
+#[test]
+fn an_agent_folds_a_racks_chains_out_and_reads_the_strips_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("racks").unwrap();
+    let midi = default_tracks(&mut client)[0];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    // An instrument rack of two chains on the MIDI track.
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": midi, "index": 0, "device": {
+                "id": {"$new": "rack"}, "name": "Instrument Rack", "enabled": true, "params": [],
+                "role": "instrument", "kind": { "rack": { "kind": "instrument" } },
+                "chains": [
+                    { "id": {"$new": "keys"}, "name": "Keys", "devices": [] },
+                    { "id": {"$new": "bass"}, "name": "Bass", "devices": [] },
+                ],
+            } } },
+        ] }),
+    );
+    let ids = &built["ids"];
+    let rack = ids["rack"].as_u64().unwrap();
+    let keys = ids["keys"].as_u64().unwrap();
+    // The chains are folded out as strips, and the state reports them.
+    let folded = run(
+        &mut client,
+        "mixer_view.fold_chains",
+        json!({ "rack": rack }),
+    );
+    let strips = folded["chains"].as_array().unwrap();
+    assert_eq!(strips.len(), 2);
+    assert_eq!(strips[0]["chain"].as_u64(), Some(keys));
+    assert_eq!(strips[0]["name"], "Keys");
+    assert_eq!(strips[0]["rack"].as_u64(), Some(rack));
+    assert_eq!(strips[0]["track"].as_u64(), Some(midi));
+    // The chain's mixer is set by ID, and reads back in the query.
+    run(
+        &mut client,
+        "chain.set_gain",
+        json!({ "chain": keys, "volume": 0.5 }),
+    );
+    let chain = call(
+        &mut client,
+        "query",
+        json!({ "id": keys, "detail": "full" }),
+    );
+    assert_eq!(chain["mixer"]["volume"], 0.5);
+    // And the strip shows the new value.
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["chains"][0]["volume"], 0.5);
+}
+
 // Spec: racks R17. An agent builds a nested rack by command ID, edits its
 // chains and groups and ungroups devices, and reads each result back
 // through the query tool's `device` object, chains and their IDs included.
@@ -4925,5 +4986,149 @@ fn an_agent_inserts_sets_and_reads_the_measurement_devices_by_id_and_reopens_the
     assert_eq!(
         find(oscilloscope::OSCILLOSCOPE).params[&oscilloscope::TIME],
         25.0
+    );
+}
+
+// Spec: device-chains R39; IMP-25. Deactivate All Devices through the agent
+// API: it switches off every top-level device on the tracks it is given, and
+// switches them back on when they are all off already. The effect reads back
+// through the track's own `devices`.
+#[test]
+fn deactivate_all_devices_switches_a_tracks_devices_through_the_agent_api() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("devices").unwrap();
+    let deletes: Vec<Value> = default_tracks(&mut client)
+        .into_iter()
+        .map(|track| json!({ "command": "track.delete", "args": { "track": track } }))
+        .collect();
+    call(&mut client, "run", json!({ "commands": deletes }));
+    let tone = |index: usize| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": "A"}, "index": index,
+                          "device": { "id": {"$new": format!("tone {index}")}, "name": "Test Tone",
+                                      "kind": { "native": { "device_type": "beatlayer.test_tone" } },
+                                      "enabled": true, "params": [] } } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            json!({ "command": "track.create",
+                    "args": { "id": {"$new": "A"}, "kind": "audio", "name": "A", "index": 0 } }),
+            tone(0), tone(1),
+        ] }),
+    );
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let track = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "audio")
+        .expect("the new audio track")["id"]
+        .clone();
+    let devices = |client: &mut Client<InProcess>| -> Vec<Value> {
+        let track = call(
+            client,
+            "query",
+            json!({ "path": "track \"A\"", "detail": "full" }),
+        );
+        track["saved"]["devices"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == true),
+        "both devices start on"
+    );
+
+    let run_one = |client: &mut Client<InProcess>| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "track.set_devices_enabled",
+                                   "args": { "tracks": [track] } }] }),
+        )
+    };
+    let result = run_one(&mut client);
+    assert_eq!(result["results"][0]["result"]["enabled"], false);
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == false),
+        "every top-level device switched off"
+    );
+
+    // Every device off: the same command turns them back on.
+    let result = run_one(&mut client);
+    assert_eq!(result["results"][0]["result"]["enabled"], true);
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == true),
+        "every top-level device back on"
+    );
+}
+
+// Spec: device-chains R40; IMP-25. Close All Plug-in Windows through the
+// agent API: it closes every open editor window at once, changes nothing in
+// the set, and is never an undo step.
+#[test]
+fn close_all_plug_in_windows_closes_the_editors_through_the_agent_api() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("windows").unwrap();
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .expect("the default set has an audio track");
+    let loaded = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.load",
+                               "args": { "path": bl_test_clap::bundle(), "track": track } }] }),
+    );
+    let device = loaded["results"][0]["result"]["device"].clone();
+    let info = |client: &mut Client<InProcess>| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "plugin.info", "args": { "device": device } }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+
+    client.transport().shell.start_audio();
+    // The host activates the plug-in on its main thread while the shell
+    // polls; a bounded poll loop drives it without waiting on the clock.
+    let mut active = false;
+    for _ in 0..10_000 {
+        client.transport().shell.poll();
+        if info(&mut client)["active"] == true {
+            active = true;
+            break;
+        }
+    }
+    assert!(active, "the plug-in never activated");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.show_window",
+                               "args": { "device": device } }] }),
+    );
+    assert!(
+        info(&mut client)["window_open"] == true,
+        "the editor is open"
+    );
+
+    let result = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "view.close_plug_in_windows", "args": {} }] }),
+    );
+    assert_eq!(result["results"][0]["result"]["closed"], 1);
+    assert!(
+        info(&mut client)["window_open"] == false,
+        "the editor closed"
     );
 }

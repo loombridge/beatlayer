@@ -72,6 +72,10 @@ use clack_plugin::stream::{InputStream, OutputStream};
 use clack_plugin::utils::Cookie;
 use std::io::{Read, Write};
 
+mod gain;
+
+use gain::{PluginGainAdjustmentMetering, PluginGainAdjustmentMeteringImpl};
+
 /// The plug-in's CLAP ID.
 pub const PLUGIN_ID: &str = "io.beatlayer.test.gain-echo";
 /// The plug-in's name.
@@ -295,7 +299,16 @@ impl Plugin for GainEcho {
             .register::<PluginParams>()
             .register::<PluginState>()
             .register::<PluginLatency>()
-            .register::<PluginGui>();
+            .register::<PluginGui>()
+            .register::<PluginGainAdjustmentMetering>();
+    }
+}
+
+impl PluginGainAdjustmentMeteringImpl for MainThread<'_> {
+    fn gain_adjustment(&self) -> f64 {
+        // The plug-in multiplies by its gain, so the adjustment it applied
+        // to the block's last sample is that gain in dB.
+        20.0 * self.shared.gain().max(1e-6).log10()
     }
 }
 

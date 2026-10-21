@@ -1,18 +1,22 @@
 //! What the mixers show (WP-1.9): whether the Session View's and the
-//! Arrangement View's mixers are shown, how far each is scrolled, and which
-//! sections show, changed by the `mixer_view.*` commands. View state only:
+//! Arrangement View's mixers are shown, how far each is scrolled, which
+//! sections show, and which racks' chains are folded out as strips in
+//! them, changed by the `mixer_view.*` commands. View state only:
 //! nothing here is in the set, and no command here is an undo step (the
 //! mixer view spec, R11 to R14, R16).
 
-use bl_model::{Document, TrackId};
+use std::collections::BTreeSet;
+
+use bl_model::{Device, DeviceId, Document, RackKind, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, ViewMixerState,
+    COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, SectionArgs,
+    ToggleArgs, TrackGainReduction, ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE,
-    TRACK_OPTIONS, VOLUME,
+    CROSSFADER, FOCUS, FOLD_CHAINS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE,
+    TOGGLE, TRACK_OPTIONS, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -37,6 +41,9 @@ pub struct MixerView {
     scene_tempo: bool,
     return_tracks: bool,
     track_options: bool,
+    /// The racks whose chains are folded out as strips in the mixers (racks
+    /// spec, R27).
+    folded: BTreeSet<DeviceId>,
     /// Counts `mixer_view.focus` runs, so the window moves the focus once
     /// for each.
     focus_requests: u64,
@@ -71,6 +78,7 @@ impl MixerView {
             scene_tempo: false,
             return_tracks: true,
             track_options: false,
+            folded: BTreeSet::new(),
             focus_requests: 0,
         }
     }
@@ -148,9 +156,11 @@ impl MixerView {
         self.focus_requests
     }
 
-    /// The state `mixer_view.state` reports.
+    /// The state `mixer_view.state` reports: what the mixers show, and the
+    /// rack chains folded out in them (racks spec, R27).
     #[must_use]
-    pub fn state(&self) -> MixerViewState {
+    pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> MixerViewState {
+        let (racks, chains) = self.folds(doc, arrangement);
         MixerViewState {
             session: self.session,
             arrangement: self.arrangement,
@@ -161,6 +171,76 @@ impl MixerView {
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
             track_options: self.track_options,
+            gain_reduction: Vec::new(),
+            racks,
+            chains,
+        }
+    }
+
+    /// The racks whose chains fold out in the mixers, and the chains folded
+    /// out as strips, in the mixers' column order (racks spec, R27).
+    ///
+    /// A track's chains fold out when it holds an instrument or drum rack of
+    /// more than one chain, and a chain's when it holds a rack of more than
+    /// one chain (racks spec, R27).
+    #[must_use]
+    pub fn folds(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> (Vec<RackFold>, Vec<ChainStrip>) {
+        let mut racks = Vec::new();
+        let mut chains = Vec::new();
+        for track in columns(doc, arrangement) {
+            let Some(t) = doc.track(track) else {
+                continue;
+            };
+            let Some(rack) = t.devices().find(|d| shows_chains(d)) else {
+                continue;
+            };
+            racks.push(self.fold_of(track, rack));
+            if self.folded.contains(&rack.id) {
+                self.strip_of(track, rack, &mut chains);
+            }
+        }
+        (racks, chains)
+    }
+
+    /// One rack's fold, as the state reports it.
+    fn fold_of(&self, track: TrackId, rack: &Device) -> RackFold {
+        RackFold {
+            track,
+            rack: rack.id,
+            name: rack.title().to_owned(),
+            folded: self.folded.contains(&rack.id),
+        }
+    }
+
+    /// A rack's chains as strips, and the chains of the racks inside them.
+    fn strip_of(&self, track: TrackId, rack: &Device, chains: &mut Vec<ChainStrip>) {
+        for chain in &rack.chains {
+            let nested = chain.devices.iter().find(|d| chains_fold(d));
+            chains.push(ChainStrip {
+                track,
+                rack: rack.id,
+                rack_name: rack.title().to_owned(),
+                chain: chain.id,
+                name: chain.name.clone(),
+                volume: chain.mixer.volume,
+                pan: chain.mixer.pan,
+                has_mixer: rack
+                    .rack_kind()
+                    .is_some_and(|kind| kind.chains_have_volume_and_pan()),
+                enabled: chain.mixer.enabled,
+                solo: chain.mixer.solo,
+                colour: chain.colour,
+                nested: nested.map(|d| self.fold_of(track, d)),
+            });
+            if let Some(nested) = nested
+                && self.folded.contains(&nested.id)
+            {
+                self.strip_of(track, nested, chains);
+            }
         }
     }
 
@@ -232,7 +312,8 @@ impl MixerView {
                         "`x` must be a finite number".to_owned(),
                     ));
                 }
-                let columns = columns(doc, arrangement).len();
+                let columns =
+                    columns(doc, arrangement).len() + self.folds(doc, arrangement).1.len();
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.scroll = (mixer.scroll + x).clamp(0.0, max_scroll(columns));
             }
@@ -241,22 +322,63 @@ impl MixerView {
                 self.arrangement.shown = true;
                 self.focus_requests = self.focus_requests.wrapping_add(1);
             }
+            FOLD_CHAINS => {
+                let args: bl_shell_spec::mixer_view::FoldChainsArgs =
+                    serde_json::from_value(args).map_err(parse_error)?;
+                let Some(rack) = doc.device(args.rack) else {
+                    return Err(MixerViewError::InvalidArgs(format!(
+                        "no device {}",
+                        args.rack
+                    )));
+                };
+                if !chains_fold(rack) {
+                    return Err(MixerViewError::InvalidArgs(format!(
+                        "{} has no chains to fold out",
+                        args.rack
+                    )));
+                }
+                let shown = args.shown.unwrap_or(!self.folded.contains(&args.rack));
+                if shown {
+                    self.folded.insert(args.rack);
+                } else {
+                    self.folded.remove(&args.rack);
+                }
+            }
             _ => {
                 return Err(MixerViewError::InvalidArgs(format!(
                     "`{id}` isn't a Mixer view command"
                 )));
             }
         }
-        Ok(self.state())
+        Ok(self.state(doc, arrangement))
     }
 
     /// Keeps each scroll within the set's columns, after the set changed.
+    /// The chain strips count as columns of their own (racks spec, R27).
     pub fn clamp_scroll(&mut self, doc: &Document, arrangement: &ArrangementView) {
-        let max = max_scroll(columns(doc, arrangement).len());
+        let (_, chains) = self.folds(doc, arrangement);
+        let max = max_scroll(columns(doc, arrangement).len() + chains.len());
         for mixer in [&mut self.session, &mut self.arrangement] {
             mixer.scroll = mixer.scroll.min(max);
         }
     }
+}
+
+/// Whether a device's chains fold out in the mixers as strips (racks spec,
+/// R27): an instrument or drum rack of more than one chain.
+#[must_use]
+pub fn shows_chains(rack: &Device) -> bool {
+    matches!(
+        rack.rack_kind(),
+        Some(RackKind::Instrument | RackKind::Drum)
+    ) && rack.chains.len() > 1
+}
+
+/// Whether a rack's chains fold out in the mixers as strips (racks spec,
+/// R27): a rack of more than one chain.
+#[must_use]
+pub fn chains_fold(rack: &Device) -> bool {
+    rack.chains.len() > 1
 }
 
 /// The furthest a mixer of `columns` track columns scrolls: until its last

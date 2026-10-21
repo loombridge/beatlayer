@@ -2414,12 +2414,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),
-        ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
-        ("note.delete", Exception(note_editor)),
-        // `note.move` has its own path now: the note-selection keys
-        // transpose the selected notes (S-A11Y-008, S-A11Y-009).
-        ("note.resize", Exception(note_editor)),
+        // `note.move`, `note.resize`, `note.delete` and
+        // `clip_view.select_notes` have keys of their own now: the
+        // note-selection keys (S-A11Y-010, S-A11Y-011), Delete
+        // (S-EDIT-005) and Cmd-A (S-NOTE-001).
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),

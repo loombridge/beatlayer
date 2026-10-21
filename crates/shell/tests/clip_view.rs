@@ -712,3 +712,188 @@ const QUARTER: i64 = Ticks::QUARTER.get();
 fn song_note(key: u8, start: i64, length: i64) -> Note {
     Note::new(key, Ticks(start), Ticks(length), 100)
 }
+
+#[test]
+fn the_insert_marker_and_the_time_selection_are_view_state() {
+    // Spec: piano-roll R23, R24, R31. The insert marker and the time
+    // selection belong to the view: they change nothing in the set and are
+    // never an undo step, and the state reports them.
+    let mut song = song(vec![song_note(60, 0, QUARTER)]);
+    let steps = song.steps();
+    let state = song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": 2 * QUARTER }),
+    );
+    assert_eq!(state.insert_marker, Some(Ticks(2 * QUARTER)));
+    assert_eq!(state.time_selection, None);
+    assert_eq!(song.steps(), steps, "the marker is never an undo step");
+    assert!(!song.shell.is_dirty(), "and doesn't dirty the set");
+    // The marker stays inside the clip's span.
+    let state = song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": 100 * BAR }),
+    );
+    assert_eq!(
+        state.insert_marker,
+        Some(Ticks(4 * BAR)),
+        "the clip's span ends it"
+    );
+    // A time selection is drawn across the note area and the lanes, and
+    // moving the marker takes it away.
+    let state = song.view(
+        "clip_view.select_time",
+        json!({ "clip": song.clip, "start": QUARTER, "end": 2 * QUARTER }),
+    );
+    assert_eq!(
+        state.time_selection,
+        Some((Ticks(QUARTER), Ticks(2 * QUARTER)))
+    );
+    assert_eq!(
+        state.insert_marker,
+        Some(Ticks(4 * BAR)),
+        "the marker stays"
+    );
+    let state = song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": QUARTER }),
+    );
+    assert_eq!(state.time_selection, None, "the marker clears it");
+    assert_eq!(song.steps(), steps, "none of it is an undo step");
+}
+
+#[test]
+fn the_keyboard_selects_the_notes_the_spec_says() {
+    // Spec: piano-roll R25, R26. The nearest note, the previous and next
+    // note, the same pitch's, every note, and a key's notes.
+    let mut song = song(vec![
+        song_note(60, 0, QUARTER),
+        song_note(64, QUARTER, QUARTER),
+        song_note(60, 2 * QUARTER, QUARTER),
+    ]);
+    song.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": song.clip, "beat": QUARTER / 2 }),
+    );
+    // The nearest note's start, and of notes that start together the lowest
+    // pitch.
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": "nearest" }));
+    assert_eq!(state.selected, [0], "the nearest note's start");
+    // The previous and next note in the clip's order.
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": "next" }));
+    assert_eq!(state.selected, [1]);
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": "previous" }));
+    assert_eq!(state.selected, [0]);
+    // The previous and next note at the same pitch.
+    let state = song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    assert_eq!(state.selected, [0]);
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": "same_pitch_next" }));
+    assert_eq!(state.selected, [2], "the next note at 60");
+    let state = song.view(
+        ids::SELECT_NOTES,
+        json!({ "select": "same_pitch_previous" }),
+    );
+    assert_eq!(state.selected, [0], "and the previous one");
+    // Every note in the clip's span, and a key's notes.
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": "all" }));
+    assert_eq!(state.selected, [0, 1, 2]);
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": { "key": 60 } }));
+    assert_eq!(state.selected, [0, 2], "the notes at that pitch");
+    // Shift-clicking a key adds its notes, or takes them out when they are
+    // all selected.
+    let state = song.view(
+        ids::SELECT_NOTES,
+        json!({ "select": { "key": 64 }, "add": true }),
+    );
+    assert_eq!(state.selected, [0, 1, 2], "the other key's notes are added");
+    let state = song.view(
+        ids::SELECT_NOTES,
+        json!({ "select": { "key": 60 }, "add": true }),
+    );
+    assert_eq!(state.selected, [1], "and the first key's are taken out");
+    // The time selection follows the notes.
+    let state = song.view(ids::SELECT_NOTES, json!({ "select": { "key": 60 } }));
+    assert_eq!(
+        state.time_selection,
+        Some((Ticks(0), Ticks(2 * QUARTER + QUARTER))),
+        "from the earliest start to the latest end"
+    );
+}
+
+#[test]
+fn the_note_clipboard_copies_cuts_pastes_and_duplicates() {
+    // Spec: piano-roll R28. The clipboard keeps the pitches, the values and
+    // the places in time, and it's apart from the clips' clipboard.
+    let mut notes = song(vec![
+        song_note(60, 0, QUARTER),
+        song_note(64, QUARTER, QUARTER),
+    ]);
+    // Copy the selected notes.
+    notes.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    let copied = notes
+        .shell
+        .run(ids::COPY, json!({ "clip": notes.clip }))
+        .unwrap();
+    assert_eq!(copied["notes"], 2, "two notes on the clipboard");
+    assert_eq!(notes.steps(), 0, "copying is never an undo step");
+    // Paste them at the insert marker: the pitches and the spacing hold.
+    notes.view(
+        "clip_view.set_insert_marker",
+        json!({ "clip": notes.clip, "beat": 2 * QUARTER }),
+    );
+    let result = notes.one_step(ids::PASTE, json!({ "clip": notes.clip }));
+    assert_eq!(result.selected.len(), 2, "the pasted notes are selected");
+    assert_eq!(
+        notes.notes(),
+        [
+            song_note(60, 0, QUARTER),
+            song_note(64, QUARTER, QUARTER),
+            song_note(60, 2 * QUARTER, QUARTER),
+            song_note(64, 3 * QUARTER, QUARTER),
+        ],
+        "the copies keep their pitches and their spacing"
+    );
+    // Cut copies the notes and deletes them.
+    notes.view(ids::SELECT_NOTES, json!({ "notes": [0, 1] }));
+    notes.one_step(ids::CUT, json!({ "clip": notes.clip }));
+    assert_eq!(notes.notes().len(), 2, "the cut notes are gone");
+    // Delete removes the selected notes.
+    notes.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    notes.one_step(ids::DELETE_NOTES, json!({ "clip": notes.clip }));
+    assert_eq!(notes.notes().len(), 1);
+    // Duplicate lays a copy straight after the time selection, and another
+    // one after that.
+    let mut copies = song(vec![song_note(60, 0, QUARTER)]);
+    copies.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
+    copies.one_step(ids::DUPLICATE, json!({ "clip": copies.clip }));
+    assert_eq!(
+        copies.notes(),
+        [song_note(60, 0, QUARTER), song_note(60, QUARTER, QUARTER)],
+        "the copy lies straight after"
+    );
+    copies.one_step(ids::DUPLICATE, json!({ "clip": copies.clip }));
+    assert_eq!(
+        copies.notes(),
+        [
+            song_note(60, 0, QUARTER),
+            song_note(60, QUARTER, QUARTER),
+            song_note(60, 2 * QUARTER, QUARTER),
+        ],
+        "and another one after that"
+    );
+}
+#[test]
+fn copying_a_note_by_dragging_leaves_the_original() {
+    // Spec: piano-roll R29. Option-dragging a note copies it: the notes
+    // stay where they are and the copies land where they would have gone.
+    let mut song = song(vec![song_note(60, 0, QUARTER)]);
+    let result = song.one_step(
+        ids::MOVE_NOTES,
+        json!({ "notes": [0], "by": QUARTER, "copy": true }),
+    );
+    assert_eq!(
+        song.notes(),
+        [song_note(60, 0, QUARTER), song_note(60, QUARTER, QUARTER)],
+        "the original stays and the copy lands where the note would have"
+    );
+    assert_eq!(result.selected, [1], "the copy is selected");
+}

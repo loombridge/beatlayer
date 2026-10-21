@@ -33,8 +33,10 @@ use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
 use bl_model::{ClipData, ClipId, Document, MidiData, Note};
 use bl_shell::arrangement::ArrangementView;
 use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
-use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit};
+use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
 use bl_shell::commands::VIEW_LANE;
+use bl_shell::context_menus;
+use bl_shell::menus::{MenuItem, shown};
 use bl_shell::note_commands as ids;
 use bl_shell::note_commands::{ClipTab, NoteField};
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
@@ -46,6 +48,7 @@ use serde_json::{Value, json};
 
 use crate::arrangement::editing::EditKeys;
 use crate::clip_envelope::{self, EnvelopeEditor};
+use crate::keymap::{Keymap, Platform};
 use crate::launch_panel;
 use crate::main_window::UiEvent;
 use crate::sample_editor::SampleEditorUi;
@@ -575,6 +578,9 @@ enum NoteDrag {
         /// The furthest the drag may move them: earlier in time, and in
         /// pitch.
         limits: (Ticks, i32, i32),
+        /// Copy the notes instead of moving them, as Option-dragging a note
+        /// does (S-NOTE-002, piano-roll R29).
+        copy: bool,
     },
     /// Dragging the notes' ends.
     Resize {
@@ -631,11 +637,88 @@ struct StripDrag {
     length: Ticks,
 }
 
+/// The MIDI Note Editor's context menus: the one a note or the empty grid
+/// opens (C-NOTE) and the one a key in the piano ruler opens (C-KEYS). Each
+/// item runs the command its shortcut runs, and an item whose command isn't
+/// built yet is drawn disabled and names its package (piano-roll R30).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteMenus {
+    keymap: Keymap,
+    platform: Platform,
+}
+
+impl Default for NoteMenus {
+    fn default() -> Self {
+        Self {
+            keymap: Keymap::live12(),
+            platform: Platform::current(),
+        }
+    }
+}
+
+impl NoteMenus {
+    /// Draws the open menu's items: the ones whose command is built run
+    /// it, and the rest are drawn disabled and name their package.
+    fn show(&self, ui: &mut Ui, shell: &Shell, menu: &[MenuItem], events: &mut Vec<UiEvent>) {
+        let contexts = shell.active_contexts();
+        for item in shown(menu) {
+            if item.is_separator() {
+                ui.separator();
+                continue;
+            }
+            let package = context_menus::pending_package(item.row);
+            let response = crate::menus::item_in(
+                ui,
+                item,
+                shell,
+                &self.keymap,
+                self.platform,
+                &contexts,
+                events,
+            );
+            let response = match package {
+                Some(package) => {
+                    let text = format!("Not built yet: arrives with {package}.");
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_description(text.clone());
+                    });
+                    response.on_disabled_hover_text(text)
+                }
+                None => response,
+            };
+            crate::menus::take_focus_first(ui, &response);
+        }
+    }
+}
+
 /// The key at the top edge a view with notes starts at: the highest note
 /// and two rows above it.
 fn default_top(midi: &MidiData) -> f32 {
     let highest = midi.notes.iter().map(|note| note.key).max();
     highest.map_or(DEFAULT_TOP, |key| (f32::from(key) + 2.0).min(127.0))
+}
+
+/// The note edges in the clip's span: every note's start and end, in order
+/// (piano-roll R23, R24).
+fn note_edges(notes: &[Note], span: (Ticks, Ticks)) -> Vec<Ticks> {
+    let mut edges: Vec<Ticks> = notes
+        .iter()
+        .flat_map(|note| [note.start, note.start + note.length])
+        .filter(|at| *at >= span.0 && *at <= span.1)
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    edges
+}
+
+/// The edge before or after `at`: the one the insert marker or the time
+/// selection's end moves to.
+fn edge_at(edges: &[Ticks], at: Ticks, forward: bool) -> Option<Ticks> {
+    if forward {
+        edges.iter().copied().find(|edge| *edge > at)
+    } else {
+        edges.iter().copied().rev().find(|edge| *edge < at)
+    }
 }
 
 /// A note under a point in the note area.
@@ -904,6 +987,8 @@ pub struct ClipViewUi {
     envelope: EnvelopeEditor,
     /// The Sample Editor, for an audio clip (WP-4.10).
     sample: SampleEditorUi,
+    /// The note editor's context menus (C-NOTE, C-KEYS).
+    menus: NoteMenus,
 }
 
 impl Default for ClipViewUi {
@@ -919,6 +1004,7 @@ impl Default for ClipViewUi {
             marquee: None,
             envelope: EnvelopeEditor::default(),
             sample: SampleEditorUi::default(),
+            menus: NoteMenus::default(),
         }
     }
 }
@@ -1086,6 +1172,7 @@ impl ClipViewUi {
             axis,
             length,
             &notes,
+            &selected,
             events,
         );
     }
@@ -1298,6 +1385,35 @@ impl ClipViewUi {
             face,
             shell.clip_view().lane(),
         );
+        // Spec: piano-roll R23, R24. The time selection is drawn across the
+        // note area and the lanes, and the insert marker is a line through
+        // both.
+        let lane = lane_rect(rect);
+        let time = shell
+            .clip_view()
+            .time_selection(shell.editor().document(), shell.arrangement());
+        let insert = shell
+            .clip_view()
+            .insert_marker(shell.editor().document(), shell.arrangement());
+        if let Some((from, to)) = time {
+            let x0 = x_of_tick(grid, start, length, from);
+            let x1 = x_of_tick(grid, start, length, to);
+            let band = Rect::from_min_max(pos2(x0, grid.top()), pos2(x1, lane.bottom())).intersect(
+                Rect::from_min_max(
+                    pos2(grid.left(), grid.top()),
+                    pos2(grid.right(), lane.bottom()),
+                ),
+            );
+            painter.rect_filled(band, 0.0, colours.time_selection.0.gamma_multiply(0.2));
+        }
+        if let Some(at) = insert {
+            let x = x_of_tick(grid, start, length, at);
+            painter.rect_filled(
+                Rect::from_min_max(pos2(x - 0.5, grid.top()), pos2(x + 0.5, lane.bottom())),
+                0.0,
+                colours.insert_marker.0,
+            );
+        }
     }
 
     /// Paints the editor ruler and marker strip (L-CLIP-011): the clip's
@@ -1439,6 +1555,7 @@ impl ClipViewUi {
         axis: Ticks,
         length: Ticks,
         notes: &[Note],
+        selected: &[u32],
         events: &mut Vec<UiEvent>,
     ) {
         // Spec: piano-roll R11. The marker strip's drags run the document's
@@ -1506,6 +1623,9 @@ impl ClipViewUi {
                             .key_at(grid, press.y)
                             .unwrap_or_else(|| f32::from(note.key)),
                         grab: tick_at(grid, start, length, press.x) - note.start,
+                        // Spec: piano-roll R29. Option-dragging a note
+                        // copies it.
+                        copy: keys.copy,
                     });
                 }
                 // Spec: piano-roll R6. Anywhere else a marquee selects.
@@ -1537,6 +1657,17 @@ impl ClipViewUi {
                     ids::SELECT_NOTES,
                     json!({ "clip": clip, "notes": inside, "mode": "replace" }),
                 )));
+                // Spec: piano-roll R24. The marquee's time span is the
+                // time selection.
+                let (low, high) = (from.x.min(pos.x), from.x.max(pos.x));
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "clip_view.select_time",
+                    json!({
+                        "clip": clip,
+                        "start": tick_at(grid, start, length, low).get() as f64,
+                        "end": tick_at(grid, start, length, high).get() as f64,
+                    }),
+                )));
             }
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -1547,6 +1678,17 @@ impl ClipViewUi {
                     phase: GesturePhase::Cancel,
                     invocation: None,
                 });
+            } else if shell.active_contexts().contains(&Context::NoteEditor) {
+                // Spec: piano-roll R24, R25. Esc deselects the notes and
+                // clears the time selection.
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SELECT_NOTES,
+                    json!({ "clip": clip, "notes": [], "mode": "replace" }),
+                )));
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "clip_view.select_time",
+                    json!({ "clip": clip }),
+                )));
             }
         }
         if response.drag_stopped() {
@@ -1603,23 +1745,82 @@ impl ClipViewUi {
                         )));
                     }
                 }
-                // Spec: piano-roll R5. With Draw Mode off, clicking a note
-                // selects it alone, Cmd-click (Ctrl-click) adds or removes
-                // it, and clicking empty grid clears the selection.
+                // Spec: piano-roll R5, R26. With Draw Mode off, clicking a
+                // note selects it alone, Cmd-click (Ctrl-click) and
+                // Shift-click add or remove it, and clicking empty grid
+                // clears the selection.
                 (false, Some(place)) => events.push(UiEvent::Invoke(Invocation::new(
                     ids::SELECT_NOTES,
                     json!({
                         "clip": clip,
                         "notes": [place],
-                        "mode": if keys.toggle { "toggle" } else { "replace" },
+                        "mode": if keys.toggle || keys.extend { "toggle" } else { "replace" },
                     }),
                 ))),
-                (false, None) => events.push(UiEvent::Invoke(Invocation::new(
-                    ids::SELECT_NOTES,
-                    json!({ "clip": clip, "notes": [], "mode": "replace" }),
-                ))),
+                // Spec: piano-roll R23. Clicking empty grid places the
+                // insert marker on the nearest grid line, and clears the
+                // time selection.
+                (false, None) => {
+                    let at = arrangement.snap_drag(
+                        doc,
+                        tick_at(grid, start, length, pos.x),
+                        keys.bypass,
+                    );
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::SELECT_NOTES,
+                        json!({ "clip": clip, "notes": [], "mode": "replace" }),
+                    )));
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        "clip_view.set_insert_marker",
+                        json!({ "clip": clip, "beat": at }),
+                    )));
+                }
             }
         }
+        // Spec: piano-roll R26. Clicking a key in the piano ruler selects
+        // the notes at that pitch, and Shift-clicking adds them or takes
+        // them out.
+        let keys_rect = Rect::from_min_max(
+            pos2(view.left(), grid.top()),
+            pos2(grid.left(), grid.bottom()),
+        );
+        let keys_response =
+            ui.interact(keys_rect, Id::new(("clip-view-keys", clip)), Sense::click());
+        if keys_response.clicked()
+            && let Some(pos) = keys_response.interact_pointer_pos()
+            && let Some(key) = rows.key_at(grid, pos.y)
+        {
+            let key = key.round().clamp(0.0, 127.0) as u8;
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_NOTES,
+                json!({
+                    "clip": clip,
+                    "notes": [],
+                    "select": { "key": key },
+                    "add": keys.extend,
+                }),
+            )));
+        }
+        // Spec: piano-roll R30. Right-clicking a note, which selects it
+        // alone first if it isn't selected, or empty grid opens the editor's
+        // context menu; right-clicking a key in the piano ruler opens that
+        // one's.
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some((place, _)) = hit(pos)
+            && !selected.contains(&place)
+        {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_NOTES,
+                json!({ "clip": clip, "notes": [place], "mode": "replace" }),
+            )));
+        }
+        response.context_menu(|ui| {
+            self.menus.show(ui, shell, &context_menus::note(), events);
+        });
+        keys_response.context_menu(|ui| {
+            self.menus.show(ui, shell, &context_menus::keys(), events);
+        });
         // Spec: piano-roll. The lane under the note area: dragging sets a
         // note's value, or draws a ramp across several. Its left column is
         // the lane header, whose menu chooses the value.
@@ -1700,32 +1901,248 @@ impl ClipViewUi {
         // keys: with notes selected, Up and Down transpose them a semitone,
         // and with Shift an octave. The Clip View holds the detail area's
         // keys (the shell's contexts say which apply).
-        if shell.active_contexts().contains(&Context::NoteSelection) {
-            let semitones = ui.input(|i| {
-                i.events
-                    .iter()
-                    .filter_map(|event| match event {
-                        egui::Event::Key {
-                            key,
-                            pressed: true,
-                            modifiers,
-                            ..
-                        } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => match key {
-                            Key::ArrowUp if modifiers.shift => Some(12),
-                            Key::ArrowUp => Some(1),
-                            Key::ArrowDown if modifiers.shift => Some(-12),
-                            Key::ArrowDown => Some(-1),
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .next_back()
-            });
-            if let Some(semitones) = semitones {
-                events.push(UiEvent::Invoke(Invocation::new(
-                    ids::MOVE_NOTES,
-                    json!({ "clip": clip, "semitones": semitones }),
-                )));
+        self.keys(
+            ui,
+            shell,
+            doc,
+            arrangement,
+            clip,
+            length,
+            midi,
+            notes,
+            selected,
+            events,
+        );
+    }
+
+    /// The note editor's keys: the insert marker, the time selection, the
+    /// selection from the keyboard, and the moves and resizes from the
+    /// keys (piano-roll R23 to R27).
+    #[expect(clippy::too_many_arguments, reason = "the editor's whole keyboard")]
+    fn keys(
+        &mut self,
+        ui: &Ui,
+        shell: &Shell,
+        doc: &Document,
+        arrangement: &ArrangementView,
+        clip: ClipId,
+        length: Ticks,
+        midi: &MidiData,
+        notes: &[Note],
+        selected: &[u32],
+        events: &mut Vec<UiEvent>,
+    ) {
+        // The Clip View holds the detail area's keys (the shell's contexts
+        // say which apply).
+        if !shell.active_contexts().contains(&Context::NoteEditor) {
+            return;
+        }
+        let insert = shell.clip_view().insert_marker(doc, arrangement);
+        let time = shell.clip_view().time_selection(doc, arrangement);
+        let span = span(midi, length);
+        let step = arrangement.grid_ticks(doc);
+        let edges = note_edges(notes, span);
+        let mac = cfg!(target_os = "macos");
+        let marker = |events: &mut Vec<UiEvent>, at: Ticks| {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "clip_view.set_insert_marker",
+                json!({ "clip": clip, "beat": at }),
+            )));
+        };
+        let selection = |events: &mut Vec<UiEvent>, from: Ticks, to: Ticks| {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "clip_view.select_time",
+                json!({
+                    "clip": clip,
+                    "start": from.get() as f64,
+                    "end": to.get() as f64,
+                }),
+            )));
+        };
+        let select = |events: &mut Vec<UiEvent>, what: &str, add: bool| {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_NOTES,
+                json!({ "clip": clip, "notes": [], "select": what, "add": add }),
+            )));
+        };
+        let pressed: Vec<(Key, egui::Modifiers)> = ui.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } => Some((*key, *modifiers)),
+                    _ => None,
+                })
+                .collect()
+        });
+        for (key, modifiers) in pressed {
+            let shift = modifiers.shift;
+            let alt = modifiers.alt;
+            let ctrl = modifiers.ctrl;
+            // The note-jump keys: Option on macOS, Alt elsewhere.
+            let jump = alt;
+            // The key that moves the insert marker to a note edge: Option on
+            // macOS, Ctrl elsewhere (S-A11Y-006).
+            let edge = if mac { alt } else { ctrl };
+            // The key that adds to the selection while jumping (S-NOTE-043).
+            let adding = if mac { alt && shift } else { ctrl && shift };
+            match key {
+                Key::ArrowLeft | Key::ArrowRight => {
+                    let forward = key == Key::ArrowRight;
+                    if jump && shift {
+                        // Spec: piano-roll R24. Option-Shift with the
+                        // arrows moves the time selection's end to a note
+                        // edge.
+                        if let Some((from, to)) = time {
+                            let end = edge_at(&edges, to, forward).unwrap_or(to);
+                            selection(events, from, end.max(from));
+                        }
+                    } else if shift {
+                        // Spec: piano-roll R24, R27. With notes selected,
+                        // Shift with the arrows lengthens or shortens them;
+                        // with none, it selects time.
+                        if selected.is_empty() {
+                            // With no time selection, the arrows select
+                            // time from the insert marker a step at a time.
+                            let (from, to) = match time {
+                                Some((from, to)) => {
+                                    let to = if forward {
+                                        to + step
+                                    } else {
+                                        (to - step).max(from)
+                                    };
+                                    (from, to)
+                                }
+                                None => {
+                                    let at = insert.unwrap_or(span.0);
+                                    if forward {
+                                        (at, at + step)
+                                    } else {
+                                        ((at - step).max(span.0), at)
+                                    }
+                                }
+                            };
+                            selection(events, from.min(to), to.max(from));
+                        } else {
+                            let by = if forward { step } else { -step };
+                            events.push(UiEvent::Invoke(Invocation::new(
+                                ids::RESIZE_NOTES,
+                                json!({ "clip": clip, "by": by }),
+                            )));
+                        }
+                    } else if jump {
+                        // Spec: piano-roll R25. Option with the arrows
+                        // selects the previous or next note of the same
+                        // pitch; with none selected, on macOS the same
+                        // keys move the insert marker to a note edge.
+                        if !selected.is_empty() && (mac || !edge) {
+                            select(
+                                events,
+                                if forward {
+                                    "same_pitch_next"
+                                } else {
+                                    "same_pitch_previous"
+                                },
+                                false,
+                            );
+                        } else if mac {
+                            let at = insert.unwrap_or(span.0);
+                            if let Some(edge) = edge_at(&edges, at, forward) {
+                                marker(events, edge);
+                            }
+                        }
+                    } else if edge {
+                        // Spec: piano-roll R23. Option (Ctrl) with the
+                        // arrows moves the insert marker to a note edge.
+                        let at = insert.unwrap_or(span.0);
+                        if let Some(edge) = edge_at(&edges, at, forward) {
+                            marker(events, edge);
+                        }
+                    } else if selected.is_empty() {
+                        // Spec: piano-roll R23. Left and Right move the
+                        // insert marker a grid step.
+                        let at = insert.unwrap_or(span.0);
+                        let at = if forward { at + step } else { at - step };
+                        marker(events, at.clamp(span.0, span.1));
+                    } else {
+                        // Spec: piano-roll R27. Left and Right move the
+                        // selection a grid step.
+                        let by = if forward { step } else { -step };
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::MOVE_NOTES,
+                            json!({ "clip": clip, "by": by }),
+                        )));
+                    }
+                }
+                Key::ArrowUp | Key::ArrowDown => {
+                    // Spec: piano-roll R25. Option with the arrows selects
+                    // the note nearest the insert marker, and the previous
+                    // or next note after that.
+                    let forward = key == Key::ArrowUp;
+                    if adding {
+                        select(events, if forward { "next" } else { "previous" }, true);
+                    } else if jump {
+                        if selected.is_empty() {
+                            select(events, "nearest", false);
+                        } else {
+                            select(events, if forward { "next" } else { "previous" }, false);
+                        }
+                    } else if !selected.is_empty()
+                        && !modifiers.command
+                        && !modifiers.ctrl
+                        && !modifiers.alt
+                    {
+                        // Spec: piano-roll R20. Up and Down transpose the
+                        // selected notes a semitone, and with Shift an
+                        // octave.
+                        let semitones = match (key, shift) {
+                            (Key::ArrowUp, true) => 12,
+                            (Key::ArrowUp, false) => 1,
+                            (_, true) => -12,
+                            (_, false) => -1,
+                        };
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::MOVE_NOTES,
+                            json!({ "clip": clip, "semitones": semitones }),
+                        )));
+                    }
+                }
+                Key::Home | Key::End => {
+                    // Spec: piano-roll R23. Home and End move the insert
+                    // marker to the clip's first and last tick.
+                    let at = if key == Key::Home { span.0 } else { span.1 };
+                    marker(events, at);
+                }
+                Key::Enter => {
+                    // Spec: piano-roll R24. Enter with a time selection and
+                    // no notes selected selects the notes that start inside
+                    // it, keeping the time selection; with notes selected it
+                    // deselects them and keeps the time selection.
+                    if !selected.is_empty() {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::SELECT_NOTES,
+                            json!({ "clip": clip, "notes": [], "mode": "replace" }),
+                        )));
+                    } else if let Some((from, to)) = time {
+                        let inside: Vec<u32> = notes
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, note)| note.start >= from && note.start < to)
+                            .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
+                            .collect();
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::SELECT_NOTES,
+                            json!({ "clip": clip, "notes": inside, "mode": "replace" }),
+                        )));
+                        selection(events, from, to);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1832,6 +2249,7 @@ impl NoteDrag {
                 grab_key,
                 grab,
                 limits,
+                copy,
             } => {
                 // Spec: piano-roll R10. With snapping on, the grabbed note's
                 // start lands on the grid, and Cmd (Alt) bypasses it.
@@ -1841,7 +2259,13 @@ impl NoteDrag {
                 let semitones = ((key - *grab_key).round() as i32).clamp(limits.1, limits.2);
                 (
                     ids::MOVE_NOTES,
-                    json!({ "clip": clip, "notes": places, "by": by, "semitones": semitones }),
+                    json!({
+                        "clip": clip,
+                        "notes": places,
+                        "by": by,
+                        "semitones": semitones,
+                        "copy": copy,
+                    }),
                 )
             }
             Self::Resize {

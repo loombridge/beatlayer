@@ -1333,6 +1333,14 @@ impl DeviceView {
                 port: external.port.clone(),
                 channel: external.channel,
                 audio_from: external.audio_from.label(),
+                // Spec: external-devices R17. The External Audio Effect
+                // sends its signal to the interface's outputs and hears it
+                // back: it has an Audio To and no MIDI To.
+                audio_to: external.audio_to.map(|channel| channel.label()),
+                output: self
+                    .types
+                    .iter()
+                    .any(|t| t.kind == d.kind && t.external_output),
                 hardware_latency: external.hardware_latency,
             }),
             midi_sidechain: d
@@ -3238,6 +3246,12 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     // starts with its routing, which `device.set_external` sets.
     if known.is_some_and(|t| t.external) {
         device = device.with_external();
+    }
+    // Spec: external-devices R17. The External Audio Effect sends its signal
+    // to the interface's outputs and hears it back: it starts with an Audio
+    // To.
+    if known.is_some_and(|t| t.external_output) {
+        device = device.with_external_output();
     }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();

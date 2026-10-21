@@ -98,6 +98,7 @@ fn the_ui_thread_sees_the_playhead_the_engine_played() {
     assert!(engine.flush(Duration::from_secs(5)));
 
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: None,
         channels: 2,

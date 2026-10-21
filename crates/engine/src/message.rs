@@ -6,6 +6,7 @@ use bl_model::ParamId;
 use crate::gc::{Owned, Program};
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
+use crate::render::RenderPlan;
 use crate::session::SessionCommand;
 
 /// When a parameter change or a transport command takes effect.
@@ -202,6 +203,8 @@ pub(crate) enum Message {
     Cancel(u64),
     /// What to record while the transport records (WP-2.13).
     Record(Owned<RecordingPlan>),
+    /// What to capture while the song plays a range in real time (WP-5.35).
+    Render(Owned<RenderPlan>),
     /// The frames between the engine handing the device a sound and it
     /// coming out, as the device reports it now (WP-5.34).
     OutputLatency(u32),

@@ -520,6 +520,7 @@ impl Vst3Host {
             found.push(Vst3Type {
                 path: path.to_owned(),
                 device_type: DeviceType {
+                    external_output: false,
                     kind: DeviceKind::Plugin {
                         format: PluginFormat::Vst3,
                         plugin_id: format_fuid(&cid),

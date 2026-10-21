@@ -33,6 +33,7 @@ fn playing() -> (ClapHost, Engine) {
 /// The render's settings: another rate and block size than the engine's.
 fn render_config() -> NodeConfig {
     NodeConfig {
+        round_trip_latency: 0,
         sample_rate: SampleRate::new(96_000).unwrap(),
         max_frames: 32,
         channels: 2,

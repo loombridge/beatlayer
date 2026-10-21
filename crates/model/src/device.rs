@@ -18,7 +18,7 @@ use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind, RackMacros};
 use crate::sample_edits::SampleEdit;
-use crate::track::Input;
+use crate::track::{Channel, Input};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
 /// The most sample slots a device's media can fill.
@@ -547,6 +547,16 @@ impl Device {
     #[must_use]
     pub fn with_external(mut self) -> Self {
         self.external = Some(External::default());
+        self
+    }
+
+    /// The same device with an Audio To, as a new external effect has: it
+    /// sends its signal to the interface's outputs and hears it back.
+    #[must_use]
+    pub fn with_external_output(mut self) -> Self {
+        let mut external = self.external.take().unwrap_or_default();
+        external.audio_to = Some(Channel::default());
+        self.external = Some(external);
         self
     }
 

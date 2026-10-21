@@ -1873,6 +1873,7 @@ mod tests {
                 midi_to: None,
                 channel: Some(2),
                 audio_from: None,
+                audio_to: None,
                 hardware_latency: Some(HardwareLatency::Samples { value: 64 }),
             })
             .unwrap();

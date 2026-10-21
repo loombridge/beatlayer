@@ -415,6 +415,7 @@ impl ClapHost {
             found.push(ClapType {
                 path: path.to_owned(),
                 device_type: DeviceType {
+                    external_output: false,
                     kind: kind(id),
                     name,
                     role,

@@ -3096,6 +3096,7 @@ fn schemas_match_what_commands_serialise() {
             "device.set_external",
             Command::SetExternal {
                 device,
+                audio_to: None,
                 midi_to: Some(ExternalPort::Port {
                     name: "Synth".to_owned(),
                 }),

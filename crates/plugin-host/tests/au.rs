@@ -34,6 +34,7 @@ const CUTOFF: u32 = 3;
 
 fn config() -> NodeConfig {
     NodeConfig {
+        round_trip_latency: 0,
         sample_rate: RATE,
         max_frames: FRAMES,
         channels: CHANNELS,

@@ -505,6 +505,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("track.group", query(Song, "tracks")),
     ("track.move", query(Song, "tracks")),
     ("track.rename", query(Track, "name")),
+    ("track.set_devices_enabled", query(Track, "devices")),
     ("track.ungroup", query(Song, "tracks")),
     ("transport.set_loop", read("transport.state", "loop_start")),
     ("transport.set_loop_enabled", read("transport.state", "loop_on")),

@@ -12,7 +12,7 @@ use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
     COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, SectionArgs,
-    ToggleArgs, ViewMixerState,
+    ToggleArgs, TrackGainReduction, ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
     CROSSFADER, FOCUS, FOLD_CHAINS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE,
@@ -171,6 +171,7 @@ impl MixerView {
             scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
             track_options: self.track_options,
+            gain_reduction: Vec::new(),
             racks,
             chains,
         }

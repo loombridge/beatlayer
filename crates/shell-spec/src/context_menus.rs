@@ -17,7 +17,7 @@ use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOA
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
-use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
+use crate::tracks::{DUPLICATE_WITHOUT_CLIPS, SET_DEVICES_ENABLED};
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
 
@@ -116,6 +116,11 @@ const TIME: &[Row] = &[
 /// improvement, so not a row of menus.md, which records Live's menus. It's
 /// ticked while the selected device floats, and choosing it again docks it.
 pub const IMP_14: &str = "IMP-14";
+
+/// The row of Beatlayer's own Deactivate All Devices / Activate All Devices
+/// in a track's menu (IMP-25), just before Freeze Track: an improvement, so
+/// not a row of menus.md.
+pub const IMP_25: &str = "IMP-25";
 
 /// Whether a context menu's row is one of Live's, in menus.md, rather than
 /// one of Beatlayer's improvements.
@@ -266,6 +271,9 @@ pub struct TrackMenu {
     pub arrangement: bool,
     /// The Arrangement has a time selection on the track (C-TRACK-020).
     pub time_selection: bool,
+    /// Every top-level device on the selected tracks is already off, so the
+    /// Deactivate All Devices item reads Activate All Devices (IMP-25).
+    pub devices_off: bool,
 }
 
 /// The rows the other states add after row `after`. menus.md doesn't
@@ -315,8 +323,22 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
 /// track's `state` adds.
 #[must_use]
 pub fn track(state: TrackMenu) -> Vec<MenuItem> {
-    let mut rows = Vec::with_capacity(TRACK.len() + 8);
+    let mut rows = Vec::with_capacity(TRACK.len() + 9);
     for &row in TRACK {
+        // IMP-25 places Deactivate All Devices just before Freeze Track, in
+        // the same group; when every top-level device on the selection is
+        // already off it reads Activate All Devices.
+        if row.0 == "C-TRACK-007" {
+            rows.push((
+                IMP_25,
+                if state.devices_off {
+                    "Activate All Devices"
+                } else {
+                    "Deactivate All Devices"
+                },
+                Cmd(SET_DEVICES_ENABLED),
+            ));
+        }
         rows.push(row);
         rows.extend(track_extras(row.0, state));
     }
@@ -528,6 +550,7 @@ mod tests {
         several: true,
         arrangement: true,
         time_selection: true,
+        devices_off: false,
     };
 
     #[test]

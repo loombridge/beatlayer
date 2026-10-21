@@ -4878,3 +4878,147 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
         }
     }
 }
+
+// Spec: device-chains R39; IMP-25. Deactivate All Devices through the agent
+// API: it switches off every top-level device on the tracks it is given, and
+// switches them back on when they are all off already. The effect reads back
+// through the track's own `devices`.
+#[test]
+fn deactivate_all_devices_switches_a_tracks_devices_through_the_agent_api() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("devices").unwrap();
+    let deletes: Vec<Value> = default_tracks(&mut client)
+        .into_iter()
+        .map(|track| json!({ "command": "track.delete", "args": { "track": track } }))
+        .collect();
+    call(&mut client, "run", json!({ "commands": deletes }));
+    let tone = |index: usize| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": "A"}, "index": index,
+                          "device": { "id": {"$new": format!("tone {index}")}, "name": "Test Tone",
+                                      "kind": { "native": { "device_type": "beatlayer.test_tone" } },
+                                      "enabled": true, "params": [] } } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            json!({ "command": "track.create",
+                    "args": { "id": {"$new": "A"}, "kind": "audio", "name": "A", "index": 0 } }),
+            tone(0), tone(1),
+        ] }),
+    );
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let track = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "audio")
+        .expect("the new audio track")["id"]
+        .clone();
+    let devices = |client: &mut Client<InProcess>| -> Vec<Value> {
+        let track = call(
+            client,
+            "query",
+            json!({ "path": "track \"A\"", "detail": "full" }),
+        );
+        track["saved"]["devices"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == true),
+        "both devices start on"
+    );
+
+    let run_one = |client: &mut Client<InProcess>| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "track.set_devices_enabled",
+                                   "args": { "tracks": [track] } }] }),
+        )
+    };
+    let result = run_one(&mut client);
+    assert_eq!(result["results"][0]["result"]["enabled"], false);
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == false),
+        "every top-level device switched off"
+    );
+
+    // Every device off: the same command turns them back on.
+    let result = run_one(&mut client);
+    assert_eq!(result["results"][0]["result"]["enabled"], true);
+    assert!(
+        devices(&mut client).iter().all(|d| d["enabled"] == true),
+        "every top-level device back on"
+    );
+}
+
+// Spec: device-chains R40; IMP-25. Close All Plug-in Windows through the
+// agent API: it closes every open editor window at once, changes nothing in
+// the set, and is never an undo step.
+#[test]
+fn close_all_plug_in_windows_closes_the_editors_through_the_agent_api() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("windows").unwrap();
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .expect("the default set has an audio track");
+    let loaded = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.load",
+                               "args": { "path": bl_test_clap::bundle(), "track": track } }] }),
+    );
+    let device = loaded["results"][0]["result"]["device"].clone();
+    let info = |client: &mut Client<InProcess>| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "plugin.info", "args": { "device": device } }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+
+    client.transport().shell.start_audio();
+    // The host activates the plug-in on its main thread while the shell
+    // polls; a bounded poll loop drives it without waiting on the clock.
+    let mut active = false;
+    for _ in 0..10_000 {
+        client.transport().shell.poll();
+        if info(&mut client)["active"] == true {
+            active = true;
+            break;
+        }
+    }
+    assert!(active, "the plug-in never activated");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.show_window",
+                               "args": { "device": device } }] }),
+    );
+    assert!(
+        info(&mut client)["window_open"] == true,
+        "the editor is open"
+    );
+
+    let result = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "view.close_plug_in_windows", "args": {} }] }),
+    );
+    assert_eq!(result["results"][0]["result"]["closed"], 1);
+    assert!(
+        info(&mut client)["window_open"] == false,
+        "the editor closed"
+    );
+}

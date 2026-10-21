@@ -512,14 +512,14 @@ impl MainWindowUi {
         if track != shell.focused_track() {
             events.push(UiEvent::FocusTrack(track));
         }
-        let metering = shell
-            .meters()
-            .iter()
-            .any(|m| m.peak.iter().chain(&m.rms).any(|level| *level > 0.0));
+        let metering = shell.meters().iter().any(|m| {
+            m.peak.iter().chain(&m.rms).any(|level| *level > 0.0) || m.gain_reduction < 0.0
+        });
         if shell.playing() || metering {
             // The playhead and the Arrangement Position fields move with
             // the engine every frame (control-bar-transport R14), and the
-            // meters until they're silent (mixer-view R10).
+            // meters and the gain-reduction bars until they're silent
+            // (mixer-view R10, R40).
             ctx.request_repaint();
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.

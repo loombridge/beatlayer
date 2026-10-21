@@ -649,10 +649,8 @@ impl Importer<'_, '_> {
             _ => {
                 if has_children || types.contains(&ContentKind::Tracks) {
                     TrackKind::Group
-                } else if types.contains(&ContentKind::Audio) && types.contains(&ContentKind::Notes)
-                {
-                    TrackKind::Midi
                 } else if types.contains(&ContentKind::Notes) {
+                    // A track of audio and notes is split in two (R17).
                     TrackKind::Midi
                 } else if types.contains(&ContentKind::Audio) {
                     TrackKind::Audio

@@ -277,12 +277,8 @@ pub fn read_xml(text: &str, report: &mut ReadReport) -> Option<Node> {
     // How many elements deep the reader is inside a subtree it leaves out.
     let mut skipped = 0usize;
 
-    loop {
-        let event = match reader.read_event() {
-            Ok(event) => event,
-            // A file that breaks off leaves what came before it.
-            Err(_) => break,
-        };
+    // A file that breaks off leaves what came before it.
+    while let Ok(event) = reader.read_event() {
         match event {
             Event::Start(element) => {
                 let node = node_of(&element, report);
@@ -870,11 +866,7 @@ fn points(node: &Node, report: &mut ReadReport) -> Points {
         info: timeline_info(node, report),
         unit: node.attribute("unit").and_then(Unit::parse),
         target,
-        points: node
-            .children
-            .iter()
-            .filter_map(|child| point(child))
-            .collect(),
+        points: node.children.iter().filter_map(point).collect(),
     }
 }
 

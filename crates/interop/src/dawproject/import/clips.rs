@@ -513,7 +513,12 @@ impl Importer<'_, '_> {
             };
             // A note that can't be played, or starts before its content
             // does, is left out and counted (R28).
-            if !(0..=127).contains(&key) || !(duration > 0.0) || !(time >= 0.0) {
+            let playable = (0..=127).contains(&key)
+                && duration.is_finite()
+                && duration > 0.0
+                && time.is_finite()
+                && time >= 0.0;
+            if !playable {
                 left_out += 1;
                 continue;
             }
@@ -856,7 +861,7 @@ impl Importer<'_, '_> {
             let mut at = zero + to;
             while at < end && passes.len() < MAX_PASSES {
                 passes.push((at, end.min(at + (to - from)), at - (zero + from)));
-                at = at + (to - from);
+                at += to - from;
             }
             if at < end {
                 self.report.add(
@@ -871,7 +876,7 @@ impl Importer<'_, '_> {
         for (from, to, shift) in passes {
             for piece in &inner {
                 let mut moved = piece.clone();
-                moved.clip.start = moved.clip.start + shift;
+                moved.clip.start += shift;
                 let (a, b) = (moved.clip.start.max(from), moved.clip.end().min(to));
                 if a >= b {
                     continue;
@@ -920,7 +925,7 @@ impl Importer<'_, '_> {
                     note.start = piece.clip.start - frame.zero + at + (note.start - from);
                     notes.push(note);
                 }
-                at = at + take;
+                at += take;
                 if !data.looping || at >= region {
                     break;
                 }

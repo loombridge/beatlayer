@@ -199,18 +199,13 @@ fn build(
     })
 }
 
-/// How much room the folder's filesystem has, when the platform says.
+/// How much room the folder's filesystem has, when the platform says: the
+/// room of the nearest folder that exists, since the import makes the rest.
 #[cfg(unix)]
 fn free_space(folder: &Path) -> Option<u64> {
-    let path = std::ffi::CString::new(folder.as_os_str().as_encoded_bytes()).ok()?;
-    let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: the path is a NUL-terminated C string, and the statistics are
-    // written by the call.
-    if unsafe { libc::statvfs(path.as_ptr(), &mut stats) } != 0 {
-        return None;
-    }
-    let block = u64::from(stats.f_frsize);
-    Some(u64::from(stats.f_bavail) * block)
+    let existing = folder.ancestors().find(|path| path.exists())?;
+    let stats = rustix::fs::statvfs(existing).ok()?;
+    Some(stats.f_bavail.saturating_mul(stats.f_frsize))
 }
 
 /// How much room the folder's filesystem has, when the platform says.

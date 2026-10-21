@@ -221,3 +221,40 @@ fn without_autonomous_a_crop_is_refused() {
         refused.text
     );
 }
+
+// Spec: audio-clip-editing R13. An agent reverses a clip by command ID and
+// reads it back.
+#[test]
+fn an_agent_reverses_a_clip_and_reads_it_back() {
+    let dir = TempDir::new("reverse");
+    let tone = dir.0.join("Tone.wav");
+    write_tone(&tone, 220.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": format!("{}/Song.blset", dir.0.display()) }),
+    );
+    let placed = run(
+        &mut client,
+        "browser.add_to_arrangement",
+        json!({ "paths": [tone.to_string_lossy()], "at": 0 }),
+    );
+    let clip = placed["clips"][0]["clip"].clone();
+
+    let reversed = run(&mut client, "clip.reverse", json!({ "clip": clip }));
+    assert!(reversed["media"].is_string(), "the new file: {reversed}");
+    assert!(reversed["path"].is_string(), "and where it is: {reversed}");
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "id": clip, "detail": "full" }),
+    );
+    assert_eq!(
+        read["saved"]["data"]["audio"]["media"], reversed["media"],
+        "the clip plays the reversed file: {read}"
+    );
+
+    assert!(client.into_transport().finish().unwrap().success());
+}

@@ -536,6 +536,10 @@ pub struct Vst3Node {
     pending: Vec<(u32, ParamValue)>,
     /// The automation and clip modulation the compiler sent.
     automation: Option<NodeData>,
+    /// The device sits in the MIDI-effect position (IMP-24): its notes go
+    /// on, its audio output is dropped, and the audio it receives passes
+    /// through.
+    midi_effect: bool,
     /// Frames processed since the plug-in was activated.
     steady: u64,
     max_frames: usize,
@@ -545,8 +549,14 @@ impl Vst3Node {
     /// A node for `config`, with the main thread's ends of its queues. The
     /// plug-in's `latency` is the last one it reported, if the host knows
     /// it: a node made after a restart reads it at once, so the compiler's
-    /// delay compensation doesn't wait for the first block.
-    pub(crate) fn new(config: &bl_engine::NodeConfig, latency: u32) -> (Self, HostEnds) {
+    /// delay compensation doesn't wait for the first block. With
+    /// `midi_effect` the device is placed as a MIDI effect (IMP-24), so its
+    /// audio output is dropped.
+    pub(crate) fn new(
+        config: &bl_engine::NodeConfig,
+        latency: u32,
+        midi_effect: bool,
+    ) -> (Self, HostEnds) {
         let (to_node, from_host) = RingBuffer::new(1);
         let (to_host, from_node) = RingBuffer::new(2);
         let (applied, reported) = RingBuffer::new(APPLIED_CAPACITY);
@@ -578,6 +588,7 @@ impl Vst3Node {
             context: unsafe { std::mem::zeroed() },
             pending: Vec::with_capacity(PENDING_CAPACITY),
             automation: None,
+            midi_effect,
             steady: 0,
             max_frames,
         };
@@ -953,17 +964,21 @@ impl Node for Vst3Node {
             return;
         }
 
-        // The audio: the plug-in's main output bus back into the block.
-        let channels = block.channels();
-        let outs = out_channels.first().copied().unwrap_or(0).min(MAX_CHANNELS);
-        let stride = self.max_frames;
-        for channel in 0..channels {
-            let out = block.channel_mut(channel);
-            if outs == 0 {
-                out.fill(0.0);
-            } else {
-                let from = channel.min(outs - 1) * stride;
-                out.copy_from_slice(&self.outs[from..from + frames]);
+        // The audio: the plug-in's main output bus back into the block. A
+        // plug-in placed as a MIDI effect passes the audio it receives on,
+        // and its own output is dropped (IMP-24).
+        if !self.midi_effect {
+            let channels = block.channels();
+            let outs = out_channels.first().copied().unwrap_or(0).min(MAX_CHANNELS);
+            let stride = self.max_frames;
+            for channel in 0..channels {
+                let out = block.channel_mut(channel);
+                if outs == 0 {
+                    out.fill(0.0);
+                } else {
+                    let from = channel.min(outs - 1) * stride;
+                    out.copy_from_slice(&self.outs[from..from + frames]);
+                }
             }
         }
 

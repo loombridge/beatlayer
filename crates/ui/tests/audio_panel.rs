@@ -115,6 +115,47 @@ impl Panel {
         }
     }
 
+    /// A set with one audio clip in a Session slot and the Clip View
+    /// showing it.
+    fn new_session(name: &str) -> Self {
+        let scratch = Scratch::new(name);
+        let path = scratch.0.join("Tone.wav");
+        wav(&path, 2, 440.0);
+        let mut h = Harness::with_title_bar(Window::Main);
+        let track = h
+            .shell
+            .editor()
+            .document()
+            .top_level()
+            .find(|t| {
+                h.shell
+                    .editor()
+                    .document()
+                    .track(*t)
+                    .is_some_and(|t| t.kind() == bl_model::TrackKind::Audio)
+            })
+            .unwrap();
+        let scene = h.shell.editor().document().scenes().next().unwrap().id;
+        h.shell
+            .run(
+                "session.drop_files",
+                json!({ "paths": [path.display().to_string()], "track": track, "scene": scene }),
+            )
+            .unwrap();
+        h.shell
+            .run("session.select", json!({ "track": track, "scene": scene }))
+            .unwrap();
+        h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+        h.settle();
+        let clip = h.shell.editor().document().slot(track, scene).unwrap().id;
+        Self {
+            h,
+            clip,
+            path,
+            _scratch: scratch,
+        }
+    }
+
     fn doc(&self) -> &Document {
         self.h.shell.editor().document()
     }
@@ -159,10 +200,13 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
         "Warp Mode",
         "BPM",
         "Lead/Follow",
+        "Reverse",
         "Edit",
         "RAM",
         "HiQ",
         "Gain",
+        "Transpose",
+        "Detune",
     ] {
         assert!(
             all.iter().any(|n| n.label == name),
@@ -200,25 +244,76 @@ fn the_panel_shows_its_controls_and_each_runs_its_command() {
     assert_eq!(steps(&p.h), before + 1);
 }
 
-// The controls whose command hasn't landed are drawn pending, and say which
-// package brings them (R14).
+// In Re-Pitch the Transpose and the Detune don't act, and the panel draws
+// them switched off (warp-modes R10).
 #[test]
-fn the_pending_controls_name_their_package() {
-    let mut p = Panel::new("pending");
+fn re_pitch_switches_the_pitch_controls_off() {
+    let mut p = Panel::new("re-pitch");
+    p.h.shell
+        .run("clip.set_warp", json!({ "clip": p.clip, "warp": true }))
+        .unwrap();
+    p.h.shell
+        .run(
+            "clip.set_warp_mode",
+            json!({ "clip": p.clip, "mode": "re_pitch" }),
+        )
+        .unwrap();
+    p.h.settle();
     let all = p.nodes();
-    for (name, package) in [
-        ("Reverse", "WP-4.7"),
-        ("Transpose", "WP-4.7"),
-        ("Detune", "WP-4.7"),
-    ] {
-        let node = Harness::node(&all, name);
-        assert!(node.disabled, "{name} is pending");
+    for name in ["Transpose", "Detune"] {
         assert!(
-            node.description.contains(package),
-            "{name} names {package}: {}",
-            node.description
+            Harness::node(&all, name).disabled,
+            "{name} is switched off in Re-Pitch"
         );
     }
+}
+
+// The control whose command hasn't landed is drawn pending, and says which
+// package brings it (R14): the Clip Fade, on a Session clip.
+#[test]
+fn the_pending_controls_name_their_package() {
+    let mut p = Panel::new_session("pending");
+    let all = p.nodes();
+    let node = Harness::node(&all, "Clip Fade");
+    assert!(node.disabled, "the Clip Fade is pending");
+    assert!(
+        node.description.contains("Phase 3"),
+        "the Clip Fade names its package: {}",
+        node.description
+    );
+}
+
+// The pitch and Reverse controls (WP-4.7) run their commands, and the
+// document reads the change back.
+#[test]
+fn the_pitch_and_reverse_controls_run_their_commands() {
+    let mut p = Panel::new("pitch");
+    let all = p.nodes();
+    for name in ["Reverse", "Transpose", "Detune"] {
+        assert!(
+            !Harness::node(&all, name).disabled,
+            "{name} is live, not pending"
+        );
+    }
+    // Transpose: a screen reader's increment raises it a semitone.
+    let before = steps(&p.h);
+    p.h.accesskit(
+        egui::Id::new(("number-box", "audio-transpose")),
+        egui::accesskit::Action::Increment,
+    );
+    assert_eq!(p.audio().transpose, 1);
+    assert_eq!(steps(&p.h), before + 1);
+    // Detune: a cent.
+    p.h.accesskit(
+        egui::Id::new(("number-box", "audio-detune")),
+        egui::accesskit::Action::Increment,
+    );
+    assert_eq!(p.audio().detune, 1.0);
+    // Reverse: a click, and the clip plays a reversed copy of its file.
+    let media = p.audio().media;
+    let all = p.nodes();
+    p.h.click(centre(Harness::node(&all, "Reverse")));
+    assert_ne!(p.audio().media, media, "the clip plays a reversed copy");
 }
 
 // With Warp off the BPM field, ×2, ÷2, the Warp Mode chooser and the

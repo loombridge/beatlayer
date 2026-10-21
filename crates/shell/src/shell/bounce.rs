@@ -501,16 +501,22 @@ impl Shell {
         let mut files = Vec::new();
         let mut made = Vec::new();
         // A group bounces as one track, after its mixer (R24).
-        for group in target_groups(&doc, &target) {
-            let (from, to) = group_span(&doc, group, &target, start, end);
-            let bounced = self.bounce_group(id, group, args.channels, from, to, &mut files)?;
-            made.push((group, self.editor.new_id(), bounced));
+        let groups = target_groups(&doc, &target);
+        for group in &groups {
+            let (from, to) = group_span(&doc, *group, &target, start, end);
+            let bounced = self.bounce_group(id, *group, args.channels, from, to, &mut files)?;
+            made.push((*group, self.editor.new_id(), bounced));
         }
         for (source, clips) in by_track {
             if doc
                 .track(source)
                 .is_some_and(|track| track.kind() == TrackKind::Group)
             {
+                continue;
+            }
+            // A track inside a group the target names is in the group's
+            // bounce, so it gets no track of its own (R24).
+            if groups.iter().any(|group| group_holds(&doc, *group, source)) {
                 continue;
             }
             if clips.is_empty() {

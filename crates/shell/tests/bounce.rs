@@ -593,3 +593,112 @@ fn a_mono_source_bounces_to_mono_and_the_channels_argument_overrides_it() {
     let decoded = bl_media::decode_file(Path::new(written)).unwrap();
     assert_eq!(decoded.channels().count(), 1, "`mono` writes one channel");
 }
+
+// Spec: freeze-and-bounce R24. A group's clips bounce as one track: the
+// group and the track inside it make one new track, not one each, and the
+// set's audio after the bounce is the audio before it.
+#[test]
+fn a_groups_clips_bounce_as_one_track() {
+    let scratch = Scratch::new("group-clips");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip = place(&mut shell, track, &file, 0);
+    let grouped = shell
+        .run("track.group", json!({ "tracks": [track] }))
+        .unwrap();
+    assert!(grouped["track"].is_u64(), "the group");
+    saved(&scratch, &mut shell);
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+
+    let live = scratch.path("live.wav");
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": live.display().to_string(), "bit_depth": 32,
+                    "sample_rate": 48_000 }),
+        )
+        .unwrap();
+
+    let result = shell.run(ids::BOUNCE_TO_NEW_TRACK, json!({})).unwrap();
+    let made: Vec<TrackId> = serde_json::from_value(result["tracks"].clone()).unwrap();
+    assert_eq!(
+        made.len(),
+        1,
+        "R24: the group's clips make one new track, not one per track in the group"
+    );
+    let doc = shell.editor().document();
+    let new_track = doc.track(made[0]).expect("the new track");
+    assert!(
+        new_track.name().ends_with("(Bounce)"),
+        "R24: the group's new track: {}",
+        new_track.name()
+    );
+
+    // The set plays the bounced audio once, not the group's and the
+    // track's on top of each other.
+    let after = scratch.path("after.wav");
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": after.display().to_string(), "bit_depth": 32,
+                    "sample_rate": 48_000 }),
+        )
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        std::fs::read(&after).unwrap(),
+        "R24: the bounce holds the group's audio once"
+    );
+}
+
+// Spec: freeze-and-bounce R25 and the agent permissions spec R1. A paste
+// of bounced audio puts each source's audio on its own track, so a clip on
+// any of those tracks is replaced: the call is destructive when any of
+// them is.
+#[test]
+fn a_paste_over_a_clip_on_a_later_destination_asks_first() {
+    let scratch = Scratch::new("paste-destinations");
+    let mut shell = new_shell(&scratch);
+    let destination: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": destination, "kind": "audio", "name": "Dest", "index": 0 }),
+        )
+        .unwrap();
+    let second: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": second, "kind": "audio", "name": "Second", "index": 1 }),
+        )
+        .unwrap();
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip_a = place(&mut shell, destination, &file, 0);
+    let clip_b = place(&mut shell, second, &file, 0);
+    saved(&scratch, &mut shell);
+    shell
+        .run("arrangement.copy", json!({ "clips": [clip_a, clip_b] }))
+        .unwrap();
+
+    // A clip on the second destination, where the paste lands.
+    let victim = place(&mut shell, second, &file, 8 * 705_600);
+
+    let call = shell.call_permission(
+        ids::PASTE_BOUNCED_AUDIO,
+        &json!({ "track": destination, "at": 8 * 705_600 }),
+    );
+    assert!(
+        call.is_destructive(),
+        "R1: the paste replaces a clip on the second destination: {call:?}"
+    );
+    assert!(
+        call.replaces.contains(&victim),
+        "R1: the clip it would replace is named: {call:?}"
+    );
+}

@@ -103,8 +103,8 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R21 | `crates/shell/tests/bounce.rs`, `bounce_in_place_replaces_the_track_keeping_its_mixer_in_both_views` | shell test |
 | R22 | `crates/shell/tests/bounce.rs`, `bounce_to_new_track_makes_a_track_per_source_and_switches_the_source_off` | shell test |
 | R23 | `crates/shell/tests/bounce.rs`, `a_group_bounce_replaces_the_group_and_its_tracks`, `a_group_bounce_holds_its_returns_and_not_mains_devices` | shell test |
-| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off` | shell test |
-| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track` | shell test |
+| R24 | `crates/shell/tests/bounce.rs`, `bounce_group_to_new_track_switches_the_groups_material_off`, `a_groups_clips_bounce_as_one_track` | shell test |
+| R25 | `crates/shell/tests/bounce.rs`, `paste_bounced_audio_renders_the_source_as_it_is_now`, `paste_bounced_audio_turns_an_empty_midi_track_into_an_audio_track`, `a_paste_over_a_clip_on_a_later_destination_asks_first` | shell test |
 | R26 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/cli/tests/agent_bounce.rs`, `an_agent_bounces_a_track_in_place_and_undoes_it`, `a_bounce_in_place_asks_first`, `a_paste_of_bounced_audio_over_clips_asks_first` | unit, agent test |
 | R27 | `crates/shell/tests/bounce.rs`, `a_bounced_track_nulls_against_its_source` | shell test |
 | R28 | `xtask/src/keymap.rs` (S-BOUNCE-001 and S-BOUNCE-002 bound) | shell test |

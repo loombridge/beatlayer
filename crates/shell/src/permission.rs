@@ -362,16 +362,26 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
             .map_or(scene.insert_marker, |(start, _)| start),
     };
     let end = at + clipboard.length;
-    let replaces: Vec<ClipId> = doc
-        .track(track)
-        .map(|track| {
-            track
-                .clips()
-                .filter(|clip| clip.start < end && clip.end() > at)
-                .map(|clip| clip.id)
-                .collect()
-        })
-        .unwrap_or_default();
+    // Every destination the paste lands on, not only the first: the paste
+    // puts each source's audio on its own track, so a clip on a later
+    // destination is replaced too.
+    let mut replaces: Vec<ClipId> = Vec::new();
+    let lanes = editing::lanes(doc);
+    let Some(base) = lanes.iter().position(|id| *id == track) else {
+        return unchanged;
+    };
+    for (distance, _) in &clipboard.tracks {
+        let Some(destination) = lanes.get(base + distance) else {
+            return unchanged;
+        };
+        if let Some(held) = doc.track(*destination) {
+            replaces.extend(
+                held.clips()
+                    .filter(|clip| clip.start < end && clip.end() > at)
+                    .map(|clip| clip.id),
+            );
+        }
+    }
     CallPermission {
         registered,
         replaces,

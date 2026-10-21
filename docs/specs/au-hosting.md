@@ -53,7 +53,7 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R1 | `crates/plugin-host/tests/au.rs`, `an_audio_unit_loads_by_description_with_its_parameters`; `crates/shell/tests/plugins_au.rs`, `an_audio_unit_loads_runs_and_keeps_its_state_with_the_set`, `loading_an_audio_unit_says_they_are_macos_only` (Windows, Linux) | unit |
 | R2 | `crates/plugin-host/tests/au.rs`, `a_node_passes_its_input_through_until_its_unit_arrives` | unit, real-time trap |
 | R3 | `crates/plugin-host/tests/au.rs`, `a_parameter_change_lands_on_its_frame` | unit, real-time trap |
-| R4 | `crates/plugin-host/tests/au.rs`, `a_note_reaches_the_unit_on_its_frame`, `an_aumi_unit_passes_its_notes_on` (an installed MIDI processor, IMP-24) | unit, real-time trap |
+| R4 | `crates/plugin-host/tests/au.rs`, `a_note_reaches_the_unit_on_its_frame`, `an_aumi_unit_passes_its_notes_on` (an installed MIDI processor, IMP-24); `crates/engine/src/node.rs`, `notes_and_channel_messages_become_note_events` (IMP-24) | unit, real-time trap |
 | R5 | `crates/plugin-host/tests/au.rs`, `an_audio_unit_loads_by_description_with_its_parameters`; `crates/shell/tests/plugins_au.rs`, `an_audio_unit_loads_runs_and_keeps_its_state_with_the_set` | unit |
 | R6 | `crates/plugin-host/src/au/mac.rs`, `a_gesture_makes_one_change_with_its_final_value`; `crates/shell/tests/au_editor.rs` (opening registers the observer) | unit |
 | R7 | every block of `crates/plugin-host/tests/au.rs` keeps and applies changes | unit, real-time trap |

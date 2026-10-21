@@ -768,7 +768,7 @@ impl Processor {
             };
             let at = start + usize::try_from(event.time.max(0)).unwrap_or(0);
             let at = u32::try_from(at.min(end.saturating_sub(1))).unwrap_or(0);
-            if let Some(note) = NoteEvent::from_message(at, &message) {
+            if let Some(note) = NoteEvent::from_midi(at, &message) {
                 block.send_note(note);
             }
         }

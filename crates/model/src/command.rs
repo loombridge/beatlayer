@@ -17,7 +17,7 @@ use crate::automation::{
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
 };
-use crate::device::{Device, DeviceRole};
+use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
@@ -5213,6 +5213,13 @@ impl Document {
         if current == role {
             return Ok(());
         }
+        // Spec: device-chains R2 (IMP-24). A native device keeps the role
+        // its type gives it; only a plug-in takes another position.
+        if matches!(self.device_ref(device)?.kind, DeviceKind::Native { .. }) {
+            return Err(ModelError::InvalidInput(
+                "a native device keeps the role its type gives it",
+            ));
+        }
         let place = self
             .device_place(device)
             .ok_or(ModelError::NoSuchDevice(device))?;
@@ -8121,6 +8128,56 @@ mod tests {
             .map(|d| d.role)
             .collect();
         assert_eq!(roles, [DeviceRole::MidiEffect, DeviceRole::Instrument]);
+    }
+
+    // Spec: device-chains R2, R3; IMP-24
+    #[test]
+    fn a_native_device_keeps_its_role_and_a_plug_in_takes_another_position() {
+        let mut song = Song::new();
+        let midi = song.track(TrackKind::Midi, None);
+        let native = song.device(midi);
+        // A native device keeps the role its type gives it.
+        assert_eq!(
+            song.reject(Command::SetDeviceRole {
+                device: native,
+                role: Some(DeviceRole::MidiEffect),
+            }),
+            ModelError::InvalidInput("a native device keeps the role its type gives it")
+        );
+        // A plug-in takes the MIDI-effect position, before the instrument.
+        let plugin = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track: midi,
+            index: 0,
+            device: Device::new(
+                plugin,
+                "Reverb",
+                DeviceKind::Plugin {
+                    format: crate::PluginFormat::Clap,
+                    plugin_id: "org.example.reverb".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+        song.apply(Command::SetDeviceRole {
+            device: plugin,
+            role: Some(DeviceRole::MidiEffect),
+        })
+        .unwrap();
+        let roles: Vec<_> = song
+            .doc
+            .track(midi)
+            .unwrap()
+            .devices()
+            .map(|d| (d.id, d.role))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                (plugin, DeviceRole::MidiEffect),
+                (native, DeviceRole::AudioEffect)
+            ]
+        );
     }
 
     // Spec: device-chains R10

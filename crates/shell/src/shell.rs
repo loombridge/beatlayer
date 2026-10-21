@@ -6297,14 +6297,23 @@ impl Shell {
         };
         // Left out, the role is the other position: into the MIDI-effect
         // position when the type sends notes on and isn't there already,
-        // and back where the type goes otherwise.
-        let role = role.unwrap_or(
-            if current.role != bl_model::DeviceRole::MidiEffect && kind.note_output {
-                bl_model::DeviceRole::MidiEffect
-            } else {
-                kind.role
-            },
-        );
+        // and back where the type goes otherwise. A type that sends no
+        // notes on can't take the MIDI-effect position at all, so the
+        // menu's item says why rather than doing nothing.
+        let role = match role {
+            Some(role) => role,
+            None if current.role == bl_model::DeviceRole::MidiEffect => kind.role,
+            None if kind.note_output => bl_model::DeviceRole::MidiEffect,
+            None => {
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!(
+                        "{} has no note output, so it can't go in the MIDI-effect position",
+                        current.title()
+                    ),
+                });
+            }
+        };
         if kind.role != role && !(role == bl_model::DeviceRole::MidiEffect && kind.note_output) {
             let message = if role == bl_model::DeviceRole::MidiEffect {
                 format!(

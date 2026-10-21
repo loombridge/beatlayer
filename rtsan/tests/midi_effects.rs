@@ -283,3 +283,149 @@ fn channel_messages_pass_under_rtsan() {
     );
     eprintln!("600 blocks of channel messages under RealtimeSanitizer: {messages} heard");
 }
+
+// Spec: articulation-map R14. The Articulation Map on the audio thread
+// under RealtimeSanitizer: a clip with a trigger key and a chord plays
+// through it into a test instrument, and its list changes while it plays.
+// RTSan stops the process at the first allocation, free, lock, or blocking
+// call on the audio thread, and the allocation trap fails the test at any
+// heap use it sees.
+#[test]
+fn the_articulation_map_passes_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let map = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                map,
+                "",
+                DeviceKind::Native {
+                    device_type: bl_devices::articulation_map::ARTICULATION_MAP.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    // The first articulation triggers on key 36 and plays a keyswitch and
+    // a controller; the second triggers on key 37.
+    editor
+        .apply(Command::SetArticulation {
+            device: map,
+            index: 0,
+            name: Some("Staccato".to_owned()),
+            trigger: Some(bl_model::Trigger::Key { key: 36 }),
+            outputs: Some(vec![
+                bl_model::ArticulationOutput::Key {
+                    key: 24,
+                    velocity: 100,
+                },
+                bl_model::ArticulationOutput::Controller {
+                    controller: 1,
+                    value: 64,
+                },
+            ]),
+            channel: Some(Some(5)),
+        })
+        .unwrap();
+    let instrument = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 1,
+            device: Device::new(
+                instrument,
+                "",
+                DeviceKind::Native {
+                    device_type: testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+
+    // A bar of sixteenth notes on many keys, with a trigger every fourth.
+    let sixteenth = Ticks(TICKS_PER_QUARTER / 4);
+    let notes = (0..64u8).flat_map(|i| {
+        let key = if i % 4 == 0 { 36 } else { 48 + i };
+        [Note::new(key, sixteenth * i64::from(i), sixteenth * 3, 90)]
+    });
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 16),
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
+
+    for round in 0..400u32 {
+        if round == 200 {
+            // A second articulation, and the list changes while it plays.
+            editor
+                .apply(Command::AddArticulation {
+                    device: map,
+                    index: None,
+                    name: "Legato".to_owned(),
+                })
+                .unwrap();
+            editor
+                .apply(Command::SetArticulation {
+                    device: map,
+                    index: 1,
+                    name: None,
+                    trigger: Some(bl_model::Trigger::Key { key: 37 }),
+                    outputs: Some(vec![bl_model::ArticulationOutput::Key {
+                        key: 25,
+                        velocity: 100,
+                    }]),
+                    channel: Some(Some(6)),
+                })
+                .unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+            assert!(sender.flush());
+        }
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let heard = probe.recorded_notes();
+    let keyswitches = heard
+        .iter()
+        .filter(|n| n.event.kind == NoteKind::On && n.event.key == 24)
+        .count();
+    assert!(
+        keyswitches > 0,
+        "the trigger played the keyswitch: {keyswitches} times"
+    );
+    eprintln!(
+        "400 blocks through the Articulation Map under RealtimeSanitizer: {keyswitches} keyswitches"
+    );
+}

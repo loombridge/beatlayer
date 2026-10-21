@@ -34,6 +34,7 @@ type State = (
     OrdMap<ParamId, f64>,
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
+    Option<Vec<bl_model::Articulation>>,
 );
 
 /// A device made ready to go in a chain, with new IDs: what a preset or a
@@ -202,7 +203,12 @@ impl DeviceView {
             Saved::Device(p) => {
                 let id: DeviceId = editor.new_id();
                 let device = self.blank(id, &p.kind, &p.device_name, p.role);
-                let state = (self.sanitize(&p.kind, p.params), name.to_owned(), p.shape);
+                let state = (
+                    self.sanitize(&p.kind, p.params),
+                    name.to_owned(),
+                    p.shape,
+                    p.articulations,
+                );
                 Ok(Ready {
                     device,
                     state: Some(state),
@@ -427,12 +433,13 @@ impl DeviceView {
                         device,
                     }),
                 }?;
-                if let Some((params, name, shape)) = state {
+                if let Some((params, name, shape, articulations)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
+                        articulations,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -487,12 +494,13 @@ impl DeviceView {
                     index: 0,
                     device,
                 })?;
-                if let Some((params, name, shape)) = state {
+                if let Some((params, name, shape, articulations)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
+                        articulations,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)

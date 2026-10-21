@@ -444,6 +444,19 @@ impl Compiler {
                     self.gc.data(crate::modbus::Shape(shape)),
                 ));
             }
+            // Spec: articulation-map R14. An Articulation Map's list reaches
+            // its node as node data, so a change to it reaches the playing
+            // device without a new program.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.articulations != after.articulations
+            {
+                let list = bl_model::ArticulationList::of(&after.articulations);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::node::Articulations(list)),
+                ));
+            }
         }
         for track in document.tracks() {
             let id = track.id();

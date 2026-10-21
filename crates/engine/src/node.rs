@@ -409,6 +409,13 @@ impl fmt::Debug for NodeData {
     }
 }
 
+/// An Articulation Map's articulations as node data (the articulation map
+/// spec, R14): sent to the device when its list changes, so the change
+/// reaches the playing device without a new program. The list is of a fixed
+/// size, made with the node, so nothing on the audio thread allocates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Articulations(pub bl_model::ArticulationList);
+
 /// A node: a device, a track's mixer, or anything else that processes audio
 /// in a program.
 ///

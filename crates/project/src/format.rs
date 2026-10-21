@@ -512,7 +512,7 @@ pub(crate) fn decode_value(
 #[cfg(test)]
 mod tests {
     use bl_core::id::Id;
-    use bl_model::{Command, TrackKind};
+    use bl_model::{Command, DeviceKind, DeviceRole, TrackKind};
     use serde_json::json;
 
     use super::*;
@@ -538,6 +538,61 @@ mod tests {
 
     fn load_json(value: &Value) -> Result<(Project, SetInfo), LoadError> {
         decode_json(&serde_json::to_vec(value).unwrap(), &LoadOptions::default())
+    }
+
+    /// A set with an Articulation Map whose list breaks the rules: the
+    /// articulation map spec, R20 says it doesn't load.
+    #[test]
+    fn a_set_with_a_broken_articulation_list_does_not_load() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Keys".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let device = editor.new_id();
+        let map = bl_model::Device::new(
+            device,
+            "Articulation Map",
+            DeviceKind::Native {
+                device_type: "beatlayer.articulation_map".to_owned(),
+            },
+        )
+        .with_role(DeviceRole::MidiEffect);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: map,
+            })
+            .unwrap();
+        let project = Project::from_editor(&editor, Media::new());
+        let mut value = json_of(&project, 1);
+        // Two articulations on the same key.
+        let articulation = |name: &str| {
+            json!({
+                "name": name,
+                "trigger": { "kind": "key", "key": 36 },
+            })
+        };
+        value["document"]["tracks"][0]["devices"][0]["articulations"] =
+            json!([articulation("Staccato"), articulation("Legato")]);
+        let error = load_json(&value).unwrap_err();
+        let reason = match error {
+            LoadError::Invalid { reason } => reason,
+            other => panic!("{other:?}"),
+        };
+        assert!(reason.contains("same key"), "{reason}");
+
+        // A list with no articulation at all doesn't load either.
+        let mut empty = json_of(&project, 1);
+        empty["document"]["tracks"][0]["devices"][0]["articulations"] = json!([]);
+        assert!(matches!(load_json(&empty), Err(LoadError::Invalid { .. })));
     }
 
     #[test]

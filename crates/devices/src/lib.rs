@@ -25,6 +25,7 @@
 
 pub mod alignment_delay;
 pub mod arpeggiator;
+pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
 pub mod beat_repeat;
@@ -253,6 +254,7 @@ pub fn register(registry: &mut Registry) {
     midi_cc::register(registry);
     midi_mpe::register(registry);
     midi_monitor::register(registry);
+    articulation_map::register(registry);
     hardware::register(registry);
     degrade::register(registry);
     crusher::register(registry);

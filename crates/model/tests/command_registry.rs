@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        206,
+        210,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -1282,6 +1282,35 @@ fn every_command_runs_by_id() {
             .is_empty()
     );
     agent.run("device.remove", json!({ "device": wave }));
+
+    // WP-6.47: an Articulation Map's list is edited by command.
+    let map: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": keys, "index": 0, "device": {
+            "id": map, "name": "Articulation Map", "enabled": true, "params": [],
+            "role": "midi_effect",
+            "kind": { "native": { "device_type": "beatlayer.articulation_map" } },
+        } }),
+    );
+    agent.run(
+        "articulation.add",
+        json!({ "device": map, "name": "Staccato" }),
+    );
+    agent.run(
+        "articulation.set",
+        json!({ "device": map, "index": 1,
+            "trigger": { "kind": "key", "key": 36 },
+            "outputs": [{ "kind": "key", "key": 24, "velocity": 100 }],
+            "channel": 5 }),
+    );
+    agent.run(
+        "articulation.move",
+        json!({ "device": map, "index": 1, "to": 0 }),
+    );
+    agent.run("articulation.delete", json!({ "device": map, "index": 0 }));
+    let list = &agent.editor.document().device(map).unwrap().articulations;
+    assert_eq!(list.len(), 1, "the list keeps one articulation");
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
@@ -2745,6 +2774,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "device.set_state",
             Command::SetDeviceState {
+                articulations: None,
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
@@ -3001,6 +3031,40 @@ fn schemas_match_what_commands_serialise() {
         (
             "modulator.unmap",
             Command::UnmapModulator { device, slot: 3 },
+        ),
+        (
+            "articulation.add",
+            Command::AddArticulation {
+                device,
+                index: None,
+                name: "Staccato".to_owned(),
+            },
+        ),
+        (
+            "articulation.delete",
+            Command::DeleteArticulation { device, index: 0 },
+        ),
+        (
+            "articulation.move",
+            Command::MoveArticulation {
+                device,
+                index: 0,
+                to: Some(1),
+            },
+        ),
+        (
+            "articulation.set",
+            Command::SetArticulation {
+                device,
+                index: 0,
+                name: Some("Legato".to_owned()),
+                trigger: Some(bl_model::Trigger::Key { key: 36 }),
+                outputs: Some(vec![bl_model::ArticulationOutput::Key {
+                    key: 24,
+                    velocity: 100,
+                }]),
+                channel: Some(Some(5)),
+            },
         ),
         (
             "modulator.set_shape",

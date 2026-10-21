@@ -5357,3 +5357,93 @@ fn an_agent_sets_the_audio_utilities_panel_and_reads_it_back() {
     );
     assert_eq!(gain["gain"], 0.5);
 }
+
+// Spec: articulation-map R18. An agent builds an Articulation Map's list by
+// command ID, headless, and reads it back through `articulation.list` and
+// the query tool.
+#[test]
+fn an_agent_builds_an_articulation_map_by_command_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Add a track", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Keys"}, "kind": "midi", "name": "Keys", "index": 0 } },
+        ] }),
+    );
+    let track = {
+        let document = client.transport().shell.editor().document();
+        document.tracks().find(|t| t.name() == "Keys").unwrap().id()
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "arrangement.select_tracks", "args": { "tracks": [track] } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.add", "args": { "device": {
+                "kind": { "native": { "device_type": "beatlayer.articulation_map" } },
+                "name": "Articulation Map", "role": "midi_effect" } } },
+        ] }),
+    );
+    let device = {
+        let document = client.transport().shell.editor().document();
+        document.track(track).unwrap().devices().next().unwrap().id
+    };
+    // A new map holds one articulation.
+    let list = |client: &mut Client<InProcess>| -> Value {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [
+                { "command": "articulation.list", "args": { "device": device } },
+            ] }),
+        );
+        reply["results"][0]["result"]["articulations"].clone()
+    };
+    assert_eq!(list(&mut client).as_array().expect("the list").len(), 1);
+
+    // The list is edited by command ID.
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Add an articulation", "commands": [
+            { "command": "articulation.add",
+              "args": { "device": device, "name": "Staccato" } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Give it a trigger", "commands": [
+            { "command": "articulation.set", "args": {
+                "device": device, "index": 1,
+                "trigger": { "kind": "key", "key": 36 },
+                "outputs": [{ "kind": "key", "key": 24, "velocity": 100 }],
+                "channel": 5 } },
+        ] }),
+    );
+    let articulations = list(&mut client);
+    let articulations = articulations.as_array().expect("the list");
+    assert_eq!(articulations.len(), 2);
+    assert_eq!(articulations[1]["name"], "Staccato");
+    assert_eq!(articulations[1]["trigger"]["kind"], "key");
+    assert_eq!(articulations[1]["trigger"]["key"], 36);
+    assert_eq!(articulations[1]["outputs"][0]["key"], 24);
+    assert_eq!(articulations[1]["channel"], 5);
+
+    // The query tool's device object gives the same list.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.0.get()) }),
+    );
+    assert_eq!(found["articulations"][1]["name"], "Staccato");
+    assert_eq!(found["articulations"][1]["trigger"]["key"], 36);
+}

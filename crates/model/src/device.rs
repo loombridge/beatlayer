@@ -163,6 +163,12 @@ pub struct Device {
     /// of frame. Left out of the saved set when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slices: Vec<u64>,
+    /// An Articulation Map's articulations, in order (WP-6.47; the
+    /// articulation map spec, R2): each with a name, a trigger, up to four
+    /// outputs and a channel. Empty for every device that isn't an
+    /// articulation map, and left out of the saved set then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub articulations: Vec<crate::articulation::Articulation>,
 }
 
 /// Warp settings for a device that plays media (WP-5.15b, Simpler).
@@ -400,6 +406,19 @@ impl Device {
     /// A switched-on audio effect with default parameters, named `name`.
     #[must_use]
     pub fn new(id: DeviceId, name: impl Into<String>, kind: DeviceKind) -> Self {
+        // Spec: articulation-map R2. A new Articulation Map holds one
+        // articulation, named "Articulation 1", with no trigger, no outputs
+        // and no channel.
+        let articulations = match &kind {
+            DeviceKind::Native { device_type }
+                if device_type == crate::articulation::ARTICULATION_MAP =>
+            {
+                vec![crate::articulation::Articulation::new(
+                    crate::articulation::FIRST_NAME,
+                )]
+            }
+            _ => Vec::new(),
+        };
         Self {
             id,
             name: name.into(),
@@ -426,6 +445,7 @@ impl Device {
             macros: RackMacros::default(),
             warp: DeviceWarp::default(),
             slices: Vec::new(),
+            articulations,
         }
     }
 
@@ -462,6 +482,28 @@ impl Device {
         matches!(self.kind, DeviceKind::Native { .. })
     }
 
+    /// Whether the device is an Articulation Map, which holds a list of
+    /// articulations (WP-6.47; the articulation map spec, R2).
+    #[must_use]
+    pub fn is_articulation_map(&self) -> bool {
+        matches!(
+            &self.kind,
+            DeviceKind::Native { device_type } if device_type == crate::articulation::ARTICULATION_MAP
+        )
+    }
+
+    /// The articulations the device holds, in order: none for any device
+    /// that isn't an articulation map.
+    #[must_use]
+    pub fn articulations(&self) -> &[crate::articulation::Articulation] {
+        &self.articulations
+    }
+
+    /// Replaces the device's articulations, as the commands that edit the
+    /// list do.
+    pub fn set_articulations(&mut self, articulations: Vec<crate::articulation::Articulation>) {
+        self.articulations = articulations;
+    }
     /// Whether the device has A and B states: native devices do; racks
     /// and plug-ins don't, as in Live (device compare R6).
     #[must_use]

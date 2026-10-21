@@ -75,6 +75,9 @@ pub struct DeviceViewUi {
     /// Simpler's sample displays (WP-5.15).
     sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
+    /// An articulation being renamed in an Articulation Map's list
+    /// (WP-6.47; the articulation map spec, R15).
+    pub(crate) renaming_articulation: Option<crate::articulation_map::Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
     /// The macro being renamed in its Macro Controls slot (WP-5.4).
     pub(crate) renaming_macro: Option<crate::rack_view::MacroRenaming>,
@@ -265,6 +268,7 @@ impl DeviceViewUi {
             multisampler: crate::multisampler::MultisamplerUi::default(),
             sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
+            renaming_articulation: None,
             renaming_chain: None,
             renaming_macro: None,
             renaming_variation: None,
@@ -609,6 +613,7 @@ impl DeviceViewUi {
                                 display.as_ref(),
                                 body,
                                 &played,
+                                &mut self.renaming_articulation,
                                 events,
                             );
                             // Spec: multisampler R54. Simpler's sample

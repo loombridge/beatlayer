@@ -126,7 +126,7 @@ fn a_sliced_drum_rack_plays_under_rtsan() {
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
-    let mut programs = 0;
+    let mut programs = 1;
     for round in 0..1_000u64 {
         // Now and then a slice's region and mode move, as the dialog's OK
         // would move them.

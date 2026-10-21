@@ -454,7 +454,11 @@ fn a_user_slicing_preset_shapes_every_chain() {
     let _home = HOME.lock().unwrap();
     let scratch = Scratch::new("preset");
     let (mut shell, _track, clip) = loop_clip(&scratch);
-    let library = scratch.path("Music/Beatlayer/User Library/Defaults/Slicing");
+    // The User Library sits under the home folder's `Music` (`Documents` on
+    // Windows), and `default_user_library` reads `HOME` (`USERPROFILE` on
+    // Windows).
+    let base = if cfg!(windows) { "Documents" } else { "Music" };
+    let library = scratch.path(&format!("{base}/Beatlayer/User Library/Defaults/Slicing"));
     std::fs::create_dir_all(&library).unwrap();
     let _guard = HomeGuard::set(&scratch.0);
 
@@ -495,27 +499,42 @@ fn a_user_slicing_preset_shapes_every_chain() {
     }
 }
 
-/// Sets `HOME` for the test and puts it back.
-struct HomeGuard(Option<std::ffi::OsString>);
+/// Sets the home folder the User Library hangs under (`HOME`, and
+/// `USERPROFILE` on Windows) for the test, and puts both back.
+struct HomeGuard {
+    home: Option<std::ffi::OsString>,
+    profile: Option<std::ffi::OsString>,
+}
 
 impl HomeGuard {
     fn set(home: &Path) -> Self {
-        let before = std::env::var_os("HOME");
+        let before = (std::env::var_os("HOME"), std::env::var_os("USERPROFILE"));
         // SAFETY: the test holds `HOME`, the lock every test in this file
         // that reads the user library takes, so no other thread runs
         // meanwhile.
-        unsafe { std::env::set_var("HOME", home) };
-        Self(before)
+        unsafe {
+            std::env::set_var("HOME", home);
+            std::env::set_var("USERPROFILE", home);
+        }
+        Self {
+            home: before.0,
+            profile: before.1,
+        }
     }
 }
 
 impl Drop for HomeGuard {
     fn drop(&mut self) {
-        match self.0.take() {
-            // SAFETY: as in `set`: the test still holds `HOME`.
-            Some(home) => unsafe { std::env::set_var("HOME", home) },
-            // SAFETY: as in `set`: the test still holds `HOME`.
-            None => unsafe { std::env::remove_var("HOME") },
+        // SAFETY: as in `set`: the test still holds `HOME`.
+        unsafe {
+            match self.home.take() {
+                Some(home) => std::env::set_var("HOME", home),
+                None => std::env::remove_var("HOME"),
+            }
+            match self.profile.take() {
+                Some(profile) => std::env::set_var("USERPROFILE", profile),
+                None => std::env::remove_var("USERPROFILE"),
+            }
         }
     }
 }

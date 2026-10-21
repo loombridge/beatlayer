@@ -152,6 +152,10 @@ pub const CROSSFADER_HEIGHT: f32 = 28.0;
 /// The Track Options section's height under the strip (L-MIX-005).
 pub const TRACK_OPTIONS_HEIGHT: f32 = 26.0;
 
+/// The Performance Impact section's height under the strip (L-MIX-007;
+/// its segments' sizes are [`unmeasured`]).
+pub const PERFORMANCE_IMPACT_HEIGHT: f32 = 12.0;
+
 /// The Main track's column width (L-SES-006: 1487 to 1591).
 pub const MAIN_COLUMN: f32 = 104.0;
 
@@ -202,6 +206,10 @@ pub struct Sections {
     /// The tracks' Track Options sections: the Track Delay with its unit
     /// switch and Keep Monitoring Latency. Hidden by default (observed).
     pub track_options: bool,
+    /// The Performance Impact section: the six segments under each strip
+    /// that light up with the track's share of the set's processing time.
+    /// Hidden by default (observed).
+    pub performance_impact: bool,
 }
 
 impl Sections {
@@ -213,6 +221,7 @@ impl Sections {
         crossfader: false,
         returns: true,
         track_options: false,
+        performance_impact: false,
     };
 
     /// The height of the sections that show, stacked, with the colour strip
@@ -231,6 +240,9 @@ impl Sections {
         }
         if self.track_options {
             height += TRACK_OPTIONS_HEIGHT;
+        }
+        if self.performance_impact {
+            height += PERFORMANCE_IMPACT_HEIGHT;
         }
         if self.crossfader {
             height += CROSSFADER_HEIGHT;
@@ -324,6 +336,8 @@ pub struct MixerLayout {
     pub crossfader: Option<(f32, f32)>,
     /// The Track Options section's, if it shows.
     pub track_options: Option<(f32, f32)>,
+    /// The Performance Impact section's, if it shows.
+    pub performance_impact: Option<(f32, f32)>,
     /// The strip's, if it shows.
     pub strip: Option<(f32, f32)>,
     /// The colour strip's, at the bottom (L-MIX-009).
@@ -417,10 +431,12 @@ impl MixerLayout {
         };
         // L-SES-009's order from the bottom: the colour strip, then the
         // Crossfader section under the strips (L-MIX-006), then the Track
-        // Options under the strips (L-MIX-005), then the strips, Sends, and
-        // In/Out above them.
+        // Options under the strips (L-MIX-005), then the Performance Impact
+        // under the strips (L-MIX-007), then the strips, Sends, and In/Out
+        // above them.
         let crossfader = stack(sections.crossfader, CROSSFADER_HEIGHT);
         let track_options = stack(sections.track_options, TRACK_OPTIONS_HEIGHT);
+        let performance_impact = stack(sections.performance_impact, PERFORMANCE_IMPACT_HEIGHT);
         let strip = stack(sections.volume, STRIP_HEIGHT);
         let sends = stack(sections.sends, SENDS_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
@@ -439,6 +455,7 @@ impl MixerLayout {
             sends,
             crossfader,
             track_options,
+            performance_impact,
             strip,
             colour,
             scroll,
@@ -495,6 +512,9 @@ impl MixerLayout {
         }
         if let Some(span) = self.track_options {
             rows.push(super::row("L-MIX-005", "Track Options", across(span)));
+        }
+        if let Some(span) = self.performance_impact {
+            rows.push(super::row("L-MIX-007", "Performance Impact", across(span)));
         }
         if let Some(span) = self.strip {
             rows.push(super::row("L-MIX-003", "Mixer Strip", across(span)));
@@ -747,6 +767,22 @@ pub fn track_options(column: Rect, span: (f32, f32)) -> [Rect; 3] {
         pos2(column.right() - PAD, bottom),
     );
     [delay, unit, keep]
+}
+
+/// The Performance Impact section's six segments in a column across the
+/// section's span (L-MIX-007): a row of six rectangles, lit from the left
+/// with the track's share of the set's processing time. No observation has
+/// measured these yet, so their sizes are [`unmeasured`].
+#[must_use]
+pub fn performance_impact(column: Rect, span: (f32, f32)) -> [Rect; 6] {
+    use unmeasured::PAD;
+    let top = span.0 + 2.0;
+    let bottom = span.1 - 2.0;
+    let width = (column.width() - 2.0 * PAD) / 6.0;
+    std::array::from_fn(|i| {
+        let left = column.left() + PAD + width * i as f32;
+        Rect::from_min_max(pos2(left, top), pos2(left + width, bottom))
+    })
 }
 
 /// The two Split Stereo Pan Mode controls beside the pan knob in a strip

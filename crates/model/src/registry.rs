@@ -2820,6 +2820,15 @@ const ENTRIES: &[Entry] = &[
         description: "Leaves macro `macro_number` out of Randomize (`excluded` true), or puts it back (false). A new rack's macros aren't excluded. One undo step, saved with the set.",
     },
     Entry {
+        id: "rack.set_macro_style",
+        action: Action::Apply("set_macro_style"),
+        label: "Change Macro Style",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets how macro `macro_number` is drawn and which positions it takes: `style` is `knob`, Live's continuous control, `stepped`, a knob that takes `steps` steps, or `radio_buttons`, a stepped macro drawn as its steps' buttons. A stepped macro takes from 2 to 16 steps, 8 by default, and only the positions `k / (steps - 1)`: a drag, an arrow key and `device.set_param` all move it a step at a time. A macro that becomes stepped moves to its nearest step. One undo step, saved with the set and with the rack in a preset.",
+    },
+    Entry {
         id: "rack.set_mapped_value",
         action: Action::Apply("set_mapped_value"),
         label: "Change parameter",

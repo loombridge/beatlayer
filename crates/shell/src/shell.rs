@@ -791,6 +791,12 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A macro's style changed, so it may have moved to another step
+    /// (R21, R22).
+    Style {
+        rack: bl_model::DeviceId,
+        number: u8,
+    },
     /// A variation launch set the macros (R27).
     Variation { rack: bl_model::DeviceId },
 }
@@ -3786,6 +3792,21 @@ impl Shell {
         self.meters.iter().find(|meter| meter.track == track)
     }
 
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track's share of the set's processing time and how many of the
+    /// six segments it lights (the mixer spec, R31).
+    #[must_use]
+    pub fn impact_values(&self) -> Vec<bl_shell_spec::mixer_view::TrackImpact> {
+        self.meters
+            .iter()
+            .map(|meter| bl_shell_spec::mixer_view::TrackImpact {
+                track: meter.track,
+                segments: bl_shell_spec::mixer_view::impact_segments(meter.impact),
+                share: meter.impact,
+            })
+            .collect()
+    }
+
     /// One track's gain reduction in dB, as its compressors and limiters
     /// last reported it: zero when the engine published no meter for the
     /// track, or none of them reduced (the mixer view spec, R40).
@@ -6481,6 +6502,12 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::SetMacroStyle {
+                rack, macro_number, ..
+            } => Some(MacroEdit::Style {
+                rack: *rack,
+                number: *macro_number,
+            }),
             bl_model::Command::LaunchVariation { rack, .. } => {
                 Some(MacroEdit::Variation { rack: *rack })
             }
@@ -6514,13 +6541,26 @@ impl Shell {
                         return Vec::new();
                     };
                     let position = info.travel.position(*value);
-                    vec![bl_model::Command::SetMappedValue {
+                    // Spec: macros R22. A stepped macro takes only its
+                    // steps, so the macro moves to the nearest step, and
+                    // the parameter takes the value that step gives.
+                    let step = device.macros.setting(*number).position_of(position);
+                    let mut commands = vec![bl_model::Command::SetMappedValue {
                         target: bl_model::MacroTarget::Device {
                             device: *rack,
                             param: bl_model::macro_param(*number),
                         },
-                        value: position,
-                    }]
+                        value: step,
+                    }];
+                    if step != position
+                        && let Some(mapping) = device.macros.mapping(*target)
+                    {
+                        commands.push(bl_model::Command::SetMappedValue {
+                            target: *target,
+                            value: info.travel.value(mapping.position(step)),
+                        });
+                    }
+                    commands
                 } else {
                     self.devices.target_commands(doc, device, *target)
                 }
@@ -6531,6 +6571,9 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Style { rack, number } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.macro_commands(doc, rack, *number)
+            }),
             MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
                 (1..=bl_model::MACROS)
                     .filter(|number| !rack.macros.setting(*number).variation_excluded)
@@ -6924,6 +6967,9 @@ impl Shell {
                     // Spec: mixer-view R40. The strips' gain-reduction bars
                     // read with the meters.
                     state.gain_reduction = self.gain_reductions();
+                    // Spec: mixer R31. The Performance Impact values the
+                    // engine last published, one per track.
+                    state.performance_impact_values = self.impact_values();
                     state
                 });
             if result.is_ok() && id == mixer_ids::FOCUS {

@@ -41,6 +41,7 @@
 
 mod describe;
 mod events;
+mod gain;
 mod handlers;
 mod node;
 

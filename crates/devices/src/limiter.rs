@@ -18,6 +18,8 @@
 
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
+
+use crate::dynamics::level_db;
 use bl_model::Device;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
@@ -224,6 +226,10 @@ pub struct Brickwall {
     position: [usize; 2],
     /// How long a reduction has been held, which Auto Release reads.
     hold_frames: f32,
+    /// The most gain the last block took off, in dB (the mixer view spec,
+    /// R40): the least gain the limiter applied, zero when it reduced
+    /// nothing.
+    reduction: f32,
 }
 
 impl Brickwall {
@@ -258,6 +264,7 @@ impl Brickwall {
             gain: [1.0; 2],
             position: [0; 2],
             hold_frames: 0.0,
+            reduction: 0.0,
         }
     }
 
@@ -403,6 +410,8 @@ impl NativeDevice for Brickwall {
             self.hold_frames = 0.0;
         }
         let release = self.release_step(params.value(RELEASE_INDEX), auto);
+        // The least gain of the block, for the gain-reduction meter (R40).
+        let mut least_gain = 1.0f32;
         for channel in 0..channels {
             let work = &self.work[channel][..frames];
             let targets = &self.targets[channel][..frames];
@@ -419,6 +428,7 @@ impl NativeDevice for Brickwall {
                 } else {
                     gain += (least - gain) * release;
                 }
+                least_gain = least_gain.min(gain);
                 let delayed = delay.read(lookahead);
                 delay.write(*sample);
                 out[i] = delayed * gain;
@@ -427,6 +437,7 @@ impl NativeDevice for Brickwall {
             self.gain[channel] = gain;
             self.position[channel] = position;
         }
+        self.reduction = level_db(f64::from(least_gain)) as f32;
 
         // 6. Back from mid/side, and out.
         if mid_side {
@@ -462,5 +473,9 @@ impl NativeDevice for Brickwall {
 
     fn latency(&self) -> u32 {
         self.lookahead
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.reduction
     }
 }

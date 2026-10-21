@@ -71,6 +71,7 @@ pub mod context_menus;
 pub mod devices;
 pub mod editing;
 pub mod export;
+pub mod freeze;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
@@ -86,6 +87,7 @@ pub mod session_launch;
 pub mod session_record;
 pub mod session_view;
 pub mod settings;
+pub mod slice;
 pub mod stems;
 pub mod tracks;
 pub mod transport;
@@ -126,5 +128,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
+    freeze::register(registry)?;
+    slice::register(registry)?;
     warping::register(registry)
 }

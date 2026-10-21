@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        204,
+        206,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -180,6 +180,11 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "parent": group, "index": 0 }),
     );
     agent.run("track.rename", json!({ "track": drums, "name": "Break" }));
+    agent.run(
+        "track.set_frozen",
+        json!({ "frozen": [[drums, { "clips": [], "tails": [], "output": null }]] }),
+    );
+    agent.run("track.clear_frozen", json!({ "tracks": [drums] }));
     let document = agent.editor.document();
     assert_eq!(document.parent(bass), Some(group));
     assert_eq!(document.track(drums).unwrap().name(), "Break");
@@ -2072,6 +2077,18 @@ fn schemas_match_what_commands_serialise() {
             Command::RenameTrack {
                 track,
                 name: "Keys".to_owned(),
+            },
+        ),
+        (
+            "track.set_frozen",
+            Command::FreezeTracks {
+                frozen: vec![(track, bl_model::FrozenTrack::default())],
+            },
+        ),
+        (
+            "track.clear_frozen",
+            Command::UnfreezeTracks {
+                tracks: vec![track],
             },
         ),
         (

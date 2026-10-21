@@ -15,9 +15,8 @@
 bl_rt::install_trap!();
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::{Bpm, SampleRate, TempoMap, TempoSegment, Ticks};
 use bl_media::MediaStore;
 use bl_model::TrackId;
@@ -25,6 +24,7 @@ use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use serde_json::{Value, json};
 
 /// A folder for one test's files, removed when the test ends.
@@ -60,21 +60,25 @@ impl Drop for TestDir {
 /// control over the device.
 fn duplex_shell() -> (Shell, NullControl) {
     let (backend, control) = four_channel_backend();
-    (shell_on(backend), control)
+    let shell = shell_on(backend, &control);
+    (shell, control)
 }
 
+/// The null backend, paced by hand so a test drives the blocks (T199).
 fn four_channel_backend() -> (NullBackend, NullControl) {
     NullBackend::with_devices(
         NullOptions {
             channels: 4,
+            pacing: Pacing::Manual,
             ..NullOptions::default()
         },
         &[("null", "Null")],
     )
 }
 
-/// A shell on `backend`, with its input open.
-fn shell_on(backend: NullBackend) -> Shell {
+/// A shell on `backend`, with its input open and its clocks driven by
+/// `control` (T199).
+fn shell_on(backend: NullBackend, control: &NullControl) -> Shell {
     let devices = backend.clone();
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
@@ -87,6 +91,8 @@ fn shell_on(backend: NullBackend) -> Shell {
         audio,
         Box::new(ProjectFiles::new()),
     );
+    // Before the stream opens: `audio.configure` opens it.
+    shell.use_test_clock(control.clock().expect("manual pacing"));
     shell
         .run("audio.configure", json!({ "input_device": "null:null" }))
         .unwrap();
@@ -120,33 +126,33 @@ fn armed_track(shell: &mut Shell, channel: u16, name: &str) -> TrackId {
     track
 }
 
-/// Runs the engine for `millis`, polling as the app does.
-fn play_for(shell: &mut Shell, millis: u64) {
-    let until = Instant::now() + Duration::from_millis(millis);
-    while Instant::now() < until {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+/// Runs the engine for `millis` of test time, polling as the app does. The
+/// null device is paced by hand (T199), so this lands on the same frames
+/// however busy the machine is.
+fn play_for(control: &NullControl, shell: &mut Shell, millis: u64) {
+    testing::advance(control, shell, millis);
 }
 
 /// The one clip on `track`, once the recording's clips have appeared.
-fn wait_for_clip(shell: &mut Shell, track: TrackId) -> bl_model::Clip {
-    let until = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < until {
-        shell.poll_engine();
+fn wait_for_clip(control: &NullControl, shell: &mut Shell, track: TrackId) -> bl_model::Clip {
+    let mut found = None;
+    testing::wait_for(control, shell, "the recording's clip", |shell| {
         let clips: Vec<bl_model::Clip> = shell
             .editor()
             .document()
             .track(track)
             .map(|track| track.clips().cloned().collect())
             .unwrap_or_default();
-        if let Some(clip) = clips.first() {
-            assert_eq!(clips.len(), 1, "one clip per armed track");
-            return clip.clone();
+        match clips.first() {
+            Some(clip) => {
+                assert_eq!(clips.len(), 1, "one clip per armed track");
+                found = Some(clip.clone());
+                true
+            }
+            None => false,
         }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("the recording made no clip");
+    });
+    found.expect("the recording's clip")
 }
 
 /// The one file a recording left in the project's `Samples/Recorded`.
@@ -196,10 +202,10 @@ fn a_recorded_tone_is_in_the_file_to_the_sample_and_lands_where_recording_starte
         .run("transport.locate", json!({ "position": start }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 300);
+    play_for(&control, &mut shell, 300);
     shell.run("transport.stop", json!({})).unwrap();
 
-    let clip = wait_for_clip(&mut shell, track);
+    let clip = wait_for_clip(&control, &mut shell, track);
     let path = recorded_file(&folder);
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     let label = bl_shell::routing::track_label(shell.editor().document(), track);
@@ -303,14 +309,10 @@ fn a_running_recording_and_the_last_one_s_report_read_back_from_transport_state(
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    let until = Instant::now() + Duration::from_secs(5);
-    let state = loop {
-        let state = transport_state(&mut shell);
-        if state["take_running"] == true || Instant::now() > until {
-            break state;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
+    testing::wait_for(&control, &mut shell, "the take to run", |shell| {
+        transport_state(shell)["take_running"] == true
+    });
+    let state = transport_state(&mut shell);
     assert_eq!(state["arrangement_record"], true);
     assert_eq!(state["take_running"], true);
     assert_eq!(state["counting_in"], false);
@@ -318,7 +320,7 @@ fn a_running_recording_and_the_last_one_s_report_read_back_from_transport_state(
     assert_eq!(state["recording"]["dropped_frames"], 0);
 
     shell.run("transport.stop", json!({})).unwrap();
-    wait_for_clip(&mut shell, track);
+    wait_for_clip(&control, &mut shell, track);
     let state = transport_state(&mut shell);
     assert_eq!(state["arrangement_record"], false);
     assert_eq!(state["take_running"], false);
@@ -342,7 +344,7 @@ fn a_running_recording_and_the_last_one_s_report_read_back_from_transport_state(
 // is over.
 #[test]
 fn the_count_in_shows_in_transport_state_before_the_take_starts() {
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     armed_track(&mut shell, 3, "Guitar");
     shell
         .run(
@@ -354,7 +356,7 @@ fn the_count_in_shows_in_transport_state_before_the_take_starts() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 300);
+    play_for(&control, &mut shell, 300);
     let state = transport_state(&mut shell);
     assert_eq!(state["counting_in"], true);
     assert_eq!(state["take_running"], false);
@@ -388,13 +390,15 @@ fn a_recording_that_cannot_write_is_reported_and_makes_no_clip() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 200);
+    play_for(&control, &mut shell, 200);
     shell.run("transport.stop", json!({})).unwrap();
     // Give the writer and the shell a few polls to report.
-    for _ in 0..40 {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the failure to be reported",
+        |shell| shell.message().is_some(),
+    );
 
     let message = shell.message().map(|message| message.text.clone());
     assert!(
@@ -431,7 +435,7 @@ fn a_recording_that_cannot_write_is_reported_and_makes_no_clip() {
 // MIDI path stays off the heap.
 #[test]
 fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes() {
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     let audio = armed_track(&mut shell, 3, "Guitar");
     shell
         .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
@@ -445,12 +449,14 @@ fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes(
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 200);
+    play_for(&control, &mut shell, 200);
     shell.run("transport.stop", json!({})).unwrap();
-    for _ in 0..40 {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    testing::wait_for(
+        &control,
+        &mut shell,
+        "the failure to be reported",
+        |shell| shell.message().is_some(),
+    );
 
     let message = shell.message().map(|message| message.text.clone());
     assert!(
@@ -537,8 +543,11 @@ fn impulse_through(
     listen: u16,
 ) -> (Ticks, usize, Value, f32) {
     let dir = TestDir::new("loopback");
-    let (backend, _) = four_channel_backend();
-    let mut shell = shell_on(backend.with_latency(400, 600).with_loopback(1_480));
+    let (backend, control) = four_channel_backend();
+    let mut shell = shell_on(
+        backend.with_latency(400, 600).with_loopback(1_480),
+        &control,
+    );
     let saved: Value = shell
         .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
         .unwrap();
@@ -592,15 +601,15 @@ fn impulse_through(
         )
         .unwrap();
     // Let the clip's stream cue before playback starts.
-    play_for(&mut shell, 300);
+    play_for(&control, &mut shell, 300);
 
     shell
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 500);
+    play_for(&control, &mut shell, 500);
     shell.run("transport.stop", json!({})).unwrap();
-    let clip = wait_for_clip(&mut shell, track);
+    let clip = wait_for_clip(&control, &mut shell, track);
 
     let media = MediaStore::new();
     let hash = media.import(recorded_file(&folder)).unwrap();
@@ -734,10 +743,10 @@ fn punch_records_only_between_the_brace_ends() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 600);
+    play_for(&control, &mut shell, 600);
     shell.run("transport.stop", json!({})).unwrap();
 
-    let clip = wait_for_clip(&mut shell, track);
+    let clip = wait_for_clip(&control, &mut shell, track);
     let tempo = shell.editor().document().settings().tempo.clone();
     let rate = SampleRate::new(48_000).unwrap();
     assert_eq!(clip.start, start, "the clip starts at the punch-in point");
@@ -751,22 +760,22 @@ fn punch_records_only_between_the_brace_ends() {
 }
 
 /// The track's take lanes, once a recording has made them.
-fn wait_for_lanes(shell: &mut Shell, track: TrackId) -> Vec<bl_model::TakeLane> {
-    let until = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < until {
-        shell.poll_engine();
-        let lanes: Vec<bl_model::TakeLane> = shell
+fn wait_for_lanes(
+    control: &NullControl,
+    shell: &mut Shell,
+    track: TrackId,
+) -> Vec<bl_model::TakeLane> {
+    let mut found = Vec::new();
+    testing::wait_for(control, shell, "the recording's take lane", |shell| {
+        found = shell
             .editor()
             .document()
             .track(track)
             .map(|track| track.take_lanes().cloned().collect())
             .unwrap_or_default();
-        if !lanes.is_empty() {
-            return lanes;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("the recording made no take lane");
+        !found.is_empty()
+    });
+    found
 }
 
 /// The track's Arrangement clips, in start order.
@@ -822,10 +831,10 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&mut shell, 700);
+    play_for(&control, &mut shell, 700);
     shell.run("transport.stop", json!({})).unwrap();
 
-    let lanes = wait_for_lanes(&mut shell, track);
+    let lanes = wait_for_lanes(&control, &mut shell, track);
     assert!(lanes.len() >= 3, "several passes: {}", lanes.len());
     let names: Vec<&str> = lanes.iter().map(|lane| lane.name.as_str()).collect();
     let expected: Vec<String> = (1..=lanes.len()).map(|n| format!("Take {n}")).collect();
@@ -897,7 +906,13 @@ fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
 
 /// Records for `millis` from `start` on a new armed track, with the set saved
 /// first so recording has a folder, and gives the clip it made.
-fn record_take(shell: &mut Shell, dir: &TestDir, start: Ticks, millis: u64) -> bl_model::Clip {
+fn record_take(
+    control: &NullControl,
+    shell: &mut Shell,
+    dir: &TestDir,
+    start: Ticks,
+    millis: u64,
+) -> bl_model::Clip {
     shell
         .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
         .unwrap();
@@ -909,9 +924,9 @@ fn record_take(shell: &mut Shell, dir: &TestDir, start: Ticks, millis: u64) -> b
         .run("transport.locate", json!({ "position": start }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(shell, millis);
+    play_for(control, shell, millis);
     shell.run("transport.stop", json!({})).unwrap();
-    wait_for_clip(shell, track)
+    wait_for_clip(control, shell, track)
 }
 
 fn audio_of(clip: &bl_model::Clip) -> bl_model::AudioData {
@@ -927,9 +942,9 @@ fn recorded_audio_is_warped_as_the_setting_says() {
     // On, as it is in a new install: a marker at the take's start, and the
     // set's tempo as the clip's.
     let dir = TestDir::new("warped");
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     let start = Ticks::QUARTER * 2;
-    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    let audio = audio_of(&record_take(&control, &mut shell, &dir, start, 300));
     assert!(audio.warp && audio.start == 0.0, "{audio:?}");
     assert_eq!(audio.warp_markers.len(), 1);
     assert_eq!(audio.warp_markers[0].time, 0.0);
@@ -939,20 +954,20 @@ fn recorded_audio_is_warped_as_the_setting_says() {
 
     // Default Warp Mode is the warp mode of a new warped clip (R33).
     let dir = TestDir::new("warped-mode");
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     shell
         .run(
             "settings.set_default_warp_mode",
             json!({ "mode": "texture" }),
         )
         .unwrap();
-    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    let audio = audio_of(&record_take(&control, &mut shell, &dir, start, 300));
     assert_eq!(audio.warp_mode, bl_model::WarpMode::Texture, "{audio:?}");
 
     // A tempo change inside the take gets a marker, at the time and beat the
     // file reaches it, and the take's last tempo is the clip's.
     let dir = TestDir::new("warped-change");
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     let change = Ticks::QUARTER * 3;
     let tempo = TempoMap::new([
         TempoSegment::Constant {
@@ -971,7 +986,7 @@ fn recorded_audio_is_warped_as_the_setting_says() {
             json!({ "tempo": serde_json::to_value(tempo).unwrap() }),
         )
         .unwrap();
-    let audio = audio_of(&record_take(&mut shell, &dir, start, 900));
+    let audio = audio_of(&record_take(&control, &mut shell, &dir, start, 900));
     assert_eq!(audio.warp_markers.len(), 2, "{audio:?}");
     let second = audio.warp_markers[1];
     assert!((second.time - 0.5).abs() < 0.005, "{second:?}");
@@ -980,10 +995,10 @@ fn recorded_audio_is_warped_as_the_setting_says() {
 
     // Off, a recorded clip is unwarped.
     let dir = TestDir::new("unwarped");
-    let (mut shell, _control) = duplex_shell();
+    let (mut shell, control) = duplex_shell();
     shell
         .run("settings.set_warp_recorded_audio", json!({ "on": false }))
         .unwrap();
-    let audio = audio_of(&record_take(&mut shell, &dir, start, 300));
+    let audio = audio_of(&record_take(&control, &mut shell, &dir, start, 300));
     assert!(!audio.warp && audio.warp_markers.is_empty(), "{audio:?}");
 }

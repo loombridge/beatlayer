@@ -847,3 +847,24 @@ fn renders_are_the_same_at_any_block_size() {
     // And run after run.
     assert_eq!(render(512, None), render(512, None));
 }
+
+// Spec: mixer-view R40. The strip's gain-reduction meter reads this device's
+// deepest band: the mid band's Above side, 4:1 over -20 dB, takes 10.5 dB
+// off a -6 dBFS signal.
+#[test]
+fn the_meter_reads_the_deepest_bands_cut() {
+    let params = one_band(&[(mid(ABOVE_THRESHOLD), -20.0), (mid(ABOVE_RATIO), 4.0)]);
+    let (mut node, _) = rig(&params, 256);
+    let input = vec![db_to_gain(-6.0) as f32; 24_000];
+    stream(node.as_mut(), &input, 256, None);
+    let reduction = f64::from(node.gain_reduction());
+    let settled = gain_db(&params, -6.0, None);
+    assert!(
+        (reduction - settled).abs() < 0.5,
+        "the meter reads {reduction} dB, the settled cut {settled} dB"
+    );
+    assert!(
+        (settled + 10.5).abs() < 0.5,
+        "the mid band's cut is 10.5 dB: {settled} dB"
+    );
+}

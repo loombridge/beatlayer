@@ -666,6 +666,14 @@ impl NativeDevice for Triband {
         }
     }
 
+    /// The deepest reduction of the last block, in dB: the most any band
+    /// took off (the mixer view spec, R40).
+    fn gain_reduction(&self) -> f32 {
+        self.gain_db
+            .iter()
+            .fold(0.0f32, |most, band| most.min((band[0] + band[1]) as f32))
+    }
+
     fn display_len(&self) -> usize {
         DISPLAY_VALUES
     }

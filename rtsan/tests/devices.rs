@@ -1114,3 +1114,55 @@ fn auto_pan_tremolo_passes_under_rtsan() {
         ],
     );
 }
+
+// Spec: spectrum-analyser R9
+#[test]
+fn spectrum_passes_under_rtsan() {
+    use bl_devices::spectrum_analyser::*;
+    run_lo_fi_device(
+        SPECTRUM,
+        &[
+            (BLOCK, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (CHANNEL, &[0.0, 1.0, 2.0]),
+            (REFRESH, &[10.0, 50.0, 100.0]),
+            (AVG, &[1.0, 4.0, 8.0]),
+            (MAX, &[0.0, 1.0]),
+            (GRAPH, &[0.0, 1.0]),
+            (SCALE_X, &[0.0, 1.0, 2.0]),
+        ],
+    );
+}
+
+// Spec: tuner R8
+#[test]
+fn tuner_passes_under_rtsan() {
+    use bl_devices::tuner::*;
+    run_lo_fi_device(
+        TUNER,
+        &[
+            (REFERENCE, &[415.0, 432.0, 440.0, 442.0]),
+            (HERTZ_CENTS, &[0.0, 1.0]),
+            (CLASSIC_MODE, &[0.0, 1.0]),
+            (AUTO, &[0.0, 1.0]),
+            (SPELLING_SHARPS, &[0.0, 1.0]),
+            (SPELLING_FLATS, &[0.0, 1.0]),
+            (SPELLING_BOTH, &[0.0, 1.0]),
+        ],
+    );
+}
+
+// Spec: oscilloscope R8
+#[test]
+fn oscilloscope_passes_under_rtsan() {
+    use bl_devices::oscilloscope::*;
+    run_lo_fi_device(
+        OSCILLOSCOPE,
+        &[
+            (TIME, &[5.0, 20.0, 50.0, 100.0]),
+            (GAIN, &[0.5, 1.0, 2.0]),
+            (FREEZE, &[0.0, 1.0]),
+            (DIVISIONS, &[2.0, 4.0, 8.0]),
+            (TRIGGER, &[-50.0, 0.0, 50.0]),
+        ],
+    );
+}

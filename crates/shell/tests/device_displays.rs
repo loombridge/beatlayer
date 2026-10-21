@@ -11,6 +11,9 @@ use std::collections::BTreeMap;
 use bl_core::time::SampleRate;
 use bl_devices::compressor::{COMPRESSOR, THRESHOLD};
 use bl_devices::eq::{ANALYSER_BANDS, EQ};
+use bl_devices::oscilloscope::OSCILLOSCOPE;
+use bl_devices::spectrum_analyser::SPECTRUM;
+use bl_devices::tuner::TUNER;
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::{Collector, Compiler, DisplayData, EngineConfig, Registry, channel};
 use bl_model::{
@@ -270,4 +273,76 @@ fn the_squeezes_view_is_view_state_that_agents_set_and_read() {
         .invoke("device.display", json!({ "device": squeeze }))
         .unwrap();
     assert!(value["readings"].as_array().is_some());
+}
+
+// Spec: spectrum-analyser R7
+#[test]
+fn the_spectrums_display_publishes_and_reads_headless() {
+    let mut shell = Shell::headless();
+    let spec = add(&mut shell, SPECTRUM);
+
+    let idle = display(&mut shell, spec);
+    assert!(!idle.live);
+    assert!(idle.series("Spectrum").is_none());
+
+    let fake_bins = vec![-20.0f32; bl_devices::spectrum_analyser::DISPLAY_BINS];
+    shell.set_device_display_data(spec, &fake_bins);
+
+    let live = display(&mut shell, spec);
+    assert!(live.live);
+    let s = live.series("Spectrum").expect("Spectrum series exists");
+    assert_eq!(s.values.len(), bl_devices::spectrum_analyser::DISPLAY_BINS);
+    assert_eq!(live.reading("Peak").unwrap().text, "-20.0 dB");
+}
+
+// Spec: tuner R5, R6
+#[test]
+fn the_tuners_display_publishes_and_reads_headless() {
+    let mut shell = Shell::headless();
+    let tun = add(&mut shell, TUNER);
+
+    let idle = display(&mut shell, tun);
+    assert!(!idle.live);
+
+    // Published data: [pitch, midi, cents, in_tune, valid]
+    shell.set_device_display_data(tun, &[440.0, 69.0, 0.0, 1.0, 1.0]);
+
+    let live = display(&mut shell, tun);
+    assert!(live.live);
+    assert_eq!(live.reading("Note").unwrap().text, "A4");
+    assert_eq!(live.reading("Pitch").unwrap().text, "440.0 Hz");
+    assert_eq!(live.reading("Cents").unwrap().text, "+0.0 ct");
+
+    // Views
+    assert_eq!(live.view.as_deref(), Some("Classic"));
+    assert!(live.series("Tuning").is_some());
+
+    shell
+        .invoke(
+            "device.set_display_view",
+            json!({ "device": tun, "view": "Histogram" }),
+        )
+        .unwrap();
+    let hist = display(&mut shell, tun);
+    assert_eq!(hist.view.as_deref(), Some("Histogram"));
+    assert!(hist.series("Histogram").is_some());
+}
+
+// Spec: oscilloscope R6
+#[test]
+fn the_oscilloscopes_display_publishes_and_reads_headless() {
+    let mut shell = Shell::headless();
+    let osc = add(&mut shell, OSCILLOSCOPE);
+
+    let idle = display(&mut shell, osc);
+    assert!(!idle.live);
+
+    let fake_wave = vec![0.5f32; bl_devices::oscilloscope::WAVEFORM_POINTS];
+    shell.set_device_display_data(osc, &fake_wave);
+
+    let live = display(&mut shell, osc);
+    assert!(live.live);
+    let wave = live.series("Waveform").expect("Waveform series exists");
+    assert_eq!(wave.values.len(), bl_devices::oscilloscope::WAVEFORM_POINTS);
+    assert_eq!(live.reading("Time").unwrap().unit, "ms");
 }

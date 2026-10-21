@@ -91,7 +91,7 @@ fn sample(name: &str, warp: bool) -> Sample {
     let scratch = Scratch::new(name);
     let path = scratch.0.join("Clicks.wav");
     wav(&path);
-    let mut h = Harness::with_title_bar(Window::Main);
+    let mut h = Harness::manual_with_title_bar(Window::Main);
     let track = h
         .shell
         .editor()
@@ -1058,12 +1058,13 @@ fn follow_scrolls_the_editor_to_the_playhead_until_an_edit_pauses_it() {
     );
     s.h.take_events();
     s.h.shell.run("transport.play", json!({})).unwrap();
-    let begun = std::time::Instant::now();
     let mut turned = Vec::new();
-    while turned.is_empty() && begun.elapsed() < std::time::Duration::from_secs(5) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    for _ in 0..2_000 {
         s.h.frame(vec![]);
         turned.extend(scrolls(&mut s));
+        if !turned.is_empty() {
+            break;
+        }
     }
     assert!(s.h.shell.playing(), "the song starts");
     let page = turned
@@ -1086,10 +1087,11 @@ fn follow_scrolls_the_editor_to_the_playhead_until_an_edit_pauses_it() {
     assert!(scrolls(&mut s).is_empty(), "paused");
     // Stopping the song lets it follow again.
     s.h.shell.run("transport.stop", json!({})).unwrap();
-    let begun = std::time::Instant::now();
-    while s.h.shell.playing() && begun.elapsed() < std::time::Duration::from_secs(5) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    for _ in 0..2_000 {
         s.h.frame(vec![]);
+        if !s.h.shell.playing() {
+            break;
+        }
     }
     assert!(!s.h.shell.playing());
     assert!(!s.h.shell.clip_view().sample().follow_paused());

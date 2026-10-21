@@ -144,6 +144,7 @@ pub use bl_shell_spec::session_launch as session_launch_commands;
 /// (WP-3.7).
 pub use bl_shell_spec::session_view as session_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
+pub use bl_shell_spec::slice as slice_commands;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).
 /// Stem separation's command IDs and arguments (IMP-11).
@@ -152,7 +153,7 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::{audio_editing, commands, context_menus, menus, register};
+pub use bl_shell_spec::{audio_editing, commands, context_menus, freeze, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
     TransientList, WindowKind,

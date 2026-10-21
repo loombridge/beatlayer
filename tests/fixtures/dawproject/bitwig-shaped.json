@@ -1,0 +1,29 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "split into a MIDI track and an audio track",
+      "what": "a track holding both audio and notes",
+      "where": "the track \"Hybrid\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a CLAP plug-in",
+      "where": "the track \"Hybrid\""
+    },
+    {
+      "count": 1,
+      "did": "changed to the default warp mode",
+      "what": "the warp mode `stretch`",
+      "where": "the track \"Hybrid Audio\""
+    },
+    {
+      "count": 1,
+      "did": "flattened",
+      "what": "a nested clip",
+      "where": "the track \"Hybrid Audio\""
+    }
+  ]
+}

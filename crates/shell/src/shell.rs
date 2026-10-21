@@ -65,6 +65,7 @@ use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
+use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
@@ -371,6 +372,12 @@ pub struct Shell {
     /// set), which `set.discard_changes` goes back to.
     saved: Editor,
     set_path: Option<PathBuf>,
+    /// The name a set that has never been saved shows, until it is saved
+    /// (the DAWproject spec, R11).
+    pending_name: Option<String>,
+    /// The report of the last DAWproject import, while the set the import
+    /// made is open (R12).
+    import_report: Option<bl_shell_spec::dawproject::ImportReport>,
     dirty: bool,
     store: Box<dyn SetStore>,
     audio: AudioHost,
@@ -883,6 +890,8 @@ impl Shell {
             editor,
             saved,
             set_path: None,
+            pending_name: None,
+            import_report: None,
             dirty: false,
             store,
             audio,
@@ -1743,7 +1752,11 @@ impl Shell {
             .as_deref()
             .and_then(Path::file_stem)
             .map_or_else(
-                || "Untitled".to_owned(),
+                || {
+                    self.pending_name
+                        .clone()
+                        .unwrap_or_else(|| "Untitled".to_owned())
+                },
                 |s| s.to_string_lossy().into_owned(),
             )
     }
@@ -7175,6 +7188,9 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if dawproject_ids::handles(id) {
+            return self.run_dawproject(id, args);
+        }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
         }
@@ -7256,6 +7272,92 @@ impl Shell {
         };
         self.touch();
         Ok(result)
+    }
+
+    /// Runs a DAWproject command (WP-6.36): opening a `.dawproject` file as
+    /// a new set, or reading back the report of the last import.
+    ///
+    /// Spec: dawproject R10 to R12. The import is refused while the open
+    /// set has unsaved changes; the reading, the extracting and the building
+    /// run on a worker thread; the set changes only when the new set is
+    /// whole, and a failure leaves the open set as it was.
+    fn run_dawproject(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let unavailable = |reason: &str| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason: reason.to_owned(),
+        };
+        match id {
+            dawproject_ids::IMPORT_DAWPROJECT => {
+                let args = Self::args::<dawproject_ids::ImportDawProjectArgs>(id, args)?;
+                if self.dirty {
+                    return Err(unavailable(
+                        "the set has unsaved changes; save them with `set.save` or \
+                         `set.save_as`, or throw them away with `set.discard_changes`, first",
+                    ));
+                }
+                let path = PathBuf::from(&args.path);
+                let folder = crate::dawproject::import_folder(&self.temporary_folder(), &path);
+                let mut job = crate::dawproject::Job::start(&path, &folder)
+                    .map_err(|error| failed(error.to_string()))?;
+                // An agent's call returns when the new set is open (R10).
+                let imported = loop {
+                    if let Some(result) = job.poll() {
+                        break result;
+                    }
+                    self.set_message(
+                        format!("Importing {} ({}%)", path.display(), job.percent()),
+                        false,
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                };
+                let imported = imported.map_err(|error| {
+                    self.set_message(error.to_string(), true);
+                    failed(error.to_string())
+                })?;
+                // The set changes only when the new set is whole.
+                self.store.close();
+                for (hash, at, size) in &imported.media {
+                    self.store.add_media(*hash, at, *size);
+                    let hash = bl_media::ContentHash::from_bytes(hash.0);
+                    if self.media.entry(hash).is_none() {
+                        let _ = self.media.import(at);
+                    }
+                }
+                self.saved = snapshot(&imported.editor);
+                self.set_replaced();
+                self.editor = imported.editor;
+                self.set_path = None;
+                // Spec: dawproject R11. Until the set is first saved its
+                // name is the file's name without `.dawproject`.
+                self.pending_name = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned());
+                self.dirty = false;
+                self.message = None;
+                self.arrangement.reset();
+                self.clip_view.forget_selection();
+                self.mixer.reset();
+                self.session.reset();
+                self.new_set_transport();
+                self.document_changed();
+                self.set_file_changed();
+                self.import_report = Some(imported.report.clone());
+                Ok(to_value(&dawproject_ids::ImportDawProjectResult {
+                    name: self.set_name(),
+                    report: imported.report,
+                }))
+            }
+            dawproject_ids::IMPORT_REPORT => {
+                Self::args::<NoArgs>(id, args)?;
+                let report = self.import_report.clone().unwrap_or_default();
+                Ok(to_value(&report))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// Runs a Standard MIDI File command (WP-2.21): importing a file into the

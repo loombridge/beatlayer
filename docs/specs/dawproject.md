@@ -1,6 +1,6 @@
 # DAWproject import and export
 
-- **Status:** draft
+- **Status:** partial
 - **Work packages:** WP-6.36 (reading a file and opening it as a set: the tracks, mixer and routing, clips, media, the Session View's scenes, tempo and time signature, and the import report: R1 to R22, R24 to R32 and R34 to R43), WP-6.36b (colours and crossfades as they're read, devices and plug-in states, automation, MIDI controllers and note expressions, markers and metadata: R23's reading, R33, R44 to R64), WP-6.37 (writing a set as a file, and the round trip: R23's writing, R65 to R82), WP-6.37b (the Open dialog, the browser, dropping a file on the window, the Export DAWproject menu item and the report window: R83 to R88). The colours a set holds are [themes.md](themes.md)'s (WP-6.30b), and the Arrangement's crossfades between adjacent clips [audio-clips.md](audio-clips.md)'s (WP-6.51)
 - **Parity-matrix row:** Files and export: (Beatlayer only) DAWproject import and export
 - **Checked against:** the DAWproject format, version 1.0: its repository's README, `Project.xsd`, `MetaData.xsd`, XML reference and reference library (github.com/bitwig/dawproject, MIT licence), read 20 October 2026; the Live 12 reference manual (online edition), chapter 5, read 20 October 2026; the Live 12 release notes, read 20 October 2026; the UI parity reference's M-FILE-002, M-FILE-016 and I-DROP-025
@@ -165,49 +165,49 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.36 | unit |
-| R2 | to be written in WP-6.36 | unit |
-| R3 | to be written in WP-6.36 | unit |
-| R4 | to be written in WP-6.36 | unit, fuzz |
-| R5 | to be written in WP-6.36 | unit, fuzz |
-| R6 | to be written in WP-6.36 | unit, fuzz |
-| R7 | to be written in WP-6.36 | unit |
-| R8 | to be written in WP-6.36 | unit |
-| R9 | to be written in WP-6.36 | unit, property |
-| R10 | to be written in WP-6.36 | unit, agent test |
-| R11 | to be written in WP-6.36 | unit |
-| R12 | to be written in WP-6.36 | unit, agent test |
-| R13 | to be written in WP-6.36 | unit |
-| R14 | to be written in WP-6.36 | unit |
-| R15 | to be written in WP-6.36 | unit |
-| R16 | to be written in WP-6.36 | unit |
-| R17 | to be written in WP-6.36 | unit |
-| R18 | to be written in WP-6.36 | unit |
-| R19 | to be written in WP-6.36 | unit, golden render |
-| R20 | to be written in WP-6.36 | unit |
-| R21 | to be written in WP-6.36 | unit |
-| R22 | to be written in WP-6.36 | unit |
+| R1 | a_container_without_a_project_is_refused | unit |
+| R2 | the_damaged_fixtures_that_read_give_their_report | unit |
+| R3 | a_version_beatlayer_does_not_read_is_refused | unit |
+| R4 | every_fixture_gives_the_report_it_should | unit, fuzz |
+| R5 | a_damaged_file_is_refused_or_read_in_part | unit, fuzz |
+| R6 | a_damaged_file_is_refused_or_read_in_part | unit, fuzz |
+| R7 | the_damaged_fixtures_that_read_give_their_report | unit |
+| R8 | every_fixture_gives_the_report_it_should | unit |
+| R9 | beats_and_seconds_reach_the_same_tick_through_a_ramp | unit, property |
+| R10 | an_import_opens_the_file_as_a_new_set | unit, agent test |
+| R11 | an_import_opens_the_file_as_a_new_set | unit |
+| R12 | the_report_is_read_back_while_the_imported_set_is_open | unit, agent test |
+| R13 | an_imported_tempo_map_holds_the_ramp_the_file_asks_for | unit |
+| R14 | every_fixture_gives_the_report_it_should | unit |
+| R15 | every_fixture_gives_the_report_it_should | unit |
+| R16 | every_fixture_gives_the_report_it_should | unit |
+| R17 | every_fixture_gives_the_report_it_should | unit |
+| R18 | every_fixture_gives_the_report_it_should | unit |
+| R19 | every_fixture_gives_the_report_it_should | unit |
+| R20 | every_fixture_gives_the_report_it_should | unit |
+| R21 | every_fixture_gives_the_report_it_should | unit |
+| R22 | every_fixture_gives_the_report_it_should | unit |
 | R23 | to be written in WP-6.36b (reading) and WP-6.37 (writing) | unit |
-| R24 | to be written in WP-6.36 | unit |
-| R25 | to be written in WP-6.36 | unit |
-| R26 | to be written in WP-6.36 | unit |
-| R27 | to be written in WP-6.36 | unit |
-| R28 | to be written in WP-6.36 | unit |
-| R29 | to be written in WP-6.36 | unit, golden render |
-| R30 | to be written in WP-6.36 | unit, golden render |
-| R31 | to be written in WP-6.36 | unit |
-| R32 | to be written in WP-6.36 | unit, golden render |
+| R24 | every_fixture_gives_the_report_it_should | unit |
+| R25 | every_fixture_gives_the_report_it_should | unit |
+| R26 | every_fixture_gives_the_report_it_should | unit |
+| R27 | every_fixture_gives_the_report_it_should | unit |
+| R28 | every_fixture_gives_the_report_it_should | unit |
+| R29 | every_fixture_gives_the_report_it_should | unit |
+| R30 | every_fixture_gives_the_report_it_should | unit |
+| R31 | every_fixture_gives_the_report_it_should | unit |
+| R32 | every_fixture_gives_the_report_it_should | unit |
 | R33 | to be written in WP-6.36b | unit |
-| R34 | to be written in WP-6.36 | unit |
-| R35 | to be written in WP-6.36 | unit |
-| R36 | to be written in WP-6.36 | unit |
-| R37 | to be written in WP-6.36 | unit |
-| R38 | to be written in WP-6.36 | unit |
-| R39 | to be written in WP-6.36 | unit |
-| R40 | to be written in WP-6.36 | unit |
-| R41 | to be written in WP-6.36 | unit |
-| R42 | to be written in WP-6.36 | unit |
-| R43 | to be written in WP-6.36 | unit |
+| R34 | every_fixture_gives_the_report_it_should | unit |
+| R35 | every_fixture_gives_the_report_it_should | unit |
+| R36 | every_fixture_gives_the_report_it_should | unit |
+| R37 | every_fixture_gives_the_report_it_should | unit |
+| R38 | every_fixture_gives_the_report_it_should | unit |
+| R39 | the_files_the_file_holds_are_written_and_moved_on_the_first_save | unit |
+| R40 | every_fixture_gives_the_report_it_should | unit |
+| R41 | every_fixture_gives_the_report_it_should | unit |
+| R42 | every_fixture_gives_the_report_it_should | unit |
+| R43 | every_fixture_gives_the_report_it_should | unit |
 | R44 | to be written in WP-6.36b | unit |
 | R45 | to be written in WP-6.36b | unit |
 | R46 | to be written in WP-6.36b | unit |
@@ -252,4 +252,4 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R85 | to be written in WP-6.37b | UI script |
 | R86 | to be written in WP-6.37b | UI script |
 | R87 | to be written in WP-6.37b | UI script |
-| R88 | to be written in WP-6.36, WP-6.37 | unit, agent test |
+| R88 | the_arguments_are_the_path_of_the_file | unit, agent test |

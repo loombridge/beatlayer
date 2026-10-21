@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-557 commands in 37 areas.
+559 commands in 37 areas.
 
 ## Permission classes
 
@@ -489,6 +489,8 @@ Each command has:
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
+| [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
+| [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
@@ -8786,6 +8788,34 @@ Arguments:
 
 Result: [`DiscardedRecovery`](#discardedrecovery).
 
+#### `set.import_dawproject`
+
+**Import DAWproject File**. Permission: `external`. Contexts: `global`.
+
+Reads the DAWproject file at `path` and opens what it holds as a new set, in place of the open one, as opening a set does: it is refused while the open set has unsaved changes. The new set starts empty and holds what the file carries: its tracks, groups, returns and their mixer and routing, its clips with their notes, media, warping and loops, its scenes and slots, its tempo and time signature. It is unsaved, and its name is the file's name without `.dawproject` until it is first saved. The result's `report` says what the import left out or changed, and `set.import_report` gives that report again while the set the import made is open. Reads a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The DAWproject file to read, absolute or relative to the app's working directory. |
+
+Result: [`ImportDawProjectResult`](#importdawprojectresult).
+
+#### `set.import_report`
+
+**DAWproject Import Report**. Permission: `read`. Contexts: `global`.
+
+Reports what the last DAWproject import left out or changed: each thing, where it was, how many there were, and what Beatlayer did, and the application and version the file says made it. It gives the report again while the set the import made is open, and nothing after another set opens. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ImportReport`](#importreport).
+
 #### `set.list_recoverable`
 
 **List Recoverable Sets**. Permission: `read`. Contexts: `global`.
@@ -10692,6 +10722,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | the query tool's `clip` | `launch.follow.enabled` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
+| [`set.import_dawproject`](#setimport_dawproject) | the query tool's `song` | `set.name` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
@@ -18771,6 +18802,124 @@ Hot-swapping, while it lasts.
   "required": [
     "device",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportDawProjectResult`
+
+What `set.import_dawproject` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The new set's name, as the title bar shows it: the file's name without `.dawproject`. |
+| `report` | [`ImportReport`](#importreport) | yes | What the import left out or changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.import_dawproject` returns.",
+  "properties": {
+    "name": {
+      "description": "The new set's name, as the title bar shows it: the file's name without `.dawproject`.",
+      "type": "string"
+    },
+    "report": {
+      "$ref": "#/$defs/ImportReport",
+      "description": "What the import left out or changed."
+    }
+  },
+  "required": [
+    "name",
+    "report"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReport`
+
+What the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `application` | string or null | no | The application and version the file says made it. |
+| `entries` | array of [`ImportReportEntry`](#importreportentry) | no | Each thing left out or changed, in the file's order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the import left out or changed.",
+  "properties": {
+    "application": {
+      "description": "The application and version the file says made it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "entries": {
+      "description": "Each thing left out or changed, in the file's order.",
+      "items": {
+        "$ref": "#/$defs/ImportReportEntry"
+      },
+      "type": "array"
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `ImportReportEntry`
+
+One thing the import left out or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `what` | string | yes | What it was: a VST2 plug-in, a send's pan, a note's channel. |
+| `where` | string | yes | Where it was: the track by name, a clip by name and its place, a device by name. |
+| `count` | integer, at least 0 | yes | How many there were. |
+| `did` | string | yes | What Beatlayer did: left out, or changed to what. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One thing the import left out or changed.",
+  "properties": {
+    "count": {
+      "description": "How many there were.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "did": {
+      "description": "What Beatlayer did: left out, or changed to what.",
+      "type": "string"
+    },
+    "what": {
+      "description": "What it was: a VST2 plug-in, a send's pan, a note's channel.",
+      "type": "string"
+    },
+    "where": {
+      "description": "Where it was: the track by name, a clip by name and its place, a device by name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "what",
+    "where",
+    "count",
+    "did"
   ],
   "type": "object"
 }

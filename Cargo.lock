@@ -868,9 +868,14 @@ name = "bl-interop"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "bl-media",
  "bl-model",
  "bl-project",
+ "flate2",
  "midly",
+ "quick-xml",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -1005,6 +1010,7 @@ dependencies = [
  "bl-test-vst3",
  "flate2",
  "getrandom 0.3.4",
+ "libc",
  "lspk-example-gain",
  "midly",
  "rtrb",

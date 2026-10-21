@@ -1,0 +1,11 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out; the track plays to Main",
+      "what": "a destination the file doesn't hold",
+      "where": "the track \"Bass\""
+    }
+  ]
+}

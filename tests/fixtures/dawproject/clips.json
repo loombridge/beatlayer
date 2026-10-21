@@ -1,0 +1,23 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a note that can't be played",
+      "where": "the track \"Lead\""
+    },
+    {
+      "count": 1,
+      "did": "left out; the notes play on one channel",
+      "what": "notes on more than one channel",
+      "where": "the track \"Lead\""
+    },
+    {
+      "count": 1,
+      "did": "shortened",
+      "what": "a clip another clip covers",
+      "where": "the track"
+    }
+  ]
+}

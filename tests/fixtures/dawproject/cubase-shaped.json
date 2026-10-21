@@ -1,0 +1,35 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "its Track Activator is off",
+      "what": "a track that isn't loaded",
+      "where": "the track \"Disabled\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a VST3 plug-in",
+      "where": "the track \"Instrument\""
+    },
+    {
+      "count": 1,
+      "did": "left out; the send is switched off",
+      "what": "a send at -12 dB",
+      "where": "the track \"Instrument\""
+    },
+    {
+      "count": 1,
+      "did": "the return takes them post",
+      "what": "sends that disagree about pre or post",
+      "where": "the return \"FX\""
+    },
+    {
+      "count": 1,
+      "did": "the file's own rate, channels and length were used",
+      "what": "the file `audio/sound.wav`",
+      "where": "the track \"Disabled\""
+    }
+  ]
+}

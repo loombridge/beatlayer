@@ -57,6 +57,11 @@ serde_json = "1"
 # opened at its rate: the version bl-engine uses.
 rtrb = "0.4.0"
 
+[target.'cfg(unix)'.dependencies]
+# How much room the filesystem has, for the DAWproject import's room check
+# (the DAWproject spec, R5). The version the engine already brings in.
+libc = "0.2"
+
 [dev-dependencies]
 # The test plug-ins, built from source, which the plug-in tests load.
 bl-test-clap = { path = "../test-clap" }

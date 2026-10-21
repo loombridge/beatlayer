@@ -1,0 +1,17 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a send to a channel that isn't a return",
+      "where": "the track \"Inside\""
+    },
+    {
+      "count": 1,
+      "did": "read as a copy",
+      "what": "an alias clip",
+      "where": "the clip"
+    }
+  ]
+}

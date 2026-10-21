@@ -1,0 +1,11 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out; the container doesn't hold it",
+      "what": "the file `audio/nowhere.wav`",
+      "where": "the track \"Drums\""
+    }
+  ]
+}

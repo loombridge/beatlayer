@@ -69,6 +69,7 @@ pub mod browser;
 pub mod capture_midi;
 pub mod commands;
 pub mod context_menus;
+pub mod dawproject;
 pub mod devices;
 pub mod editing;
 pub mod export;
@@ -113,6 +114,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     browser::register(registry)?;
     export::register(registry)?;
     midi_files::register(registry)?;
+    dawproject::register(registry)?;
     midi_io::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;

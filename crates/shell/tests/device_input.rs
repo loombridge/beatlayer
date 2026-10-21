@@ -25,6 +25,7 @@ use serde_json::json;
 fn duplex_shell() -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
+            dropout_after: None,
             channels: 4,
             ..NullOptions::default()
         },

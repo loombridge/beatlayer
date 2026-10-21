@@ -1462,6 +1462,7 @@ mod tests {
 
     fn config() -> NodeConfig {
         NodeConfig {
+            round_trip_latency: 0,
             sample_rate: SampleRate::HZ_48000,
             max_frames: 4096,
             channels: 2,

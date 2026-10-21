@@ -13,7 +13,7 @@
 //! binding: a person reaches it once the dialog is built.
 
 use bl_commands::Context::Global;
-use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
+use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::TrackId;
 use schemars::JsonSchema;
@@ -23,10 +23,27 @@ use crate::editing::Position;
 
 /// `export.audio`: render the set's Main output to an audio file.
 pub const AUDIO: &str = "export.audio";
+/// `export.realtime.status`: what the real-time render is doing now.
+pub const REALTIME_STATUS: &str = "export.realtime.status";
+/// `export.realtime.restart`: start the waiting period again.
+pub const REALTIME_RESTART: &str = "export.realtime.restart";
+/// `export.realtime.skip`: start the render at once.
+pub const REALTIME_SKIP: &str = "export.realtime.skip";
+/// `export.realtime.cancel`: stop the render and delete its partial file.
+pub const REALTIME_CANCEL: &str = "export.realtime.cancel";
+/// `export.realtime.auto_restart`: turn Auto-Restart on Drop-Outs on or off.
+pub const REALTIME_AUTO_RESTART: &str = "export.realtime.auto_restart";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[AUDIO];
+pub const IDS: &[&str] = &[
+    AUDIO,
+    REALTIME_STATUS,
+    REALTIME_RESTART,
+    REALTIME_SKIP,
+    REALTIME_CANCEL,
+    REALTIME_AUTO_RESTART,
+];
 
 /// Whether `id` is one of the export commands.
 #[must_use]
@@ -155,6 +172,20 @@ pub struct ExportArgs {
     /// exactly the range long. Off unless given.
     #[serde(default, skip_serializing_if = "is_false")]
     pub render_as_loop: bool,
+    /// How long the render waits before it starts, in seconds, so the
+    /// hardware's last sound dies away: 10 unless given, and longer if the
+    /// seconds are given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_seconds: Option<u32>,
+    /// Whether the render starts again when a dropout spoils it: on unless
+    /// told otherwise. With it off, the render carries on and the dropouts
+    /// are listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_restart: Option<bool>,
+    /// The most times the render may start again after a dropout: no limit
+    /// when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
 }
 
 /// Where an export's range came from.
@@ -214,11 +245,69 @@ pub struct ExportResult {
     /// Media that clips name and that couldn't be found, by content hash:
     /// those clips are silent in the export.
     pub missing_media: Vec<String>,
-    /// The devices that work with hardware (an external instrument), by the
-    /// name their title bar shows and their ID: they send nothing to
-    /// hardware in an offline render and bring back silence.
+    /// The devices that work with hardware (an external instrument or an
+    /// external effect), by the name their title bar shows and their ID:
+    /// they send nothing to hardware in an offline render and bring back
+    /// silence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub silenced_external_devices: Vec<String>,
+    /// Whether the export rendered in real time, on the running engine,
+    /// because its path runs through external hardware.
+    #[serde(default)]
+    pub real_time: bool,
+    /// How many times the render started: more than one when a dropout
+    /// spoiled it and it started again.
+    #[serde(default)]
+    pub attempts: u32,
+    /// The dropouts the render found, each with the song position it
+    /// happened at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropouts: Vec<Dropout>,
+}
+
+/// A dropout a real-time render found.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Dropout {
+    /// The song position it happened at, in ticks from 1.1.1.
+    pub position: Ticks,
+    /// What it was: the device's report, or a ring too full.
+    pub kind: String,
+}
+
+/// What the real-time render is doing now (the external devices spec, R23).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RealtimePhase {
+    /// Nothing is rendering.
+    Idle,
+    /// Waiting for the hardware's sound to die away, with the seconds left.
+    Waiting {
+        /// The seconds left before the render starts.
+        seconds: f64,
+    },
+    /// Rendering the range.
+    Rendering,
+}
+
+/// What `export.realtime.status` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RealtimeStatus {
+    /// What the render is doing now.
+    pub phase: RealtimePhase,
+    /// How much of the range is written, from 0 to 1, while it renders.
+    pub progress: f64,
+    /// How many times the render has started.
+    pub attempts: u32,
+    /// Whether the render starts again when a dropout spoils it.
+    pub auto_restart: bool,
+}
+
+/// Arguments of `export.realtime.auto_restart`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AutoRestartArgs {
+    /// Whether the render starts again when a dropout spoils it.
+    pub auto_restart: bool,
 }
 
 /// Adds the export commands to a registry.
@@ -249,13 +338,81 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  converted down. Files are written under temporary names and appear only when \
                  complete. Existing files are refused unless `replace` is true. Playback stops \
                  first, and plug-in devices render through the plug-ins the engine plays, lent to \
-                 the export and handed back afterwards. Changes nothing in the set.",
+                 the export and handed back afterwards. An export whose path runs through external \
+                 hardware renders in real time, on the running engine, after waiting \
+                 `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; \
+                 `auto_restart` (on unless told otherwise) starts it again when a dropout spoils \
+                 it, up to `max_attempts` times, and with it off the dropouts are listed. \
+                 Changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)
             .args::<ExportArgs>()
             .result::<ExportResult>(),
-    )
+    )?;
+    // Spec: external-devices R23. The real-time render's dialog.
+    registry.register(
+        CommandSpec::new(REALTIME_STATUS, "Real-time Rendering Status")
+            .description(
+                "What the real-time render of an export with external hardware is doing now: \
+                 `idle` when nothing is rendering, `waiting` with the seconds left before the \
+                 render starts, or `rendering`. It also says how much of the range is written, \
+                 how many times the render has started, and whether Auto-Restart on Drop-Outs is \
+                 on.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RealtimeStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(REALTIME_RESTART, "Restart Real-time Rendering")
+            .description(
+                "Starts the waiting period of the real-time render of an export with external \
+                 hardware again, so the hardware's sound has the whole period to die away. \
+                 Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RealtimeStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(REALTIME_SKIP, "Skip Real-time Rendering Wait")
+            .description(
+                "Starts the real-time render of an export with external hardware at once, \
+                 without waiting for the waiting period to run out. Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RealtimeStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(REALTIME_CANCEL, "Cancel Real-time Rendering")
+            .description(
+                "Stops the real-time render of an export with external hardware and deletes its \
+                 partial file. The export fails and the file it was writing is left as it was. \
+                 Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<RealtimeStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(REALTIME_AUTO_RESTART, "Set Auto-Restart on Drop-Outs")
+            .description(
+                "Turns Auto-Restart on Drop-Outs on or off for the real-time render of an export \
+                 with external hardware: on, the render starts again when a dropout spoils it; \
+                 off, it carries on and the dropouts are listed. Changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<AutoRestartArgs>()
+            .result::<RealtimeStatus>(),
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

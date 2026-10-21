@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-571 commands in 38 areas.
+576 commands in 38 areas.
 
 ## Permission classes
 
@@ -323,6 +323,11 @@ Each command has:
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
+| [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | Set Auto-Restart on Drop-Outs | `edit` |  |  |
+| [`export.realtime.cancel`](#exportrealtimecancel) | Cancel Real-time Rendering | `edit` |  |  |
+| [`export.realtime.restart`](#exportrealtimerestart) | Restart Real-time Rendering | `edit` |  |  |
+| [`export.realtime.skip`](#exportrealtimeskip) | Skip Real-time Rendering Wait | `edit` |  |  |
+| [`export.realtime.status`](#exportrealtimestatus) | Real-time Rendering Status | `read` |  |  |
 | [`focus.arrangement`](#focusarrangement) | Arrangement View | `read` | `Option+2` | `Alt+2` |
 | [`focus.browser`](#focusbrowser) | Browser | `read` | `Option+5` | `Alt+5` |
 | [`focus.control_bar`](#focuscontrol_bar) | Control Bar | `read` | `Option+0` | `Alt+0` |
@@ -5236,7 +5241,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set External Device**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the routing of a device that works with hardware outside the computer (the External Instrument), as the choosers in its title bar do; give only the settings to change. `midi_to` is `{ "type": "none" }` (No Output, a new device's) or `{ "type": "port", "name": ... }` with a MIDI output port's name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio interface's inputs the hardware's sound comes back on, a channel or a pair (`{ "type": "pair", "channel": 1 }`, the first pair on a new device); `hardware_latency` is the delay the hardware adds that the computer can't detect, in the unit the unit switch is on: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000, kept in samples); to switch the unit, send the converted value. Each change recompiles the song's audio, so these are settings, not parameters. Read them back in the query tool's `device` result, under `external`.
+Sets the routing of a device that works with hardware outside the computer (the External Instrument and the External Audio Effect), as the choosers in its title bar do; give only the settings to change. `midi_to` is `{ "type": "none" }` (No Output, a new device's) or `{ "type": "port", "name": ... }` with a MIDI output port's name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio interface's inputs the hardware's sound comes back on, a channel or a pair (`{ "type": "pair", "channel": 1 }`, the first pair on a new device); `audio_to` is the audio interface's outputs an External Audio Effect sends its signal to, a channel or a pair (the first pair on a new device); `hardware_latency` is the delay the hardware adds that the computer can't detect, in the unit the unit switch is on: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000, kept in samples); to switch the unit, send the converted value. Each change recompiles the song's audio, so these are settings, not parameters. Read them back in the query tool's `device` result, under `external`.
 
 Default keys: none.
 
@@ -5246,6 +5251,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `audio_from` | [`Channel`](#channel) or null | no | Audio From: the audio interface's inputs it comes back on. |
+| `audio_to` | [`Channel`](#channel) or null | no | Audio To: the audio interface's outputs an external effect sends its signal to. |
 | `channel` | integer or null | no | The MIDI channel, 1 to 16. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) or null | no | Hardware Latency with its unit: the unit switch is the unit given, so switching the unit sends the converted value. |
 | `midi_to` | [`ExternalPort`](#externalport) or null | no | MIDI To: `none` for No Output, or `port` with the MIDI output port's name. |
@@ -5893,7 +5899,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Export Audio**. Permission: `external`. Contexts: `global`.
 
-Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. Changes nothing in the set.
+Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. An export whose path runs through external hardware renders in real time, on the running engine, after waiting `wait_seconds` seconds (10 unless given) so the hardware's sound dies away; `auto_restart` (on unless told otherwise) starts it again when a dropout spoils it, up to `max_attempts` times, and with it off the dropouts are listed. Changes nothing in the set.
 
 Default keys: none.
 
@@ -5904,17 +5910,84 @@ Arguments:
 | `path` | string | yes | The file to write, absolute or relative to the app's working directory, such as `/Music/Mix.wav`. Its folder must exist. |
 | `bit_depth` | one of `16`, `24`, `32` | yes | Bits per sample: 16 or 24 (integers), or 32 (floating point; WAV and AIFF only). MP3 has no bit depth, so it ignores this. |
 | `sample_rate` | integer from 8000 to 384000 | yes | The file's sample rate in hertz, from 8,000 to 384,000, such as 44100 or 48000. MP3 holds 8,000, 11,025, 12,000, 16,000, 22,050, 24,000, 32,000, 44,100, or 48,000 Hz. |
+| `auto_restart` | boolean or null | no | Whether the render starts again when a dropout spoils it: on unless told otherwise. With it off, the render carries on and the dropouts are listed. |
 | `dither` | [`Dither`](#dither) or null | no | The dither below 32 bits. Left out, `triangular`. MP3 ignores it. |
 | `file_type` | [`FileType`](#filetype) or null | no | The file type. Left out, the path's extension decides: `.wav`; `.aif` or `.aiff`; `.flac`; `.mp3`. Given, it must agree with the extension. |
 | `include_return_and_main_effects` | boolean | no | Include return and Main effects when rendering individual tracks. Unavailable (refused) when `rendered_track` is `main`. |
 | `length` | [`Ticks`](#ticks) or null | no | How long the range is, in ticks (705,600 to the quarter note). Left out, to the end of the time selection, or without one to the end of the set's last clip. |
+| `max_attempts` | integer or null | no | The most times the render may start again after a dropout: no limit when left out. |
 | `normalize` | boolean | no | Normalize: raise or lower the whole export so its highest peak is at full scale (0 dBFS). |
 | `render_as_loop` | boolean | no | Render as Loop: the song goes on past the range's end as if Stop were pressed there, until the output has stayed below -120 dBFS for 100 ms or 60 s have passed, and that tail is added onto the file's start, wrapping round if it's longer than the range. The file is still exactly the range long. Off unless given. |
 | `rendered_track` | [`RenderedTrack`](#renderedtrack) or null | no | Which track(s) to render: `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. |
 | `replace` | boolean | no | Replace a file already at `path`. Without it, an existing file is left alone and the export refused. |
 | `start` | [`Position`](#position) or null | no | Where the range starts. Left out, the start of the Arrangement's time selection, or 1.1.1 without one. |
+| `wait_seconds` | integer or null | no | How long the render waits before it starts, in seconds, so the hardware's last sound dies away: 10 unless given, and longer if the seconds are given. |
 
 Result: [`ExportResult`](#exportresult).
+
+#### `export.realtime.auto_restart`
+
+**Set Auto-Restart on Drop-Outs**. Permission: `edit`. Contexts: `global`.
+
+Turns Auto-Restart on Drop-Outs on or off for the real-time render of an export with external hardware: on, the render starts again when a dropout spoils it; off, it carries on and the dropouts are listed. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `auto_restart` | boolean | yes | Whether the render starts again when a dropout spoils it. |
+
+Result: [`RealtimeStatus`](#realtimestatus).
+
+#### `export.realtime.cancel`
+
+**Cancel Real-time Rendering**. Permission: `edit`. Contexts: `global`.
+
+Stops the real-time render of an export with external hardware and deletes its partial file. The export fails and the file it was writing is left as it was. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RealtimeStatus`](#realtimestatus).
+
+#### `export.realtime.restart`
+
+**Restart Real-time Rendering**. Permission: `edit`. Contexts: `global`.
+
+Starts the waiting period of the real-time render of an export with external hardware again, so the hardware's sound has the whole period to die away. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RealtimeStatus`](#realtimestatus).
+
+#### `export.realtime.skip`
+
+**Skip Real-time Rendering Wait**. Permission: `edit`. Contexts: `global`.
+
+Starts the real-time render of an export with external hardware at once, without waiting for the waiting period to run out. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RealtimeStatus`](#realtimestatus).
+
+#### `export.realtime.status`
+
+**Real-time Rendering Status**. Permission: `read`. Contexts: `global`.
+
+What the real-time render of an export with external hardware is doing now: `idle` when nothing is rendering, `waiting` with the seconds left before the render starts, or `rendering`. It also says how much of the range is written, how many times the render has started, and whether Auto-Restart on Drop-Outs is on.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RealtimeStatus`](#realtimestatus).
 
 ### Area `focus`
 
@@ -10846,6 +10919,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`export.realtime.auto_restart`](#exportrealtimeauto_restart) | `export.realtime.status` | `auto_restart` |
+| [`export.realtime.cancel`](#exportrealtimecancel) | `export.realtime.status` | `phase` |
+| [`export.realtime.restart`](#exportrealtimerestart) | `export.realtime.status` | `phase` |
+| [`export.realtime.skip`](#exportrealtimeskip) | `export.realtime.status` | `phase` |
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
@@ -17351,6 +17428,40 @@ A driver type this build and machine offer.
 
 </details>
 
+### `Dropout`
+
+A dropout a real-time render found.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `position` | [`Ticks`](#ticks) | yes | The song position it happened at, in ticks from 1.1.1. |
+| `kind` | string | yes | What it was: the device's report, or a ring too full. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A dropout a real-time render found.",
+  "properties": {
+    "kind": {
+      "description": "What it was: the device's report, or a ring too full.",
+      "type": "string"
+    },
+    "position": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The song position it happened at, in ticks from 1.1.1."
+    }
+  },
+  "required": [
+    "position",
+    "kind"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DrumRow`
 
 A drum chain's row in the chain list (drum racks spec, R21).
@@ -17719,8 +17830,11 @@ What `export.audio` returns.
 | `took_seconds` | number | yes | How long the export took, in seconds. |
 | `speed` | number | yes | How many times faster than real time it ran. |
 | `missing_media` | array of string | yes | Media that clips name and that couldn't be found, by content hash: those clips are silent in the export. |
+| `real_time` | boolean | yes | Whether the export rendered in real time, on the running engine, because its path runs through external hardware. |
+| `attempts` | integer, at least 0 | yes | How many times the render started: more than one when a dropout spoiled it and it started again. |
+| `dropouts` | array of [`Dropout`](#dropout) | no | The dropouts the render found, each with the song position it happened at. |
 | `files` | array of string | no | Every file written by the export: one for Main or a single track, or one per track for all-tracks or selected-tracks exports. |
-| `silenced_external_devices` | array of string | no | The devices that work with hardware (an external instrument), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence. |
+| `silenced_external_devices` | array of string | no | The devices that work with hardware (an external instrument or an external effect), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17728,6 +17842,13 @@ What `export.audio` returns.
 {
   "description": "What `export.audio` returns.",
   "properties": {
+    "attempts": {
+      "default": 0,
+      "description": "How many times the render started: more than one when a dropout spoiled it and it started again.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "bit_depth": {
       "description": "Bits per sample.",
       "format": "uint8",
@@ -17745,6 +17866,13 @@ What `export.audio` returns.
     "dither": {
       "$ref": "#/$defs/Dither",
       "description": "The dither used: `none` at 32 bits."
+    },
+    "dropouts": {
+      "description": "The dropouts the render found, each with the song position it happened at.",
+      "items": {
+        "$ref": "#/$defs/Dropout"
+      },
+      "type": "array"
     },
     "end": {
       "$ref": "#/$defs/Ticks",
@@ -17795,6 +17923,11 @@ What `export.audio` returns.
       "$ref": "#/$defs/RangeSource",
       "description": "Where the range came from."
     },
+    "real_time": {
+      "default": false,
+      "description": "Whether the export rendered in real time, on the running engine, because its path runs through external hardware.",
+      "type": "boolean"
+    },
     "render_rate": {
       "description": "The rate the engine rendered at (describes the first file in a multi-file export), which is higher than the file's when the file's is below the engine's.",
       "format": "uint32",
@@ -17813,7 +17946,7 @@ What `export.audio` returns.
       "type": "number"
     },
     "silenced_external_devices": {
-      "description": "The devices that work with hardware (an external instrument), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence.",
+      "description": "The devices that work with hardware (an external instrument or an external effect), by the name their title bar shows and their ID: they send nothing to hardware in an offline render and bring back silence.",
       "items": {
         "type": "string"
       },
@@ -17851,7 +17984,9 @@ What `export.audio` returns.
     "render_rate",
     "took_seconds",
     "speed",
-    "missing_media"
+    "missing_media",
+    "real_time",
+    "attempts"
   ],
   "type": "object"
 }
@@ -17894,6 +18029,7 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `audio_from` | [`Channel`](#channel) | no | Audio From: the interface's inputs the sound comes back on, the first pair on a new device. |
+| `audio_to` | [`Channel`](#channel) or null | no | Audio To: the interface's outputs an external effect sends its signal to, the first pair on a new effect. `None` for an external instrument: it sends notes, not audio. |
 | `channel` | integer from 0 to 255 | no | The MIDI channel, 1 to 16: 1 on a new device. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | no | Hardware Latency: 0 ms on a new device. |
 | `port` | string or null | no | MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away. |
@@ -17907,6 +18043,17 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
     "audio_from": {
       "$ref": "#/$defs/Channel",
       "description": "Audio From: the interface's inputs the sound comes back on, the first pair on a new device."
+    },
+    "audio_to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Channel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Audio To: the interface's outputs an external effect sends its signal to, the first pair on a new effect. `None` for an external instrument: it sends notes, not audio."
     },
     "channel": {
       "description": "The MIDI channel, 1 to 16: 1 on a new device.",
@@ -17995,6 +18142,8 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
 | `channel` | integer from 0 to 255 | yes | The MIDI channel, 1 to 16. |
 | `audio_from` | string | yes | What Audio From shows: a channel `3` or a pair `3/4`. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | yes | Hardware Latency, in the unit its switch is on. |
+| `audio_to` | string or null | no | What Audio To shows: a channel `3` or a pair `3/4`, for a device that sends its signal to the interface's outputs. |
+| `output` | boolean | no | Whether the device sends its signal to the interface's outputs and hears it back, as the External Audio Effect does: it has an Audio To and no MIDI To (WP-5.35). |
 
 <details><summary>JSON Schema</summary>
 
@@ -18006,6 +18155,13 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
       "description": "What Audio From shows: a channel `3` or a pair `3/4`.",
       "type": "string"
     },
+    "audio_to": {
+      "description": "What Audio To shows: a channel `3` or a pair `3/4`, for a device that sends its signal to the interface's outputs.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "channel": {
       "description": "The MIDI channel, 1 to 16.",
       "format": "uint8",
@@ -18016,6 +18172,10 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",
       "description": "Hardware Latency, in the unit its switch is on."
+    },
+    "output": {
+      "description": "Whether the device sends its signal to the interface's outputs and hears it back, as the External Audio Effect does: it has an Audio To and no MIDI To (WP-5.35).",
+      "type": "boolean"
     },
     "port": {
       "description": "MIDI To: the output port's name, or none for No Output.",
@@ -25754,6 +25914,110 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RealtimePhase`
+
+What the real-time render is doing now (the external devices spec, R23).
+
+One of:
+
+- `"idle"`: Nothing is rendering.
+- an object with `waiting` (object with `seconds` (number)): Waiting for the hardware's sound to die away, with the seconds left.
+- `"rendering"`: Rendering the range.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the real-time render is doing now (the external devices spec, R23).",
+  "oneOf": [
+    {
+      "const": "idle",
+      "description": "Nothing is rendering.",
+      "type": "string"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Waiting for the hardware's sound to die away, with the seconds left.",
+      "properties": {
+        "waiting": {
+          "properties": {
+            "seconds": {
+              "description": "The seconds left before the render starts.",
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "seconds"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "waiting"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "rendering",
+      "description": "Rendering the range.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RealtimeStatus`
+
+What `export.realtime.status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `phase` | [`RealtimePhase`](#realtimephase) | yes | What the render is doing now. |
+| `progress` | number | yes | How much of the range is written, from 0 to 1, while it renders. |
+| `attempts` | integer, at least 0 | yes | How many times the render has started. |
+| `auto_restart` | boolean | yes | Whether the render starts again when a dropout spoils it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `export.realtime.status` returns.",
+  "properties": {
+    "attempts": {
+      "description": "How many times the render has started.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "auto_restart": {
+      "description": "Whether the render starts again when a dropout spoils it.",
+      "type": "boolean"
+    },
+    "phase": {
+      "$ref": "#/$defs/RealtimePhase",
+      "description": "What the render is doing now."
+    },
+    "progress": {
+      "description": "How much of the range is written, from 0 to 1, while it renders.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "phase",
+    "progress",
+    "attempts",
+    "auto_restart"
+  ],
+  "type": "object"
 }
 ```
 

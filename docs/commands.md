@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-551 commands in 37 areas.
+554 commands in 37 areas.
 
 ## Permission classes
 
@@ -164,6 +164,7 @@ Each command has:
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
 | [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` | `Delete` | `Delete` |
+| [`clip.edit_sample`](#clipedit_sample) | Edit Sample | `external` |  |  |
 | [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` | `Cmd+I` | `Ctrl+I` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
@@ -176,6 +177,7 @@ Each command has:
 | [`clip.open_slice_dialog`](#clipopen_slice_dialog) | Slice to New MIDI Track | `read` |  |  |
 | [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.replace_sample`](#clipreplace_sample) | Replace Sample | `edit` |  |  |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
@@ -505,6 +507,7 @@ Each command has:
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | Sample Editor | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
@@ -2980,6 +2983,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.edit_sample`
+
+**Edit Sample**. Permission: `external`. Contexts: `clip-view`.
+
+Opens an audio clip's file in the external sample editor, as the Edit button in the Clip View's Audio Utilities panel does: the editor the File & Folder page's Sample Editor row names, or that page itself when it names none. The file's content is checked when Beatlayer comes to the front again: if it has changed, every clip of the set that played the old file plays the new one, in one undo step, each keeping its warp markers only if the file kept its length. Opens a program outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`EditedSample`](#editedsample).
+
 #### `clip.insert_transient`
 
 **Insert Transient**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -3215,6 +3234,23 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.replace_sample`
+
+**Replace Sample**. Permission: `edit`. Contexts: `clip-view`.
+
+Replaces an audio clip's file with the file at `path`, as dropping a file from the browser on the Clip View does: the clip keeps its gain and pitch, and its warp markers only if the new file is exactly as long as the old one. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file the clip plays instead. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`ReplacedSample`](#replacedsample).
 
 #### `clip.reset_transients`
 
@@ -9035,6 +9071,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_sample_editor`
+
+**Sample Editor**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the sample editor on the Settings window's File & Folder page: the command the Edit button in the Clip View's Audio Utilities panel opens a clip's file in. `path` is the command: the program, its arguments, and the clip's file as the last one, or `null` for none, when Edit opens the File & Folder page instead. Run by a person from the Browse button without a `path`, it asks for a program. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the editor in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The editor's command: the program, its arguments, and the clip's file as the last one. `null` for none, when Edit opens the File & Folder page instead. |
+
+Result: [`SampleEditorResult`](#sampleeditorresult).
+
 #### `settings.set_select_next_scene_on_launch`
 
 **Select Next Scene on Launch**. Permission: `edit`. Contexts: `settings`.
@@ -10356,6 +10408,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.edit_sample`](#clipedit_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -10367,6 +10420,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.quantize_audio`](#clipquantize_audio) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.replace_sample`](#clipreplace_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
@@ -10594,6 +10648,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | `settings.state` | `file_folder.sample_editor` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
@@ -16941,6 +16996,52 @@ What an edit did, and what's selected afterwards.
 
 </details>
 
+### `EditedSample`
+
+What `clip.edit_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose file was opened. |
+| `file` | string | yes | The file that was opened. |
+| `editor` | string | yes | The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor. |
+| `opened` | boolean | yes | Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.edit_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose file was opened."
+    },
+    "editor": {
+      "description": "The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor.",
+      "type": "string"
+    },
+    "file": {
+      "description": "The file that was opened.",
+      "type": "string"
+    },
+    "opened": {
+      "description": "Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "editor",
+    "opened"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EditorSize`
 
 How tall the zone editor's rows are (R10): a right-click offers Small, Medium and Large, which change only the view.
@@ -17453,6 +17554,7 @@ File & Folder's settings in `settings.state`.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
+| `sample_editor` | string | yes | The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17460,13 +17562,18 @@ File & Folder's settings in `settings.state`.
 {
   "description": "File & Folder's settings in `settings.state`.",
   "properties": {
+    "sample_editor": {
+      "description": "The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named.",
+      "type": "string"
+    },
     "temporary_folder": {
       "description": "The Temporary Folder in use: the setting, or the default.",
       "type": "string"
     }
   },
   "required": [
-    "temporary_folder"
+    "temporary_folder",
+    "sample_editor"
   ],
   "type": "object"
 }
@@ -25377,6 +25484,46 @@ One of:
 
 </details>
 
+### `ReplacedSample`
+
+What `clip.replace_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The file the clip plays now. |
+| `media` | [`ContentHash`](#contenthash) | yes | The media it plays, by its content hash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.replace_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "file": {
+      "description": "The file the clip plays now.",
+      "type": "string"
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The media it plays, by its content hash."
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReturnChoice`
 
 An entry of a return chain's Audio To chooser.
@@ -25647,6 +25794,34 @@ What `device.edit_sample` returns.
     "device",
     "edits",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleEditorResult`
+
+What `settings.set_sample_editor` returns: the editor in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The sample editor's path, empty when none is named. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_sample_editor` returns: the editor in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The sample editor's path, empty when none is named.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }

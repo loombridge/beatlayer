@@ -122,6 +122,9 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
+/// `settings.set_sample_editor`: choose the sample editor on the File &
+/// Folder page (WP-4.10b).
+pub const SETTINGS_SET_SAMPLE_EDITOR: &str = "settings.set_sample_editor";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
 /// `settings.set_loop_warp_short_samples`: choose Loop/Warp Short Samples
@@ -214,6 +217,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_TEMPORARY_FOLDER,
+    SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
     SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
     SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
@@ -378,6 +382,23 @@ pub struct TemporaryFolderArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TemporaryFolderResult {
     /// The Temporary Folder's path.
+    pub path: String,
+}
+
+/// Arguments of `settings.set_sample_editor`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SampleEditorArgs {
+    /// The editor's command: the program, its arguments, and the clip's
+    /// file as the last one. `null` for none, when Edit opens the File &
+    /// Folder page instead.
+    pub path: Option<String>,
+}
+
+/// What `settings.set_sample_editor` returns: the editor in use afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SampleEditorResult {
+    /// The sample editor's path, empty when none is named.
     pub path: String,
 }
 
@@ -1112,6 +1133,22 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<TemporaryFolderArgs>()
             .result::<TemporaryFolderResult>(),
+        // File & Folder (L-SET-015; WP-4.10b): the sample editor Edit opens
+        // a clip's file in.
+        CommandSpec::new(SETTINGS_SET_SAMPLE_EDITOR, "Sample Editor")
+            .description(
+                "Chooses the sample editor on the Settings window's File & Folder page: the \
+                 command the Edit button in the Clip View's Audio Utilities panel opens a clip's \
+                 file in. `path` is the command: the program, its arguments, and the clip's \
+                 file as the last one, or `null` for none, when Edit opens the File & Folder \
+                 page instead. Run by a person from the Browse button without a `path`, it asks \
+                 for a program. The setting is kept for the next start, and isn't part of the \
+                 set or an undo step. The result's `path` is the editor in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SampleEditorArgs>()
+            .result::<SampleEditorResult>(),
         // Record, Warp & Launch, Warp/Fades (IMP-02; WP-2.13).
         CommandSpec::new(SETTINGS_SET_WARP_RECORDED_AUDIO, "Warp Recorded Audio")
             .description(

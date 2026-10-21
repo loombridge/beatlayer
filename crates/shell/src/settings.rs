@@ -123,6 +123,12 @@ pub struct Preferences {
     /// clip editing spec, R5). `None` is the default, a `Temporary` folder
     /// in Beatlayer's application-data folder.
     pub temporary_folder: Option<PathBuf>,
+    /// The sample editor (File & Folder, L-SET-015): the command the Edit
+    /// button in the Clip View's Audio Utilities panel opens a clip's file in
+    /// (WP-4.10b, the sample editor spec, R16), with the file as its last
+    /// argument. `None` names no editor, so Edit opens the File & Folder
+    /// page instead.
+    pub sample_editor: Option<String>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

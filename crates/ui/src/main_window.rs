@@ -439,11 +439,18 @@ impl MainWindowUi {
             // takes the files dropped on it itself.
             let zone_editor =
                 crate::device_view::DeviceViewUi::zone_editor_rect(shell, layout.detail);
+            // The Clip View takes a file dropped on it: it replaces the
+            // clip's sample (R18).
+            let clip_view = if shell.clip_view().visible() {
+                layout.device_view
+            } else {
+                Rect::NOTHING
+            };
             self.browser.drop_overlay(
                 ui,
                 shell,
                 theme,
-                (layout.main_view, zone_editor),
+                (layout.main_view, zone_editor, clip_view),
                 &mut events,
             );
             // The Status Bar draws before the Info View, so the elements

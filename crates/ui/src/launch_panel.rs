@@ -26,6 +26,12 @@ use crate::widgets::{self, Choice, NO_LEDS};
 pub const WIDTH: f32 = 342.0;
 /// The panel selector row's height (L-CLIP-003).
 const SELECTOR: f32 = 16.0;
+
+/// How wide the left group of panels is in a view of this width.
+#[must_use]
+pub fn panel_width(view: Rect) -> f32 {
+    WIDTH.min(view.width() / 2.0)
+}
 /// A control's size, and the step between rows.
 const CONTROL: Vec2 = vec2(120.0, 17.0);
 const ROW: f32 = 19.0;
@@ -43,7 +49,7 @@ pub fn launch_panel_id() -> Id {
 /// The panel group's place at the Clip View's left edge.
 #[must_use]
 pub fn panel_rect(view: Rect) -> Rect {
-    Rect::from_min_size(view.min, vec2(WIDTH.min(view.width() / 2.0), view.height()))
+    Rect::from_min_size(view.min, vec2(panel_width(view), view.height()))
 }
 
 /// The editor's place beside the panel group.

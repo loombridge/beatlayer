@@ -4,13 +4,15 @@
 //! the range's frames.
 
 use std::path::PathBuf;
+use std::thread;
 
 use bl_devices::hardware_effect_type;
 use bl_model::{Channel, DeviceId, TrackId};
-use bl_audio_io::{BackendKind, NullBackend};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::export_commands::{self as export_ids, ExportResult};
 use bl_shell::files::ProjectFiles;
+use bl_shell::realtime::Phase;
 use bl_shell::settings::Preferences;
 use bl_shell::Shell;
 use serde_json::{Value, json};
@@ -62,6 +64,56 @@ fn shell_on_loopback() -> Shell {
         .unwrap();
     shell.start_audio();
     shell
+}
+
+/// A shell on a null device paced by hand, with a loopback of 1,000 frames
+/// and the control that runs its blocks. The device reports a dropout after
+/// `dropout_after` blocks, as one that underruns does.
+fn shell_on_manual_loopback(dropout_after: Option<u64>) -> (Shell, NullControl) {
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            dropout_after,
+            ..NullOptions::default()
+        },
+        &[("null", "Null")],
+    );
+    let backend = backend.with_latency(400, 600).with_loopback(1_000);
+    let devices = backend.clone();
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(devices.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell
+        .run("audio.configure", json!({ "input_device": "null:null" }))
+        .unwrap();
+    shell.start_audio();
+    (shell, control)
+}
+
+/// Runs the device's blocks on a thread of their own, until the render has
+/// finished: the export runs on the test's thread, and the device's blocks
+/// are what it plays.
+fn drive(control: NullControl, session: bl_shell::realtime::Session) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut rendering = false;
+        for _ in 0..2_000 {
+            control.run_blocks(10);
+            match session.status().phase {
+                Phase::Idle if rendering => break,
+                Phase::Idle => {}
+                _ => rendering = true,
+            }
+            thread::yield_now();
+        }
+    })
 }
 
 /// A tone of `frames` frames, as a WAV file.
@@ -122,11 +174,12 @@ fn set_with_effect(shell: &mut Shell, folder: &TestDir) -> TrackId {
     first
 }
 
-/// The frames of a WAV file's data.
-fn frames_of(path: &PathBuf) -> usize {
-    let bytes = std::fs::read(path).unwrap();
-    let data = &bytes[44..];
-    data.len() / 4
+/// The frames of a WAV file, as its header says.
+fn frames_of(path: &PathBuf) -> u64 {
+    bl_media::probe(path)
+        .expect("the file is a WAV")
+        .frames
+        .expect("the file's header says how many frames it holds")
 }
 
 // Spec: external-devices R22, R24
@@ -210,6 +263,95 @@ fn without_an_audio_device_it_is_refused() {
     );
     assert!(result.is_err(), "the export is refused");
     assert!(!out.exists(), "nothing was written");
+}
+
+// Spec: external-devices R25. A dropout starts the render again, and the
+// attempt count says so.
+#[test]
+fn a_dropout_starts_the_render_again() {
+    let folder = TestDir::new("dropout");
+    let (mut shell, control) = shell_on_manual_loopback(Some(20));
+    set_with_effect(&mut shell, &folder);
+    let session = shell.realtime_session();
+    let driver = drive(control, session);
+
+    let out = folder.path("Live.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 48000, "wait_seconds": 0 }),
+        )
+        .unwrap();
+    driver.join().unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert_eq!(result.attempts, 2, "the dropout started the render again");
+    assert!(out.exists(), "the render finished and wrote its file");
+}
+
+// Spec: external-devices R25. With Auto-Restart off, the render carries on
+// and the dropouts are listed with the position they happened at.
+#[test]
+fn with_auto_restart_off_the_dropout_is_listed() {
+    let folder = TestDir::new("nodropout");
+    let (mut shell, control) = shell_on_manual_loopback(Some(20));
+    set_with_effect(&mut shell, &folder);
+    let session = shell.realtime_session();
+    let driver = drive(control, session);
+
+    let out = folder.path("Live.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 48000, "wait_seconds": 0,
+                    "auto_restart": false }),
+        )
+        .unwrap();
+    driver.join().unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert_eq!(result.attempts, 1, "the render carried on");
+    assert_eq!(result.dropouts.len(), 1, "the dropout is listed: {result:?}");
+    let dropout = &result.dropouts[0];
+    assert!(
+        dropout.position > bl_core::time::Ticks::ZERO,
+        "the dropout has the position it happened at: {dropout:?}"
+    );
+}
+
+// Spec: external-devices R23. Cancel stops the render and deletes the
+// partial file it was writing.
+#[test]
+fn a_cancelled_render_leaves_no_file_behind() {
+    let folder = TestDir::new("cancel");
+    let (mut shell, control) = shell_on_manual_loopback(None);
+    set_with_effect(&mut shell, &folder);
+    let session = shell.realtime_session();
+    let driver = drive(control, session.clone());
+
+    let out = folder.path("Live.wav");
+    let partial = folder.path(".Live.wav.partial");
+    // A thread of its own cancels the render while it runs.
+    let cancel = session.clone();
+    let stopper = thread::spawn(move || {
+        for _ in 0..20_000 {
+            if cancel.status().phase != Phase::Idle {
+                cancel.cancel();
+                break;
+            }
+            thread::yield_now();
+        }
+    });
+    let result = shell.run(
+        export_ids::AUDIO,
+        json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                "sample_rate": 48000, "wait_seconds": 0 }),
+    );
+    stopper.join().unwrap();
+    driver.join().unwrap();
+    assert!(result.is_err(), "the export failed: {result:?}");
+    assert!(!out.exists(), "nothing was written");
+    assert!(!partial.exists(), "the partial file was deleted");
 }
 
 // The channel chooser of the effect lists the interface's outputs.

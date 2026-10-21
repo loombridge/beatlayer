@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -57,6 +58,166 @@ pub struct Dropout {
     pub position: Ticks,
     /// What it was: the backend's report, or a ring too full.
     pub kind: String,
+}
+
+/// What a real-time render is doing now (R23): the app's dialog shows it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Phase {
+    /// Nothing is rendering.
+    Idle,
+    /// Waiting for the hardware's sound to die away, until `until`.
+    Waiting {
+        /// When the wait is over and the render starts.
+        until: Instant,
+    },
+    /// Rendering the range.
+    Rendering,
+}
+
+/// What a real-time render is doing now (R23): the app's dialog shows it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Status {
+    /// What the render is doing.
+    pub phase: Phase,
+    /// How much of the range is written, from 0 to 1.
+    pub progress: f64,
+    /// How many times the render has started.
+    pub attempts: u32,
+    /// Whether the render starts again when a dropout spoils it.
+    pub auto_restart: bool,
+}
+
+/// The state of a real-time render, shared with the app (R23): the dialog
+/// shows the phase, and its buttons set the flags here. The shell holds
+/// one, so the app and the export see the same state.
+#[derive(Clone)]
+pub struct Session {
+    state: Arc<Mutex<State>>,
+    skip: Arc<AtomicBool>,
+    restart: Arc<AtomicBool>,
+    cancel: Arc<AtomicBool>,
+    auto_restart: Arc<AtomicBool>,
+}
+
+/// The render's state, under the lock.
+#[derive(Clone, Copy, Debug)]
+struct State {
+    phase: Phase,
+    progress: f64,
+    attempts: u32,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State {
+                phase: Phase::Idle,
+                progress: 0.0,
+                attempts: 0,
+            })),
+            skip: Arc::new(AtomicBool::new(false)),
+            restart: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            auto_restart: Arc::new(AtomicBool::new(true)),
+        }
+    }
+}
+
+impl Session {
+    /// What the render is doing now.
+    #[must_use]
+    pub fn status(&self) -> Status {
+        let state = self.state.lock().map_or(
+            State {
+                phase: Phase::Idle,
+                progress: 0.0,
+                attempts: 0,
+            },
+            |state| *state,
+        );
+        Status {
+            phase: state.phase,
+            progress: state.progress,
+            attempts: state.attempts,
+            auto_restart: self.auto_restart(),
+        }
+    }
+
+    /// Starts the render at once, without waiting (R23).
+    pub fn skip(&self) {
+        self.skip.store(true, Ordering::Relaxed);
+    }
+
+    /// Starts the waiting period again (R23).
+    pub fn restart(&self) {
+        self.restart.store(true, Ordering::Relaxed);
+    }
+
+    /// Stops the render; its partial file is deleted (R23).
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the render was cancelled.
+    #[must_use]
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The flag the export watches, so a Cancel from another thread stops
+    /// it.
+    #[must_use]
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    /// Whether the render starts again after a dropout spoils it (R23).
+    #[must_use]
+    pub fn auto_restart(&self) -> bool {
+        self.auto_restart.load(Ordering::Relaxed)
+    }
+
+    /// Turns Auto-Restart on Drop-Outs on or off (R23).
+    pub fn set_auto_restart(&self, on: bool) {
+        self.auto_restart.store(on, Ordering::Relaxed);
+    }
+
+    /// Says what the render is doing now.
+    fn set_state(&self, phase: Phase, progress: f64, attempts: u32) {
+        if let Ok(mut state) = self.state.lock() {
+            state.phase = phase;
+            state.progress = progress;
+            state.attempts = attempts;
+        }
+    }
+
+    /// Waits `period` before the render starts, so the hardware's last sound
+    /// dies away (R23). A Restart starts the count again, a Skip starts the
+    /// render at once, and a Cancel stops it. Returns whether the render
+    /// should go on.
+    pub fn wait(&self, period: Duration) -> bool {
+        let mut until = Instant::now() + period;
+        self.set_state(Phase::Waiting { until }, 0.0, self.status().attempts);
+        loop {
+            if self.cancelled() {
+                return false;
+            }
+            if self.skip.swap(false, Ordering::Relaxed) {
+                break;
+            }
+            if self.restart.swap(false, Ordering::Relaxed) {
+                until = Instant::now() + period;
+                self.set_state(Phase::Waiting { until }, 0.0, self.status().attempts);
+                continue;
+            }
+            let now = Instant::now();
+            if now >= until {
+                break;
+            }
+            thread::sleep(POLL.min(until - now));
+        }
+        !self.cancelled()
+    }
 }
 
 /// Whether a rendered output's path runs through external hardware that
@@ -127,9 +288,10 @@ fn reaches_interface(device: &Device) -> bool {
 /// engine (R22 to R26). The engine plays the range; the audio thread copies
 /// each output into a ring; a writer thread writes the files.
 ///
-/// The render waits `wait` before it starts. A dropout found while it runs
-/// starts it again while `auto_restart` is on, up to `max_attempts` times;
-/// with it off, the render carries on and the dropouts are listed.
+/// The render waits `wait` before it starts, in `session`, whose phase the
+/// app's dialog shows. A dropout found while it runs starts it again while
+/// Auto-Restart is on, up to `max_attempts` times; with it off, the render
+/// carries on and the dropouts are listed.
 ///
 /// # Errors
 ///
@@ -145,7 +307,7 @@ pub fn render(
     wait: Duration,
     auto_restart: bool,
     max_attempts: Option<u32>,
-    cancel: &Arc<AtomicBool>,
+    session: &Session,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(Vec<Report>, Outcome), ExportError> {
     // Spec: external-devices R26. Without a running audio device, an export
@@ -174,6 +336,9 @@ pub fn render(
             "the range is shorter than one frame".to_owned(),
         ));
     }
+    // The dialog's switch starts as the export's argument says.
+    session.set_auto_restart(auto_restart);
+    let cancel = session.cancel_flag();
     let mut attempt = 0u32;
     let mut reports: Vec<Report> = Vec::new();
     loop {
@@ -184,45 +349,47 @@ pub fn render(
         }
         // Spec: external-devices R23. The render waits, so the hardware's
         // last sound dies away.
-        if !wait_out(wait, cancel) {
+        if !session.wait(wait) {
             return Err(ExportError::Cancelled);
         }
-        let (rendered, found) = play(
+        session.set_state(Phase::Rendering, 0.0, attempt);
+        let (rendered, found) = match play(
             audio,
             outputs,
             start,
             first,
             frames,
             rate.hz(),
-            cancel,
+            &cancel,
+            session,
+            attempt,
             progress,
-        )?;
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                // Spec: external-devices R23. A render that stops leaves no
+                // file behind: its partial file is deleted.
+                for (_, job) in outputs {
+                    let _ = std::fs::remove_file(export::hidden_beside(&job.path, "partial"));
+                    let _ = std::fs::remove_file(export::hidden_beside(&job.path, "render"));
+                }
+                session.set_state(Phase::Idle, 0.0, attempt);
+                return Err(error);
+            }
+        };
         reports.extend(rendered);
         outcome.dropouts.extend(found.iter().cloned());
         // Spec: external-devices R25. A dropout starts the render again
         // while Auto-Restart is on; with it off, the render carries on.
-        if found.is_empty() || !auto_restart {
+        if found.is_empty() || !session.auto_restart() {
             break;
         }
         if max_attempts.is_some_and(|max| attempt >= max) {
             break;
         }
     }
+    session.set_state(Phase::Idle, 0.0, attempt);
     Ok((reports, outcome))
-}
-
-/// Waits for `period`, in short steps, so a cancel is noticed. Returns
-/// whether the wait ran out.
-fn wait_out(period: Duration, cancel: &AtomicBool) -> bool {
-    let until = Instant::now() + period;
-    while Instant::now() < until {
-        if cancel.load(Ordering::Relaxed) {
-            return false;
-        }
-        let left = until.saturating_duration_since(Instant::now());
-        thread::sleep(POLL.min(left));
-    }
-    !cancel.load(Ordering::Relaxed)
 }
 
 /// Plays the range on the running engine and captures the outputs, until
@@ -236,6 +403,8 @@ fn play(
     frames: u64,
     rate: u32,
     cancel: &Arc<AtomicBool>,
+    session: &Session,
+    attempt: u32,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(Vec<Report>, Vec<Dropout>), ExportError> {
     // The rings the audio thread fills, and the writers that drain them.
@@ -265,7 +434,7 @@ fn play(
         };
         let consumer = consumers.remove(0);
         let job = job.clone();
-        let cancel = Arc::clone(cancel);
+        let cancel = Arc::clone(&cancel);
         let finished = Arc::clone(&finished);
         writers.push(thread::spawn(move || {
             write_output(consumer, converter, out, job, cancel, finished)
@@ -296,7 +465,7 @@ fn play(
     let _ = audio.send_transport(TransportCommand::SetLoop(None));
     let _ = audio.send_transport(TransportCommand::Locate(start));
     let _ = audio.send_transport(TransportCommand::Play);
-    let before = audio.stats();
+    let mut seen = Seen::default();
     let mut found: Vec<Dropout> = Vec::new();
     loop {
         if cancel.load(Ordering::Relaxed) {
@@ -307,7 +476,7 @@ fn play(
             .all(|count| count.load(Ordering::Relaxed) >= frames);
         let stats = audio.stats();
         let position = audio.transport_state().position;
-        let new = dropouts(before, stats, &dropped, position);
+        let new = dropouts(&mut seen, stats, &dropped, position);
         found.extend(new);
         if done || !audio.engine_running() {
             break;
@@ -317,6 +486,9 @@ fn play(
             .map_or(0.0, |count| {
                 count.load(Ordering::Relaxed) as f64 / frames as f64
             });
+        // Spec: external-devices R23. The dialog shows the render's
+        // progress and how many attempts it has taken.
+        session.set_state(Phase::Rendering, share, attempt);
         progress(share);
         thread::sleep(POLL);
     }
@@ -341,22 +513,40 @@ fn play(
     Ok((reports, found))
 }
 
-/// The dropouts since the counters were read, with the song position each
-/// happened at (R25).
+/// What the render has seen of the device's counters, so a dropout is
+/// listed once (R25).
+#[derive(Default)]
+struct Seen {
+    /// The counters as they were at the last look.
+    stats: Option<bl_audio_io::StreamStats>,
+    /// The frames the rings had dropped at the last look.
+    rings: Vec<u64>,
+}
+
+/// The dropouts since the counters were last read, with the song position
+/// each happened at (R25).
 fn dropouts(
-    before: Option<bl_audio_io::StreamStats>,
+    seen: &mut Seen,
     now: Option<bl_audio_io::StreamStats>,
     dropped: &[Arc<AtomicU64>],
     position: Ticks,
 ) -> Vec<Dropout> {
     let mut found = Vec::new();
-    let (Some(before), Some(now)) = (before, now) else {
+    let Some(now) = now else {
+        return found;
+    };
+    let Some(was) = seen.stats else {
+        seen.stats = Some(now);
+        seen.rings = dropped
+            .iter()
+            .map(|count| count.load(Ordering::Relaxed))
+            .collect();
         return found;
     };
     for (kind, was, is) in [
-        ("the device reported an xrun", before.xruns, now.xruns),
-        ("the device's clock broke", before.gaps, now.gaps),
-        ("a callback overran its block", before.late_blocks, now.late_blocks),
+        ("the device reported an xrun", was.xruns, now.xruns),
+        ("the device's clock broke", was.gaps, now.gaps),
+        ("a callback overran its block", was.late_blocks, now.late_blocks),
     ] {
         if is > was {
             found.push(Dropout {
@@ -365,14 +555,17 @@ fn dropouts(
             });
         }
     }
-    for count in dropped {
-        if count.load(Ordering::Relaxed) > 0 {
+    for (at, count) in dropped.iter().enumerate() {
+        let now_dropped = count.load(Ordering::Relaxed);
+        if now_dropped > seen.rings[at] {
             found.push(Dropout {
                 position,
                 kind: "a ring was too full for a block".to_owned(),
             });
         }
+        seen.rings[at] = now_dropped;
     }
+    seen.stats = Some(now);
     found
 }
 

@@ -105,22 +105,19 @@ impl NativeDevice for Effect {
         let invert = params.ramp(params.index(INVERT).expect("the description holds it"));
         let latency = self.latency;
         let frames = audio.frames();
+        let channels = audio.channels();
         let mut write = self.write;
         let mut peak_out = self.peaks[0];
         let mut peak_in = self.peaks[1];
-        for channel in 0..audio.channels() {
-            // Spec: external-devices R18, R19. The signal leaves for the
-            // hardware as it is, times the out Gain; the returning signal
-            // comes back on the interface's inputs the engine mapped, times
-            // the in Gain and with its phase flipped while Invert is on.
-            let returning = audio.external(channel);
-            let (input, mut outgoing) = audio.channel_with_external_out(channel);
-            let mut dry = if latency == 0 {
-                None
-            } else {
-                Some(&mut self.line[channel * latency..(channel + 1) * latency])
-            };
-            for frame in 0..frames {
+        for frame in 0..frames {
+            for channel in 0..channels {
+                // Spec: external-devices R18, R19. The signal leaves for the
+                // hardware as it is, times the out Gain; the returning signal
+                // comes back on the interface's inputs the engine mapped,
+                // times the in Gain and with its phase flipped while Invert
+                // is on.
+                let returning = audio.external(channel);
+                let (input, mut outgoing) = audio.channel_with_external_out(channel);
                 let heard = input[frame];
                 if let Some(outgoing) = outgoing.as_deref_mut() {
                     let sent = heard * gain_out[frame];
@@ -136,21 +133,24 @@ impl NativeDevice for Effect {
                     }
                 });
                 peak_in = peak_in.max(back.abs());
-                let dry = match dry.as_deref_mut() {
-                    // The dry signal waits in the line for the device's
-                    // latency, so it lines up with the returning signal.
-                    Some(line) => {
-                        let held = line[write];
-                        line[write] = heard;
-                        held
-                    }
-                    None => heard,
+                // The dry signal waits in the line for the device's
+                // latency, so it lines up with the returning signal.
+                let dry = if latency == 0 {
+                    heard
+                } else {
+                    let line = &mut self.line[channel * latency..(channel + 1) * latency];
+                    let held = line[write];
+                    line[write] = heard;
+                    held
                 };
-                if latency > 0 {
-                    write = (write + 1) % latency;
-                }
                 let mix = wet[frame] / 100.0;
                 input[frame] = (1.0 - mix) * dry + mix * back;
+            }
+            // The line holds one frame for every channel, and the index
+            // moves on once a frame, so the dry signal waits the device's
+            // latency.
+            if latency > 0 {
+                write = (write + 1) % latency;
             }
         }
         self.write = write;

@@ -390,6 +390,9 @@ pub struct Shell {
     /// keyboard, so its keys go to it (WP-2.5).
     value_focused: bool,
     effects: Vec<Effect>,
+    /// The state of the real-time render an export with external hardware
+    /// runs, which the app's dialog shows and its buttons set (WP-5.35).
+    realtime: crate::realtime::Session,
     message: Option<Message>,
     /// What the pointer is over says about itself, while there's no message.
     hint: Option<String>,
@@ -870,6 +873,7 @@ impl Shell {
             focused_track: None,
             value_focused: false,
             effects: Vec::new(),
+            realtime: crate::realtime::Session::default(),
             message: None,
             hint: None,
             revision: 0,
@@ -6829,6 +6833,11 @@ impl Shell {
             return self.run_stems(id, args);
         }
         if export_ids::handles(id) {
+            if id != export_ids::AUDIO {
+                // Spec: external-devices R23. The real-time render's
+                // dialog: its buttons set the session's flags.
+                return self.run_realtime(id, args);
+            }
             // Spec: export R15. The set, its media, the Arrangement's time
             // selection, and the engine's rate; the export changes none.
             let engine_rate = self.engine_rate();
@@ -6855,6 +6864,7 @@ impl Shell {
                 engine_rate,
                 &args,
                 Some(&mut self.audio),
+                &self.realtime,
             )
             .map(|result| to_value(&result));
         }
@@ -6880,6 +6890,62 @@ impl Shell {
             .sample_rate()
             .or(self.audio.settings().sample_rate)
             .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
+    }
+
+    /// The state of the real-time render an export with external hardware
+    /// runs: the app's dialog shows it, and its buttons set it (the
+    /// external devices spec, R23).
+    #[must_use]
+    pub fn realtime_session(&self) -> crate::realtime::Session {
+        self.realtime.clone()
+    }
+
+    /// What the real-time render is doing now (the external devices spec,
+    /// R23).
+    #[must_use]
+    pub fn realtime_status(&self) -> export_ids::RealtimeStatus {
+        let status = self.realtime.status();
+        let phase = match status.phase {
+            crate::realtime::Phase::Idle => export_ids::RealtimePhase::Idle,
+            crate::realtime::Phase::Waiting { until } => export_ids::RealtimePhase::Waiting {
+                seconds: until
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_secs_f64(),
+            },
+            crate::realtime::Phase::Rendering => export_ids::RealtimePhase::Rendering,
+        };
+        export_ids::RealtimeStatus {
+            phase,
+            progress: status.progress,
+            attempts: status.attempts,
+            auto_restart: status.auto_restart,
+        }
+    }
+
+    /// Runs the real-time render's dialog's commands (the external devices
+    /// spec, R23).
+    fn run_realtime(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        match id {
+            export_ids::REALTIME_STATUS => Ok(to_value(&self.realtime_status())),
+            export_ids::REALTIME_RESTART => {
+                self.realtime.restart();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_SKIP => {
+                self.realtime.skip();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_CANCEL => {
+                self.realtime.cancel();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_AUTO_RESTART => {
+                let args = Self::args::<export_ids::AutoRestartArgs>(id, args)?;
+                self.realtime.set_auto_restart(args.auto_restart);
+                Ok(to_value(&self.realtime_status()))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// Runs a MIDI port or computer MIDI keyboard command (WP-2.2).

@@ -490,6 +490,10 @@ impl MainWindowUi {
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
         // window while it's open.
         crate::stems_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: external-devices R23. The real-time render's dialog sits
+        // over the window while a render that runs through external
+        // hardware is under way.
+        crate::realtime_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         // An open menu, or Separate Stems' dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx) || shell.stems_dialog().is_some();

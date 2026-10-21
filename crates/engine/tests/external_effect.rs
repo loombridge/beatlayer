@@ -11,6 +11,7 @@ mod common;
 use std::sync::Arc;
 
 use bl_core::time::Ticks;
+use bl_devices::hardware_effect;
 use bl_engine::{DeviceInput, MediaMap};
 use bl_media::SampleData;
 use bl_model::{
@@ -23,6 +24,13 @@ use common::{Rig, track};
 /// Hardware Latency.
 const ROUND_TRIP: u32 = 300;
 const HARDWARE: u32 = 100;
+
+/// The frames the effect's latency takes: the interface's round trip and
+/// its Hardware Latency.
+const TOTAL: usize = (ROUND_TRIP + HARDWARE) as usize;
+
+/// The frames a block holds.
+const FRAMES: usize = 64;
 
 /// The effect's type id.
 const EFFECT: &str = "beatlayer.hardware_effect";
@@ -159,12 +167,9 @@ impl Loopback {
     }
 }
 
-/// The frames the device's latency takes: the interface's round trip and
-/// its Hardware Latency.
-const TOTAL: usize = (ROUND_TRIP + HARDWARE) as usize;
-
 /// A rig with an audio track playing an impulse, and an external effect on
-/// it, with the interface's round trip.
+/// it, with the interface's round trip. The song is stopped: a test starts
+/// it when it wants to hear the impulse.
 fn rig() -> Rig {
     let mut media = MediaMap::new();
     media.insert(hash(1), impulse(1.0));
@@ -175,7 +180,10 @@ fn rig() -> Rig {
             config.output_channels = 2;
             config.round_trip_latency = ROUND_TRIP;
         },
-        |registry| registry.set_media(Arc::new(media)),
+        |registry| {
+            registry.set_media(Arc::new(media));
+            hardware_effect::register(registry);
+        },
     );
     let audio = track(&mut rig.editor, TrackKind::Audio, None);
     clip(&mut rig.editor, audio, hash(1));
@@ -186,8 +194,42 @@ fn rig() -> Rig {
         Channel::Pair(1),
     );
     rig.sync();
-    rig.sender.transport(bl_engine::TransportCommand::Play);
     rig
+}
+
+/// The effect's device in the rig.
+fn device(rig: &Rig) -> DeviceId {
+    rig.editor
+        .document()
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .find(|device| device.external.is_some())
+        .unwrap()
+        .id
+}
+
+/// Lets a parameter's glide finish, so the value set is the value played:
+/// the devices glide their controls over twenty milliseconds.
+fn settle(rig: &mut Rig) {
+    for _ in 0..20 {
+        rig.block(FRAMES);
+    }
+}
+
+/// Plays the song and renders `blocks` blocks with a cable from the
+/// interface's outputs to its inputs `delay` frames long. Returns what
+/// Main played and what the interface's first output channel played.
+fn play(rig: &mut Rig, delay: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
+    rig.sender.transport(bl_engine::TransportCommand::Play);
+    let mut cable = Loopback::new(2, delay);
+    let mut main = Vec::new();
+    let mut ext = Vec::new();
+    for _ in 0..blocks {
+        let (out, sent) = cable.block(rig, FRAMES);
+        main.extend(out);
+        ext.extend(sent);
+    }
+    (main, ext)
 }
 
 /// The frames where the output is not silent, with what it holds there.
@@ -203,8 +245,7 @@ fn heard(out: &[f32]) -> Vec<(usize, f32)> {
 #[test]
 fn the_effect_sends_to_its_outputs() {
     let mut rig = rig();
-    let mut cable = Loopback::new(2, 0);
-    let (_, ext) = cable.block(&mut rig, 64);
+    let (_, ext) = play(&mut rig, 0, 1);
     assert_eq!(
         heard(&ext),
         vec![(0, 1.0)],
@@ -229,53 +270,38 @@ fn the_effects_signal_adds_to_what_plays_on_those_channels() {
         })
         .unwrap();
     rig.sync();
-    let mut cable = Loopback::new(2, 0);
-    let (_, ext) = cable.block(&mut rig, 64);
+    let (_, ext) = play(&mut rig, 0, 1);
     assert_eq!(
-        heard(&ext),
-        vec![(0, 1.25)],
+        ext[0], 1.25,
         "the effect's signal and the track's add on the channel"
+    );
+    assert!(
+        ext[1..].iter().all(|s| (s - 0.25).abs() < 1e-6),
+        "the track alone plays on the channel: {ext:?}"
     );
 }
 
 // Spec: external-devices R19, R20
 #[test]
 fn dry_and_wet_line_up_and_the_return_is_flipped_by_invert() {
-    let mut rig = rig();
     // A cable as long as the device's latency: the returning signal and
     // the dry one arrive together.
-    let mut cable = Loopback::new(2, TOTAL);
-    let mut main = Vec::new();
-    for _ in 0..8 {
-        let (out, _) = cable.block(&mut rig, 64);
-        main.extend(out);
-    }
+    let mut rig = rig();
+    let (main, _) = play(&mut rig, TOTAL, 8);
     // With Dry/Wet at 100 % the output is the returning signal alone, at
     // the frame the hardware brought it back.
     assert_eq!(heard(&main), vec![(TOTAL, 1.0)], "the wet signal plays");
 
     // With Dry/Wet at 50 % the dry and the wet sum: they line up, so the
     // impulse is at one frame with its own height.
-    let device = rig
-        .editor
-        .document()
-        .tracks()
-        .flat_map(|track| track.devices_deep())
-        .find(|device| device.external.is_some())
-        .unwrap()
-        .id;
+    let device = device(&rig);
     rig.apply(Command::SetDeviceParam {
         device,
         param: DRY_WET,
         value: 50.0,
     });
-    rig.sync();
-    let mut cable = Loopback::new(2, TOTAL);
-    let mut main = Vec::new();
-    for _ in 0..8 {
-        let (out, _) = cable.block(&mut rig, 64);
-        main.extend(out);
-    }
+    settle(&mut rig);
+    let (main, _) = play(&mut rig, TOTAL, 8);
     assert_eq!(
         heard(&main),
         vec![(TOTAL, 1.0)],
@@ -293,13 +319,8 @@ fn dry_and_wet_line_up_and_the_return_is_flipped_by_invert() {
         param: INVERT,
         value: 1.0,
     });
-    rig.sync();
-    let mut cable = Loopback::new(2, TOTAL);
-    let mut main = Vec::new();
-    for _ in 0..8 {
-        let (out, _) = cable.block(&mut rig, 64);
-        main.extend(out);
-    }
+    settle(&mut rig);
+    let (main, _) = play(&mut rig, TOTAL, 8);
     assert_eq!(
         heard(&main),
         vec![(TOTAL, -1.0)],
@@ -311,26 +332,14 @@ fn dry_and_wet_line_up_and_the_return_is_flipped_by_invert() {
 #[test]
 fn a_cable_one_frame_longer_than_the_latency_shows_in_the_sum() {
     let mut rig = rig();
-    let device = rig
-        .editor
-        .document()
-        .tracks()
-        .flat_map(|track| track.devices_deep())
-        .find(|device| device.external.is_some())
-        .unwrap()
-        .id;
+    let device = device(&rig);
     rig.apply(Command::SetDeviceParam {
         device,
         param: DRY_WET,
         value: 50.0,
     });
-    rig.sync();
-    let mut cable = Loopback::new(2, TOTAL + 1);
-    let mut main = Vec::new();
-    for _ in 0..8 {
-        let (out, _) = cable.block(&mut rig, 64);
-        main.extend(out);
-    }
+    settle(&mut rig);
+    let (main, _) = play(&mut rig, TOTAL + 1, 8);
     assert_eq!(
         heard(&main),
         vec![(TOTAL, 0.5), (TOTAL + 1, 0.5)],

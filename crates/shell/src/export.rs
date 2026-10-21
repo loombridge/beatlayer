@@ -1168,6 +1168,7 @@ pub fn run_command(
     engine_rate: u32,
     args: &ExportArgs,
     audio: Option<&mut crate::audio::AudioHost>,
+    session: &crate::realtime::Session,
 ) -> Result<ExportResult, ShellError> {
     let invalid = |message: String| ShellError::InvalidArgs {
         command: AUDIO.to_owned(),
@@ -1338,7 +1339,7 @@ pub fn run_command(
             message: error.to_string(),
         },
     };
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = session.cancel_flag();
     let (mut reports, partials) = render_multi(&offline, media, plugins, &cancel, &mut |_| {})
         .map_err(failed)?;
     let mut outcome = crate::realtime::Outcome::default();
@@ -1363,7 +1364,7 @@ pub fn run_command(
             std::time::Duration::from_secs(u64::from(args.wait_seconds.unwrap_or(10))),
             args.auto_restart.unwrap_or(true),
             args.max_attempts,
-            &cancel,
+            session,
             &mut |_| {},
         )
         .map_err(failed)?;
@@ -1375,11 +1376,10 @@ pub fn run_command(
             .collect();
         let destinations: Vec<PathBuf> = jobs.iter().map(|(_, job)| job.path.clone()).collect();
         promote(&live_partials, &destinations).map_err(failed)?;
-        let _ = partials;
-    } else {
-        let destinations: Vec<PathBuf> = offline.iter().map(|(_, job)| job.path.clone()).collect();
-        promote(&partials, &destinations).map_err(failed)?;
     }
+    // The outputs that rendered offline are moved into place as well.
+    let destinations: Vec<PathBuf> = offline.iter().map(|(_, job)| job.path.clone()).collect();
+    promote(&partials, &destinations).map_err(failed)?;
 
     let canonical_path = fs::canonicalize(&path).unwrap_or(path);
     let files: Vec<String> = written_paths

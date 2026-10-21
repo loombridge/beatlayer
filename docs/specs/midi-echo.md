@@ -1,9 +1,9 @@
 # The note-echo MIDI effect
 
-- **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.31. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
+- **Status:** partial (R1 to R9 have passing tests; R10 is WP-6.8's)
+- **Work packages:** WP-5.31 (R1 to R9); WP-6.8 (R10, scales). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
-- **Checked against:** the Live 12 reference manual, chapter 33 "Max for Live Devices", section 33.3.5 "Note Echo", read on 19 October 2026
+- **Checked against:** the Live 12 reference manual, chapter 33 "Max for Live Devices", section 33.3.5 "Note Echo", read on 19 October 2026, and again for scales on 20 October 2026
 
 ## The behaviour
 
@@ -33,6 +33,7 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 - **R7.** When transport stops, or when the device is deactivated, moved, or deleted, sounding echo notes terminate immediately with no hanging notes. (S2, S4)
 - **R8.** Every parameter is automatable, has a description, is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Note Echo/`. (S3)
 - **R9.** No allocation, lock, or blocking operation occurs on the audio thread. (S4)
+- **R10.** Note Echo has no Use Current Scale: its Pitch moves each echo by keys whatever its track's scale ([scales.md](scales.md) R15), and under a tuning a key is a step of the tuning ([tunings.md](tunings.md) R17). (S1)
 
 ## Tests
 
@@ -47,6 +48,7 @@ The device takes Live's name, Note Echo; its appearance is the device framework'
 | R7 | `crates/devices/tests/note_echo.rs`, `stopping_transport_leaves_no_hanging_echoes`, `stopping_transport_while_an_echo_sounds_leaves_no_hanging_notes` | real-time trap |
 | R8 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
 | R9 | `crates/devices/tests/rules.rs`; `rtsan/tests/midi_effects.rs` | real-time trap |
+| R10 | to be written in WP-6.8 | |
 
 ## Defaults, ranges and details
 

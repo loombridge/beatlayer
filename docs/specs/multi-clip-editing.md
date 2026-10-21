@@ -1,0 +1,81 @@
+# Multi-clip editing: several MIDI clips in one note editor, the loop bars, and Focus Mode
+
+- **Status:** draft
+- **Work packages:** WP-6.6 (R1 to R18). One clip in the editor is [piano-roll.md](piano-roll.md)'s; the lanes, the footer and the note operations [note-editing.md](note-editing.md)'s; each clip's scale and how its controls show for several clips [scales.md](scales.md)'s; a clip's groove WP-6.19's; Expand Clip View (Cmd-Option-E) [detail-views.md](detail-views.md)'s
+- **Parity-matrix row:** MIDI editing: Multi-clip editing and focus mode
+- **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.1 and 12.3; the UI parity reference's rows L-CLIP-002, L-CLIP-004, L-CLIP-010, S-NOTE-040 and I-HOLD-003, recorded from Live 12.4.3 on macOS
+
+## The behaviour
+
+Selecting several MIDI clips shows them together in the MIDI Note Editor: up to eight looped clips from the Session View, or the clips of up to eight tracks across a stretch of the Arrangement. A loop bar for each clip, in its colour, runs above the editor; dragging a bar's markers changes that clip's loop. One clip is in the foreground, the one clicked last: the lanes under the editor show and edit its notes alone, and its name is in the editor's title bar. Everything else edits all the clips at once: a selection, a move, a quantise or a split reaches the notes it covers in every clip, each note staying in its own clip, and changing the loop, the signature, the groove or the scale in the Clip View changes every selected clip.
+
+Focus Mode, on N or the Focus button, narrows the editing to one clip while the others stay in view, greyed: only the foreground clip's notes take edits, and its scale is the one shown.
+
+This spec covers showing and editing several clips, the loop bars, the foreground clip, Duplicate Loop, and Focus Mode. It leaves single-clip editing to [piano-roll.md](piano-roll.md) and [note-editing.md](note-editing.md), the scale controls to [scales.md](scales.md), and Expand Clip View to [detail-views.md](detail-views.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 10 "Editing MIDI", section 10.8 "Multi-Clip Editing" | Several clips' notes show and edit together. A loop bar per clip, in its colour, sits above the editor; clicking a note or a loop bar switches to that clip; dragging a bar's marker changes its loop length; Cmd (Ctrl) adds bars and Shift takes a run of them; Cmd-D or the bar's context menu duplicates the selected bars. The title bar shows the edited clip's name, or its track's. Loop, signature, groove and scale settings apply to every selected clip, as do Fold to Notes and Fold to Scale; the Velocity and Chance lanes edit the foreground clip alone. A drag just above the title bar's scrub area resizes the loop bars. |
+| S2 | Manual | Same chapter, section 10.8.1 "Focus Mode" | The Focus button and N switch Focus Mode, and holding N switches it while held. On: the active clip's notes and loop bar in its colour and the others grey; a click on the active bar draws it black and a click elsewhere on its timeline gives back the colour; its name shows under the loop bars; hovering an inactive bar shows that clip's notes; editing reaches the active clip alone; its scale is the one shown and folded to; Fold to Notes keeps the rows of every selected clip; one loop bar at a time. Off: every note in its clip's colour and editable; a clicked bar turns black and its clip's velocities and chances can be randomised; root and scale show only where every clip agrees, an asterisk otherwise; editing reaches every selected clip; notes cut or copied from several clips paste back into the same clips while the selection and the foreground clip are unchanged, or into another clip once it's selected; time selections cross loop and clip boundaries. |
+| S3 | Manual | Same chapter, section 10.8.2 "Multi-Clip Editing in the Session View" | Up to eight MIDI clips, all looped. Loop bars ordered by track, then scene. Clips of different lengths show as many loop passes as it takes for them to line up again; a clip's part outside its loop is a darker shade of its colour; hovering a clip draws its loop start and end as black lines. |
+| S4 | Manual | Same chapter, section 10.8.3 "Multi-Clip Editing in the Arrangement View" | Clips on up to eight tracks across a stretch of time. Loop bars ordered by track down the editor and by time across it. Notes can be drawn across clip boundaries, except in Focus Mode. No silence before the first clip or after the last shows. The Loop button shows half coloured when looped and unlooped clips are mixed. |
+| S5 | Manual | Same chapter, section 10.7.3 "Looping" | With the loop brace selected, Cmd-D doubles the loop, copies the notes in it, and zooms out to show it; notes after the loop keep their distance from its end. |
+| S6 | Manual | Same manual, chapter 8 "Clip View", sections 8.1.1.1 to 8.1.1.3 and 8.13 "Editing Clip Properties for Multiple Clips" | With several clips selected, the activator, name and colour act on every one, and the title bar shows how many are selected; the Clip View shows the properties they share, a control showing the range of values that differ. |
+| S7 | Release notes | Live 12 release notes, 12.0 (keyboard note entry and preview; the bug fixes after 12.0) and 12.1 (multi-clip editing) | Notes selected from the keyboard preview in Focus Mode too; notes selected in clips out of focus are let go when the Velocity or Chance lane is used; the foreground clip is marked by an LED in its colour. |
+| S8 | Beatlayer | The UI parity reference: [layout.md](../ui-parity/layout.md) L-CLIP-002, L-CLIP-004 and L-CLIP-021; [shortcuts.toml](../ui-parity/shortcuts.toml) S-NOTE-040 and S-LOOP-012; [interactions.md](../ui-parity/interactions.md) I-HOLD-003 and I-DRAG-041; [menus.md](../ui-parity/menus.md) C-LOOPBAR | Where the title bars, the panels, the loop bars and the Focus button sit; the keys, gestures and menu. |
+| S9 | Spec | [piano-roll.md](piano-roll.md) R1, R3, R4, R16 and R23 to R28; [session-view.md](session-view.md) R17 and R33; [arrangement-editing.md](arrangement-editing.md) R1; [midi-clips.md](midi-clips.md) R3, R4 and R10; [note-editing.md](note-editing.md) R1 to R17 and R21; [scales.md](scales.md) R6; [find-and-select-notes.md](find-and-select-notes.md) R3; [step-recording.md](step-recording.md) R2 to R6 | One clip in the editor; selecting slots and clips; how a clip plays its region and loop, and that edits reach the engine as node data; the lanes; groups belong to one clip; the scale controls for several clips; the filters; preview and step recording. |
+| S10 | Beatlayer | [The architecture](../02-architecture.md), "The document" and "Agent control", decision D17 | Every edit is one undo step; every action is a registered command with a schema, a description and a permission class, and what an agent sets it can read back. |
+
+## Rules
+
+**Several clips in the editor (WP-6.6)**
+
+- **R1.** With two or more MIDI clips selected, the note editor shows them together: in the Session View, the selected slots' clips ([session-view.md](session-view.md) R17), up to eight, every one with its Loop on; in the Arrangement, the selected MIDI clips ([arrangement-editing.md](arrangement-editing.md) R1) on up to eight tracks. Of a larger selection the editor shows the first eight in R2's order; a Session selection holding a clip whose Loop is off shows the clip selected last alone, as [piano-roll.md](piano-roll.md) R1 says; audio clips in a selection aren't shown in the note editor. (S1, S3, S4; the larger selection, the unlooped clip and the audio clips are Beatlayer's own)
+- **R2.** Above the note editor runs a loop bar for each clip shown (L-CLIP-021), in its clip's colour, showing its loop brace with its start and end markers. In the Session View the bars lie one under the other, by track and then by scene; in the Arrangement each track has a row, in track order, and each clip's bar lies at its time across it. Dragging up or down just above the editor's title bar makes the bars taller or shorter, which is view state. (S1, S3, S4)
+- **R3.** One shown clip is the foreground clip: the clip selected last when the selection was made, and after that the clip whose note or loop bar was clicked last. Its loop bar carries an LED in its colour, and the editor's title bar, over the loop bars, shows its name, or its track's name when it has none, while the Clip View's title bar (L-CLIP-002) shows how many clips are selected. The expression lanes and the footer ([note-editing.md](note-editing.md) R1 to R17) show and edit the foreground clip's notes alone, and using them lets go of the notes selected in the other clips. (S1, S6, S7)
+- **R4.** In the Arrangement, the editor's time runs as the song's, from the first shown clip's start to the last one's end, with nothing before or after; each clip's notes are drawn where the clip plays them, through its Start marker and its loop ([midi-clips.md](midi-clips.md) R3, R4), and the time between clips is empty. (S4, S9)
+- **R5.** In the Session View, the clips line up from their loop starts, and the editor shows each clip's loop passes over a span as long as the least common multiple of their loop lengths, so they all end together, but no longer than 64 times the longest loop. A clip's part outside its loop brace is drawn in a darker shade of its colour, and with the pointer over a clip's notes its loop start and end are drawn as black lines. (S3; the 64 is Beatlayer's own)
+- **R6.** A note shown in any pass of its clip's loop is that one note of the clip: editing it in any pass edits the note, and every pass shows the change. (S1; Beatlayer's own)
+- **R7.** With Focus Mode off, the editor's edits reach every shown clip: a selection may hold notes of several clips, and moving, resizing, transposing, quantising, deleting, deactivating, splitting, chopping, joining, stretching and the value keys act on the selected notes in each clip, every note staying in its own clip, all of one gesture or key one undo step. A time selection may cross loop and clip boundaries. Grouping notes of more than one clip is refused, since a group belongs to one clip ([note-editing.md](note-editing.md) R21). (S1, S2, S9)
+- **R8.** In the Arrangement with Focus Mode off, a note drawn across a clip's end belongs to the clip its start lies in, and plays only up to that clip's end ([midi-clips.md](midi-clips.md) R3). (S4; Beatlayer's own)
+- **R9.** Changing the Loop switch, the loop's place or length, or the Signature in the Main Properties panel (L-CLIP-004), the Groove (WP-6.19), or the Scale ([scales.md](scales.md) R6) changes every selected clip, as one undo step; a control whose clips differ shows the lowest and highest of their values, the scale controls as [scales.md](scales.md) R6 says, and the Loop switch half coloured while some loops are on and some off. Fold to Notes ([piano-roll.md](piano-roll.md) R16) and Fold to Scale fold the editor for every shown clip together, keeping the rows that hold notes in any of them. The Clip View's activator, name and colour act on every selected clip, each one undo step. (S1, S4, S6)
+- **R10.** Dragging a loop bar's start or end marker, or its body, changes that clip's loop brace as dragging the editor's brace does ([piano-roll.md](piano-roll.md) R21). Clicking a bar selects it and makes its clip the foreground clip (R3); Cmd-clicking (Ctrl-clicking) adds a bar to the selected bars or takes it out, and Shift-clicking selects the bars between (I-DRAG-041). With several bars selected, a drag on one moves the same marker of every selected bar by the same amount. A selected bar is drawn black. Each drag is one undo step. (S1, S2)
+- **R11.** Duplicate Loop (Cmd-D, Ctrl-D on Windows; S-LOOP-012) with the loop brace selected, or with loop bars selected, and Duplicate in a loop bar's context menu (C-LOOPBAR), double each chosen clip's loop brace and copy the notes inside it into the new half; notes after the loop's end move later with it, keeping their distance from the end; the editor zooms out to show the whole loop. One undo step, `Duplicate Loop`. (S1, S5)
+- **R12.** With Focus Mode off, notes cut or copied from several clips paste back into those same clips, each into its own at the insert marker ([piano-roll.md](piano-roll.md) R28), while the clips shown and the foreground clip are the same as when they were copied; otherwise Paste puts them all into the foreground clip. (S2)
+
+**Focus Mode (WP-6.6)**
+
+- **R13.** N (S-NOTE-040) and the Focus button (L-CLIP-021) switch Focus Mode: a tap switches it, and holding N switches it while it's held (I-HOLD-003). It is view state, off when the app starts, never saved and never an undo step (`clip_view.focus_mode`), and it acts only while the editor shows several clips. (S2, S8; off at start is Beatlayer's own)
+- **R14.** With Focus Mode on, the foreground clip is the active clip: its notes and its loop bar are drawn in its colour and every other clip's grey, and its name shows under the loop bars. With the pointer over another clip's loop bar, that clip's notes show in its colour; clicking another clip's note or bar makes it the active clip. Clicking the active clip's bar draws it black, and clicking elsewhere on its timeline gives it back its colour, the clip staying active. Only one loop bar can be selected, and a selection of several is set aside until Focus Mode is off. (S2)
+- **R15.** With Focus Mode on, every edit, gesture, key and filter acts on the active clip alone, and a note can't be drawn across its boundaries; the Clip View's scale controls show the active clip's scale, and Fold to Scale folds to it; Fold to Notes keeps the rows that hold notes in any shown clip. (S2, S4)
+- **R16.** With Focus Mode off, every clip's notes show in its colour, and the scale controls show a root and a scale only where every shown clip has the same, and an asterisk otherwise ([scales.md](scales.md) R6). (S2)
+
+**What else reaches several clips (WP-6.6)**
+
+- **R17.** The Preview switch plays notes selected from the keyboard in any shown clip, in Focus Mode too, and step recording records into the foreground clip ([step-recording.md](step-recording.md) R2 to R6). The note filters ([find-and-select-notes.md](find-and-select-notes.md) R3) select in every shown clip, or in the active clip alone with Focus Mode on, counting Count and Time within each clip. (S7; step recording, the filters and the counts are Beatlayer's own)
+- **R18.** Notes of several clips are named by their clip and their place in it ([piano-roll.md](piano-roll.md) R3): the note commands and `clip_view.select_notes` take a list of clips, each with its notes, in place of one clip, and with none given act on the selection in every shown clip, or in the active clip alone with Focus Mode on. `clip_view.foreground` and `clip_view.select_loop_bars` choose the foreground clip and the selected bars, and `clip_view.focus_mode` switches Focus Mode, in the read class; `clip.duplicate_loop` is in the edit class; the clip property commands take several clips. `view.state`'s `clip_view` reports the clips shown in R2's order, the foreground clip, the selected bars, Focus Mode and each clip's selected notes. Edits to several clips reach the engine as each changed track's clip list, as node data with no new program ([midi-clips.md](midi-clips.md) R10). (S9, S10)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-6.6 | |
+| R2 | to be written in WP-6.6 | |
+| R3 | to be written in WP-6.6 | |
+| R4 | to be written in WP-6.6 | |
+| R5 | to be written in WP-6.6 | |
+| R6 | to be written in WP-6.6 | |
+| R7 | to be written in WP-6.6 | |
+| R8 | to be written in WP-6.6 | |
+| R9 | to be written in WP-6.6 | |
+| R10 | to be written in WP-6.6 | |
+| R11 | to be written in WP-6.6 | |
+| R12 | to be written in WP-6.6 | |
+| R13 | to be written in WP-6.6 | |
+| R14 | to be written in WP-6.6 | |
+| R15 | to be written in WP-6.6 | |
+| R16 | to be written in WP-6.6 | |
+| R17 | to be written in WP-6.6 | |
+| R18 | to be written in WP-6.6 | |

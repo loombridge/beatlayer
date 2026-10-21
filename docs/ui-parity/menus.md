@@ -5,7 +5,7 @@ The menu bar and the main context menus of Live 12, as Beatlayer reproduces them
 ## How to read this page
 
 - **Item labels** are the generic command names Live shows, recorded so Beatlayer's menus read the same. Labels that name an Ableton product or service are marked; Beatlayer replaces or drops those (each needs a decisions-log entry).
-- **Order** is the order Live 12.4.3 lists the items on macOS, observed on 10 October 2026: first through the menu bar's accessibility interface (titles and order of every menu and submenu), then by opening each menu to read its separators, the keys it shows, and which items are disabled or ticked. Every row here was observed.
+- **Order** is the order Live 12.4.3 lists the items on macOS, observed on 10 October 2026: first through the menu bar's accessibility interface (titles and order of every menu and submenu), then by opening each menu to read its separators, the keys it shows, and which items are disabled or ticked. Every row here was observed, except Beatlayer's own additions, keyed by the ID of their decision or improvement (D24, IMP-16 and so on), and the context menus that section says weren't opened in Live.
 - **Separators** are the rows with — in the Item column. Live draws a line there.
 - **Keys shown** are the keys Live displays beside the item on macOS, written as it writes them: ⌘ Cmd, ⌥ Option, ⇧ Shift, ^ Ctrl, ⇥ Tab, ⌫ Delete, ↩ Return. An empty cell means Live shows no key. Submenu contents were read from the accessibility tree only, so their keys and separators aren't recorded, except for the Mixer Controls and Arrangement Track Controls submenus.
 - **Shortcut** gives the ID of the entry in [shortcuts.toml](shortcuts.toml) that binds the command, which holds both platforms' bindings. Where Live shows no key, an entry from the manual may still bind one; the notes say so.
@@ -36,25 +36,27 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
 | M-FILE-001 | New Live Set | ⌘N | S-FILE-001 | | Beatlayer: New Beatlayer Set (D21) |
-| M-FILE-002 | Open Live Set... | ⌘O | S-FILE-002 | | Beatlayer: Open Beatlayer Set... (D21) |
+| M-FILE-002 | Open Live Set... | ⌘O | S-FILE-002 | | Beatlayer: Open Beatlayer Set... (D21); its dialog also lists .dawproject files, which it imports as a new set ([dawproject](../specs/dawproject.md) R83) |
 | M-FILE-003 | Open Recent Set ▸ | | | | Submenu of recently opened sets; its contents are the user's files and weren't recorded |
 | M-FILE-004 | Close Window | ⌘W | S-FILE-009 | disabled | Not in the manual |
 | | — | | | | |
-| M-FILE-005 | Install Pack... | | | | Installs a pack file |
+| M-FILE-005 | Install Pack... | | | | Installs a pack file. Beatlayer: installs a Beatlayer pack (`.blpack`); Ableton's packs are out ([set exchange](../specs/set-exchange.md) R20) |
 | M-FILE-006 | Add Folder to Browser... | | | | Adds a folder to the browser's Places |
 | | — | | | | |
-| M-FILE-007 | Manage Files | | | | Opens the File Manager (L-OTH-002) |
-| M-FILE-008 | Open Live Set Backups ▸ | | | | Beatlayer: Open Beatlayer Set Backups (D21). A submenu of the set's backups; its contents weren't recorded |
+| M-FILE-007 | Manage Files | | | | Opens the File Manager (L-OTH-002); built in WP-6.63 |
+| IMP-29 | Manage Plug-Ins | | | | Beatlayer addition: the set's plug-ins, in the File Manager's place (L-OTH-002; [plug-in list](../specs/plugin-list.md) R1) |
+| M-FILE-008 | Open Live Set Backups ▸ | | | | Beatlayer: Open Beatlayer Set Backups (D21). A submenu of the set's backups; its contents weren't recorded. Beatlayer lists the open set's backups, newest first, by local time; choosing one opens it as the set (WP-6.63) |
+| IMP-05 | Save History | | | | Beatlayer addition: the set's save points and saved versions, in the right-hand area (L-OTH-001; [crash recovery](../specs/crash-recovery.md) R12) |
 | | — | | | | |
 | M-FILE-009 | Save Live Set | ⌘S | S-FILE-003 | | Beatlayer: Save Beatlayer Set (D21) |
 | M-FILE-010 | Save Live Set As... | ⇧⌘S | S-FILE-004 | | Beatlayer: Save Beatlayer Set As... (D21) |
-| M-FILE-011 | Save a Copy... | | | | |
+| M-FILE-011 | Save a Copy... | | | | Built in WP-6.63 |
 | M-FILE-012 | Collect All and Save | | | | |
 | M-FILE-013 | Save Live Set As Template... | | | | Beatlayer: Save Beatlayer Set As Template... (D21) |
 | M-FILE-014 | Save Live Set As Default Set... | | | | Beatlayer: Save Beatlayer Set As Default Set... (D21) |
 | | — | | | | |
-| M-FILE-015 | Export Audio/Video... | ⇧⌘R | S-FILE-007 | | |
-| M-FILE-016 | Export MIDI Clip... | | S-FILE-008 | disabled | Live shows no key here or in the clip context menus; the manual's binding (S-FILE-008) is unconfirmed |
+| M-FILE-015 | Export Audio/Video... | ⇧⌘R | S-FILE-007 | | Opens the Export Audio/Video dialog (L-OTH-003; [export](../specs/export.md) R28) |
+| M-FILE-016 | Export MIDI Clip... | | S-FILE-008 | disabled | Live shows no key here or in the clip context menus; the manual's binding (S-FILE-008) is unconfirmed. Beatlayer adds Export DAWproject... straight after it ([dawproject](../specs/dawproject.md) R86; not in Live), with no key |
 
 ## Edit
 
@@ -66,16 +68,16 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-EDIT-003 | Cut | ⌘X | S-EDIT-001 | | |
 | M-EDIT-004 | Copy | ⌘C | S-EDIT-002 | | |
 | M-EDIT-005 | Paste | ⌘V | S-EDIT-003 | disabled | |
-| M-EDIT-006 | Duplicate | ⌘D | S-EDIT-004 | | Beatlayer adds Duplicate Track Without Clips straight after it (IMP-12; not in Live) |
+| M-EDIT-006 | Duplicate | ⌘D | S-EDIT-004 | | Beatlayer adds Duplicate Track Without Clips straight after it (IMP-12; not in Live), and Duplicate as Linked Clip after that, with no key (IMP-21; [linked clips](../specs/linked-clips.md) R1) |
 | M-EDIT-007 | Delete | ⌫ | S-EDIT-005 | | |
 | | — | | | | |
-| M-EDIT-008 | Deactivate Track | 0 | S-TRACK-016, S-SES-018, S-ARR-027 | | Label follows the selection: Deactivate Track with a track's slot selected, Deactivate Clip in the clip context menus, and likewise for notes |
+| M-EDIT-008 | Deactivate Track | 0 | S-TRACK-016, S-SES-018, S-ARR-027, S-NOTE-041 | | Label follows the selection: Deactivate Track with a track's slot selected, Deactivate Clip in the clip context menus, and Deactivate Note(s) with notes selected (man 10.5.7). Beatlayer reads Activate Note(s) when every selected note is already deactivated ([note editing](../specs/note-editing.md) R18) |
 | | — | | | | |
 | M-EDIT-009 | Select All | ⌘A | S-EDIT-009 | | |
 | M-EDIT-010 | Invert Selection | ⇧⌘A | S-NOTE-034 | disabled | |
 | M-EDIT-011 | Select Loop | ⇧⌘L | S-ARR-013 | disabled | |
 | M-EDIT-012 | Loop Selection | ⌘L | S-ARR-011 | disabled | |
-| M-EDIT-013 | Clip Markers ▸ | | | | Submenu, rows M-EDIT-013a to 013d |
+| M-EDIT-013 | Clip Markers ▸ | | | | Submenu, rows M-EDIT-013a to 013d. With the note editor focused, the items set the markers to the time selection (release notes 12.0) |
 | M-EDIT-013a | Set Start Marker | | S-LOOP-001 | | |
 | M-EDIT-013b | Set Loop Start | | S-LOOP-002 | | |
 | M-EDIT-013c | Set Loop End | | S-LOOP-003 | | |
@@ -93,7 +95,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-EDIT-021 | Duplicate Time | ⇧⌘D | S-ARR-018 | disabled | |
 | M-EDIT-022 | Delete Time | ⇧⌘⌫ | S-ARR-019 | disabled | |
 | | — | | | | |
-| M-EDIT-023 | Apply Transformation/Generator | ⌘↩ | S-NOTE-033 | disabled | |
+| M-EDIT-023 | Apply Transformation/Generator | ⌘↩ | S-NOTE-033 | disabled | Applies the chosen tool of the Transform or Generate panel shown last; disabled while no MIDI clip shows ([MIDI tools](../specs/midi-tools.md) R19) |
 | | — | | | | |
 | M-EDIT-024 | Rename | ⌘R | S-EDIT-008 | | |
 | M-EDIT-025 | Edit Info Text | | | | Writes the Info View text for the selection |
@@ -111,7 +113,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | M-EDIT-034 | Fit to Time Range | ⌥⌘J | S-NOTE-008 | disabled | |
 | | — | | | | |
 | M-EDIT-035 | Quantize | ⌘U | S-NOTE-011, S-SAMPLE-001 | disabled | |
-| M-EDIT-036 | Quantize Settings... | ⇧⌘U | S-NOTE-012, S-SAMPLE-002 | disabled | |
+| M-EDIT-036 | Quantize Settings... | ⇧⌘U | S-NOTE-012, S-SAMPLE-002 | disabled | With the note editor focused, shows the Transform panel with Quantize chosen (man 11.2.7, 10.5.11; [MIDI transformations](../specs/midi-transformations.md) R21) |
 | M-EDIT-037 | Extract Groove(s) | | | disabled | |
 | M-EDIT-038 | Record Quantization ▸ | | | | Submenu, rows M-EDIT-038a to 038i |
 | M-EDIT-038a | No Quantization | | | | |
@@ -139,7 +141,7 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-003 | Insert Return Track | ⌥⌘T | S-TRACK-003 | | |
 | M-CREATE-004 | Insert Take Lane | ⌥⇧T | S-COMP-004 | disabled | |
 | | — | | | | |
-| M-CREATE-005 | Insert Scene | ⌘I | S-SES-008 | disabled | Enabled in the scene's context menu (C-SCENE-007) |
+| M-CREATE-005 | Insert Scene | ⌘I | S-SES-008 | disabled | Enabled in the scene's context menu (C-SCENE-007). With the Arrangement focused, ⌘I is Insert Silence (S-ARR-014, manual 6.11, 42.16), which Beatlayer shows in this place ([time editing](../specs/time-editing.md) R17) |
 | M-CREATE-006 | Capture and Insert Scene | ⇧⌘I | S-SES-009 | | Inserts a new scene directly after the scene last launched, holding copies of the clips that are playing, in their tracks; playback moves to the copies, and the new scene's tempo and signature are set to the current ones (observed in 12.4.3 (macOS), 15 October 2026) |
 | M-CREATE-007 | Consolidate Time to New Scene | | | disabled | |
 | | — | | | | |
@@ -192,7 +194,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
 | M-VIEW-001 | Full Screen | ^⌘F | S-VIEW-001 | | |
-| M-VIEW-002 | Second Window | ⇧⌘W | S-VIEW-002 | | |
+| M-VIEW-002 | Second Window | ⇧⌘W | S-VIEW-002 | | Beatlayer ticks it while the second window is open (its own; [second window](../specs/second-window.md) R1) |
 | M-VIEW-003 | Zoom ▸ | | | | Submenu, rows M-VIEW-003a to 003c (interface zoom) |
 | M-VIEW-003a | Zoom In | | S-ZOOM-001 | | |
 | M-VIEW-003b | Zoom Out | | S-ZOOM-002 | | |
@@ -201,8 +203,8 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-004 | Info | ? | S-VIEW-008 | ticked | Info View. Whether it is shown is an application setting, not part of the set: hiding it doesn't mark the set as changed, and a new set and a relaunch keep it hidden (observed in 12.4.3 (macOS), 14 October 2026) |
 | M-VIEW-005 | Learn View | ⌥⌘7 | S-VIEW-018 | ticked | |
 | M-VIEW-006 | Pack Overview | | | | Ableton pack service; Beatlayer's equivalent is its own content overview or nothing. Left out of Beatlayer's menu (D21) |
-| M-VIEW-007 | File Manager | | | | |
-| M-VIEW-008 | Undo History | ⌥⌘Z | S-VIEW-021 | | Opens in the right-hand column where the Learn View sits (L-OTH-001) |
+| M-VIEW-007 | File Manager | | | | Built in WP-6.63 ([file management](../specs/file-management.md)) |
+| M-VIEW-008 | Undo History | ⌥⌘Z | S-VIEW-021 | | Opens in the right-hand column where the Learn View sits (L-OTH-001). Beatlayer ticks it while the panel shows, and running it again hides the panel (its own; [undo history](../specs/undo-history.md) R1) |
 | D24 | Assistant | | | | Beatlayer addition (D24): opens and closes the assistant pane (`view.toggle_assistant`); no key |
 | | — | | | | |
 | M-VIEW-009 | Toggle Arrangement/Session View | ⇥ | S-VIEW-003 | | |
@@ -210,12 +212,12 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-010 | Clip View | ⌥⌘3 | S-VIEW-015 | | |
 | M-VIEW-011 | Device View | ⌥⌘4 | S-VIEW-016 | ticked | |
 | M-VIEW-012 | Toggle Clip/Device View | ⇧⇥ | S-VIEW-004 | | |
-| M-VIEW-013 | Expand Clip View | ⌥⌘E | S-NOTE-030 | disabled | |
-| M-VIEW-014 | Hide Device View | ⌥⌘L | S-VIEW-022 | | Label read with the Device View shown; hides the detail area |
+| M-VIEW-013 | Expand Clip View | ⌥⌘E | S-NOTE-030 | disabled | Beatlayer enables it while the Clip View shows and ticks it while expanded (its own; [detail views](../specs/detail-views.md) R11) |
+| M-VIEW-014 | Hide Device View | ⌥⌘L | S-VIEW-022 | | Label read with the Device View shown; hides the detail area. Beatlayer's labels in other states: Hide Clip View, Hide Clip and Device View, and Show Device View, Show Clip View or Show Clip and Device View for what it would bring back (its own words; [detail views](../specs/detail-views.md) R6) |
 | | — | | | | |
-| M-VIEW-015 | Arrange Clip View Panels Automatically | | | ticked | One of three choices (015 to 017) |
-| M-VIEW-016 | Arrange Clip View Panels Horizontally | | | | |
-| M-VIEW-017 | Arrange Clip View Panels Vertically | | | | |
+| M-VIEW-015 | Arrange Clip View Panels Automatically | | | ticked | One of three choices (015 to 017). Live from WP-6.72 ([detail views](../specs/detail-views.md) R20); the same three items are in the Clip View title bar's menu (C-CLIPTITLE-005 to 007) |
+| M-VIEW-016 | Arrange Clip View Panels Horizontally | | | | As M-VIEW-015 |
+| M-VIEW-017 | Arrange Clip View Panels Vertically | | | | As M-VIEW-015 |
 | | — | | | | |
 | M-VIEW-018 | Content Editor | ⌥⇧1 | S-CLIPMODE-003 | ticked | Sample Editor or MIDI Note Editor |
 | M-VIEW-019 | Envelope Editor | ⌥⇧2 | S-CLIPMODE-004 | disabled | |
@@ -224,11 +226,11 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-021 | Browser | ⌥⌘5 | S-VIEW-010 | ticked | |
 | M-VIEW-022 | Groove Pool | ⌥⌘6 | S-VIEW-017 | | |
 | M-VIEW-023 | Tuning | | | | Tuning section of the browser column |
-| M-VIEW-024 | Full-Height Browser | | | | |
+| M-VIEW-024 | Full-Height Browser | | | | Built in WP-6.32 ([browser](../specs/browser.md) R26) |
 | | — | | | | |
 | M-VIEW-025 | Search in Browser | ⌘F | S-BRW-006 | | |
 | M-VIEW-026 | Show Similar Files | ⇧⌘F | S-BRW-010 | disabled | |
-| M-VIEW-027 | Show Filter View | ⌥⌘G | S-BRW-013 | disabled | |
+| M-VIEW-027 | Show Filter View | ⌥⌘G | S-BRW-013 | disabled | Built in WP-6.32 ([browser tags](../specs/browser-tags.md) R18) |
 | | — | | | | |
 | M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b), with every plug-in editor window the device's window button opens (L-DEV-010, WP-2.10) |
 | M-VIEW-029 | Video Window | ⌥⇧⌘V | S-VIEW-009 | ticked, disabled | Not the manual's ⌥⌘V, which Live shows for Paste Bounced Audio (M-EDIT-031) |
@@ -236,7 +238,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-030 | Show the Max for Live Window | ⌥⇧⌘M | S-VIEW-023 | | Max-specific; Beatlayer's extension host takes this place in M9 or drops it. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
 | M-VIEW-031 | Mixer | ⌥⌘M | S-VIEW-014 | ticked | |
-| M-VIEW-032 | Mixer Controls ▸ | | | | Submenu, rows M-VIEW-032a to 032g; observed in 12.4.6, 11 October 2026 |
+| M-VIEW-032 | Mixer Controls ▸ | | | | Submenu, rows M-VIEW-032a to 032g; observed in 12.4.6, 11 October 2026. Each view's mixer keeps its own sections (release notes 12.0; [mixer view](../specs/mixer-view.md) R37) |
 | M-VIEW-032a | In/Out | ⌥⌘I | S-VIEW-012 | ticked | |
 | M-VIEW-032b | Sends | ⌥⌘S | S-VIEW-013 | ticked | |
 | M-VIEW-032c | Volume | | | ticked | |
@@ -244,24 +246,30 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-032d | Track Options | | | | Beatlayer's Track Options section; live since WP-5.36 ([mixer](../specs/mixer.md) R28, R30) |
 | M-VIEW-032e | Crossfader | | | | |
 | M-VIEW-032f | Performance Impact | | | | |
+| IMP-25 | Devices | | | | Beatlayer addition: shows the Devices section of the view in front's mixer, unticked on a new install ([mixer view](../specs/mixer-view.md) R24) |
 | | — | | | | |
 | M-VIEW-032g | Return Tracks | ⌥⌘R | S-TRACK-011 | ticked | |
+| IMP-01 | Return Tracks Scroll with Tracks | | | | Beatlayer addition, unticked on a new install; one switch, shown in both this submenu and Arrangement Track Controls ([mixer view](../specs/mixer-view.md) R21) |
 | M-VIEW-033 | Arrangement Track Controls ▸ | | | disabled | Submenu, rows M-VIEW-033a to 033d; observed in 12.4.6, 11 October 2026: disabled while the Session View is in front, no keys |
-| M-VIEW-033a | In/Out | | | ticked | |
-| M-VIEW-033b | Volume | | | ticked | |
+| M-VIEW-033a | In/Out | | | ticked | Hides the track headers' In/Out sub-column ([arrangement view](../specs/arrangement-view.md) R21) |
+| M-VIEW-033b | Volume | | | ticked | Hides the second and third rows of the headers' mixer sub-column ([arrangement view](../specs/arrangement-view.md) R22) |
 | M-VIEW-033c | Track Options | | | | As M-VIEW-032d; live since WP-5.36 |
 | | — | | | | |
-| M-VIEW-033d | Return Tracks | | | ticked | |
+| M-VIEW-033d | Return Tracks | | | ticked | Hides the return tracks' rows in the lanes ([arrangement view](../specs/arrangement-view.md) R23) |
+| IMP-01 | Return Tracks Scroll with Tracks | | | | As in Mixer Controls: the same switch |
 | | — | | | | |
 | M-VIEW-034 | Overview | ⌥⌘O | S-VIEW-011 | | |
+| IMP-22 | Arranger Track | | | | Beatlayer addition: shows the arranger track (L-ARR-023; `arrangement.arranger_track`), unticked in a new set; no key ([arranger track](../specs/arranger-track.md) R1) |
 | M-VIEW-035 | Scene Tempo and Time Signature | | | | Shows the Main track's scene tempo and signature fields |
 | | — | | | | |
 | M-VIEW-036 | Automation Mode | A | S-ENV-001 | disabled | |
 | M-VIEW-037 | Show Grouped Tracks | ⌥U | S-ARR-021 | disabled | |
 | M-VIEW-038 | Show Selected Grouped Track | U | S-TRACK-010 | disabled | |
+| IMP-34 | Mark Empty Tracks | | | | Beatlayer addition: a switch, unticked on a new install ([view options](../specs/view-options.md) R6) |
 | | — | | | | |
 | M-VIEW-039 | Fold to Notes | F | S-NOTE-038 | disabled | |
 | M-VIEW-040 | Fold to Scale | G | S-NOTE-039 | disabled | |
+| IMP-35 | Note Colors ▸ | | | | Beatlayer addition: a submenu of By Velocity (ticked on a new install), By Pitch Class and By Scale Degree ([view options](../specs/view-options.md) R2) |
 | | — | | | | |
 | M-VIEW-041 | Show Chains | + | S-DEV-012 | disabled | Rack chain list |
 | M-VIEW-042 | Hide Chains | − | S-DEV-013 | disabled | |
@@ -289,9 +297,10 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-NAV-013 | Next | | S-FOCUS-011 | | No key shown: Tab moves focus only with Use Tab Key to Move Focus on |
 | M-NAV-014 | Previous Neighbor | ⌥⇧⇥ | S-FOCUS-014 | disabled | Enabled whenever the track with the focus has a previous neighbour, whatever the Tab setting: with Use Tab Key to Move Focus off and track 1 selected, disabled (observed in 12.4.6, 11 October 2026) |
 | M-NAV-015 | Next Neighbor | ⌥⇥ | S-FOCUS-013 | disabled | Enabled whenever there's a next track: with Use Tab Key to Move Focus off and track 1 selected, enabled; it moved the focus to the same control on the next track without changing the selected track (observed in 12.4.6, 11 October 2026) |
+| IMP-18 | Find Track | ⇧⌘O | S-FOCUS-015 | | Beatlayer addition: opens the search field (layout.md's IMP-16 row) on its Tracks scope; straight after Next Neighbor ([command palette](../specs/command-palette.md) R1) |
 | | — | | | | |
-| M-NAV-016 | Browser History Back | ⌘[ | S-BRW-011 | disabled | |
-| M-NAV-017 | Browser History Forward | ⌘] | S-BRW-012 | disabled | |
+| M-NAV-016 | Browser History Back | ⌘[ | S-BRW-011 | disabled | Built in WP-6.32 ([browser tags](../specs/browser-tags.md) R30) |
+| M-NAV-017 | Browser History Forward | ⌘] | S-BRW-012 | disabled | Built in WP-6.32 ([browser tags](../specs/browser-tags.md) R30) |
 | | — | | | | |
 | M-NAV-018 | Use Tab Key to Move Focus | | | | Switch; also in Settings, Display & Input. Off on this install (observed in 12.4.6, 11 October 2026) |
 | M-NAV-019 | Wrap Keyboard Navigation | | | | Switch, ticked on this install (observed in 12.4.6, 11 October 2026); Settings calls it Wrap Tab Navigation |
@@ -310,7 +319,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-002 | Edit MIDI Map | ⌘M | S-MAP-001 | | |
 | M-OPT-003 | Edit Key Map | ⌘K | S-MAP-002 | | |
 | M-OPT-004 | Computer MIDI Keyboard | M | S-MAP-003 | | |
-| M-OPT-005 | MIDI Note Editor Preview | | | | |
+| M-OPT-005 | MIDI Note Editor Preview | | | | The editor's Preview switch (L-CLIP-012) |
 | M-OPT-006 | Browser File Preview | | | | Same as the browser's preview switch |
 | | — | | | | |
 | M-OPT-007 | External Sync | | | disabled | |
@@ -333,7 +342,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-016 | Fixed Grid | ⌘5 | S-GRID-006 | disabled | |
 | | — | | | | |
 | M-OPT-017 | Draw Mode | B | S-GRID-001 | | Reads "Draw Mode (Pitch Lock On/Off)" with the MIDI Note Editor focused (manual 10.4.1) |
-| M-OPT-018 | Step Input Mode | ⇧⌘B | S-NOTE-044 | disabled | |
+| M-OPT-018 | Step Input Mode | ⇧⌘B | S-NOTE-044 | disabled | A command, never ticked (release notes 12.0) |
 | | — | | | | |
 | M-OPT-019 | Highlight Scales | K | S-NOTE-035 | | |
 | M-OPT-020 | Chase MIDI Notes | | | | |
@@ -359,6 +368,7 @@ On macOS the system adds a search field at the top of the Help menu (S-MENU-005)
 
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
+| IMP-16 | Search Commands… | ⇧⌘P | S-MENU-007 | | Beatlayer addition: opens the search field on its Commands scope; the menu's first item, after the system's search field, with a separator after it ([command palette](../specs/command-palette.md) R1) |
 | M-HELP-001 | Learn View | | S-VIEW-018 | | No key shown here; the View menu shows ⌥⌘7 |
 | M-HELP-002 | Pack Overview | | | | Ableton service; see M-VIEW-006. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
@@ -429,7 +439,7 @@ Context menus open on right-click (or Ctrl-click on macOS) and from the keyboard
 
 **Live draws its context menus itself** rather than using the system's menus. They take Live's theme, write keys their own way (Del for the Delete key, Enter for Return, where the Edit menu shows ⌫ and ↩), lay some choices out as grids (the Arrangement's grid settings), and the track header, scene, and Session clip menus end with a colour palette of 5 rows of 14 swatches. Beatlayer draws its context menus the same way, with its own colours.
 
-Each menu below was opened once in a new set on 10 October 2026 (the crossfader's on 15 October 2026), on the object named; its rows are in Live's order, with separators, keys shown, and state as in the menu-bar tables. **Other states** lists commands the manual places in the same menu for other objects or selections (audio clips, group tracks, automation lanes); their source is the manual.
+Each menu below, up to the crossfader's, was opened once in a new set on 10 October 2026 (the crossfader's on 15 October 2026), on the object named; its rows are in Live's order, with separators, keys shown, and state as in the menu-bar tables. **Other states** lists commands the manual places in the same menu for other objects or selections (audio clips, group tracks, automation lanes); their source is the manual. The menus after the crossfader's weren't opened in Live: each says where its items and their order come from, and those listed as commands give each item's source, and its shortcut's ID where it has one, in place of the keys and state Live shows.
 
 ### Session clip slot, empty (C-SLOT)
 
@@ -451,8 +461,8 @@ Other states:
 
 | ID | Command | Source |
 |---|---|---|
-| C-SLOT-008 | Paste (with something to paste) | manual 7.4 |
-| C-SLOT-009 | Bounce Group to New Track (group slots) | manual 20.2 |
+| C-SLOT-008 | Paste (with something to paste); Beatlayer puts it first, followed by a separator ([session context menus](../specs/session-context-menus.md) R1) | manual 7.4 |
+| C-SLOT-009 | Bounce Group to New Track (group slots); Beatlayer puts it after Bounce to New Track (C-SLOT-003) ([session context menus](../specs/session-context-menus.md) R1) | manual 20.2 |
 
 ### Track header (C-TRACK)
 
@@ -489,13 +499,13 @@ Other states:
 | ID | Command | Source |
 |---|---|---|
 | C-TRACK-017 | Ungroup Tracks; Assign Track Color to Grouped Tracks and Clips; Bounce Group to New Track (group tracks) | manual 18.3, 8.1.1.3, 20 |
-| C-TRACK-018 | Link Tracks, Unlink Track(s) (several tracks selected) | manual 6.14.1 |
-| C-TRACK-019 | Show Take Lanes, Insert Take Lane, Delete All Take Lanes (Arrangement) | manual 21 |
+| C-TRACK-018 | Link Tracks, Unlink Track(s) (several tracks selected, or a group track's header) | manual 6.14.1 |
+| C-TRACK-019 | Show Take Lanes, Insert Take Lane, Delete All Take Lanes, Delete All Unused Take Lanes (Arrangement) | manual 21.1, 21.2; release notes 12.2 |
 | C-TRACK-020 | Crop Clip (from a time selection in the track) | manual 22.2 |
 
 ### Scene (C-SCENE)
 
-Opened on a scene in the Main track's column.
+Opened on a scene in the Main track's column. Beatlayer opens the same menu from the Scene View's title bar for the selected scenes (its own; [session context menus](../specs/session-context-menus.md) R3).
 
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
@@ -525,7 +535,7 @@ Other states:
 
 | ID | Command | Source |
 |---|---|---|
-| C-SCENE-015 | Paste (with something to paste) | manual 7.2 |
+| C-SCENE-015 | Paste (with something to paste); Beatlayer puts it straight after Copy ([session context menus](../specs/session-context-menus.md) R3) | manual 7.2 |
 | C-SCENE-016 | Return to Default (on the scene tempo and signature fields) | manual 7.2.1 |
 
 ### Browser item (C-BROWSER)
@@ -553,11 +563,14 @@ Other states:
 |---|---|---|
 | C-BROWSER-012 | Rename, Delete (user files) | manual 4, 5.8 |
 | C-BROWSER-013 | Separate Stems to New Audio Tracks (audio files) | manual 22.2 |
-| C-BROWSER-014 | Manage Project (project folders) | manual 5.5.3 |
+| C-BROWSER-014 | Manage Project (project folders); built in WP-6.63 | manual 5.5.3 |
 | C-BROWSER-015 | Set Default Live Set (template sets) | manual 5.4.5 |
 | C-BROWSER-016 | Show Pack Info; Download, Pause, Resume, Cancel, Install (packs) | manual 4.7 |
 | C-BROWSER-017 | Locate Folder, Remove from Sidebar (user folders) | manual 4.7.8 |
 | C-BROWSER-018 | Rename label, choose label icon, remove custom label (sidebar labels) | manual 4.2.1 |
+| C-BROWSER-019 | Hide Plug-In, or Show Plug-In for a hidden one, at the end of a plug-in's menu (Beatlayer's own, IMP-07; [browser tags](../specs/browser-tags.md) R41) | Beatlayer |
+| C-BROWSER-020 | New Collection, Rename, Delete (a collection's label; New Collection, and Delete on a nested collection, are Beatlayer's own, IMP-07; [browser tags](../specs/browser-tags.md) R38, R45, R47) | manual 4.5 (Rename); Beatlayer |
+| C-BROWSER-021 | Reset Label Order (the Library heading; Beatlayer's own name, [browser tags](../specs/browser-tags.md) R26) | release notes 12.1 |
 
 ### Clip, in the Session View (C-CLIP-SES)
 
@@ -567,7 +580,7 @@ Opened on an empty MIDI clip on track 1.
 |---|---|---|---|---|---|
 | C-CLIP-SES-001 | Cut | ⌘X | S-EDIT-001 | | |
 | C-CLIP-SES-002 | Copy | ⌘C | S-EDIT-002 | | |
-| C-CLIP-SES-003 | Duplicate | ⌘D | S-EDIT-004 | | |
+| C-CLIP-SES-003 | Duplicate | ⌘D | S-EDIT-004 | | Beatlayer adds Duplicate as Linked Clip and then Unlink Clip straight after it, with no keys (IMP-21; [linked clips](../specs/linked-clips.md) R1, R8) |
 | C-CLIP-SES-004 | Delete | Del | S-EDIT-005 | | |
 | | — | | | | |
 | C-CLIP-SES-005 | Rename | ⌘R | S-EDIT-008 | | |
@@ -594,8 +607,8 @@ Other states:
 
 | ID | Command | Source |
 |---|---|---|
-| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips) | manual 13 |
-| C-CLIP-SES-020 | Separate Stems to New Audio Tracks (audio clips) | manual 22.2 |
+| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips); Beatlayer puts them after Crop Clip and a separator, in C-CLIP-ARR-027's order ([session context menus](../specs/session-context-menus.md) R2) | manual 13 |
+| C-CLIP-SES-020 | Separate Stems to New Audio Tracks (audio clips); after C-CLIP-SES-019, as C-CLIP-ARR-027d follows the Convert items | manual 22.2 |
 
 ### Clip, in the Arrangement (C-CLIP-ARR)
 
@@ -605,7 +618,7 @@ Opened on an empty MIDI clip on track 1, bars 1 to 5. No colour palette was reco
 |---|---|---|---|---|---|
 | C-CLIP-ARR-001 | Cut | ⌘X | S-EDIT-001 | | |
 | C-CLIP-ARR-002 | Copy | ⌘C | S-EDIT-002 | | |
-| C-CLIP-ARR-003 | Duplicate | ⌘D | S-EDIT-004 | | |
+| C-CLIP-ARR-003 | Duplicate | ⌘D | S-EDIT-004 | | Beatlayer adds Duplicate as Linked Clip and then Unlink Clip straight after it, with no keys (IMP-21; [linked clips](../specs/linked-clips.md) R1, R8) |
 | C-CLIP-ARR-004 | Delete | Del | S-EDIT-005 | | |
 | | — | | | | |
 | C-CLIP-ARR-005 | Zoom to Time Selection | Z | S-ARR-030 | | |
@@ -645,10 +658,12 @@ Other states:
 | C-CLIP-ARR-025 | Split | manual 6.12 |
 | C-CLIP-ARR-026 | Consolidate | manual 6.13 |
 | C-CLIP-ARR-027 | Slice and Convert to New MIDI Track commands, Separate Stems to New Audio Tracks (audio clips) | manual 13, 22 |
+| C-CLIP-ARR-027e | Slice to New MIDI Track (audio clips) | manual 13; observed in Live 12 on macOS, 18 October 2026: an audio clip's menu, first in that group |
 | C-CLIP-ARR-027a | Convert Harmony to New MIDI Track (audio clips) | observed in Live 12 on macOS, 18 October 2026: an audio clip's menu, after a separator below Reverse Clip(s) |
 | C-CLIP-ARR-027b | Convert Melody to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
 | C-CLIP-ARR-027c | Convert Drums to New MIDI Track (audio clips) | observed, as C-CLIP-ARR-027a, next |
 | C-CLIP-ARR-027d | Separate Stems to New Audio Tracks (audio clips) | observed, as C-CLIP-ARR-027a, last in that group, before the clip colours |
+| C-CLIP-ARR-028 | The clip colours, last in the menu, after a separator | observed in Live 12 on macOS, 18 October 2026: an audio clip's menu, after C-CLIP-ARR-027d |
 
 ### Arrangement time selection (C-TIME)
 
@@ -688,10 +703,13 @@ Other states, including the scrub area's own menu:
 | C-TIME-018 | Paste, Delete, and the ... Time commands | manual 6.9, 6.11 |
 | C-TIME-019 | Split, Consolidate, Crop Clip (a selection that holds clips) | manual 6.12, 6.13, 22.2 |
 | C-TIME-020 | Consolidate Time to New Scene | manual 7.5 |
-| C-TIME-021 | Insert automation shapes, Simplify Envelope (automation lanes) | manual 26.6.3, 26.7.3 |
+| C-TIME-021 | Insert automation shapes, Simplify Envelope (automation lanes) | manual 25.5.5, 25.5.4 |
 | C-TIME-022 | Add Locator, Insert Time Signature Change (scrub area) | manual 6.4, 6.5 |
 | C-TIME-023 | Loop to Next Locator, Set Song Start Time Here (locator or loop brace) | manual 6.4, 6.6 |
 | C-TIME-024 | Delete Fragmentary Bar Time, Complete Fragmentary Bar (fragmentary bars) | manual 6.5 |
+| C-TIME-025 | Edit Info Text (a locator) | manual 6.4 |
+| C-TIME-026 | Edit Value (an automation breakpoint); Add Value (the preview point on an envelope's line) | manual 25.5.2 |
+| C-TIME-027 | Edit Time Signature (a selected time-signature marker) | manual 6.5 |
 
 ### Device title bar (C-DEVICE)
 
@@ -722,7 +740,7 @@ Other states:
 |---|---|---|
 | C-DEVICE-013 | Group to Drum Rack (several devices selected) | manual 25.2 |
 | C-DEVICE-014 | Lock to (a control surface) | manual 34 |
-| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device, MPE settings on MPE plug-ins; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad) | manual 23.2.1, 12.6, 31.4.5 |
+| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device; on plug-ins, MPE Mode, ticked while on, and MPE Settings…, and on MPE-capable plug-ins the tuning item; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad) | manual 23.2.1, 12.5, 12.6, 12.6.1, 31.4.5; release notes 12.1 |
 
 ### Crossfader (C-XFADE)
 
@@ -748,3 +766,177 @@ Opened on a track's pan control (the strip's or the Arrangement header's). Sourc
 |---|---|---|---|---|---|
 | C-PAN-001 | Stereo Pan Mode | | | ticked | One control balances both channels; the default ([mixer](../specs/mixer.md) R29) |
 | C-PAN-002 | Split Stereo Pan Mode | | | | A control places each input channel on its own ([mixer](../specs/mixer.md) R29) |
+
+### Mixer control or device parameter (C-PARAM)
+
+Opened on a track's mixer control or a device's parameter. These items come after any of the control's own (C-PAN, C-XFADE): the crossfader's menu shows the last two (C-XFADE-008, C-XFADE-009), and the order of the first two is Beatlayer's own ([automation](../specs/automation.md) R29).
+
+| ID | Command | Source |
+|---|---|---|
+| C-PARAM-001 | Delete Automation, enabled while the parameter has an envelope | manual 25.3 |
+| C-PARAM-002 | Re-Enable Automation, enabled while its envelope is overridden | manual 25.4 |
+| C-PARAM-003 | Show Automation | manual 25.5; release notes 12.2; observed (C-XFADE-008) |
+| C-PARAM-004 | Show Automation In New Lane | manual 25.5; observed (C-XFADE-009) |
+
+### Automation lane header (C-ALANE)
+
+Opened on an automation lane's header in the Arrangement. The items are the manual's; their names and order are Beatlayer's own ([automation](../specs/automation.md) R28).
+
+| ID | Command | Source |
+|---|---|---|
+| C-ALANE-001 | Show Automated Parameters Only, ticked while on | manual 25.5 |
+| C-ALANE-002 | Show All Lanes | manual 25.5 |
+| C-ALANE-003 | Hide All Lanes | manual 25.5 |
+| C-ALANE-004 | Clear All Envelopes (every envelope of the track) | manual 25.5 |
+| C-ALANE-005 | Clear Envelopes (those of the device the lane shows) | manual 25.5 |
+
+### Take lane header (C-TAKE)
+
+Opened on a take lane's header in the Arrangement, which it selects first ([comping](../specs/comping.md) R29). The items are the manual's and the release notes'; Live's order and separators weren't recorded, and the rows follow the manual.
+
+| ID | Command | Source |
+|---|---|---|
+| C-TAKE-001 | Copy Selection to Main Lane | manual 21.6 |
+| C-TAKE-002 | Insert Take Lane (S-COMP-004) | manual 21.2 |
+| C-TAKE-003 | Duplicate (S-COMP-005) | manual 21.2 |
+| C-TAKE-004 | Rename (S-EDIT-008) | manual 21.2 |
+| C-TAKE-005 | Delete | manual 21.2 |
+| C-TAKE-006 | Delete All Take Lanes | manual 21.2 |
+| C-TAKE-007 | Delete All Unused Take Lanes | manual 21.2; release notes 12.2 |
+| C-TAKE-008 | Paste Bounced Audio (S-BOUNCE-002) | release notes 12.3 |
+
+### Clip View title bar (C-CLIPTITLE)
+
+Opened on the Clip View's title bar (L-CLIP-002); it acts on the clips the Clip View shows. The items are the manual's; Live's order wasn't recorded, and the order and separators below are Beatlayer's own ([session context menus](../specs/session-context-menus.md) R4).
+
+| ID | Command | Source |
+|---|---|---|
+| C-CLIPTITLE-001 | Rename (S-EDIT-008) | manual 8.1.1.2 |
+| C-CLIPTITLE-002 | Edit Info Text | manual 8.1.1.2 |
+| | — | |
+| C-CLIPTITLE-003 | Colour palette | manual 8.1.1.3 |
+| | — | |
+| C-CLIPTITLE-004 | Fold, as double-clicking the title bar does (I-CLICK-008) | manual 8.1.2 |
+| | — | |
+| C-CLIPTITLE-005 | Arrange Clip View Panels Automatically, as M-VIEW-015; the one in use of 005 to 007 ticked | manual 8.1.2 |
+| C-CLIPTITLE-006 | Arrange Clip View Panels Horizontally, as M-VIEW-016 | manual 8.1.2 |
+| C-CLIPTITLE-007 | Arrange Clip View Panels Vertically, as M-VIEW-017 | manual 8.1.2 |
+
+### MIDI Note Editor (C-NOTE)
+
+Opened on a note, which it selects alone first if it isn't selected, or on empty grid in the MIDI Note Editor ([piano roll](../specs/piano-roll.md) R30). The items are the manual's and the release notes'; Live's order and separators weren't recorded.
+
+| ID | Command | Source |
+|---|---|---|
+| C-NOTE-001 | Cut (S-EDIT-001) | manual 10.7.2 |
+| C-NOTE-002 | Copy (S-EDIT-002) | manual 10.7.2 |
+| C-NOTE-003 | Paste (S-EDIT-003) | manual 10.7.2 |
+| C-NOTE-004 | Duplicate (S-EDIT-004) | manual 10.7.2 |
+| C-NOTE-005 | Delete (S-EDIT-005) | manual 10.7.2 |
+| C-NOTE-006 | Invert Selection (S-NOTE-034) | manual 10.5.2 |
+| C-NOTE-007 | Deactivate Note(s) (S-NOTE-041) | manual 10.5.7 |
+| C-NOTE-008 | Group Notes (S-NOTE-031) | manual 10.5.13.1 |
+| C-NOTE-009 | Ungroup Notes (S-NOTE-032) | manual 10.5.13.1 |
+| C-NOTE-010 | Split Note(s) (S-NOTE-003), only where a note would split | manual 10.5.8.1 |
+| C-NOTE-011 | Chop Note(s) on Grid (S-NOTE-003) | manual 10.5.8.2 |
+| C-NOTE-012 | Join Notes (S-NOTE-007) | manual 10.5.8.3 |
+| C-NOTE-013 | Fit to Time Range (S-NOTE-008) | manual 10.5.5 |
+| C-NOTE-014 | Clip Markers ▸, as M-EDIT-013 | release notes 12.0 |
+| C-NOTE-015 | Split Clip (S-NOTE-036), on an Arrangement clip | release notes 12.1 |
+| C-NOTE-016 | Highlight Scales (S-NOTE-035) | manual 10.6 |
+
+### Piano ruler (C-KEYS)
+
+Opened on the MIDI Note Editor's piano ruler (L-CLIP-012). Live's labels and order weren't recorded.
+
+| ID | Command | Source |
+|---|---|---|
+| C-KEYS-001 | Deactivate Note(s) (S-NOTE-041) | manual 10.5.7 |
+| C-KEYS-002 | Note spelling: Sharps, Flats, Sharps and Flats, Auto, MIDI Note Numbers, the one in use ticked (the labels are Beatlayer's own; [scales](../specs/scales.md) R24) | manual 10.6 |
+
+### Probability group marker (C-PGROUP)
+
+Opened on a probability group's marker in the Chance lane ([note editing](../specs/note-editing.md) R23). Live's order wasn't recorded.
+
+| ID | Command | Source |
+|---|---|---|
+| C-PGROUP-001 | Play All, ticked while the group plays all its notes | manual 10.5.13.1 |
+| C-PGROUP-002 | Play One, ticked while the group plays one of its notes | manual 10.5.13.1 |
+| C-PGROUP-003 | Ungroup Notes, ending the group | manual 10.5.13.1 |
+
+### Expression lane header (C-LANE)
+
+Opened on the header of an expression lane under the note area (L-CLIP-014; [note editing](../specs/note-editing.md) R2). The MPE tab's lane headers have the same item ([MPE](../specs/mpe.md) R23).
+
+| ID | Command | Source |
+|---|---|---|
+| C-LANE-001 | Swap Lane: shows a hidden lane in this one's place | manual 10.1; release notes 12.0 |
+
+### Multi-clip loop bar (C-LOOPBAR)
+
+Opened on a loop bar above the note editor while it shows several clips (L-CLIP-021; [multi-clip editing](../specs/multi-clip-editing.md) R11).
+
+| ID | Command | Source |
+|---|---|---|
+| C-LOOPBAR-001 | Duplicate (S-LOOP-012): doubles each chosen clip's loop and copies its notes into the new half | manual 10.8 |
+
+### MPE tab (C-MPE)
+
+Opened in the Clip View's MPE tab ([MPE](../specs/mpe.md) R26, R31). Live's order wasn't recorded.
+
+| ID | Command | Source |
+|---|---|---|
+| C-MPE-001 | Clear All Envelopes, in the note area's and each lane's menu | manual 12.2 |
+| C-MPE-002 | Edit Value, on a breakpoint | manual 12.2 |
+| C-MPE-003 | Add Value, on the preview breakpoint at the pointer | manual 12.2 |
+
+### Filter View Menu (C-FILTER)
+
+Opened by the menu button beside the Filter View toggle on the browser's top row (L-BRW-001). The items are the manual's and the release notes'; their order, the separator, and the name Show All Filter Groups are Beatlayer's own ([browser tags](../specs/browser-tags.md) R21).
+
+| ID | Command | Source |
+|---|---|---|
+| C-FILTER-001 | One item for each filter group the chosen label can show, ticked while it shows | manual 4.4.1 |
+| C-FILTER-002 | Show All Filter Groups | manual 4.4.1 |
+| C-FILTER-003 | Reset Filter Groups to Default | manual 4.4.1 |
+| | — | |
+| C-FILTER-004 | Include Auto Tags, disabled until automatic tagging (M9) | release notes 12.2 |
+| C-FILTER-005 | Tag Editor (S-BRW-014), ticked while it shows | release notes 12.2 |
+| C-FILTER-006 | Show Quick Tags, ticked while Quick Tags shows | release notes 12.2 |
+
+### Content Options (C-CONTENT)
+
+Opened by the menu button at the right of the browser's column header row, or on a column's name (L-BRW-009; [browser tags](../specs/browser-tags.md) R27, R43). The columns' names are Beatlayer's own.
+
+| ID | Command | Source |
+|---|---|---|
+| C-CONTENT-001 | One item for each optional column (Date Modified, Size, Kind, and for audio files Length, Sample Rate and Channels), ticked while it shows | manual 4.1 |
+| C-CONTENT-002 | Show File Extensions | release notes 12.2 |
+| C-CONTENT-003 | Show Hidden Plug-Ins, under the Plug-Ins label (Beatlayer's own, IMP-07) | Beatlayer |
+
+### Tag Editor (C-TAG)
+
+Opened on a person's own tag or group, or on the list's background, in the Tag Editor (L-BRW-013; [browser tags](../specs/browser-tags.md) R12).
+
+| ID | Command | Source |
+|---|---|---|
+| C-TAG-001 | Add Subtag In…, on a tag outside the Creator group that isn't a subtag | manual 4.4.3 |
+| C-TAG-002 | Rename | manual 4.4.3 |
+| C-TAG-003 | Delete | manual 4.4.3 |
+| C-TAG-004 | Reset Order, on the list's background (Beatlayer's own name and place) | Beatlayer |
+
+### Quick Tags tag (C-QTAG)
+
+Opened on a tag in Quick Tags (L-BRW-012; [browser tags](../specs/browser-tags.md) R13).
+
+| ID | Command | Source |
+|---|---|---|
+| C-QTAG-001 | Show Tag in Tag Editor | release notes 12.3 |
+
+### Automation Arm button (IMP-23)
+
+Beatlayer's addition, opened on the Control Bar's Automation Arm button (L-CTRL-015; [automation](../specs/automation.md) R18). Live has no such menu.
+
+| ID | Command | Source |
+|---|---|---|
+| IMP-23 | Touch, Latch, Write: the Arrangement's automation recording mode, the current one ticked; Touch, Live's behaviour, on a new install (the names are Beatlayer's own) | Beatlayer |

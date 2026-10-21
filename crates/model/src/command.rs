@@ -2070,6 +2070,62 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Stores every macro of a rack's values as a new variation at the end of
+    /// its list (macros spec, R26).
+    StoreVariation {
+        /// The rack.
+        rack: DeviceId,
+    },
+    /// Sets every macro of a rack that isn't excluded from variations to the
+    /// value a variation holds, at once and on one frame, as a hand move on
+    /// each (macros spec, R27).
+    LaunchVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Replaces every value a variation holds with the macros' values now,
+    /// keeping its name and place (macros spec, R28).
+    OverwriteVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Gives a variation a name of its own (macros spec, R29).
+    RenameVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+        /// The name.
+        name: String,
+    },
+    /// Copies a variation, with its name and values, straight after it
+    /// (macros spec, R29).
+    DuplicateVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Deletes a variation (macros spec, R29).
+    DeleteVariation {
+        /// The rack.
+        rack: DeviceId,
+        /// The variation's place in the rack's list, from 0.
+        index: usize,
+    },
+    /// Leaves a macro out of variations, or puts it back (macros spec, R30).
+    SetMacroVariationExcluded {
+        /// The rack.
+        rack: DeviceId,
+        /// The macro, numbered from 1.
+        macro_number: u8,
+        /// Whether it's left out.
+        excluded: bool,
+    },
 }
 
 impl Command {
@@ -2328,6 +2384,13 @@ impl Command {
             Self::RandomizeMacros { .. } => "Randomize Macros",
             Self::SetMacroRandomizeExcluded { .. } => "Exclude Macro from Randomization",
             Self::SetMacroStyle { .. } => "Change Macro Style",
+            Self::StoreVariation { .. } => "Store Macro Variation",
+            Self::LaunchVariation { .. } => "Launch Macro Variation",
+            Self::OverwriteVariation { .. } => "Overwrite Macro Variation",
+            Self::RenameVariation { .. } => "Rename Macro Variation",
+            Self::DuplicateVariation { .. } => "Duplicate Macro Variation",
+            Self::DeleteVariation { .. } => "Delete Macro Variation",
+            Self::SetMacroVariationExcluded { .. } => "Exclude Macro from Variations",
             Self::SetMappedValue { .. } => "Change parameter",
         }
     }
@@ -3783,6 +3846,40 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::StoreVariation { rack } => {
+                let values = self.rack_macro_values(*rack)?;
+                self.device_mut(*rack)?.macros.store_variation(values);
+                Ok(())
+            }
+            Command::LaunchVariation { rack, index } => self.launch_variation(*rack, *index),
+            Command::OverwriteVariation { rack, index } => {
+                let values = self.rack_macro_values(*rack)?;
+                self.device_mut(*rack)?
+                    .macros
+                    .overwrite_variation(*index, values)
+            }
+            Command::RenameVariation { rack, index, name } => {
+                self.variation_mut(*rack, *index)?.name.clone_from(name);
+                Ok(())
+            }
+            Command::DuplicateVariation { rack, index } => {
+                let variation = self.variation(*rack, *index)?.clone();
+                self.device_mut(*rack)?
+                    .macros
+                    .variations
+                    .insert(index + 1, variation);
+                Ok(())
+            }
+            Command::DeleteVariation { rack, index } => {
+                self.variation(*rack, *index)?;
+                self.device_mut(*rack)?.macros.variations.remove(*index);
+                Ok(())
+            }
+            Command::SetMacroVariationExcluded {
+                rack,
+                macro_number,
+                excluded,
+            } => self.edit_macro(*rack, *macro_number, |m| m.variation_excluded = *excluded),
         }
     }
 
@@ -3980,6 +4077,82 @@ impl Document {
             return value;
         }
         device.macros.setting(number).position_of(value)
+    }
+
+    /// Every macro of `rack`'s values, in number order (macros spec, R26).
+    fn rack_macro_values(&self, rack: DeviceId) -> Result<Vec<f64>, ModelError> {
+        let device = self.device_ref(rack)?;
+        if device.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        Ok(device.macro_values())
+    }
+
+    /// The variation at `index` of `rack`.
+    fn variation(
+        &self,
+        rack: DeviceId,
+        index: usize,
+    ) -> Result<&crate::rack::Variation, ModelError> {
+        self.device_ref(rack)?
+            .macros
+            .variations
+            .get(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))
+    }
+
+    /// The variation at `index` of `rack`, to change.
+    fn variation_mut(
+        &mut self,
+        rack: DeviceId,
+        index: usize,
+    ) -> Result<&mut crate::rack::Variation, ModelError> {
+        self.device_mut(rack)?
+            .macros
+            .variations
+            .get_mut(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))
+    }
+
+    /// Sets every macro of `rack` that isn't excluded from variations to the
+    /// value the variation at `index` holds, at once, as a hand move on each
+    /// (macros spec, R27).
+    fn launch_variation(&mut self, rack: DeviceId, index: usize) -> Result<(), ModelError> {
+        let current = self.device_ref(rack)?;
+        if current.rack_kind().is_none() {
+            return Err(ModelError::InvalidInput("only a rack has macros"));
+        }
+        let variation = current
+            .macros
+            .variations
+            .get(index)
+            .ok_or(ModelError::InvalidInput("no such macro variation"))?;
+        let moves: Vec<(u8, f64)> = (1..=MACROS)
+            .filter(|number| !current.macros.setting(*number).variation_excluded)
+            .filter_map(|number| {
+                variation
+                    .values
+                    .get(usize::from(number - 1))
+                    // Spec: macros R22. A stepped macro takes only its steps.
+                    .map(|value| {
+                        let value = value.clamp(0.0, 1.0);
+                        (number, current.macros.setting(number).position_of(value))
+                    })
+            })
+            .collect();
+        let owner = self.device_owner(rack)?;
+        for (number, value) in &moves {
+            self.device_mut(rack)?
+                .set_param(crate::macro_param(*number), *value);
+        }
+        for (number, _) in &moves {
+            self.track_mut(owner)?
+                .override_target(&AutomationTarget::Device {
+                    device: rack,
+                    param: crate::macro_param(*number),
+                });
+        }
+        Ok(())
     }
 
     /// Sets every mapped macro of `rack` that isn't excluded to a random

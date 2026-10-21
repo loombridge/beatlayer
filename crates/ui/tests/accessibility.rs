@@ -2096,6 +2096,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  focused column into view",
             )),
         ),
+        // The fold button in a track's title bar (racks spec, R27): Live
+        // names the button (25.8) but its key isn't observed yet, and its
+        // place in the Tab order with it (the racks spec's open question
+        // 19).
+        (
+            "mixer_view.fold_chains",
+            Exception(Unobserved(
+                "the fold button in the track's title bar: Live's own key for it isn't observed \
+                 yet, and its place in the mixers' Tab order with it",
+            )),
+        ),
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
@@ -2629,6 +2640,48 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "what the Macro Controls and the mappings list show",
             )),
+        ),
+        // Spec: macros R25 to R30 and R32. The Macro Variations view's
+        // buttons, its rows and the macro's context menu reach these with the
+        // pointer; Rename, Duplicate and Delete also take Cmd+R, Cmd+D and the
+        // Delete key through the device's own commands.
+        (
+            "rack.store_variation",
+            Exception(Equivalent("the variations view's New button")),
+        ),
+        (
+            "rack.launch_variation",
+            Exception(Equivalent("a variation row's Launch button")),
+        ),
+        (
+            "rack.overwrite_variation",
+            Exception(Equivalent("a variation row's Overwrite button")),
+        ),
+        (
+            "rack.rename_variation",
+            Exception(Equivalent("Rename on a variation row")),
+        ),
+        (
+            "rack.duplicate_variation",
+            Exception(Equivalent("Duplicate on a variation row")),
+        ),
+        (
+            "rack.delete_variation",
+            Exception(Equivalent("Delete on a variation row")),
+        ),
+        (
+            "rack.set_macro_variation_excluded",
+            Exception(Equivalent(
+                "Exclude Macro From Variations on a macro's context menu",
+            )),
+        ),
+        (
+            "rack.show_variations",
+            Exception(Equivalent("the view column's Show/Hide Macro Variations")),
+        ),
+        (
+            "rack.select_variation",
+            Exception(Equivalent("a click on a variation's row")),
         ),
         (
             "chain.select",
@@ -3411,6 +3464,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        // Slice to New MIDI Track's dialog (WP-4.16).
+        (
+            "clip.slice_to_midi_track",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's OK, which Tab reaches",
+            )),
+        ),
+        (
+            "clip.close_slice_dialog",
+            Exception(Equivalent(
+                "the Slice to New MIDI Track dialog's Cancel, or Esc",
+            )),
         ),
         // Gaps.
         (

@@ -2,9 +2,14 @@
 //! R19): mapping, the law's values, the hold a mapping gives, the undo
 //! steps and the readback.
 
-use bl_model::{DeviceId, TrackId};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
+use bl_core::time::Ticks;
+use bl_model::{AutomationTarget, DeviceId, TrackId};
+use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::device_commands::DeviceAdded;
-use bl_shell::{Area, Effect, Shell};
+use bl_shell::files::ProjectFiles;
+use bl_shell::settings::Preferences;
+use bl_shell::{Area, Effect, Shell, testing};
 use serde_json::{Value, json};
 
 const UTILITY: &str = "beatlayer.utility";
@@ -555,4 +560,311 @@ fn deleting_a_rack_forgets_its_macro_and_its_map_mode() {
         .unwrap();
     assert_eq!(set.shell.devices().map_mode(), None);
     assert_eq!(set.shell.devices().macro_selected(), None);
+}
+
+// Spec: macros R29
+#[test]
+fn variations_rename_duplicate_and_delete_in_one_undo_step_each() {
+    let mut set = set();
+    set.shell
+        .invoke("rack.store_variation", json!({ "rack": set.rack }))
+        .unwrap();
+    assert_eq!(last_undo(&set), "Store Macro Variation");
+    set.shell
+        .invoke(
+            "rack.rename_variation",
+            json!({ "rack": set.rack, "index": 0, "name": "Quiet" }),
+        )
+        .unwrap();
+    assert_eq!(last_undo(&set), "Rename Macro Variation");
+    set.shell
+        .invoke(
+            "rack.duplicate_variation",
+            json!({ "rack": set.rack, "index": 0 }),
+        )
+        .unwrap();
+    assert_eq!(last_undo(&set), "Duplicate Macro Variation");
+    // Moving a macro and then overwriting records the new values.
+    set.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": set.rack, "param": bl_model::macro_param(1), "value": 0.9 }),
+        )
+        .unwrap();
+    set.shell
+        .invoke(
+            "rack.overwrite_variation",
+            json!({ "rack": set.rack, "index": 0 }),
+        )
+        .unwrap();
+    assert_eq!(last_undo(&set), "Overwrite Macro Variation");
+    set.shell
+        .invoke(
+            "rack.delete_variation",
+            json!({ "rack": set.rack, "index": 1 }),
+        )
+        .unwrap();
+    assert_eq!(last_undo(&set), "Delete Macro Variation");
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    let variations = state["variations"].as_array().unwrap();
+    assert_eq!(variations.len(), 1);
+    assert_eq!(variations[0]["name"], "Quiet");
+
+    let before = set.shell.editor().undo_history().count();
+    set.shell
+        .invoke(
+            "rack.launch_variation",
+            json!({ "rack": set.rack, "index": 0 }),
+        )
+        .unwrap();
+    assert_eq!(set.shell.editor().undo_history().count(), before + 1);
+    assert_eq!(last_undo(&set), "Launch Macro Variation");
+}
+
+// Spec: macros R30
+#[test]
+fn an_excluded_macro_keeps_its_value_when_a_variation_launches() {
+    let mut set = set();
+    map(&mut set, 1, WIDTH);
+    // Macro 1 stands at Width's value, 0.5; the variation stores it.
+    set.shell
+        .invoke("rack.store_variation", json!({ "rack": set.rack }))
+        .unwrap();
+    set.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": set.rack, "param": bl_model::macro_param(1), "value": 0.9 }),
+        )
+        .unwrap();
+    set.shell
+        .invoke(
+            "rack.set_macro_variation_excluded",
+            json!({ "rack": set.rack, "macro_number": 1, "excluded": true }),
+        )
+        .unwrap();
+    set.shell
+        .invoke(
+            "rack.launch_variation",
+            json!({ "rack": set.rack, "index": 0 }),
+        )
+        .unwrap();
+    assert!(
+        (macro_value(&set, 1) - 0.9).abs() < 1e-12,
+        "the excluded macro kept its value"
+    );
+    // The variation still holds 0.5, so switching the exclusion off lets the
+    // next launch set the macro.
+    set.shell
+        .invoke(
+            "rack.set_macro_variation_excluded",
+            json!({ "rack": set.rack, "macro_number": 1, "excluded": false }),
+        )
+        .unwrap();
+    set.shell
+        .invoke(
+            "rack.launch_variation",
+            json!({ "rack": set.rack, "index": 0 }),
+        )
+        .unwrap();
+    assert!((macro_value(&set, 1) - 0.5).abs() < 1e-9);
+}
+
+/// A shell playing through a null device paced by hand, with a test clock, so
+/// a recording test drives time itself rather than the wall clock (T199).
+fn clocked() -> (Shell, NullControl) {
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            ..NullOptions::default()
+        },
+        &[("null", "Null")],
+    );
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell.use_test_clock(control.clock().expect("manual pacing"));
+    shell.start_audio();
+    (shell, control)
+}
+
+fn set_macro(shell: &mut Shell, rack: DeviceId, number: u8, value: f64) {
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": rack, "param": bl_model::macro_param(number), "value": value }),
+        )
+        .unwrap();
+}
+
+fn macro_value_of(shell: &Shell, rack: DeviceId, number: u8) -> f64 {
+    shell
+        .editor()
+        .document()
+        .device(rack)
+        .and_then(|d| d.params.get(&bl_model::macro_param(number)).copied())
+        .unwrap_or(0.0)
+}
+
+fn automation_enabled(shell: &Shell, track: TrackId, target: AutomationTarget) -> bool {
+    shell
+        .editor()
+        .document()
+        .track(track)
+        .and_then(|track| track.automation_for(&target))
+        .is_some_and(|automation| automation.enabled)
+}
+
+// Spec: macros R27
+#[test]
+fn a_launch_overrides_automated_macros_and_records_while_armed() {
+    let (mut shell, control) = clocked();
+    let audio: TrackId = shell
+        .editor()
+        .document()
+        .top_level()
+        .nth(2)
+        .expect("an audio track");
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    shell.set_focused_area(Area::Detail);
+    let rack: DeviceAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": { "rack": { "kind": "audio_effect" } },
+                        "name": "Rack",
+                        "role": "audio_effect",
+                    },
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let range = shell.new_id::<bl_model::ChainId>();
+    shell
+        .invoke(
+            "chain.add",
+            json!({ "rack": rack.device, "index": 0, "chain": { "id": range, "name": "Range", "devices": [] } }),
+        )
+        .unwrap();
+    let utility: DeviceAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "device.add",
+                json!({
+                    "chain": range,
+                    "device": {
+                        "kind": { "native": { "device_type": UTILITY } },
+                        "name": "Utility",
+                        "role": "audio_effect",
+                    },
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let (rack, utility) = (rack.device, utility.device);
+    let macro_one = bl_model::macro_param(1);
+    let target = AutomationTarget::Device {
+        device: rack,
+        param: macro_one,
+    };
+    // Macro 1 drives the Utility's Width. A variation holds 0.25, and the
+    // macro stands at 0.75 with an envelope of its own.
+    shell
+        .invoke(
+            "rack.map_macro",
+            json!({
+                "rack": rack,
+                "macro_number": 1,
+                "target": { "type": "device", "device": utility, "param": WIDTH },
+            }),
+        )
+        .unwrap();
+    set_macro(&mut shell, rack, 1, 0.25);
+    shell
+        .invoke("rack.store_variation", json!({ "rack": rack }))
+        .unwrap();
+    set_macro(&mut shell, rack, 1, 0.75);
+    for at in [Ticks::ZERO, Ticks::WHOLE * 4] {
+        shell
+            .run(
+                "automation.set_breakpoint",
+                json!({
+                    "track": audio,
+                    "target": { "type": "device", "device": rack, "param": macro_one },
+                    "at": at,
+                    "value": 0.75,
+                }),
+            )
+            .unwrap();
+    }
+    testing::settle(&control, &mut shell);
+
+    // Spec: macros R27. The launch sets the macro to the variation's value and
+    // overrides the envelope it had.
+    shell
+        .invoke("rack.launch_variation", json!({ "rack": rack, "index": 0 }))
+        .unwrap();
+    assert!((macro_value_of(&shell, rack, 1) - 0.25).abs() < 1e-9);
+    assert!(
+        !automation_enabled(&shell, audio, target),
+        "the launch overrode the macro's envelope"
+    );
+
+    // Spec: macros R27, automation R17. While Automation Arm records, the
+    // launch is written as the macro's envelope too.
+    shell
+        .run("arrangement.automation_arm", json!({ "on": true }))
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    testing::wait_for(&control, &mut shell, "recording", |shell| {
+        let engine = shell.poll_engine();
+        engine.recording && engine.playing
+    });
+    testing::advance(&control, &mut shell, 40);
+    shell
+        .invoke("rack.launch_variation", json!({ "rack": rack, "index": 0 }))
+        .unwrap();
+    shell.run("transport.stop", json!({})).unwrap();
+    testing::wait_for(&control, &mut shell, "the recording to end", |shell| {
+        !shell.poll_engine().playing
+    });
+    let recorded = shell
+        .editor()
+        .document()
+        .track(audio)
+        .and_then(|track| track.automation_for(&target))
+        .map(|automation| automation.envelope.clone())
+        .expect("the recording made an envelope");
+    assert!(
+        recorded
+            .points()
+            .any(|point| (point.value - 0.25).abs() < 1e-9),
+        "the launch was recorded"
+    );
+    assert!(
+        shell
+            .editor()
+            .undo_history()
+            .any(|label| label == "Record Automation"),
+        "one undo step for the recording"
+    );
 }

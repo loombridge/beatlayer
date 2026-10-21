@@ -720,7 +720,11 @@ fn local_time(time: SystemTime) -> Option<(i64, u32, u32, u32, u32, u32)> {
     use windows_sys::Win32::System::Time::FileTimeToSystemTime;
 
     let seconds = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let ticks = u64::try_from(seconds).ok()?.checked_mul(10_000_000)?;
+    // A Windows time counts 100-nanosecond intervals from 1601, and the
+    // standard library counts seconds from 1970: the two are 11,644,473,600
+    // seconds apart.
+    const SINCE_1601: u64 = 11_644_473_600 * 10_000_000;
+    let ticks = SINCE_1601.checked_add(seconds.checked_mul(10_000_000)?)?;
     let utc = FILETIME {
         dwLowDateTime: u32::try_from(ticks & u64::from(u32::MAX)).ok()?,
         dwHighDateTime: u32::try_from(ticks >> 32).ok()?,
@@ -890,6 +894,23 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn a_local_stamp_is_the_time_in_the_computers_own_time_zone() {
+        let now = at(NOW);
+        let utc = stamp_time(&utc_stamp(now)).expect("the UTC stamp names a time");
+        let local = stamp_time(&local_stamp(now)).expect("the local stamp names a time");
+        let difference = local
+            .duration_since(utc)
+            .or_else(|_| utc.duration_since(local))
+            .expect("one is after the other")
+            .as_secs();
+        assert!(
+            difference < 14 * 3_600,
+            "the local time is the same moment, in the computer's own time zone: {}",
+            local_stamp(now)
+        );
     }
 
     #[test]

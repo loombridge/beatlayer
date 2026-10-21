@@ -5,7 +5,7 @@
 
 mod common;
 
-use bl_shell::keymap::Origin;
+use bl_shell::keymap::{Origin, Platform};
 use bl_shell::settings::SettingsPage;
 use common::{Harness, Window, command};
 use egui::accesskit::Role;
@@ -156,13 +156,17 @@ fn a_conflict_asks_and_replace_moves_the_key() {
         .find(|shortcut| shortcut.mac.origin == Origin::User)
         .expect("the person's own shortcut");
     assert_eq!(own.commands, ["track.duplicate_without_clips"]);
-    // Duplicate has lost the key.
+    // Duplicate has lost the key, on this platform.
     let duplicate = state
         .shortcuts
         .iter()
         .find(|shortcut| shortcut.id == "S-EDIT-004")
         .expect("Duplicate");
-    assert!(duplicate.mac.keys.is_empty(), "{:?}", duplicate.mac.keys);
+    let keys = match Platform::current() {
+        Platform::Mac => &duplicate.mac.keys,
+        Platform::Other => &duplicate.win.keys,
+    };
+    assert!(keys.is_empty(), "{keys:?}");
 }
 
 #[test]

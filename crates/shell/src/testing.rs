@@ -106,3 +106,12 @@ pub fn wait_for(
     }
     panic!("waited for {what}");
 }
+
+/// Puts the real-time render's session into its waiting period, so a test
+/// can show the dialog an export with external hardware opens (the external
+/// devices spec, R23).
+pub fn realtime_waiting(shell: &Shell, seconds: u64) {
+    shell
+        .realtime_session()
+        .begin_wait(Duration::from_secs(seconds));
+}

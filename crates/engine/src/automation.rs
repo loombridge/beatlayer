@@ -425,6 +425,9 @@ pub struct AutomationList {
     /// The macros (WP-5.4) that drive each parameter from their envelopes,
     /// ordered by parameter (macros spec, R8).
     macros: Vec<(ParamId, MacroDrive)>,
+    /// The node's own stepped macros, and how many steps they take (macros
+    /// spec, R22).
+    stepped: Vec<(ParamId, u8)>,
 }
 
 /// A mapped parameter's base from its macro's envelope (macros spec, R7 and
@@ -436,6 +439,9 @@ pub struct MacroDrive {
     min: f64,
     max: f64,
     envelope: PlacedEnvelope,
+    /// How many steps the macro takes, when it is stepped (macros spec,
+    /// R22).
+    steps: Option<u8>,
 }
 
 /// A mapping's target travel, owned so a drive can outlive the document
@@ -467,6 +473,10 @@ impl MacroDrive {
     /// The value the macro gives at song `frame`.
     fn value_at(&self, frame: i64) -> f64 {
         let position = self.envelope.value_at(frame).clamp(0.0, 1.0);
+        // Spec: macros R22. A stepped macro's envelope plays as its steps.
+        let position = self.steps.map_or(position, |steps| {
+            bl_model::macro_step_position(steps, position)
+        });
         self.travel
             .travel()
             .value(self.min + position * (self.max - self.min))
@@ -551,12 +561,28 @@ impl AutomationList {
     // Spec: session-automation R6, R7
     #[must_use]
     pub fn driven(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
-        self.macro_value(param, frame)
+        let value = self
+            .macro_value(param, frame)
             .or_else(|| self.session_value(param, frame, now))
             .or_else(|| {
                 self.envelope(param)
                     .map(|envelope| envelope.value_at(frame))
-            })
+            });
+        // Spec: macros R22. A stepped macro's envelope plays as its steps.
+        value.map(|value| self.stepped_position(param, value))
+    }
+
+    /// The position a stepped macro of this node takes for `position` (macros
+    /// spec, R22): its nearest step, or the position itself for any other
+    /// parameter.
+    fn stepped_position(&self, param: ParamId, position: f64) -> f64 {
+        let index = self
+            .stepped
+            .binary_search_by_key(&param, |&(param, _)| param)
+            .ok();
+        index.map_or(position, |index| {
+            bl_model::macro_step_position(self.stepped[index].1, position)
+        })
     }
 
     /// The value the Session clip in `now` gives `param` at `frame`.
@@ -621,7 +647,8 @@ impl AutomationList {
                 .map(|&share| f64::from(share))
                 .sum::<f64>();
         }
-        travel.played(base, sum)
+        // Spec: macros R22. A stepped macro's modulation plays as its steps.
+        self.stepped_position(param, travel.played(base, sum))
     }
 
     /// The position on `param`'s travel a modulator in Remote Control holds
@@ -713,7 +740,7 @@ impl AutomationList {
         control_of: impl Fn(ParamId) -> f64,
     ) -> f64 {
         if let Some(position) = self.held(param, bus, at) {
-            return travel.value(position);
+            return travel.value(self.stepped_position(param, position));
         }
         song.and_then(|frame| self.driven(param, frame, now))
             .unwrap_or_else(|| control_of(param))
@@ -815,7 +842,20 @@ pub(crate) fn lists(
         }
     }
     for device in track.devices_deep() {
-        lists.insert(NodeKey::Device(device.id), Entries::default());
+        let mut entries = Entries::default();
+        // Spec: macros R22. A rack's stepped macros take their steps, so the
+        // node that holds them plays them as steps.
+        if device.rack_kind().is_some() {
+            for number in 1..=bl_model::MACROS {
+                let setting = device.macros.setting(number);
+                if setting.is_stepped() {
+                    entries
+                        .stepped
+                        .push((bl_model::macro_param(number), setting.steps));
+                }
+            }
+        }
+        lists.insert(NodeKey::Device(device.id), entries);
         for chain in &device.chains {
             lists.insert(NodeKey::ChainMixer(chain.id), Entries::default());
             for send in &chain.sends {
@@ -983,6 +1023,7 @@ pub(crate) fn lists(
                 continue;
             }
             if let Some(entries) = lists.get_mut(&key) {
+                let setting = rack.macros.setting(mapping.macro_number);
                 entries.macros.push((
                     param,
                     MacroDrive {
@@ -990,6 +1031,7 @@ pub(crate) fn lists(
                         min: mapping.min,
                         max: mapping.max,
                         envelope,
+                        steps: setting.is_stepped().then_some(setting.steps),
                     },
                 ));
             }
@@ -1003,6 +1045,7 @@ pub(crate) fn lists(
             entries.modulation.sort_by_key(|&(param, _)| param);
             entries.session.sort_by_key(|&(param, _)| param);
             entries.macros.sort_by_key(|&(param, _)| param);
+            entries.stepped.sort_by_key(|&(param, _)| param);
             // However many clips modulate one parameter, the node reads
             // them together.
             let mut modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)> = Vec::new();
@@ -1029,6 +1072,7 @@ pub(crate) fn lists(
                     session: entries.session,
                     mapped,
                     macros: entries.macros,
+                    stepped: entries.stepped,
                 },
             )
         })
@@ -1121,6 +1165,9 @@ struct Entries {
     session: Vec<(ParamId, SessionEnvelope)>,
     mapped: Vec<(ParamId, u32)>,
     macros: Vec<(ParamId, MacroDrive)>,
+    /// The node's own stepped macros, and how many steps they take (macros
+    /// spec, R22).
+    stepped: Vec<(ParamId, u8)>,
 }
 
 #[cfg(test)]
@@ -1197,6 +1244,7 @@ mod tests {
             session: Vec::new(),
             mapped: Vec::new(),
             macros: Vec::new(),
+            stepped: Vec::new(),
         };
         let mut seen = Vec::new();
         let tempo = TempoMap::default();

@@ -855,6 +855,19 @@ impl AudioHost {
         Ok(())
     }
 
+    /// Sets what the engine captures while the song plays a range in real
+    /// time (WP-5.35): the rendered outputs and the rings their samples go
+    /// to.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can render in real time, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn render(&mut self, plan: bl_engine::RenderPlan) -> Result<(), String> {
+        self.running_engine()?.render(plan);
+        Ok(())
+    }
+
     /// Schedules a command at a musical position on the engine's queue,
     /// the queue the transport's commands take, so they arrive in the order
     /// they were sent (the agent API's scheduled commands, WP-1.15b).

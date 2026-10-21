@@ -70,10 +70,20 @@ pub struct DeviceType {
     /// the sound comes back on, and a Hardware Latency
     /// ([`bl_model::External`]).
     pub external: bool,
+    /// Whether its devices send their audio to the interface's outputs and
+    /// hear it back (WP-5.35): an external effect, with an Audio To beside
+    /// its Audio From.
+    pub external_output: bool,
     /// Whether its devices have a MIDI sidechain input (WP-5.27): the
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
+    /// Whether its devices send notes on from a note output (IMP-24): a CLAP
+    /// plug-in's note output port, a VST3 class's event output bus, or an
+    /// Audio Unit's MIDI output. A device whose type has one can sit in the
+    /// MIDI-effect position of a MIDI track's chain, before the instrument;
+    /// one whose type has none can't. Every MIDI-effect type has one.
+    pub note_output: bool,
     /// The extra audio outputs its devices offer past their main one, by the
     /// names the device gives them (WP-5.45): another track can take one as
     /// its input ([`Input::Track`](bl_model::Input::Track)), and the node
@@ -96,7 +106,9 @@ impl DeviceType {
             description: DeviceDescription::default(),
             sidechain: false,
             external: false,
+            external_output: false,
             midi_sidechain: false,
+            note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
         }
     }
@@ -122,10 +134,28 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, sending its audio to the interface and hearing
+    /// it back: an external effect (WP-5.35).
+    #[must_use]
+    pub fn with_external_output(mut self) -> Self {
+        self.external = true;
+        self.external_output = true;
+        self
+    }
+
     /// The same device type, declaring a MIDI sidechain input.
     #[must_use]
     pub fn with_midi_sidechain(mut self) -> Self {
         self.midi_sidechain = true;
+        self
+    }
+
+    /// The same device type, declaring a note output (IMP-24): its devices
+    /// send notes on, so they can sit in the MIDI-effect position of a MIDI
+    /// track's chain.
+    #[must_use]
+    pub fn with_note_output(mut self) -> Self {
+        self.note_output = true;
         self
     }
 
@@ -148,6 +178,9 @@ impl DeviceType {
         }
         if self.external {
             device = device.with_external();
+        }
+        if self.external_output {
+            device = device.with_external_output();
         }
         if self.midi_sidechain {
             device = device.with_midi_sidechain();

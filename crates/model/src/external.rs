@@ -126,6 +126,11 @@ pub struct External {
     /// pair on a new device.
     #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
     pub audio_from: Channel,
+    /// Audio To: the interface's outputs an external effect sends its signal
+    /// to, the first pair on a new effect. `None` for an external
+    /// instrument: it sends notes, not audio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_to: Option<Channel>,
     /// Hardware Latency: 0 ms on a new device.
     #[serde(default, skip_serializing_if = "HardwareLatency::is_default")]
     pub hardware_latency: HardwareLatency,
@@ -146,6 +151,7 @@ impl Default for External {
             port: None,
             channel: 1,
             audio_from: Channel::default(),
+            audio_to: None,
             hardware_latency: HardwareLatency::default(),
         }
     }
@@ -196,6 +202,7 @@ mod tests {
             port: Some("Synth".to_owned()),
             channel: 4,
             audio_from: Channel::Mono(3),
+            audio_to: Some(Channel::Pair(2)),
             hardware_latency: HardwareLatency::Samples { value: 9 },
         };
         let saved = serde_json::to_value(&kept).unwrap();

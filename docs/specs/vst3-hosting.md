@@ -30,7 +30,7 @@ This part loads, describes, activates and processes, saves and restores the comp
 
 ## Rules
 
-- **R1.** `plugin.load` loads a `.vst3` bundle or module by path and offers each audio module class in it as a device type: its class ID as the FUID string for the device's kind, its name, and its role from its subcategories (an instrument; otherwise an audio effect). A path that isn't a VST3 module, or a module with no audio classes, is refused, and nothing changes. The class is added as `device.add` adds a device: one undo step, Insert Device, selected. (S1, S2, S3)
+- **R1.** `plugin.load` loads a `.vst3` bundle or module by path and offers each audio module class in it as a device type: its class ID as the FUID string for the device's kind, its name, and its role from its subcategories (an instrument; otherwise an audio effect), and whether it sends events on from an event output bus, which lets it sit in the MIDI-effect position of a MIDI track's chain (IMP-24). A path that isn't a VST3 module, or a module with no audio classes, is refused, and nothing changes. The class is added as `device.add` adds a device: one undo step, Insert Device, selected. (S1, S2, S3)
 - **R2.** A plug-in device's node passes its input through until the main thread has activated the plug-in for it (at once when the compiler runs on the main thread, otherwise at the shell's next poll), then runs the plug-in on every block: the block's channels in the plug-in's main audio input bus, and its main output bus back into the block's channels. (S1, S4)
 - **R3.** A parameter change for a plug-in device reaches the plug-in on its exact frame within the block, through the block's `IParameterChanges`, as a normalized value over the parameter's plain range; a change kept while the plug-in wasn't running reaches it at the block's first frame. (S1, S4, S5)
 - **R4.** Notes in a block reach the plug-in on their frames, in the block's input event list, and the notes it sends out go on from the node on their frames. (S4)
@@ -59,10 +59,10 @@ The test plug-in, Test Gain Echo, is built from source in `crates/test-vst3` and
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/plugin-host/tests/vst3.rs`, `a_plugin_loads_by_path_with_its_parameters`, `a_plugin_that_cant_be_found_leaves_its_device_passing_audio_through`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands`; `crates/agent/tests/plugin_vst3.rs`, `a_vst3_plugin_loads_by_path_through_the_agent_api` | unit |
+| R1 | `crates/plugin-host/tests/vst3.rs`, `a_plugin_loads_by_path_with_its_parameters`, `a_vst3_plugin_with_an_event_output_bus_has_a_note_output` (IMP-24), `a_plugin_that_cant_be_found_leaves_its_device_passing_audio_through`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands`; `crates/agent/tests/plugin_vst3.rs`, `a_vst3_plugin_loads_by_path_through_the_agent_api` | unit |
 | R2 | `crates/plugin-host/tests/vst3.rs`, `a_node_passes_its_input_through_until_its_plugin_arrives`, `audio_runs_through_the_plugin_and_a_change_lands_on_its_frame` | unit, real-time trap |
 | R3 | `crates/plugin-host/tests/vst3.rs`, `audio_runs_through_the_plugin_and_a_change_lands_on_its_frame` | unit, real-time trap |
-| R4 | `crates/plugin-host/tests/vst3.rs`, `notes_reach_the_plugin_and_come_back_out_on_their_frames` | unit, real-time trap |
+| R4 | `crates/plugin-host/tests/vst3.rs`, `notes_reach_the_plugin_and_come_back_out_on_their_frames`, `a_vst3_plugin_placed_as_a_midi_effect_passes_notes_on_and_drops_its_audio` (IMP-24) | unit, real-time trap |
 | R5 | `crates/plugin-host/tests/vst3.rs`, `a_plugin_loads_by_path_with_its_parameters`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands` | unit |
 | R6 | `crates/plugin-host/tests/vst3.rs`, `a_gesture_from_the_controllers_editor_makes_one_change`; `crates/shell/tests/plugins.rs`, `a_change_a_vst3_plugin_makes_itself_is_one_undo_step` | unit |
 | R7 | `crates/plugin-host/tests/vst3.rs`, `a_switched_off_plugin_keeps_changes_for_its_next_block` | unit, real-time trap |

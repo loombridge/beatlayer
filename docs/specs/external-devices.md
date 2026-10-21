@@ -1,6 +1,6 @@
 # External devices: MIDI out to hardware, the external instrument and effect, and exporting with hardware
 
-- **Status:** partial (R1 to R13, R15, R16, R28 and R29 for them are built, WP-5.34; R14 here keeps the external devices' Hardware Latency controls, and its switches are [delay compensation](delay-compensation.md) R7 and R8, since WP-5.36; R17 to R27 for WP-5.35)
+- **Status:** partial (R1 to R13, R15, R16, R28 and R29 for them are built, WP-5.34; R14 here keeps the external devices' Hardware Latency controls, and its switches are [delay compensation](delay-compensation.md) R7 and R8, since WP-5.36; R17 to R20 and R22 to R27 are built, WP-5.35; R21's peak indicators, and the click that resets them, are not)
 - **Work packages:** WP-5.34 (a MIDI track's MIDI To an external port, scheduled MIDI output, and the external instrument), WP-5.35 (the external effect, and real-time export with external hardware), WP-5.36 (the Delay Compensation and Reduced Latency When Monitoring switches, moved from R14 to [delay compensation](delay-compensation.md) R7 and R8, and Keep Monitoring Latency there); WP-6.17b (MIDI To sending MPE: R1 to R3 as they read now, with [MPE](mpe.md) R17 to R19)
 - **Parity-matrix row:** Mixing and routing: MIDI track output to external MIDI ports and channels (hardware synths); Instruments: External Instrument; Audio effects: External Audio Effect; Files and export: Real-time rendering with external hardware, restart after dropouts
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 17, sections 17.2, 17.2.1, 17.3 (17.3.1, 17.3.1.1, 17.3.3, 17.3.4) and 17.5.2.6; chapter 31, section 31.6 "External Instrument"; chapter 29, section 29.18 "External Audio Effect"; chapter 23, section 23.3 "Device Delay Compensation"; chapter 5, section 5.1.3.5 "Real-Time Rendering"; and Live 12.4.6 on macOS, observed 12 October 2026 (the MIDI To chooser)
@@ -97,16 +97,16 @@ This spec covers MIDI out on a track's MIDI To, the two external devices, the De
 | R14 | `crates/shell/tests/delay_compensation.rs`, `switching_compensation_off_holds_nothing_back_and_disables_hardware_latency`; `crates/shell/tests/menus.rs`, `the_options_menu_switches_delay_compensation` | shell test |
 | R15 | `crates/cli/tests/agent.rs`, `an_agent_routes_an_external_instrument_and_reads_it_back` | agent test |
 | R16 | `crates/shell/tests/external_devices.rs`, `an_offline_render_silences_the_external_devices_and_names_them` | shell test |
-| R17 | `crates/shell/tests/external_devices.rs`, `the_external_effect_is_described_and_its_choosers_list_the_interface` | shell test |
-| R18 | `crates/engine/tests/external_devices.rs`, `the_effect_sends_to_its_outputs_and_adds_to_what_plays_there` | engine test under the allocation trap |
-| R19 | `crates/engine/tests/external_devices.rs`, `dry_and_wet_line_up_and_invert_flips_the_return` | engine test under the allocation trap |
-| R20 | `crates/engine/tests/pdc.rs`, `a_loopback_through_the_external_effect_lines_up_at_main` | engine test under the allocation trap |
-| R21 | `crates/engine/tests/external_devices.rs`, `the_peak_indicators_hold_and_reset`; `crates/devices/tests/rules.rs` over the shipped types | engine test under the allocation trap |
-| R22 | `crates/shell/tests/realtime_export.rs`, `an_export_with_external_hardware_renders_in_real_time_and_the_rest_offline` | shell test |
-| R23 | `crates/ui/tests/realtime_render.rs`, `the_dialog_counts_down_and_restart_skip_and_cancel_work` | UI script |
-| R24 | `crates/shell/tests/realtime_export.rs`, `a_real_time_render_holds_the_ranges_frames` | shell test |
-| R25 | `crates/shell/tests/realtime_export.rs`, `a_dropout_restarts_the_render_and_counts_the_attempt`, `with_auto_restart_off_the_dropouts_are_listed` | shell test |
-| R26 | `crates/shell/tests/realtime_export.rs`, `a_real_time_render_converts_to_the_exports_rate_and_says_so`, `without_an_audio_device_it_is_refused` | shell test |
-| R27 | `crates/cli/tests/agent_export.rs`, `an_agent_exports_with_external_hardware_in_real_time`, `a_preview_silences_the_external_devices` | agent test |
+| R17 | `crates/shell/tests/realtime_export.rs`, `the_effects_audio_to_lists_the_interface`; `crates/ui/tests/device_view.rs`, `the_external_effects_choosers_route_it` | shell test; UI script |
+| R18 | `crates/engine/tests/external_effect.rs`, `the_effect_sends_to_its_outputs`, `the_effects_signal_adds_to_what_plays_on_those_channels` | engine test under the allocation trap |
+| R19 | `crates/engine/tests/external_effect.rs`, `dry_and_wet_line_up_and_the_return_is_flipped_by_invert`, `a_cable_one_frame_longer_than_the_latency_shows_in_the_sum` | engine test under the allocation trap |
+| R20 | `crates/engine/tests/external_effect.rs`, `dry_and_wet_line_up_and_the_return_is_flipped_by_invert` | engine test under the allocation trap |
+| R21 | not built yet: the peaks are published as the device's display, but the indicators and the click that resets them are not | |
+| R22 | `crates/shell/tests/realtime_export.rs`, `an_export_with_external_hardware_renders_in_real_time`, `a_track_without_the_hardware_renders_offline` | shell test |
+| R23 | `crates/ui/tests/realtime_dialog.rs`, `the_dialog_counts_down_and_its_buttons_work`; `crates/shell/tests/realtime_export.rs`, `a_cancelled_render_leaves_no_file_behind` | UI script; shell test |
+| R24 | `crates/shell/tests/realtime_export.rs`, `an_export_with_external_hardware_renders_in_real_time` | shell test |
+| R25 | `crates/shell/tests/realtime_export.rs`, `a_dropout_starts_the_render_again`, `with_auto_restart_off_the_dropout_is_listed` | shell test |
+| R26 | `crates/shell/tests/realtime_export.rs`, `without_an_audio_device_it_is_refused` | shell test |
+| R27 | `crates/shell/tests/external_devices.rs`, `an_offline_render_silences_the_external_devices_and_names_them`; `crates/cli/tests/agent_export.rs`, `an_agent_exports_with_the_real_time_arguments`; `crates/shell-spec/src/export.rs` (the new arguments) | shell test; agent test |
 | R28 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `cargo xtask commands` (the readback table) | unit |
 | R29 | every engine test above runs its blocks under the allocation trap; `rtsan/tests/external_devices.rs` | RealtimeSanitizer test |

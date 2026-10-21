@@ -355,6 +355,7 @@ impl View<'_> {
             "id": device.id,
             "name": device.name,
             "kind": device.kind,
+            "role": device.role,
             "enabled": device.enabled,
             "params_set": device.params.len(),
         });

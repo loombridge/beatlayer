@@ -28,6 +28,7 @@ clack-extensions = { version = "=0.2.0", features = [
     "gui",
     "latency",
     "log",
+    "note-ports",
     "params",
     "state",
 ] }

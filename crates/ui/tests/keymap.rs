@@ -696,3 +696,32 @@ fn quantize_and_quantize_settings_are_bound_in_the_sample_editor() {
     let entry_002 = keymap.entry_for("S-SAMPLE-002").unwrap();
     assert_eq!(entry_002.status, Status::Bound);
 }
+
+#[test]
+fn the_tags_shortcuts_reach_their_commands() {
+    // Spec: browser-tags R10 and R14.
+    let keymap = Keymap::live12();
+    // Cmd-Shift-E shows and hides the Tag Editor (S-BRW-014).
+    let entry = keymap.entry_for("S-BRW-014").expect("the shortcut");
+    assert_eq!(entry.status, Status::Bound);
+    assert_eq!(entry.mac, vec!["Cmd+Shift+E".to_owned()]);
+    assert_eq!(entry.win, vec!["Ctrl+Shift+E".to_owned()]);
+    assert!(
+        entry
+            .commands
+            .iter()
+            .any(|command| command.id == "browser.show_tag_editor"),
+        "{:?}",
+        entry.commands
+    );
+    // Cmd-E moves the keyboard focus to Quick Tags' Add field
+    // (S-BRW-015): the browser's own widget reads it.
+    let entry = keymap.entry_for("S-BRW-015").expect("the shortcut");
+    assert!(
+        matches!(entry.status, Status::Widget(_)),
+        "{:?}",
+        entry.status
+    );
+    assert_eq!(entry.mac, vec!["Cmd+E".to_owned()]);
+    assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
+}

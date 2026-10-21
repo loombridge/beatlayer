@@ -685,6 +685,14 @@ impl ShellLayout {
 /// in Live (browser, "To observe in Live").
 pub const BROWSER_ROW: f32 = 17.0;
 
+/// How high the Quick Tags section is, when it shows (L-BRW-012). Live's
+/// isn't measured; this is Beatlayer's own.
+pub const QUICK_TAGS_HEIGHT: f32 = 62.0;
+
+/// How wide the Tag Editor is, when it opens beside the content pane
+/// (L-BRW-013). Live's isn't measured; this is Beatlayer's own.
+pub const TAG_EDITOR_WIDTH: f32 = 190.0;
+
 /// The browser's parts inside its column (L-BRW rows), from layout.md's
 /// measurements in Live 12.4.3 at 1600 × 1000 points. The top row and the
 /// sidebar keep their size; the search field and the content pane stretch
@@ -713,6 +721,9 @@ pub struct BrowserLayout {
     pub header: Rect,
     /// The item list (L-BRW-010).
     pub list: Rect,
+    /// The Quick Tags section, at the content pane's bottom, above the
+    /// preview strip (L-BRW-012).
+    pub quick_tags: Rect,
     /// The preview strip at the content pane's bottom (L-BRW-011).
     pub strip: Rect,
     /// The Preview switch, at the strip's left (L-BRW-011).
@@ -724,9 +735,15 @@ pub struct BrowserLayout {
 }
 
 impl BrowserLayout {
-    /// Lays the browser out in its column.
+    /// Lays the browser out in its column, with Quick Tags hidden.
     #[must_use]
     pub fn compute(column: Rect) -> Self {
+        Self::compute_with(column, false)
+    }
+
+    /// Lays the browser out in its column, with Quick Tags showing or not.
+    #[must_use]
+    pub fn compute_with(column: Rect, quick_tags_shown: bool) -> Self {
         // Offsets from layout.md's window coordinates: the column spans x 9
         // to 311 and y 61 to 766 at the reference size.
         let x = |window_x: f32| column.left() + window_x - 9.0;
@@ -742,9 +759,20 @@ impl BrowserLayout {
         let header = Rect::from_min_max(content.min, pos2(right, content.top() + 19.0));
         // The strip from y 744 to the column's bottom (766).
         let strip = Rect::from_min_max(pos2(content.left(), column.bottom() - 22.0), content.max);
+        // Quick Tags sits at the content pane's bottom, above the preview
+        // strip (L-BRW-012).
+        let quick_tags = Rect::from_min_max(
+            pos2(content.left(), strip.top() - QUICK_TAGS_HEIGHT),
+            pos2(right, strip.top()),
+        );
+        let list_bottom = if quick_tags_shown {
+            quick_tags.top()
+        } else {
+            strip.top()
+        };
         let list = Rect::from_min_max(
             pos2(content.left(), header.bottom()),
-            pos2(right, strip.top()),
+            pos2(right, list_bottom),
         );
         let preview_toggle = Rect::from_min_size(
             pos2(content.left() + 4.0, strip.top() + 4.0),
@@ -769,12 +797,23 @@ impl BrowserLayout {
             content,
             header,
             list,
+            quick_tags,
             strip,
             preview_toggle,
             raw_toggle,
             preview_wave,
         }
     }
+}
+
+/// Where the Tag Editor opens, beside the browser's content pane
+/// (L-BRW-013).
+#[must_use]
+pub fn tag_editor_rect(browser: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(browser.right() + 6.0, browser.top()),
+        vec2(TAG_EDITOR_WIDTH, browser.height()),
+    )
 }
 
 /// The Arrangement View's track header column (L-ARR-006): 294 points at

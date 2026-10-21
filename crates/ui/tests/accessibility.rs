@@ -1674,7 +1674,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
     );
+    // The browser's tags (browser-tags R10 to R16): the Tag Editor and
+    // Quick Tags reach them.
+    let tag_editor = Equivalent(
+        "the browser's Tag Editor: its check boxes, its Add Tag\u{2026} and Add Group\u{2026} \
+         rows, its context menu's Rename and Delete items, its list's context menu's Reset \
+         Order item, and dragging a tag or a group (the browser tags spec, R10 to R12)",
+    );
+    let quick_tags = Equivalent(
+        "the browser's Quick Tags: its Add\u{2026} field, its X, and its Create New Tag\u{2026} \
+         item (the browser tags spec, R13 and R14)",
+    );
     BTreeMap::from([
+        // The browser's tags (browser-tags R10 to R16).
+        ("browser.add_tag", Exception(tag_editor)),
+        ("browser.add_tag_group", Exception(tag_editor)),
+        ("browser.delete_tag", Exception(tag_editor)),
+        ("browser.move_tag", Exception(tag_editor)),
+        ("browser.rename_tag", Exception(tag_editor)),
+        ("browser.reset_tag_order", Exception(tag_editor)),
+        ("browser.tag_items", Exception(tag_editor)),
+        ("browser.show_quick_tags", Exception(quick_tags)),
         // The Control Bar's transport (control-bar-transport R11).
         (
             "transport.play",
@@ -2000,6 +2020,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
+        ("browser.tags", Exception(Query)),
         ("mixer_view.state", Exception(Query)),
         ("transport.state", Exception(Query)),
         ("settings.state", Exception(Query)),

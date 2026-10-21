@@ -418,6 +418,8 @@ impl MainWindowUi {
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
+            // Where the Tag Editor opens, beside the content pane.
+            let mut tag_editor = None;
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
                 // Spec: macros R3. A rack's Map mode puts the mappings list
@@ -430,9 +432,17 @@ impl MainWindowUi {
                     let browser =
                         crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
                     self.browser.show(ui, shell, theme, browser, &mut events);
+                    tag_editor = shell.browser_view().tag_editor().then_some(browser);
                 }
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            // Spec: browser-tags R10. The Tag Editor opens beside the
+            // content pane (L-BRW-013), over the main view, so it is drawn
+            // after it.
+            if let Some(browser) = tag_editor {
+                let rect = crate::layout::tag_editor_rect(browser);
+                self.browser.tag_editor(ui, shell, theme, rect, &mut events);
+            }
             // Files dragged from the browser, or from Finder or Explorer,
             // land in the Arrangement (WP-1.10).
             // The zone editor, which sits over the foot of the Arrangement,

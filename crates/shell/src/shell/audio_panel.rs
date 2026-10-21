@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use bl_media::ContentHash;
-use bl_model::{ClipData, ClipId, Command};
+use bl_model::{AudioData, ClipData, ClipId, Command};
 use bl_shell_spec::audio_panel::{EditSampleArgs, EditedSample, ReplaceSampleArgs, ReplacedSample};
 use serde_json::Value;
 
@@ -161,22 +161,32 @@ impl Shell {
         clip: ClipId,
         media: ContentHash,
     ) -> Result<(), ShellError> {
-        let failed = |message: String| ShellError::Failed {
-            command: id.to_owned(),
-            message,
-        };
+        let next = self.replaced_audio(id, clip, media)?;
+        self.apply_replaced(id, &[(clip, next)])
+    }
+
+    /// The clip's data with `media` in place of its file: it keeps its gain
+    /// and pitch, and its warp markers only if the new file is exactly as
+    /// long as the old one; otherwise it takes the settings a new clip of
+    /// the file gets (warping R27).
+    fn replaced_audio(
+        &self,
+        id: &str,
+        clip: ClipId,
+        media: ContentHash,
+    ) -> Result<AudioData, ShellError> {
         let Some(ClipData::Audio(audio)) = self.editor.document().clip(clip).map(|c| &c.data)
         else {
-            return Err(failed("the clip isn't an audio clip".to_owned()));
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: "the clip isn't an audio clip".to_owned(),
+            });
         };
         let audio = audio.clone();
         let mut next = audio.clone();
         next.media = bl_model::ContentHash(*media.as_bytes());
-        // R27: the warp markers are kept only when the new file is exactly
-        // as long as the old one; otherwise the clip takes the settings a new
-        // clip of the file gets.
         if !self.same_length(audio.media, next.media) {
-            next = bl_model::AudioData {
+            next = AudioData {
                 warp: false,
                 warp_markers: Vec::new(),
                 tempo: None,
@@ -184,11 +194,23 @@ impl Shell {
                 ..next.in_seconds().into_owned()
             };
         }
+        Ok(next)
+    }
+
+    /// Gives the clips their replaced data in one undo step: R16 reaches
+    /// every clip that played the file at once.
+    fn apply_replaced(
+        &mut self,
+        id: &str,
+        replaced: &[(ClipId, AudioData)],
+    ) -> Result<(), ShellError> {
         crate::arrangement::editing::transaction(&mut self.editor, "Replace Sample", |editor| {
-            editor.apply(Command::SetClipData {
-                clip,
-                data: ClipData::Audio(next),
-            })?;
+            for (clip, data) in replaced {
+                editor.apply(Command::SetClipData {
+                    clip: *clip,
+                    data: ClipData::Audio(data.clone()),
+                })?;
+            }
             Ok(())
         })
         .map(|_| ())
@@ -226,7 +248,8 @@ impl Shell {
 
     /// Looks at the files that were opened in the external editor, and
     /// replaces the media of every clip that played one of them when its
-    /// content has changed (R16). Each change is one undo step.
+    /// content has changed (R16): the clips of one file change together, in
+    /// one undo step.
     pub fn check_edited_samples(&mut self) {
         if self.editing.is_empty() {
             return;
@@ -246,8 +269,19 @@ impl Shell {
                 done.push(editing);
                 continue;
             };
-            for clip in self.clips_of_media(editing.hash) {
-                let _ = self.replace_media("clip.edit_sample", clip, media);
+            // R16: every clip in the set that played the old file plays the
+            // new one, in one undo step.
+            let replaced: Vec<(ClipId, AudioData)> = self
+                .clips_of_media(editing.hash)
+                .into_iter()
+                .filter_map(|clip| {
+                    self.replaced_audio("clip.edit_sample", clip, media)
+                        .ok()
+                        .map(|data| (clip, data))
+                })
+                .collect();
+            if !replaced.is_empty() {
+                let _ = self.apply_replaced("clip.edit_sample", &replaced);
             }
         }
         self.editing = done;

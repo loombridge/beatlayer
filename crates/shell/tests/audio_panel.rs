@@ -115,6 +115,18 @@ fn audio(shell: &Shell, clip: ClipId) -> bl_model::AudioData {
     }
 }
 
+/// The clips of the set that play `media`.
+fn clips_of(shell: &Shell, media: bl_model::ContentHash) -> Vec<ClipId> {
+    shell
+        .editor()
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips().chain(track.slots().map(|(_, clip)| clip)))
+        .filter(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.media == media))
+        .map(|clip| clip.id)
+        .collect()
+}
+
 /// Replacing a clip's file keeps its gain, and its warp markers only when
 /// the new file is exactly as long as the old one (R18, warping R27).
 #[test]
@@ -178,10 +190,39 @@ fn replacing_the_sample_keeps_the_gain_and_the_markers_of_one_length() {
 fn an_edited_file_reaches_every_clip_of_it_in_one_step() {
     let scratch = Scratch::new("edited");
     let (mut shell, clip, path) = shell_with(&scratch);
+    // A second clip of the same file: the edit reaches every clip of it.
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.clips().any(|other| other.id == clip))
+        .expect("the clip is on a track")
+        .id();
     shell
-        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .run(
+            "browser.add_to_arrangement",
+            json!({
+                "paths": [path.display().to_string()],
+                "track": track,
+                "at": Ticks::WHOLE.get() * 8,
+            }),
+        )
         .unwrap();
-    let markers = audio(&shell, clip).warp_markers.len();
+    let clips = clips_of(&shell, audio(&shell, clip).media);
+    assert_eq!(clips.len(), 2, "two clips play the file");
+    for other in &clips {
+        shell
+            .run("clip.set_warp", json!({ "clip": other, "warp": true }))
+            .unwrap();
+    }
+    let markers: Vec<usize> = clips
+        .iter()
+        .map(|other| audio(&shell, *other).warp_markers.len())
+        .collect();
+    assert!(
+        markers.iter().all(|count| *count > 0),
+        "the clips are warped"
+    );
     shell
         .run(
             "settings.set_sample_editor",
@@ -201,13 +242,15 @@ fn an_edited_file_reaches_every_clip_of_it_in_one_step() {
     wav(&path, 2, 880.0);
     let before = shell.editor().undo_history().len();
     shell.check_edited_samples();
-    let after = audio(&shell, clip);
-    assert_ne!(after.media, media, "the clip plays the edited file");
-    assert_eq!(
-        after.warp_markers.len(),
-        markers,
-        "the warp markers are kept at the same length"
-    );
+    for (index, other) in clips.iter().enumerate() {
+        let after = audio(&shell, *other);
+        assert_ne!(after.media, media, "the clip plays the edited file");
+        assert_eq!(
+            after.warp_markers.len(),
+            markers[index],
+            "the warp markers are kept at the same length"
+        );
+    }
     assert_eq!(
         shell.editor().undo_history().len(),
         before + 1,

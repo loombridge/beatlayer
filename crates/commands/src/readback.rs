@@ -201,7 +201,23 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.quantize_audio", query(Clip, "data.audio.warp_markers")),
     ("clip.replace_sample", query(Clip, "data.audio.media")),
     ("clip.rename", query(Clip, "name")),
-    ("clip.reset_transients", read("clip.transients", "transients")),
+    (
+        "file_manager.delete_unused",
+        nothing("moves files outside the set to the trash; the set doesn't change"),
+    ),
+    ("file_manager.edit_file", nothing(FILE)),
+    (
+        "file_manager.hot_swap",
+        nothing("arms the browser to replace a file; the set doesn't change"),
+    ),
+    ("file_manager.replace_file", query(Clip, "data.audio.media")),
+    (
+        "file_manager.state",
+        nothing(
+            "a query of its own: it reads the File Manager, and is `external` for the files it \
+             lists",
+        ),
+    ),    ("clip.reset_transients", read("clip.transients", "transients")),
     ("clip.save_default", read("clip.defaults", "defaults")),
     ("clip.slice_to_midi_track", query(Song, "tracks")),
     ("clip.crop", query(Clip, "data")),
@@ -465,11 +481,13 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
     ("set.new", query(Song, "set.name")),
     ("set.open", query(Song, "set.path")),
+    ("set.open_backup", query(Song, "set.unsaved_changes")),
     ("set.recover", query(Song, "set.path")),
     ("set.relink_missing", nothing("finds files outside the set; the clips that use them read their media")),
     ("set.save", query(Song, "set.unsaved_changes")),
     ("set.save_as", query(Song, "set.path")),
     ("set.save_as_default", nothing(FILE)),
+    ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
     ("settings.set_continuous_save", nothing(CONTINUOUS)),

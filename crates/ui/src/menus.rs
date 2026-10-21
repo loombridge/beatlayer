@@ -310,9 +310,22 @@ fn items(
             continue;
         }
         if item.action == Action::Submenu {
+            let dynamic = shell.menu_items(item.row);
             ui.add_enabled_ui(shell.can_open_submenu(item.row), |ui| {
                 ui.menu_button(item.label, |ui| {
                     items(ui, &item.items, shell, keymap, platform, events);
+                    // The rows the shell fills in now (WP-6.63: the
+                    // backups in File ▸ Open Beatlayer Set Backups).
+                    for entry in dynamic {
+                        let response = ui.add_enabled(true, egui::Button::new(&entry.label));
+                        register_item(ui.ctx(), &response);
+                        if response.clicked() {
+                            let args: Value =
+                                serde_json::from_str(&entry.args).unwrap_or(Value::Null);
+                            events.push(UiEvent::Invoke(Invocation::new(entry.id, args)));
+                            ui.close();
+                        }
+                    }
                 });
             });
             continue;

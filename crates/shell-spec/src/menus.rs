@@ -30,6 +30,7 @@ use crate::commands::{
     VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
+use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
@@ -142,6 +143,22 @@ pub struct MenuItem {
     pub items: Vec<MenuItem>,
 }
 
+/// The rows whose items the shell fills in now (WP-6.63): the backups in
+/// File ▸ Open Beatlayer Set Backups, which change as the set is saved.
+pub const DYNAMIC_ROWS: &[&str] = &["M-FILE-008"];
+
+/// A menu item the shell fills in now (WP-6.63): the backups in File ▸ Open
+/// Beatlayer Set Backups, which change as the set is saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DynamicItem {
+    /// The item's label.
+    pub label: String,
+    /// The command it runs.
+    pub id: &'static str,
+    /// The arguments it runs with, as JSON.
+    pub args: String,
+}
+
 impl MenuItem {
     /// The command this item runs directly, if it does.
     #[must_use]
@@ -246,12 +263,12 @@ const FILE: &[Row] = &[
         Cmd(BROWSER_ADD_FOLDER),
     ),
     SEPARATOR,
-    ("M-FILE-007", "Manage Files", Pending(None)),
-    ("M-FILE-008", "Open Beatlayer Set Backups", Pending(None)),
+    ("M-FILE-007", "Manage Files", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
+    ("M-FILE-008", "Open Beatlayer Set Backups", Submenu),
     SEPARATOR,
     ("M-FILE-009", "Save Beatlayer Set", Cmd(SET_SAVE)),
     ("M-FILE-010", "Save Beatlayer Set As...", Cmd(SET_SAVE_AS)),
-    ("M-FILE-011", "Save a Copy...", Pending(None)),
+    ("M-FILE-011", "Save a Copy...", Cmd(SET_SAVE_COPY)),
     ("M-FILE-012", "Collect All and Save", Cmd(SET_COLLECT_ALL)),
     (
         "M-FILE-013",
@@ -521,7 +538,7 @@ const VIEW: &[Row] = &[
         "Pack Overview",
         Omitted("Ableton's pack service (D21)"),
     ),
-    ("M-VIEW-007", "File Manager", Pending(None)),
+    ("M-VIEW-007", "File Manager", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
     ("M-VIEW-008", "Undo History", Key(&["S-VIEW-021"])),
     (D24, "Assistant", Cmd(VIEW_TOGGLE_ASSISTANT)),
     SEPARATOR,

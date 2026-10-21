@@ -38,6 +38,8 @@
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
+//! - [`file_manager`]: the File Manager's commands (WP-6.63): showing it,
+//!   what it lists, replacing a file, and the set's backups and copies.
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -72,6 +74,7 @@ pub mod context_menus;
 pub mod devices;
 pub mod editing;
 pub mod export;
+pub mod file_manager;
 pub mod freeze;
 pub mod menus;
 pub mod midi_files;
@@ -112,6 +115,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     mixer_view::register(registry)?;
     browser::register(registry)?;
     export::register(registry)?;
+    file_manager::register(registry)?;
     midi_files::register(registry)?;
     midi_io::register(registry)?;
     devices::register(registry)?;

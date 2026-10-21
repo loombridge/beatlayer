@@ -762,6 +762,27 @@ impl BrowserUi {
 
         if item.kind == ItemKind::Folder {
             drop_chains(ui, theme, rect, &item.path, events);
+            // Spec: file-management R10, C-BROWSER-014. A project folder's
+            // context menu has Manage Project, which shows the File
+            // Manager at that project.
+            if shell.is_project_folder(Path::new(&item.path)) {
+                response.context_menu(|ui| {
+                    let button = ui.button("Manage Project");
+                    crate::menus::register_item(ui.ctx(), &button);
+                    if button.clicked() {
+                        invoke(
+                            events,
+                            "view.toggle_file_manager",
+                            json!({
+                                "view": "project",
+                                "project": item.path,
+                                "open": true,
+                            }),
+                        );
+                        ui.close();
+                    }
+                });
+            }
         }
         if response.double_clicked() {
             match item.kind {

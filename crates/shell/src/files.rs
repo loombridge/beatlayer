@@ -22,6 +22,7 @@ use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
     SetInfo, is_set,
 };
+use bl_shell_spec::file_manager::ExternalGroup;
 use serde_json::json;
 
 /// Reads and writes set files, and remembers the open set's file between
@@ -67,6 +68,19 @@ pub trait SetStore {
 
     /// Forgets the open set's file, as a new set has none.
     fn close(&mut self);
+
+    /// Reads the set at `path` into an editor with an empty undo history,
+    /// without making it the open set: the File Manager opens a backup as
+    /// the set, which keeps its own file (WP-6.63, R18). A store that
+    /// keeps no files can't read one.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why the set couldn't be read.
+    fn read(&mut self, path: &Path) -> Result<Editor, String> {
+        let _ = path;
+        Err("this set store can't read a set".to_owned())
+    }
 
     /// Records a file the set's clips play (WP-1.10), by its content hash,
     /// its path on disk, and its size, so the next save lists it in the
@@ -175,6 +189,31 @@ pub trait SetStore {
     /// A message saying why a copy couldn't be made.
     fn collect(&mut self) -> Result<usize, String> {
         Ok(0)
+    }
+
+    /// Copies the files the open set uses that live outside its project
+    /// folder and are in the groups given, into the project's
+    /// `Samples/Imported` folder, re-pointing the media table at the copies
+    /// (WP-6.63, Collect All and Save, R15). The User Library's path says
+    /// which files are in it, so they can be left alone. Returns how many
+    /// files were copied. A store that keeps no media table copies nothing.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why a copy couldn't be made.
+    fn collect_groups(
+        &mut self,
+        groups: &[ExternalGroup],
+        library: Option<&Path>,
+    ) -> Result<usize, String> {
+        let _ = (groups, library);
+        self.collect()
+    }
+
+    /// Drops a file from the open set's media table, so the next save
+    /// doesn't list it (WP-6.63: a replaced file isn't used any more).
+    fn forget_media(&mut self, hash: ContentHash) {
+        let _ = hash;
     }
 
     /// Re-points the open set's media table at the files at `found`, by
@@ -295,6 +334,18 @@ impl SetStore for ProjectFiles {
         }
     }
 
+    fn read(&mut self, path: &Path) -> Result<Editor, String> {
+        let (set, mut project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        if set.info().is_some_and(SetInfo::before_relative_modulation) {
+            bl_devices::relative_clip_envelopes(&mut project.document);
+        }
+        let editor = project.editor();
+        // The set's song is the backup's now, so its media table is the
+        // backup's.
+        self.media = project.media;
+        Ok(editor)
+    }
+
     fn close(&mut self) {
         self.set = None;
         self.media = Media::new();
@@ -409,8 +460,24 @@ impl SetStore for ProjectFiles {
     }
 
     fn collect(&mut self) -> Result<usize, String> {
-        // Spec: file-management R4. The set's external files are copied
-        // into `Samples/Imported` and its media table re-pointed at them.
+        self.collect_groups(
+            &[
+                ExternalGroup::OtherProject,
+                ExternalGroup::UserLibrary,
+                ExternalGroup::Elsewhere,
+            ],
+            None,
+        )
+    }
+
+    fn collect_groups(
+        &mut self,
+        groups: &[ExternalGroup],
+        library: Option<&Path>,
+    ) -> Result<usize, String> {
+        // Spec: file-management R4, R15. The set's external files are
+        // copied into `Samples/Imported` and its media table re-pointed at
+        // them.
         let Some(set) = self.set.clone() else {
             return Ok(0);
         };
@@ -433,6 +500,9 @@ impl SetStore for ProjectFiles {
                 continue;
             };
             if !source.is_file() {
+                continue;
+            }
+            if !groups.contains(&external_group(&source, library)) {
                 continue;
             }
             std::fs::create_dir_all(&imported)
@@ -468,6 +538,11 @@ impl SetStore for ProjectFiles {
         self.added.retain(|hash, _| media.get(hash).is_none());
         self.media = media;
         Ok(copied)
+    }
+
+    fn forget_media(&mut self, hash: ContentHash) {
+        self.media.remove(&hash);
+        self.added.remove(&hash);
     }
 
     fn relink(&mut self, found: &[(ContentHash, PathBuf)]) {
@@ -609,6 +684,27 @@ impl ProjectFiles {
         }
         warnings
     }
+}
+
+/// Where a file outside the project lives (file-management R15): the group
+/// the External Files section lists it in.
+pub fn external_group(path: &Path, library: Option<&Path>) -> ExternalGroup {
+    if library.is_some_and(|library| path.starts_with(library)) {
+        return ExternalGroup::UserLibrary;
+    }
+    // The path as the disk has it, so a file outside the project isn't
+    // taken for one inside it.
+    let path = lexical(path);
+    // Another project folder: one with a set file in it.
+    for folder in path.ancestors().skip(1) {
+        if ProjectFolder::new(folder)
+            .sets()
+            .is_ok_and(|sets| !sets.is_empty())
+        {
+            return ExternalGroup::OtherProject;
+        }
+    }
+    ExternalGroup::Elsewhere
 }
 
 /// Where Save Set As puts a set: see [`place_set`].
@@ -807,7 +903,7 @@ fn repoint_media(media: &mut Media, from: &Path, to: &Path) -> Option<String> {
 
 /// `path` with `.` dropped and each `..` taking off the name before it,
 /// from the path alone, as media paths are worked out.
-fn lexical(path: &Path) -> PathBuf {
+pub(crate) fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {

@@ -383,6 +383,88 @@ impl MediaStore {
         Ok(self.relink_sizes(&wanted, folders))
     }
 
+    /// Looks for the files holding the media whose file is missing or
+    /// changed, searching the given folders and their subfolders, and
+    /// returns every candidate found for each of them (file-management R14).
+    /// A file with one candidate is relinked to it; a file with several
+    /// keeps its row, and the person chooses.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a read error while checking an entry's current file.
+    pub fn relink_candidates(
+        &self,
+        folders: &[impl AsRef<Path>],
+    ) -> Result<Vec<(ContentHash, Vec<PathBuf>)>, MediaError> {
+        let hashes: Vec<ContentHash> = self.read().keys().copied().collect();
+        let mut wanted: HashMap<u64, Vec<ContentHash>> = HashMap::new();
+        for hash in hashes {
+            if self.check(hash)? != MediaStatus::Available
+                && let Some(entry) = self.entry(hash)
+            {
+                wanted.entry(entry.size).or_default().push(hash);
+            }
+        }
+        Ok(self.candidates(&wanted, folders))
+    }
+
+    /// Walks the folders, hashing files whose length is wanted, and returns
+    /// every file found with each wanted content, in the order the folders
+    /// are searched.
+    fn candidates(
+        &self,
+        wanted: &HashMap<u64, Vec<ContentHash>>,
+        folders: &[impl AsRef<Path>],
+    ) -> Vec<(ContentHash, Vec<PathBuf>)> {
+        let mut found: HashMap<ContentHash, Vec<PathBuf>> = HashMap::new();
+        let mut stack: Vec<PathBuf> = folders.iter().map(|f| f.as_ref().to_owned()).collect();
+        stack.reverse();
+        while let Some(folder) = stack.pop() {
+            let Ok(listing) = fs::read_dir(&folder) else {
+                continue;
+            };
+            let mut children: Vec<_> = listing.filter_map(Result::ok).collect();
+            children.sort_by_key(fs::DirEntry::file_name);
+            let mut subfolders = Vec::new();
+            for child in children {
+                // Symbolic links aren't followed, so a link loop can't trap
+                // the search.
+                let Ok(kind) = child.file_type() else {
+                    continue;
+                };
+                if kind.is_dir() {
+                    subfolders.push(child.path());
+                    continue;
+                }
+                if !kind.is_file() {
+                    continue;
+                }
+                let Ok(metadata) = child.metadata() else {
+                    continue;
+                };
+                let Some(candidates) = wanted.get(&metadata.len()) else {
+                    continue;
+                };
+                let path = child.path();
+                let Ok(hash) = ContentHash::of_file(&path) else {
+                    continue;
+                };
+                if !candidates.contains(&hash) {
+                    continue;
+                }
+                let paths = found.entry(hash).or_default();
+                if paths.contains(&path) {
+                    continue;
+                }
+                paths.push(path);
+            }
+            stack.extend(subfolders.into_iter().rev());
+        }
+        let mut out: Vec<(ContentHash, Vec<PathBuf>)> = found.into_iter().collect();
+        out.sort_by_key(|(hash, _)| *hash);
+        out
+    }
+
     /// Walks the folders, hashing files whose length is wanted, and points
     /// each wanted hash at the first file found with that content.
     fn relink_sizes(
@@ -439,7 +521,7 @@ impl MediaStore {
     }
 
     /// Points an entry at a file known to hold its content.
-    fn relocate(&self, hash: ContentHash, path: &Path) {
+    pub fn relocate(&self, hash: ContentHash, path: &Path) {
         let fingerprint = Fingerprint::of(path).ok();
         if let Some(record) = self.write().get_mut(&hash) {
             record.entry.path = absolute(path).unwrap_or_else(|_| path.to_owned());

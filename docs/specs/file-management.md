@@ -1,6 +1,6 @@
 # Templates and file management
 
-- **Status:** partial (R1 to R6 each have a passing test; R7 to R9 are WP-6.34's and R10 to R21 WP-6.63's)
+- **Status:** partial (R1 to R6 and R10 to R21 each have a passing test; R7 to R9 are WP-6.34's)
 - **Work packages:** WP-2.25 (R1 to R6); WP-6.34 (Collect Files on Export, R7 to R9); WP-6.63 (the File Manager, Open Beatlayer Set Backups and Save a Copy..., R10 to R21). The save history, which lists a set's backups too, is [crash recovery](crash-recovery.md)'s (WP-6.39); the list of a set's plug-ins, which opens in the File Manager's place, is [the plug-in list](plugin-list.md)'s (WP-6.41); Create Pack, in the Manage Project view, is [set exchange](set-exchange.md)'s (WP-6.35b)
 - **Parity-matrix row:** Files and export: Sets, templates, Collect All and Save, File Manager (missing files); Clip, device preset, and rack preset files (the copying of a clip's files)
 - **Checked against:** the Live 12 reference manual (online edition), read on 14 October 2026, and for R7 to R21 on 20 October 2026; the Live 12 release notes, 12.2; the UI parity reference's rows L-SET-016, L-OTH-002, M-FILE-007, M-FILE-008, M-FILE-011, M-VIEW-007, C-BROWSER-014 and I-DROP-012
@@ -37,7 +37,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 - **R3.** `set.save_as_template` saves the open set as a template in the User Library's `Templates` folder, making that folder the first time. `name` names the template, without the `.blset` extension; left out it takes the open set's name. As in R2 the open set is unchanged. A template is an ordinary set file: it can be opened, or set as the default set with R2. (S1)
 - **R4.** `set.collect_all_and_save` copies every media file the set uses that lives outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, so the set no longer depends on files elsewhere. A name already taken in `Samples/Imported` gets ` 2`, ` 3`, and so on before its extension, so nothing is overwritten. It fails if the set has never been saved, so it has no project folder to collect into. The result's `files` is how many files were copied. (S2)
 - **R5.** The browser's Templates label lists the set files in the User Library's `Templates` folder (browser R2); with no User Library it says so. (S1)
-- **R6.** Files the set uses that are missing or changed are found again by their content (audio-import R10): Beatlayer searches the set's project folder, the User Library, the folders the files were last in, and any folders a call gives, each with its subfolders; it hashes only files of the recorded length and relinks each missing file to the first match, whatever its name. This runs by itself when a set is opened, and on demand as `set.relink_missing`. The set's media table is re-pointed at what was found, so the next save keeps the new paths; the Status Bar says how many were relinked. The result's `files` is how many were relinked. (S3, S4)
+- **R6.** Files the set uses that are missing or changed are found again by their content (audio-import R10): Beatlayer searches the set's project folder, the User Library, the folders the files were last in, and any folders a call gives, each with its subfolders; it hashes only files of the recorded length. A file with one candidate is relinked to it, whatever its name; a file with several keeps its row, and the person chooses (R14). This runs by itself when a set is opened, and on demand as `set.relink_missing`. The set's media table is re-pointed at what was found, so the next save keeps the new paths; the Status Bar says how many were relinked. The result's `files` is how many were relinked. (S3, S4)
 - **R7.** Settings ▸ Library (L-SET-016) has Collect Files on Export, a chooser of Always, the choice in a new install, Never and Ask, kept between launches (`settings.set_collect_files_on_export`, an edit to preferences read back in `settings.state`). It decides what happens to the audio files a clip, Session clips or tracks use when they're saved to the browser as a clip file or a set ([clip files](clip-files.md) R5, [set exchange](set-exchange.md) R14). Collect All and Save (R4) doesn't follow it, nor do presets: a rack preset carries its samples inside it ([racks](racks.md) R42). (S6, S8)
 - **R8.** Always copies every such file that isn't already in the saved file's project (R9); Never copies none, and the saved file names each file where it is, by its path relative to the saved file's own folder. Ask, when the item uses a file outside that project, asks with Copy, Don't Copy and Cancel: Copy does what Always does, Don't Copy what Never does, and Cancel saves nothing. The commands that save to the browser take `copy` to answer for the person; while the setting is Ask, one given no `copy` is refused, so an agent asks the person first. (S6)
 - **R9.** Copies go into the `Samples/Imported` folder of the project the saved file lands in: for a file saved into a project folder, one holding a set, or into a folder inside one, that project folder; for a new set, the project folder it's given ([set exchange](set-exchange.md) R13); for a file in the User Library, the User Library. A clip file saved into a folder that's in neither gets a `Samples/Imported` folder beside it (Beatlayer's own). A name already taken there gets " 2", " 3" and so on, as R4's copies do, and a file with the same content already there is used rather than copied again. The saved file names the copies by their paths relative to its own folder. (S6, S7; Beatlayer's own where S6 is silent)
@@ -60,7 +60,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 **Commands and access (WP-6.63)**
 
-- **R20.** Every action above is a registered command: `view.toggle_file_manager` (read) shows and hides the File Manager on a view; `file_manager.state` reports a view's sections and rows (external, as it lists files outside the project); `file_manager.replace_file` replaces or relinks a file (edit, or external when the new file is outside the project); `set.relink_missing` takes the Automatic Search's switches and folder and returns each file's candidates; `set.collect_all_and_save` takes the groups to collect; `file_manager.delete_unused` moves files to the trash (destructive); `set.backups` (read) lists the backups, `set.open_backup` opens one, refusing while the open set has unsaved changes as `set.open` does, and `set.save_copy` saves a copy (both external). Each reads back in `file_manager.state`, `set.backups`, the query tool's `song`, or its result. (S16)
+- **R20.** Every action above is a registered command: `view.toggle_file_manager` (read) shows and hides the File Manager on a view; `file_manager.state` reports a view's sections and rows (external, as it lists files outside the project); `file_manager.replace_file` replaces or relinks a file (edit, or external when the new file is outside the project); `file_manager.hot_swap` arms the browser to replace a file and `file_manager.edit_file` opens one in the external sample editor; `set.relink_missing` takes the Automatic Search's switches and folder and returns each file's candidates; `set.collect_all_and_save` takes the groups to collect, and the project to collect for; `file_manager.delete_unused` moves files to the trash (destructive); `set.backups` (read) lists the backups, `set.open_backup` opens one, refusing while the open set has unsaved changes as `set.open` does, and `set.save_copy` saves a copy (both external). Each reads back in `file_manager.state`, `set.backups`, the query tool's `song`, or its result. (S16)
 - **R21.** The File Manager builds only the rows on screen, and every part reaches assistive technology: its view buttons as a tab list, each section as a group with its name and count, each row as a list item naming its file, its location and what uses it, and the switches and buttons with their names and states. The keyboard moves through it as through the browser's list (browser R7, R17). (S16)
 
 ## Tests
@@ -76,21 +76,20 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 | R7 | to be written in WP-6.34 | |
 | R8 | to be written in WP-6.34 | |
 | R9 | to be written in WP-6.34 | |
-| R10 | to be written in WP-6.63 | |
-| R11 | to be written in WP-6.63 | |
-| R12 | to be written in WP-6.63 | |
-| R13 | to be written in WP-6.63 | |
-| R14 | to be written in WP-6.63 | |
-| R15 | to be written in WP-6.63 | |
-| R16 | to be written in WP-6.63 | |
-| R17 | to be written in WP-6.63 | |
-| R18 | to be written in WP-6.63 | |
-| R19 | to be written in WP-6.63 | |
-| R20 | to be written in WP-6.63 | |
-| R21 | to be written in WP-6.63 | |
+| R10 | `crates/shell/tests/file_manager.rs`, `the_file_manager_commands_are_registered_and_reach_the_agent_api`; `crates/ui/tests/file_manager.rs`, `the_file_manager_opens_in_the_detail_areas_place_from_each_entry_point` | unit, through `Shell::run` on real folders; UI script |
+| R11 | `crates/shell/tests/file_manager.rs`, `the_files_list_where_they_are`, `replacing_a_file_changes_every_clip_that_used_it_in_one_step` | unit, through `Shell::run` on real folders |
+| R12 | `crates/shell/tests/file_manager.rs`, `a_renamed_file_shows_in_the_status_bar_and_the_missing_files` | unit, through `Shell::run` on real folders |
+| R13 | `crates/shell/tests/file_manager.rs`, `a_missing_file_is_relinked_to_other_content_in_one_step` | unit, through `Shell::run` on real folders |
+| R14 | `crates/shell/tests/file_manager.rs`, `a_search_with_two_candidates_relinks_nothing_until_one_is_chosen` | unit, through `Shell::run` on real folders |
+| R15 | `crates/shell/tests/file_manager.rs`, `the_files_list_where_they_are`, `collect_and_save_copies_the_groups_that_are_switched_on` | unit, through `Shell::run` on real folders |
+| R16 | `crates/shell/tests/file_manager.rs`, `a_projects_collect_and_save_rewrites_its_sets_with_a_backup` | unit, through `Shell::run` on real folders |
+| R17 | `crates/shell/tests/file_manager.rs`, `an_unused_recording_is_listed_and_deleted_to_the_trash` | unit, through `Shell::run` on real folders |
+| R18 | `crates/shell/tests/file_manager.rs`, `three_saves_give_three_backups_and_opening_one_makes_it_the_set` | unit, through `Shell::run` on real folders |
+| R19 | `crates/shell/tests/file_manager.rs`, `save_a_copy_leaves_the_open_set_alone` | unit, through `Shell::run` on real folders |
+| R20 | `crates/shell/tests/file_manager.rs`, `the_file_manager_commands_are_registered_and_reach_the_agent_api` | unit |
+| R21 | `crates/ui/tests/file_manager.rs`, `accesskit_reaches_the_file_managers_tabs_sections_and_rows` | UI script |
 
 ## Not built yet
 
 - A default set that uses samples: R1 opens the saved default set's document, but its media table isn't loaded into the media store yet, so such a set's clips play silence until relinked.
-- Collect All's choice of locations to collect from: it isn't offered, and R4 collects every external file.
-- Choosing between several candidates for one missing file: it isn't offered, and R6 relinks the first match, taking the folders in the order R6 lists them.
+

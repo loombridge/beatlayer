@@ -38,10 +38,10 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
-    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, RelinkArgs,
-    SampleEditorArgs, SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
-    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
+    SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
+    TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
+    ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -68,6 +68,7 @@ use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
@@ -95,6 +96,7 @@ pub(crate) mod audio_editing;
 mod audio_panel;
 pub mod autosample;
 mod capture;
+mod file_manager;
 mod freeze;
 mod multisampler;
 mod processed_files;
@@ -105,6 +107,8 @@ mod session_recording;
 mod slice;
 mod stems;
 mod warping;
+
+use file_manager::FileManager;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -444,6 +448,10 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The File Manager (WP-6.63): whether it shows, which files it shows,
+    /// and the Automatic Search's switches. View state, never part of the
+    /// set, like the browser's.
+    file_manager: FileManager,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -925,6 +933,7 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            file_manager: FileManager::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
@@ -4033,18 +4042,42 @@ impl Shell {
             .map(|library| library.join("Templates"))
     }
 
+    /// The Automatic Search's switches as they are unless asked otherwise
+    /// (file-management R14): the set's project folder and the User
+    /// Library are searched.
+    fn default_search() -> bl_shell_spec::file_manager::Search {
+        bl_shell_spec::file_manager::Search {
+            folder: None,
+            project: true,
+            library: true,
+            candidates: Vec::new(),
+        }
+    }
+
     /// Searches for the open set's missing or changed files and relinks them
-    /// (WP-2.25, file-management R6): the set's project folder, the User
-    /// Library, the folders the files were last in, and `extra`, each with
-    /// its subfolders. Returns how many were relinked, and re-points the
-    /// set's media table at them.
-    fn relink_missing(&mut self, extra: &[PathBuf]) -> usize {
+    /// (WP-2.25, file-management R6 and R14): the places the search is
+    /// switched on for, each with its subfolders, and the folders the files
+    /// were last in. A file with one candidate is relinked to it; a file
+    /// with several keeps its row, and the person chooses. Returns how many
+    /// were relinked, and the candidates the others have.
+    fn relink_missing(
+        &mut self,
+        extra: &[PathBuf],
+        search: &bl_shell_spec::file_manager::Search,
+    ) -> (usize, Vec<bl_shell_spec::file_manager::Candidate>) {
         let mut folders: Vec<PathBuf> = Vec::new();
-        if let Some(folder) = self.set_path.as_deref().and_then(Path::parent) {
+        if search.project
+            && let Some(folder) = self.set_path.as_deref().and_then(Path::parent)
+        {
             folders.push(folder.to_path_buf());
         }
-        if let Some(library) = self.browser_view.user_library() {
+        if search.library
+            && let Some(library) = self.browser_view.user_library()
+        {
             folders.push(library.to_path_buf());
+        }
+        if let Some(folder) = &search.folder {
+            folders.push(PathBuf::from(folder));
         }
         for entry in self.media.entries() {
             if let Some(folder) = entry.path.parent() {
@@ -4055,13 +4088,33 @@ impl Shell {
         // Keep each folder once, in the order the search should try them.
         let mut seen = std::collections::HashSet::new();
         folders.retain(|folder| seen.insert(folder.clone()));
-        let Ok(found) = self.media.relink_missing(&folders) else {
-            return 0;
+        let Ok(candidates) = self.media.relink_candidates(&folders) else {
+            return (0, Vec::new());
         };
-        let found: Vec<(bl_model::ContentHash, PathBuf)> = found
-            .into_iter()
-            .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
-            .collect();
+        let mut found = Vec::new();
+        let mut several = Vec::new();
+        for (hash, paths) in candidates {
+            if paths.len() == 1 {
+                self.media.relocate(hash, &paths[0]);
+                found.push((bl_model::ContentHash(*hash.as_bytes()), paths[0].clone()));
+            } else {
+                several.push(bl_shell_spec::file_manager::Candidate {
+                    hash: hash
+                        .as_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                    name: paths
+                        .first()
+                        .and_then(|path| path.file_name())
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                    paths: paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                });
+            }
+        }
         self.store.relink(&found);
         // A relinked file's failed analysis is made again (R20).
         for (hash, _) in &found {
@@ -4072,7 +4125,7 @@ impl Shell {
             self.analysed.remove(&hash);
         }
         self.start_analyses();
-        found.len()
+        (found.len(), several)
     }
 
     /// Runs a browser command and carries out what it asks of the rest of
@@ -7169,6 +7222,11 @@ impl Shell {
             return self.run_tracks(id, args);
         }
         if browser_ids::handles(id) {
+            // Spec: file-management R11, R14. A file armed for hot-swapping
+            // is replaced by the file the browser has chosen.
+            if id == browser_ids::LOAD_SELECTED && self.file_manager.hot_swap.is_some() {
+                return self.hot_swap_selected(id);
+            }
             return self.run_browser(id, args);
         }
         if perception_ids::handles(id) {
@@ -7223,6 +7281,13 @@ impl Shell {
         }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if file_manager_ids::handles(id) {
+            // Spec: file-management R10 to R17. The File Manager's own
+            // commands.
+            let result = self.run_file_manager(id, args);
+            self.touch();
+            return result;
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -7673,9 +7738,12 @@ impl Shell {
                     self.media
                         .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
                 }
-                // Spec: file-management R6. Files that moved are found
-                // again by content, so the set opens able to play them.
-                let relinked = self.relink_missing(&[]);
+                // Spec: file-management R6, R14. Files that moved are found
+                // again by content, so the set opens able to play them: a
+                // file with one candidate is relinked to it, and a file with
+                // several waits for the person to choose.
+                let (relinked, candidates) = self.relink_missing(&[], &Self::default_search());
+                self.file_manager.search.candidates = candidates;
                 if relinked > 0 {
                     self.message = Some(Message {
                         text: format!(
@@ -7824,7 +7892,30 @@ impl Shell {
                 }))
             }
             ids::SET_COLLECT_ALL => {
-                Self::args::<NoArgs>(id, args)?;
+                // Spec: file-management R4, R15, R16. The groups to collect
+                // from, and the project to collect for.
+                let crate::commands::CollectArgs { groups, project } = Self::args(id, args)?;
+                let library = self.browser_view.user_library();
+                let groups = if groups.is_empty() {
+                    vec![
+                        file_manager_ids::ExternalGroup::OtherProject,
+                        file_manager_ids::ExternalGroup::UserLibrary,
+                        file_manager_ids::ExternalGroup::Elsewhere,
+                    ]
+                } else {
+                    groups
+                };
+                if let Some(project) = project {
+                    let folder = PathBuf::from(project);
+                    let files = self
+                        .collect_project(&folder, &groups, library)
+                        .map_err(failed)?;
+                    return Ok(to_value(&FileReport {
+                        path: Some(folder.to_string_lossy().into_owned()),
+                        files,
+                        candidates: Vec::new(),
+                    }));
+                }
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable(
                         "the set has never been saved; use `set.save_as` to give it a project \
@@ -7843,24 +7934,44 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
-                let files = self.store.collect().map_err(failed)?;
+                let files = self
+                    .store
+                    .collect_groups(&groups, library)
+                    .map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
                 Ok(to_value(&FileReport {
                     path: Some(path.to_string_lossy().into_owned()),
                     files,
+                    candidates: Vec::new(),
                 }))
             }
             ids::SET_RELINK_MISSING => {
-                let RelinkArgs { folders } = Self::args(id, args)?;
+                // Spec: file-management R14. The places the search is
+                // switched on for, and the folders it is given.
+                let crate::commands::RelinkArgs {
+                    folders,
+                    project,
+                    library,
+                    folder,
+                } = Self::args(id, args)?;
                 let extra: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
-                let files = self.relink_missing(&extra);
+                let search = bl_shell_spec::file_manager::Search {
+                    folder: folder.clone(),
+                    project: project.unwrap_or(true),
+                    library: library.unwrap_or(true),
+                    candidates: Vec::new(),
+                };
+                let (files, candidates) = self.relink_missing(&extra, &search);
+                self.file_manager.search = search.clone();
+                self.file_manager.search.candidates = candidates.clone();
                 Ok(to_value(&FileReport {
                     path: self
                         .set_path
                         .as_ref()
                         .map(|path| path.to_string_lossy().into_owned()),
                     files,
+                    candidates,
                 }))
             }
             ids::APP_QUIT => {

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-558 commands in 37 areas.
+568 commands in 38 areas.
 
 ## Permission classes
 
@@ -318,6 +318,11 @@ Each command has:
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
 | [`edit.undo`](#editundo) | Undo | `edit` | `Cmd+Z` | `Ctrl+Z` |
 | [`export.audio`](#exportaudio) | Export Audio | `external` |  |  |
+| [`file_manager.delete_unused`](#file_managerdelete_unused) | Delete Unused Files | `destructive` |  |  |
+| [`file_manager.edit_file`](#file_manageredit_file) | Edit File | `external` |  |  |
+| [`file_manager.hot_swap`](#file_managerhot_swap) | Hot-Swap File | `edit` |  |  |
+| [`file_manager.replace_file`](#file_managerreplace_file) | Replace File | `edit` |  |  |
+| [`file_manager.state`](#file_managerstate) | File Manager State | `external` |  |  |
 | [`focus.arrangement`](#focusarrangement) | Arrangement View | `read` | `Option+2` | `Alt+2` |
 | [`focus.browser`](#focusbrowser) | Browser | `read` | `Option+5` | `Alt+5` |
 | [`focus.control_bar`](#focuscontrol_bar) | Control Bar | `read` | `Option+0` | `Alt+0` |
@@ -488,18 +493,21 @@ Each command has:
 | [`session.stop_track`](#sessionstop_track) | Stop Track | `read` |  |  |
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | Toggle Follow Actions | `edit` | `Shift+Enter` | `Shift+Enter` |
 | [`session.triplet_quantization`](#sessiontriplet_quantization) | Triplet Launch Quantization | `read` | `Cmd+3` | `Ctrl+3` |
+| [`set.backups`](#setbackups) | Beatlayer Set Backups | `read` |  |  |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
+| [`set.open_backup`](#setopen_backup) | Open Beatlayer Set Backup | `external` |  |  |
 | [`set.recover`](#setrecover) | Recover Set | `destructive` |  |  |
 | [`set.relink_missing`](#setrelink_missing) | Relink Missing Files | `external` |  |  |
 | [`set.save`](#setsave) | Save Beatlayer Set | `destructive` | `Cmd+S` | `Ctrl+S` |
 | [`set.save_as`](#setsave_as) | Save Beatlayer Set As... | `external` | `Cmd+Shift+S` | `Ctrl+Shift+S` |
 | [`set.save_as_default`](#setsave_as_default) | Save Beatlayer Set As Default Set... | `destructive` |  |  |
 | [`set.save_as_template`](#setsave_as_template) | Save Beatlayer Set As Template... | `destructive` |  |  |
+| [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
@@ -582,6 +590,7 @@ Each command has:
 | [`view.toggle_assistant`](#viewtoggle_assistant) | Assistant | `read` |  |  |
 | [`view.toggle_browser`](#viewtoggle_browser) | Browser | `read` | `Cmd+Option+B`, `Cmd+Option+5`; `Cmd+Option+B` | `Ctrl+Alt+B`, `Ctrl+Alt+5`; `Ctrl+Alt+B` |
 | [`view.toggle_clip_view`](#viewtoggle_clip_view) | Clip View | `read` | `Cmd+Option+3` | `Ctrl+Alt+3` |
+| [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_session_arrangement`](#viewtoggle_session_arrangement) | Toggle Arrangement/Session View | `read` | `Tab` | `Tab` |
@@ -5813,6 +5822,85 @@ Arguments:
 
 Result: [`ExportResult`](#exportresult).
 
+### Area `file_manager`
+
+#### `file_manager.delete_unused`
+
+**Delete Unused Files**. Permission: `destructive`. Contexts: `global`.
+
+Moves the files at `paths`, which the Unused Files section lists, to the system's trash. Nothing is erased outright, but a file another project uses breaks that project, so the files are collected first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `paths` | array of string | yes | The files to move to the trash, by their paths. |
+
+Result: [`DeletedFiles`](#deletedfiles).
+
+#### `file_manager.edit_file`
+
+**Edit File**. Permission: `external`. Contexts: `global`.
+
+Opens the file the row with `hash` names in the external sample editor, as the row's Edit button does: the editor the File & Folder page's Sample Editor row names, or that page itself when it names none. The file's content is checked when Beatlayer comes to the front again: if it has changed, every clip of the set that played the old file plays the new one, in one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to edit, by its content hash, as the row shows it. |
+
+Result: [`EditedFile`](#editedfile).
+
+#### `file_manager.hot_swap`
+
+**Hot-Swap File**. Permission: `edit`. Contexts: `global`.
+
+Arms the browser to replace the file the row with `hash` names, as the row's Hot-Swap button does: the browser opens at the file's folder, and choosing a file there replaces the armed one, as `file_manager.replace_file` does. The browser stays armed, so another file can be chosen.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to replace, by its content hash, as the row shows it. |
+
+Result: [`ReplacedFile`](#replacedfile).
+
+#### `file_manager.replace_file`
+
+**Replace File**. Permission: `edit`. Contexts: `global`.
+
+Replaces the file the row with `hash` names with the file at `path`, as dropping a file from the browser on the row does: every clip and device that used the file uses the new one, in one undo step, each keeping its warp markers only if the new file is exactly as long as the old one. A missing file is relinked to the file given, whatever its content.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to replace, by its content hash, as the row shows it. |
+| `path` | string | yes | The file to use instead. |
+
+Result: [`ReplacedFile`](#replacedfile).
+
+#### `file_manager.state`
+
+**File Manager State**. Permission: `external`. Contexts: `global`.
+
+What the File Manager lists: the files the set uses with their locations and what uses them, the missing files, the files used from outside the project grouped by where they are, the files in the project that nothing uses, and the Automatic Search's switches with the candidates its last search found. It is `external` because it lists files outside the project.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`FileManagerState`](#filemanagerstate).
+
 ### Area `focus`
 
 #### `focus.arrangement`
@@ -8783,15 +8871,32 @@ Result: [`LaunchSettings`](#launchsettings).
 
 ### Area `set`
 
-#### `set.collect_all_and_save`
+#### `set.backups`
 
-**Collect All and Save**. Permission: `external`. Contexts: `global`.
+**Beatlayer Set Backups**. Permission: `read`. Contexts: `global`.
 
-Copies every file the open set uses that lives outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, as File ▸ Collect All and Save does in Live, so the set no longer depends on files elsewhere. Fails if the set has never been saved; use `set.save_as` to give it a project folder first. The result's `files` is how many files were copied.
+The open set's backups, in the project folder's `Backup` folder, newest first, each with the time it was made in local time. The list is empty when the set has no backups.
 
 Default keys: none.
 
 Arguments: none (send `{}`).
+
+Result: [`Backups`](#backups).
+
+#### `set.collect_all_and_save`
+
+**Collect All and Save**. Permission: `external`. Contexts: `global`.
+
+Copies the files the open set uses that live outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, as File ▸ Collect All and Save does in Live, so the set no longer depends on files elsewhere. `groups` chooses which places to collect from: "other-project", "user-library" and "elsewhere"; all of them when none are given. Fails if the set has never been saved; use `set.save_as` to give it a project folder first. The result's `files` is how many files were copied.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groups` | array of [`ExternalGroup`](#externalgroup) | no | The groups to collect from: "other-project", "user-library" or "elsewhere". All of them when none are given. |
+| `project` | string or null | no | The project folder to collect for, when it isn't the open set's: every set in it is rewritten, each keeping the version it replaces in its project's `Backup` folder (R16). |
 
 Result: [`FileReport`](#filereport).
 
@@ -8871,6 +8976,22 @@ Arguments:
 
 Result: [`SetResult`](#setresult).
 
+#### `set.open_backup`
+
+**Open Beatlayer Set Backup**. Permission: `external`. Contexts: `global`.
+
+Opens the backup at `path` as the set itself, as File ▸ Open Beatlayer Set Backups does: the set keeps its own file and name, its song is the backup's, and it opens unsaved with an empty undo history, so `set.save` makes the backup the set's current version. Refuses while the set has unsaved changes, as `set.open` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The backup to open, by its path. |
+
+Result: [`SetResult`](#setresult).
+
 #### `set.recover`
 
 **Recover Set**. Permission: `destructive`. Contexts: `global`.
@@ -8891,7 +9012,7 @@ Result: [`RecoveredSet`](#recoveredset).
 
 **Relink Missing Files**. Permission: `external`. Contexts: `global`.
 
-Searches for the files the open set uses that are missing or changed, and relinks each one to the first file found with the same content, as Live's automatic search does. The search covers the set's project folder, the User Library, the folders the files were last in, and any `folders` given, each with its subfolders. The result's `files` is how many files were relinked. It also runs by itself when a set is opened.
+Searches for the files the open set uses that are missing or changed, and relinks each one to the file found with the same content, as Live's automatic search does. The search covers the set's project folder, the User Library, the folders the files were last in, and any `folders` given, each with its subfolders; `project` and `library` switch the first two off, and `folder` names the folder the Automatic Search's Search Folder chooses. A file with one candidate is relinked to it; a file with several keeps its row, and the candidates are in the result's `candidates`, so the person chooses. The result's `files` is how many files were relinked. It also runs by itself when a set is opened.
 
 Default keys: none.
 
@@ -8899,7 +9020,10 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `folder` | string or null | no | The folder the Automatic Search's Search Folder names. |
 | `folders` | array of string | no | Folders to search, each with its subfolders, absolute or relative to the app's working directory. May be empty. |
+| `library` | boolean or null | no | Whether the User Library is searched. On unless asked otherwise. |
+| `project` | boolean or null | no | Whether the set's project folder is searched. On unless asked otherwise. |
 
 Result: [`FileReport`](#filereport).
 
@@ -8970,6 +9094,22 @@ Arguments:
 | `name` | string or null | no | The template's name, without the `.blset` extension; left out uses the open set's name. |
 
 Result: [`SetResult`](#setresult).
+
+#### `set.save_copy`
+
+**Save a Copy...**. Permission: `external`. Contexts: `global`.
+
+Saves a copy of the open set at `path`, as File ▸ Save a Copy... does: in the folder when it is a project folder, otherwise in a new "<name> Project" folder. The copy names the same media files. The open set keeps its file, its name, its undo history and whether it has unsaved changes.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where to save the copy, as a save dialog gives it: a folder and the set's name, such as `/Music/Tango.blset`. |
+
+Result: [`SavedCopy`](#savedcopy).
 
 ### Area `settings`
 
@@ -10311,6 +10451,24 @@ Arguments: none (send `{}`).
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.toggle_file_manager`
+
+**File Manager**. Permission: `read`. Contexts: `global`.
+
+Shows the File Manager in the detail area's place, or hides it, as File ▸ Manage Files and View ▸ File Manager do. `view` chooses which files it lists: "set" for the open set's, "project" for a project folder's, "user-library" for the User Library's. `project` names the project folder Manage Project works on, when it isn't the open set's. The File Manager's state is view state: it isn't saved in the set and it isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean or null | no | Whether it shows (`true`) or hides (`false`). Left out, it shows when it is hidden and hides when it shows. |
+| `project` | string or null | no | The project folder Manage Project shows, when it isn't the open set's. |
+| `view` | [`Scope`](#scope) or null | no | Which files the File Manager shows: "set", "project" or "user-library". Left out, it keeps the view it shows. |
+
+Result: [`FileManagerState`](#filemanagerstate).
+
 #### `view.toggle_info_view`
 
 **Info**. Permission: `read`. Contexts: `global`.
@@ -10624,6 +10782,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`file_manager.replace_file`](#file_managerreplace_file) | the query tool's `clip` | `data.audio.media` |
 | [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
@@ -10732,6 +10891,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
+| [`set.open_backup`](#setopen_backup) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
@@ -10817,12 +10977,17 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
+| [`file_manager.delete_unused`](#file_managerdelete_unused) | moves files outside the set to the trash; the set doesn't change |
+| [`file_manager.edit_file`](#file_manageredit_file) | writes a file outside the set; the set doesn't change |
+| [`file_manager.hot_swap`](#file_managerhot_swap) | arms the browser to replace a file; the set doesn't change |
+| [`file_manager.state`](#file_managerstate) | a query of its own: it reads the File Manager, and is `external` for the files it lists |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
 | [`set.relink_missing`](#setrelink_missing) | finds files outside the set; the clips that use them read their media |
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
 | [`set.save_as_template`](#setsave_as_template) | writes a file outside the set; the set doesn't change |
+| [`set.save_copy`](#setsave_copy) | writes a file outside the set; the set doesn't change |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | the app doesn't host the autosave service yet, so no read command reports Save Continuously; the command's own result does |
 
 ## Types
@@ -12507,6 +12672,77 @@ What `device.autosample_open` returns.
 
 </details>
 
+### `Backup`
+
+One of the open set's backups (R18).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the backup is. |
+| `name` | string | yes | Its name, with its time in brackets. |
+| `time` | string | yes | When it was made, in local time. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the open set's backups (R18).",
+  "properties": {
+    "name": {
+      "description": "Its name, with its time in brackets.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where the backup is.",
+      "type": "string"
+    },
+    "time": {
+      "description": "When it was made, in local time.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "time"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Backups`
+
+What `set.backups` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backups` | array of [`Backup`](#backup) | yes | The backups, newest first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.backups` returns.",
+  "properties": {
+    "backups": {
+      "description": "The backups, newest first.",
+      "items": {
+        "$ref": "#/$defs/Backup"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "backups"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BandResult`
 
 One octave band.
@@ -12846,6 +13082,49 @@ What the browser shows: most browser commands return it.
     "selected",
     "preview",
     "index"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Candidate`
+
+A file a missing file could be relinked to (R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The missing file's content hash. |
+| `name` | string | yes | The candidate's name. |
+| `paths` | array of string | yes | Where the candidates are. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file a missing file could be relinked to (R14).",
+  "properties": {
+    "hash": {
+      "description": "The missing file's content hash.",
+      "type": "string"
+    },
+    "name": {
+      "description": "The candidate's name.",
+      "type": "string"
+    },
+    "paths": {
+      "description": "Where the candidates are.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash",
+    "name",
+    "paths"
   ],
   "type": "object"
 }
@@ -15108,6 +15387,37 @@ One of:
 
 </details>
 
+### `DeletedFiles`
+
+What `file_manager.delete_unused` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of string | yes | The files that were moved to the trash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.delete_unused` returns.",
+  "properties": {
+    "files": {
+      "description": "The files that were moved to the trash.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Device`
 
 A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -17301,6 +17611,52 @@ What an edit did, and what's selected afterwards.
 
 </details>
 
+### `EditedFile`
+
+What `file_manager.edit_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file that was opened. |
+| `file` | string | yes | Its path. |
+| `editor` | string | yes | The editor it was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor. |
+| `opened` | boolean | yes | Whether the editor was found and started. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.edit_file` returns.",
+  "properties": {
+    "editor": {
+      "description": "The editor it was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor.",
+      "type": "string"
+    },
+    "file": {
+      "description": "Its path.",
+      "type": "string"
+    },
+    "hash": {
+      "description": "The file that was opened.",
+      "type": "string"
+    },
+    "opened": {
+      "description": "Whether the editor was found and started.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hash",
+    "file",
+    "editor",
+    "opened"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EditedSample`
 
 What `clip.edit_sample` returns.
@@ -17655,6 +18011,102 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 
 </details>
 
+### `ExternalFiles`
+
+A group of files outside the project (R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `group` | [`ExternalGroup`](#externalgroup) | yes | Where the group's files are. |
+| `count` | integer, at least 0 | yes | How many files the group has. |
+| `size` | integer, at least 0 | yes | How big they are together, in bytes. |
+| `files` | array of [`FileRow`](#filerow) | yes | The files themselves. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group of files outside the project (R15).",
+  "properties": {
+    "count": {
+      "description": "How many files the group has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "The files themselves.",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "group": {
+      "$ref": "#/$defs/ExternalGroup",
+      "description": "Where the group's files are."
+    },
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "size": {
+      "description": "How big they are together, in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "group",
+    "count",
+    "size",
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExternalGroup`
+
+Where a file outside the project lives (R15): the groups the External Files section lists.
+
+One of:
+
+- `"other-project"`: In another project folder.
+- `"user-library"`: In the User Library.
+- `"elsewhere"`: Somewhere else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a file outside the project lives (R15): the groups the External Files section lists.",
+  "oneOf": [
+    {
+      "const": "other-project",
+      "description": "In another project folder.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "In the User Library.",
+      "type": "string"
+    },
+    {
+      "const": "elsewhere",
+      "description": "Somewhere else.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ExternalPort`
 
 An external device's MIDI To: `none` (No Output), or `port` with the MIDI output port's `name` as the MIDI settings list it.
@@ -17886,6 +18338,113 @@ File & Folder's settings in `settings.state`.
 
 </details>
 
+### `FileManagerState`
+
+What the File Manager shows (R10 to R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the File Manager shows. |
+| `scope` | [`Scope`](#scope) | yes | Which files it shows. |
+| `sections` | array of [`FileSection`](#filesection) | yes | The sections on screen, in order (R21). |
+| `files` | array of [`FileRow`](#filerow) | yes | The files the set uses (R11). |
+| `missing` | array of [`FileRow`](#filerow) | yes | The files that are missing (R13). |
+| `external` | array of [`ExternalFiles`](#externalfiles) | yes | The files used from outside the project (R15). |
+| `unused` | array of [`UnusedFiles`](#unusedfiles) | yes | The files in the project that nothing uses (R17). |
+| `search` | [`Search`](#search) | yes | The Automatic Search (R14). |
+| `packing` | boolean | yes | Whether the Packing section shows (R16). |
+| `hot_swap` | string or null | no | The file armed for hot-swapping, by its content hash, when a row's Hot-Swap button armed it (R11). |
+| `project` | string or null | no | The project folder it works on, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the File Manager shows (R10 to R17).",
+  "properties": {
+    "external": {
+      "description": "The files used from outside the project (R15).",
+      "items": {
+        "$ref": "#/$defs/ExternalFiles"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The files the set uses (R11).",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "hot_swap": {
+      "description": "The file armed for hot-swapping, by its content hash, when a row's Hot-Swap button armed it (R11).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "missing": {
+      "description": "The files that are missing (R13).",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "open": {
+      "description": "Whether the File Manager shows.",
+      "type": "boolean"
+    },
+    "packing": {
+      "description": "Whether the Packing section shows (R16).",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "The project folder it works on, when it has one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope",
+      "description": "Which files it shows."
+    },
+    "search": {
+      "$ref": "#/$defs/Search",
+      "description": "The Automatic Search (R14)."
+    },
+    "sections": {
+      "description": "The sections on screen, in order (R21).",
+      "items": {
+        "$ref": "#/$defs/FileSection"
+      },
+      "type": "array"
+    },
+    "unused": {
+      "description": "The files in the project that nothing uses (R17).",
+      "items": {
+        "$ref": "#/$defs/UnusedFiles"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open",
+    "scope",
+    "sections",
+    "files",
+    "missing",
+    "external",
+    "unused",
+    "search",
+    "packing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileReport`
 
 What `set.collect_all_and_save` and `set.relink_missing` return.
@@ -17894,6 +18453,7 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
 |---|---|---|---|
 | `path` | string or null | yes | The set's file, if it has one. |
 | `files` | integer, at least 0 | yes | The number of files the command copied (Collect All and Save) or relinked (automatic search). |
+| `candidates` | array of [`Candidate`](#candidate) | no | The files the search found for each missing file, when there was more than one candidate (R14). |
 
 <details><summary>JSON Schema</summary>
 
@@ -17901,6 +18461,13 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
 {
   "description": "What `set.collect_all_and_save` and `set.relink_missing` return.",
   "properties": {
+    "candidates": {
+      "description": "The files the search found for each missing file, when there was more than one candidate (R14).",
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "type": "array"
+    },
     "files": {
       "description": "The number of files the command copied (Collect All and Save) or relinked (automatic search).",
       "format": "uint",
@@ -17918,6 +18485,105 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
   "required": [
     "path",
     "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileRow`
+
+A file the File Manager lists (R11).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file's content hash, which names it. |
+| `name` | string | yes | Its name. |
+| `path` | string | yes | Where it is, or where it was. |
+| `size` | integer, at least 0 | yes | Its length in bytes. |
+| `location` | [`Location`](#location) | yes | Where it is (R11). |
+| `used_by` | array of string | yes | The clips and devices that use it (R11). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file the File Manager lists (R11).",
+  "properties": {
+    "hash": {
+      "description": "The file's content hash, which names it.",
+      "type": "string"
+    },
+    "location": {
+      "$ref": "#/$defs/Location",
+      "description": "Where it is (R11)."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it is, or where it was.",
+      "type": "string"
+    },
+    "size": {
+      "description": "Its length in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "used_by": {
+      "description": "The clips and devices that use it (R11).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash",
+    "name",
+    "path",
+    "size",
+    "location",
+    "used_by"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileSection`
+
+A section of the File Manager (R21).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The section's name. |
+| `count` | integer, at least 0 | yes | How many rows it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the File Manager (R21).",
+  "properties": {
+    "count": {
+      "description": "How many rows it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The section's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "count"
   ],
   "type": "object"
 }
@@ -20715,6 +21381,49 @@ What `device.load_sample` returns.
     "name"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Location`
+
+Where a file is (R11).
+
+One of:
+
+- `"missing"`: The file isn't where it was, or holds other content now.
+- `"user-library"`: The file is in the User Library.
+- `"project"`: The file is in the project.
+- `"external"`: The file is somewhere else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a file is (R11).",
+  "oneOf": [
+    {
+      "const": "missing",
+      "description": "The file isn't where it was, or holds other content now.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "The file is in the User Library.",
+      "type": "string"
+    },
+    {
+      "const": "project",
+      "description": "The file is in the project.",
+      "type": "string"
+    },
+    {
+      "const": "external",
+      "description": "The file is somewhere else.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -25870,6 +26579,48 @@ One of:
 
 </details>
 
+### `ReplacedFile`
+
+What `file_manager.replace_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file that was replaced. |
+| `path` | string | yes | The file that is used now. |
+| `replaced` | integer, at least 0 | yes | How many clips and devices used it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.replace_file` returns.",
+  "properties": {
+    "hash": {
+      "description": "The file that was replaced.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The file that is used now.",
+      "type": "string"
+    },
+    "replaced": {
+      "description": "How many clips and devices used it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "hash",
+    "path",
+    "replaced"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReplacedSample`
 
 What `clip.replace_sample` returns.
@@ -26593,6 +27344,34 @@ One of:
 
 </details>
 
+### `SavedCopy`
+
+What `set.save_copy` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the copy was written. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.save_copy` returns.",
+  "properties": {
+    "path": {
+      "description": "Where the copy was written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SavedDefaults`
 
 What `clip.save_default` and `clip.defaults` return.
@@ -26728,6 +27507,93 @@ Type: integer, at least 1.
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
+}
+```
+
+</details>
+
+### `Scope`
+
+Which files the File Manager shows (R10).
+
+One of:
+
+- `"set"`: The open set's files.
+- `"project"`: A project folder's files.
+- `"user-library"`: The User Library's files.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which files the File Manager shows (R10).",
+  "oneOf": [
+    {
+      "const": "set",
+      "description": "The open set's files.",
+      "type": "string"
+    },
+    {
+      "const": "project",
+      "description": "A project folder's files.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "The User Library's files.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Search`
+
+The Automatic Search's switches and folder (R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `project` | boolean | yes | Whether the set's project folder is searched. |
+| `library` | boolean | yes | Whether the User Library is searched. |
+| `candidates` | array of [`Candidate`](#candidate) | no | The candidates the last search found, one list for each missing file. |
+| `folder` | string or null | no | The folder Search Folder names. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Automatic Search's switches and folder (R14).",
+  "properties": {
+    "candidates": {
+      "description": "The candidates the last search found, one list for each missing file.",
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "type": "array"
+    },
+    "folder": {
+      "description": "The folder Search Folder names.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "library": {
+      "description": "Whether the User Library is searched.",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "Whether the set's project folder is searched.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "project",
+    "library"
+  ],
+  "type": "object"
 }
 ```
 
@@ -29612,6 +30478,150 @@ What `device.ungroup` returns.
     "devices"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `UnusedFile`
+
+A file in the project that nothing uses (R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `path` | string | yes | Where it is. |
+| `size` | integer, at least 0 | yes | Its length in bytes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file in the project that nothing uses (R17).",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it is.",
+      "type": "string"
+    },
+    "size": {
+      "description": "Its length in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "size"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UnusedFiles`
+
+A group of unused files (R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `group` | [`UnusedKind`](#unusedkind) | yes | What kind of files the group holds. |
+| `count` | integer, at least 0 | yes | How many files the group has. |
+| `size` | integer, at least 0 | yes | How big they are together, in bytes. |
+| `files` | array of [`UnusedFile`](#unusedfile) | yes | The files themselves. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group of unused files (R17).",
+  "properties": {
+    "count": {
+      "description": "How many files the group has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "The files themselves.",
+      "items": {
+        "$ref": "#/$defs/UnusedFile"
+      },
+      "type": "array"
+    },
+    "group": {
+      "$ref": "#/$defs/UnusedKind",
+      "description": "What kind of files the group holds."
+    },
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "size": {
+      "description": "How big they are together, in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "group",
+    "count",
+    "size",
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UnusedKind`
+
+What kind of file an unused file is (R17): the groups the Unused Files section lists.
+
+One of:
+
+- `"recorded"`: Recorded into the project.
+- `"imported"`: Copied into the project.
+- `"processed"`: Written by an edit.
+- `"other"`: Anything else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What kind of file an unused file is (R17): the groups the Unused Files section lists.",
+  "oneOf": [
+    {
+      "const": "recorded",
+      "description": "Recorded into the project.",
+      "type": "string"
+    },
+    {
+      "const": "imported",
+      "description": "Copied into the project.",
+      "type": "string"
+    },
+    {
+      "const": "processed",
+      "description": "Written by an edit.",
+      "type": "string"
+    },
+    {
+      "const": "other",
+      "description": "Anything else.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

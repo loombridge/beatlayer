@@ -97,6 +97,7 @@ pub mod autosample;
 mod capture;
 mod freeze;
 mod multisampler;
+mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
@@ -248,6 +249,12 @@ pub enum Effect {
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
+    /// Ask where to save the set's plug-in list, then run
+    /// `plugin.export_list` there (IMP-29, WP-6.41).
+    PickPluginListPath {
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -447,6 +454,9 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
+    /// in the detail area's place, and whether Show Only Missing is on.
+    plugin_list: plugin_list::PluginList,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -929,6 +939,7 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
@@ -1769,6 +1780,16 @@ impl Shell {
             .map(|path| bl_project::ProjectFolder::of_set(path).root().to_owned())
     }
 
+    /// The file name the plug-in list's Export… suggests: `<set name>
+    /// Plug-Ins.txt` (the plug-in list spec, R7).
+    #[must_use]
+    pub fn plugin_list_file_name(&self) -> String {
+        format!(
+            "{} Plug-Ins.txt",
+            bl_project::preset::file_safe(&self.set_name())
+        )
+    }
+
     /// Whether the set has changes that aren't saved.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
@@ -2473,6 +2494,7 @@ impl Shell {
                     })?;
                 self.refresh_device_types();
                 let device_type = found.device_type;
+                let preset = found.preset;
                 let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
                     device_ids::ADD,
                     to_value(&device_ids::AddDeviceArgs {
@@ -2501,6 +2523,9 @@ impl Shell {
                         data: Vec::new(),
                     }),
                 );
+                // Spec: plugin-list R5. The name of the preset the unit
+                // holds, as it reports it.
+                let _ = self.editor.amend_device_preset_name(added.device, preset);
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
@@ -2828,8 +2853,34 @@ impl Shell {
             }
             plugin_ids::LIST => {
                 let _: plugin_ids::ListArgs = Self::args(id, args)?;
-                let list = crate::plugins::set_plugin_list(self.editor.document(), &self.scanner);
+                let list = self.set_plugin_list();
                 Ok(to_value(&list))
+            }
+            plugin_ids::EXPORT_LIST => {
+                // Spec: plugin-list R7, R10.
+                let plugin_ids::ExportListArgs { path } = Self::args(id, args)?;
+                let Some(path) = path else {
+                    // The list's Export… button: the app asks where to
+                    // save it, and runs this again with the path.
+                    self.effects.push(Effect::PickPluginListPath {
+                        default_name: self.plugin_list_file_name(),
+                    });
+                    return Ok(Value::Null);
+                };
+                let path = std::path::PathBuf::from(path);
+                let written = crate::plugins::export_list(
+                    self.editor.document(),
+                    &self.set_plugin_list(),
+                    &path,
+                    &self.set_name(),
+                )
+                .map_err(|message| ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                })?;
+                Ok(to_value(&plugin_ids::ExportedList {
+                    path: written.to_string_lossy().into_owned(),
+                }))
             }
             plugin_ids::SETTINGS => {
                 let plugin_ids::PluginSettingsArgs {
@@ -3752,6 +3803,18 @@ impl Shell {
     #[must_use]
     pub fn clip_view(&self) -> &ClipView {
         &self.clip_view
+    }
+
+    /// The list of the set's plug-ins (IMP-29, WP-6.41).
+    #[must_use]
+    pub fn plugin_list(&self) -> &plugin_list::PluginList {
+        &self.plugin_list
+    }
+
+    /// The set's plug-in list, as `plugin.list` reports it.
+    #[must_use]
+    pub fn set_plugin_list(&self) -> plugin_ids::SetPluginList {
+        crate::plugins::set_plugin_list(self.editor.document(), &self.scanner)
     }
 
     /// What the mixers show (WP-1.9).
@@ -5279,6 +5342,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
@@ -8112,6 +8176,21 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                 ))
             }
+            ids::VIEW_TOGGLE_PLUGIN_LIST => {
+                // Spec: plugin-list R1, R3. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.plugin_list.toggle();
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
+            ids::VIEW_SET_PLUGIN_LIST_ONLY_MISSING => {
+                // Spec: plugin-list R3, R10. View state only.
+                let ids::PluginListOnlyMissingArgs { only_missing } = Self::args(id, args)?;
+                self.plugin_list
+                    .set_only_missing(only_missing.unwrap_or(!self.plugin_list.only_missing()));
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
             ids::VIEW_DRAW_MODE => {
                 // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
                 Self::args::<NoArgs>(id, args)?;
@@ -8207,6 +8286,7 @@ impl Shell {
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
+                    plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     plug_in_windows: self.plug_in_windows,
                 }))

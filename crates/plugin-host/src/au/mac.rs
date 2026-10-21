@@ -80,6 +80,9 @@ pub struct AuType {
     pub vendor: Option<String>,
     /// Its version, if the system gives one.
     pub version: Option<String>,
+    /// The name of the preset the unit holds, as it reports it (the plug-in
+    /// list spec, R5).
+    pub preset: Option<String>,
 }
 
 /// Things only the thread that made the host may touch: the unit
@@ -453,6 +456,13 @@ impl AuHost {
             .map(|vendor| vendor.to_string())
             .filter(|vendor| !vendor.trim().is_empty());
         let (descriptors, _, _) = describe(&unit);
+        // Spec: plugin-list R5. The name of the preset the unit holds, as
+        // it reports it.
+        // SAFETY: reading the unit's current preset is a property read on
+        // the thread that made it.
+        let preset = unsafe { unit.currentPreset() }
+            .map(|preset| unsafe { preset.name() }.to_string())
+            .filter(|name| !name.trim().is_empty());
         let found = AuType {
             device_type: DeviceType {
                 external_output: false,
@@ -468,6 +478,7 @@ impl AuHost {
             },
             vendor,
             version: has_version.then(|| version_text(version)),
+            preset,
         };
         drop(unit);
         let mut types = lock(&self.inner.types);

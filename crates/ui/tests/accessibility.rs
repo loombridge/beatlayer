@@ -1542,6 +1542,20 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// The list of the set's plug-ins, open in the detail area, with the
+/// keyboard in it (IMP-29, WP-6.41).
+fn plugin_list(h: &mut Harness) {
+    h.shell
+        .run("view.toggle_plugin_list", json!({}))
+        .expect("the list opens");
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 /// A Simpler on the first MIDI track, that track selected, no device selected
 /// (WP-5.15b): the Warp controls show in the Device View.
 fn a_snapshot(h: &mut Harness) {
@@ -2437,6 +2451,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
+        // Show Only Missing switch.
+        (
+            "view.set_plugin_list_only_missing",
+            main(nothing, plugin_list, "Show Only Missing", Key::Enter),
+        ),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -3300,9 +3320,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.rescan",
             settings("plug-ins", nothing, "Rescan Plug-Ins", Key::Enter),
         ),
+        ("plugin.list", Exception(Query)),
         (
-            "plugin.list",
-            Exception(LaterView("the set's plug-ins view (Phase 6, IMP-29)")),
+            "plugin.export_list",
+            Exception(Equivalent(
+                "the Export… button in the list of the set's plug-ins, which asks where to \
+                 save the list",
+            )),
         ),
         (
             "plugin.settings",

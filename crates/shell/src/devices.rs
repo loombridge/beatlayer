@@ -2166,6 +2166,12 @@ impl DeviceView {
                     }
                 };
                 rack_presets::save_device(current, media, &path)?;
+                // Spec: plugin-list R5. A plug-in device holds the preset it
+                // was saved as; a native device's preset is in its name.
+                if matches!(current.kind, DeviceKind::Plugin { .. }) {
+                    let _ =
+                        editor.amend_device_preset_name(device, Some(preset::preset_name(&path)));
+                }
                 outcome.message = Some(format!("Saved preset {}.", path.display()));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);

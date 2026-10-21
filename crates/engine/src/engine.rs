@@ -118,6 +118,12 @@ impl Sender {
         self.push(Message::Record(plan));
     }
 
+    /// Captures the outputs of a real-time render while the song plays the
+    /// range (WP-5.35). The plan's rings close when it goes.
+    pub fn render(&mut self, plan: Owned<crate::render::RenderPlan>) {
+        self.push(Message::Render(plan));
+    }
+
     /// Sends a transport command, which takes effect at the start of the
     /// next block.
     pub fn transport(&mut self, command: TransportCommand) {
@@ -241,6 +247,8 @@ enum Request {
     Flush(mpsc::Sender<()>),
     /// What to record while the transport records (WP-2.13).
     Record(Box<Owned<RecordingPlan>>),
+    /// What to capture while the song plays a range in real time (WP-5.35).
+    Render(Box<Owned<crate::render::RenderPlan>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -341,6 +349,7 @@ impl std::fmt::Debug for Request {
             Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
             Self::Record(_) => "Record",
+            Self::Render(_) => "Render",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -522,6 +531,15 @@ impl Engine {
     /// ends, which closes the rings and tells the writer the take is over.
     pub fn record(&self, plan: crate::recording::RecordingPlan) {
         self.request(Request::Record(Box::new(self.gc.wrap(plan))));
+    }
+
+    /// Sets what the engine captures while the song plays a range in real
+    /// time (WP-5.35): the rendered outputs and the rings their samples go
+    /// to. The plan replaces any earlier one; the audio thread drops it
+    /// when the render ends, which closes the rings and tells the writer
+    /// the render is over.
+    pub fn render(&self, plan: crate::render::RenderPlan) {
+        self.request(Request::Render(Box::new(self.gc.wrap(plan))));
     }
 
     /// Reports `device`'s node's latency now, as a plug-in that restarted
@@ -834,6 +852,12 @@ fn compile_loop(
                     // While no processor runs, nothing records it.
                     if let Some(sender) = sender.as_mut() {
                         sender.record(*plan);
+                    }
+                }
+                Request::Render(plan) => {
+                    // While no processor runs, nothing renders in real time.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.render(*plan);
                     }
                 }
                 Request::Detach => {

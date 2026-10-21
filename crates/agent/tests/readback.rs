@@ -374,6 +374,7 @@ fn fixture() -> Project {
         port: Some("Synth".to_owned()),
         channel: 5,
         audio_from: Channel::Mono(3),
+        audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
     });
     device.sidechain = Some(Sidechain {

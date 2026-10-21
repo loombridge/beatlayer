@@ -1823,6 +1823,10 @@ pub enum Command {
         /// Audio From: the audio interface's inputs it comes back on.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audio_from: Option<Channel>,
+        /// Audio To: the audio interface's outputs an external effect sends
+        /// its signal to.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio_to: Option<Channel>,
         /// Hardware Latency with its unit: the unit switch is the unit
         /// given, so switching the unit sends the converted value.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3776,6 +3780,7 @@ impl Document {
                 midi_to,
                 channel,
                 audio_from,
+                audio_to,
                 hardware_latency,
             } => {
                 let mut external = self
@@ -3790,6 +3795,9 @@ impl Document {
                 }
                 external.channel = channel.unwrap_or(external.channel);
                 external.audio_from = audio_from.unwrap_or(external.audio_from);
+                if let Some(channel) = audio_to {
+                    external.audio_to = Some(*channel);
+                }
                 if let Some(latency) = hardware_latency {
                     check_value(
                         "hardware latency",

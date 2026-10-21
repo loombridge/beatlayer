@@ -2506,13 +2506,15 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the routing of a device that works with hardware outside the \
-            computer (the External Instrument), as the choosers in its title bar do; give only \
-            the settings to change. `midi_to` is `{ \"type\": \"none\" }` (No Output, a new \
-            device's) or `{ \"type\": \"port\", \"name\": ... }` with a MIDI output port's \
-            name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI \
-            channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio \
-            interface's inputs the hardware's sound comes back on, a channel or a pair \
-            (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a new device); \
+            computer (the External Instrument and the External Audio Effect), as the choosers \
+            in its title bar do; give only the settings to change. `midi_to` is `{ \"type\": \
+            \"none\" }` (No Output, a new device's) or `{ \"type\": \"port\", \"name\": ... }` \
+            with a MIDI output port's name as `midi.ports` lists it, with its Track switch \
+            on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); \
+            `audio_from` is the audio interface's inputs the hardware's sound comes back on, \
+            a channel or a pair (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a \
+            new device); `audio_to` is the audio interface's outputs an External Audio Effect \
+            sends its signal to, a channel or a pair (the first pair on a new device); \
             `hardware_latency` is the delay the hardware adds that the computer can't detect, \
             in the unit the unit switch is on: `{ \"unit\": \"milliseconds\", \"value\": 12.5 }` \
             (0 to 1000, kept in milliseconds when the sample rate changes) or `{ \"unit\": \

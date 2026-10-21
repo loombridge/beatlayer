@@ -530,6 +530,10 @@ impl MainWindowUi {
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
         // window while it's open.
         crate::stems_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: external-devices R23. The real-time render's dialog sits
+        // over the window while a render that runs through external
+        // hardware is under way.
+        crate::realtime_dialog::show(ctx, shell, theme, &mut events);
         // Spec: multisampler R64. The autosampler's dialog sits over the
         // window while it's open.
         crate::autosampler::show(ctx, shell, theme, &mut events);

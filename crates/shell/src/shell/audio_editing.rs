@@ -160,6 +160,22 @@ impl Shell {
                 }
             }
         }
+        // Spec: freeze-and-bounce R8. A clip on a frozen track isn't
+        // reversed.
+        {
+            let doc = self.editor.document();
+            for (track, _) in &material {
+                if doc.track(*track).is_some_and(|track| track.is_frozen()) {
+                    return Err(unavailable(
+                        id,
+                        format!(
+                            "the track {} is frozen; unfreeze it to change its clip settings",
+                            track.0
+                        ),
+                    ));
+                }
+            }
+        }
         let tracks: Vec<TrackId> = material.iter().map(|(track, _)| *track).collect();
         self.editor.begin("Reverse clip(s)");
         let outcome = self.reverse_span(id, &tracks, start, end);

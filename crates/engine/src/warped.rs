@@ -1235,14 +1235,6 @@ impl WarpScratch {
                     texture.set_flux(playing.texture.flux);
                     texture
                 }
-                _ => repitch,
-            }
-                ClipWarpMode::Complex => complex,
-                ClipWarpMode::ComplexPro => {
-                    complex_pro.set_formants(playing.complex_pro.formants);
-                    complex_pro.set_envelope(playing.complex_pro.envelope);
-                    complex_pro
-                }
                 ClipWarpMode::Complex => stretchers.complex(lane),
                 ClipWarpMode::ComplexPro => {
                     let pro = stretchers.complex_pro(lane);

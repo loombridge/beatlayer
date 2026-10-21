@@ -1495,6 +1495,8 @@ impl Node for ClipPlayer {
                         &mut self.warp,
                         histories[at].as_deref_mut(),
                         PlacedClip::launch_level,
+                        stretchers,
+                        clip.lane as usize,
                     );
                 } else {
                     render(
@@ -1604,6 +1606,8 @@ impl Node for ClipPlayer {
                     warp,
                     history.as_deref_mut(),
                     PlacedClip::level,
+                    stretchers,
+                    clip.lane as usize,
                 );
                 continue;
             }

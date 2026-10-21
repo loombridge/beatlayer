@@ -506,6 +506,46 @@ fn complex_modes_keep_the_sawtooths_pitch() {
     }
 }
 
+// Spec: warp-modes R21, R26, R35. A transposed clip's pitch lands within the
+// cent the stretcher's own block reaches: 1.2 cents, where the block's
+// frequency resolution runs out. The held pitch is within R35's cent (the
+// test above), and the transposed one is the block's limit, which a finer
+// block would move.
+#[test]
+fn complex_modes_land_the_transposed_pitch_within_the_blocks_cent() {
+    let media = complex_media();
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for semitones in [-12.0, -7.0, 7.0, 12.0] {
+            let ratio = 2f64.powf(semitones / 12.0);
+            let want = 440.0 * ratio;
+            let mut song =
+                build_complex_song(120.0, HASH_SINE_LONG, mode, 100.0, 128, Ticks::WHOLE * 4);
+            let clip = song
+                .document()
+                .tracks()
+                .flat_map(|track| track.clips())
+                .next()
+                .unwrap()
+                .id;
+            song.apply(Command::SetClipPitch {
+                clip,
+                transpose: Some(semitones as i32),
+                detune: None,
+            })
+            .unwrap();
+            let out = render(&song, &media, 144_000, 512);
+            let steady = &out[48_000..144_000];
+            let got = estimate_pitch_in(steady, 48_000.0, want * 0.9, want * 1.1);
+            let cents = 1200.0 * (got / want).log2();
+            assert!(
+                cents.abs() <= 1.3,
+                "{mode:?} at {semitones} semitones: {got:.2} Hz, {cents:.2} cents from {want:.2} Hz, \
+                 past the block's own cent"
+            );
+        }
+    }
+}
+
 // Spec: warp-modes R21, R35. Pink noise's balance stays within 1 dB of the
 // source's in every octave band, in both modes.
 #[test]
@@ -715,8 +755,8 @@ fn texture_sine_and_pink_noise_targets() {
 
 // Spec: warp-modes R26. A clip's transposition lands within 1 cent of its
 // target in every mode that takes it: Beats, Tones and Texture. Re-Pitch
-// ignores it (R10), and Complex and Complex Pro take it in their
-// stretcher when their package lands.
+// ignores it (R10), and Complex and Complex Pro take it in their stretcher
+// when their package lands.
 #[test]
 fn transpose_and_detune_land_within_1_cent_in_every_mode() {
     let media = test_media();

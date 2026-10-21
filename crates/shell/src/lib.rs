@@ -68,6 +68,7 @@ pub mod assistant;
 pub mod audio;
 pub mod auto_warp;
 mod automation_record;
+pub mod autosample;
 pub mod browser;
 mod chord_learn;
 pub mod clip_defaults;
@@ -104,6 +105,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Audio Utilities panel's command IDs and their argument and result
 /// types (WP-4.10b).
 pub use bl_shell_spec::audio_panel as audio_panel_commands;
+/// The autosampler's command IDs and its argument and result types
+/// (WP-5.16).
+pub use bl_shell_spec::autosampler as autosampler_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
 /// Capture MIDI's command ID and its result types (WP-3.14).
@@ -154,6 +158,8 @@ pub use bl_shell_spec::tracks as track_commands;
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{audio_editing, commands, context_menus, freeze, menus, register};
+/// The autosampler's progress (WP-5.16).
+pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
     TransientList, WindowKind,

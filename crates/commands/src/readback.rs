@@ -274,6 +274,8 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.add_layers", query(Device, "layers")),
     ("device.add_sample_edit", query(Device, "sample_edits")),
     ("device.add_slice", query(Device, "slices")),
+    ("device.autosample", query(Track, "devices")),
+    ("device.autosample_cancel", nothing("it stops a running autosample")),
     ("device.clear_sample_edits", query(Device, "sample_edits")),
     ("device.convert", query(Track, "devices")),
     ("device.crop_sample", query(Device, "media")),

@@ -62,6 +62,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
@@ -92,6 +93,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 
 pub(crate) mod audio_editing;
 mod audio_panel;
+pub mod autosample;
 mod capture;
 mod freeze;
 mod multisampler;
@@ -454,6 +456,12 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The autosampler at work (WP-5.16, IMP-27).
+    autosample: Option<autosample::Job>,
+    /// The autosampler's dialog, open for an instrument.
+    autosample_dialog: Option<autosample::Dialog>,
+    /// What the last autosample made, for the command's result.
+    autosample_result_value: Option<bl_shell_spec::autosampler::Autosampled>,
     /// The Slice to New MIDI Track dialog (WP-4.16): its clip and the
     /// slicing presets it offers. Never part of the set.
     slice_dialog: Option<bl_shell_spec::slice::SliceDialogStatus>,
@@ -862,6 +870,9 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            autosample: None,
+            autosample_dialog: None,
+            autosample_result_value: None,
             slice_dialog: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
@@ -3885,6 +3896,9 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed | self.poll_processed() | self.poll_stems();
+        // Spec: multisampler R73. The autosampler makes one sample at a
+        // time, so the dialog sees its progress and Cancel stops it.
+        self.poll_autosample();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
@@ -5489,6 +5503,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
+        }
+        if autosampler_ids::handles(id) {
+            return self.can_autosampler(id, args);
         }
         if slice_ids::handles(id) {
             // Spec: slice-to-midi R1. The menus' enabled states: one audio
@@ -7095,6 +7112,9 @@ impl Shell {
         }
         if multisampler_ids::handles(id) {
             return self.run_multisampler(id, args);
+        }
+        if autosampler_ids::handles(id) {
+            return self.run_autosampler(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);

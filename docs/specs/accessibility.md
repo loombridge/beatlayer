@@ -95,6 +95,10 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 
 15. `rack.set_macro_info_text`: a macro's info text has no menu item yet; M-EDIT-025 (Edit Info Text) adds it.
 
+**Gaps in the autosampler** ([multisampler](multisampler.md), WP-5.16):
+
+16. `device.autosample_open`: the device's title bar menu isn't opened from the keyboard (R64).
+
 ## Tests
 
 | Rule | Test | Kind |

@@ -3703,6 +3703,108 @@ fn an_agent_edits_a_sample_and_reads_the_edits_back() {
     );
 }
 
+/// Spec: multisampler R64, R69, R70, R73. An agent autosamples a plug-in
+/// instrument by ID: the command waits for the samples and returns them,
+/// and the new track's multisampler and its layers read back.
+#[test]
+fn an_agent_autosamples_a_plugin_into_a_multisampler() {
+    let dir = TempDir::new("autosample");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("autosample").unwrap();
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    // The samples go in the project's folder, so the set is saved first.
+    let set = dir.0.join("Song.blset");
+    one(
+        &mut client,
+        "set.save_as",
+        json!({ "path": set.to_string_lossy() }),
+    );
+    // The kit's sine example, a plug-in instrument, on a MIDI track.
+    one(
+        &mut client,
+        "track.create",
+        json!({ "id": {"$new": "Inst"}, "kind": "midi", "name": "Inst", "index": 0 }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.name() == "Inst")
+        .unwrap()
+        .id();
+    let sine = {
+        let types = client.transport().shell.kit().device_types();
+        types
+            .iter()
+            .find(|kind| kind.name == "Example Sine")
+            .expect("the sine example")
+            .clone()
+    };
+    let added = one(
+        &mut client,
+        "device.add",
+        json!({ "device": { "kind": sine.kind, "name": sine.name, "role": sine.role },
+                "track": track }),
+    );
+    let device = added["device"].as_u64().expect("the instrument");
+    // The command runs by ID, waits for the samples and returns them.
+    let result = one(
+        &mut client,
+        "device.autosample",
+        json!({
+            "device": device, "name": "Sine", "lowest": 60, "highest": 60,
+            "note_length": 0.1, "release_tail": 0.05,
+        }),
+    );
+    let files = result["files"].as_array().expect("the samples");
+    assert_eq!(files.len(), 1, "one note at one velocity: {result}");
+    assert_eq!(files[0]["note"], 60);
+    assert_eq!(files[0]["velocity"], 127);
+    let file = Path::new(files[0]["path"].as_str().unwrap());
+    assert!(file.exists(), "the sample is written: {file:?}");
+    assert_eq!(
+        file.parent().unwrap(),
+        dir.0.join("Song Project/Samples/Processed/Autosample/Sine"),
+        "in the project's folder, under the name"
+    );
+    // The new track holds the multisampler, and its layers read back.
+    let new_track = result["track"].as_u64().expect("the new track");
+    let multisampler = result["device"].as_u64().expect("the multisampler");
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "id": new_track, "detail": "full" }),
+    );
+    assert_eq!(read["name"], "Sine");
+    assert_eq!(read["kind"], "midi");
+    assert_eq!(read["devices"][0]["id"], json!(multisampler));
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "id": multisampler, "detail": "full" }),
+    );
+    let layers = read["layers"]["list"]["items"].as_array().unwrap();
+    assert_eq!(layers.len(), 1, "one layer per sample");
+    assert_eq!(layers[0]["root_key"], 60);
+    assert_eq!(
+        (
+            layers[0]["key"]["low"].as_u64(),
+            layers[0]["key"]["high"].as_u64()
+        ),
+        (Some(0), Some(127))
+    );
+    assert_eq!(layers[0]["sustain"], "off", "no loop was asked for");
+}
+
 /// Spec: sampler R18, R20. An agent sets Simpler's Warp controls and its
 /// manual slices by command ID, as the Warp controls and the display's
 /// gestures do, and reads them back.

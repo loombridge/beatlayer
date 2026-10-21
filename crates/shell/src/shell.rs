@@ -801,6 +801,12 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A macro's style changed, so it may have moved to another step
+    /// (R21, R22).
+    Style {
+        rack: bl_model::DeviceId,
+        number: u8,
+    },
     /// A variation launch set the macros (R27).
     Variation { rack: bl_model::DeviceId },
 }
@@ -5418,6 +5424,23 @@ impl Shell {
                     .to_owned(),
                 )
             }
+            // IMP-24: the item follows the selected device's position.
+            device_ids::SET_ROLE => {
+                let selected = self
+                    .devices
+                    .selected()
+                    .and_then(|device| self.editor.document().device(device));
+                Some(match selected {
+                    Some(device) if device.role == bl_model::DeviceRole::MidiEffect => {
+                        let role = self
+                            .devices
+                            .device_type(&device.kind)
+                            .map_or(bl_model::DeviceRole::AudioEffect, |kind| kind.role);
+                        format!("Use as {}", role.label())
+                    }
+                    _ => "Use as MIDI Effect".to_owned(),
+                })
+            }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6560,6 +6583,12 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::SetMacroStyle {
+                rack, macro_number, ..
+            } => Some(MacroEdit::Style {
+                rack: *rack,
+                number: *macro_number,
+            }),
             bl_model::Command::LaunchVariation { rack, .. } => {
                 Some(MacroEdit::Variation { rack: *rack })
             }
@@ -6593,13 +6622,26 @@ impl Shell {
                         return Vec::new();
                     };
                     let position = info.travel.position(*value);
-                    vec![bl_model::Command::SetMappedValue {
+                    // Spec: macros R22. A stepped macro takes only its
+                    // steps, so the macro moves to the nearest step, and
+                    // the parameter takes the value that step gives.
+                    let step = device.macros.setting(*number).position_of(position);
+                    let mut commands = vec![bl_model::Command::SetMappedValue {
                         target: bl_model::MacroTarget::Device {
                             device: *rack,
                             param: bl_model::macro_param(*number),
                         },
-                        value: position,
-                    }]
+                        value: step,
+                    }];
+                    if step != position
+                        && let Some(mapping) = device.macros.mapping(*target)
+                    {
+                        commands.push(bl_model::Command::SetMappedValue {
+                            target: *target,
+                            value: info.travel.value(mapping.position(step)),
+                        });
+                    }
+                    commands
                 } else {
                     self.devices.target_commands(doc, device, *target)
                 }
@@ -6610,6 +6652,9 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Style { rack, number } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.macro_commands(doc, rack, *number)
+            }),
             MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
                 (1..=bl_model::MACROS)
                     .filter(|number| !rack.macros.setting(*number).variation_excluded)
@@ -6621,7 +6666,73 @@ impl Shell {
 
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
+        let args = self.prepare_device_role(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: device-chains R2, R3, and IMP-24. A device may take the
+    /// MIDI-effect position only if its type sends notes on from a note
+    /// output; otherwise its role is its type's role. The document can't
+    /// check this: only the host knows whether a plug-in has a note output.
+    fn prepare_device_role(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        let Ok(bl_model::Command::SetDeviceRole { device, role }) =
+            model::command_from_args(id, args.clone())
+        else {
+            return Ok(args);
+        };
+        // An unknown device is the document's to refuse.
+        let Some(current) = self.editor.document().device(device) else {
+            return Ok(args);
+        };
+        // A type the host hasn't met can't be checked; the chain's order
+        // still is.
+        let Some(kind) = self.devices.device_type(&current.kind) else {
+            return Ok(args);
+        };
+        // Left out, the role is the other position: into the MIDI-effect
+        // position when the type sends notes on and isn't there already,
+        // and back where the type goes otherwise. A type that sends no
+        // notes on can't take the MIDI-effect position at all, so the
+        // menu's item says why rather than doing nothing.
+        let role = match role {
+            Some(role) => role,
+            None if current.role == bl_model::DeviceRole::MidiEffect => kind.role,
+            None if kind.note_output => bl_model::DeviceRole::MidiEffect,
+            None => {
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!(
+                        "{} has no note output, so it can't go in the MIDI-effect position",
+                        current.title()
+                    ),
+                });
+            }
+        };
+        if kind.role != role && !(role == bl_model::DeviceRole::MidiEffect && kind.note_output) {
+            let message = if role == bl_model::DeviceRole::MidiEffect {
+                format!(
+                    "{} has no note output, so it can't go in the MIDI-effect position",
+                    current.title()
+                )
+            } else {
+                format!(
+                    "{} goes in the chain as {}",
+                    current.title(),
+                    kind.role.label()
+                )
+            };
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message,
+            });
+        }
+        if let Some(object) = args.as_object_mut() {
+            object.insert(
+                "role".to_owned(),
+                serde_json::to_value(role).unwrap_or_default(),
+            );
+        }
+        Ok(args)
     }
 
     /// Spec: warping R7, R11. A warp marker edit on several clips needs

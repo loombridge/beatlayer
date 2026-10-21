@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-561 commands in 37 areas.
+567 commands in 37 areas.
 
 ## Permission classes
 
@@ -62,6 +62,7 @@ Each command has:
 | [`arrangement.overview`](#arrangementoverview) | Overview | `read` | `Cmd+Option+O` | `Ctrl+Alt+O` |
 | [`arrangement.paste`](#arrangementpaste) | Paste | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`arrangement.resize_clips`](#arrangementresize_clips) | Resize Clips | `edit` | `Enter then Left`, `Right` | `Enter then Left`, `Right` |
+| [`arrangement.reverse`](#arrangementreverse) | Reverse Clip(s) | `edit` | `R` | `R` |
 | [`arrangement.scroll`](#arrangementscroll) | Scroll Arrangement | `read` | `Shift+scroll`; `Cmd+Option+drag`; `Cmd+Option+drag` | `Shift+scroll`; `Ctrl+Alt+drag`; `Ctrl+Alt+drag` |
 | [`arrangement.select_all`](#arrangementselect_all) | Select All | `read` | `Cmd+A` | `Ctrl+A` |
 | [`arrangement.select_clips`](#arrangementselect_clips) | Select Clips | `read` | `Cmd+click`; `Cmd+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` | `Ctrl+click`; `Ctrl+click`; `Shift+click`; `Shift+click`; `Shift+click`, `Shift+drag` |
@@ -179,6 +180,8 @@ Each command has:
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.replace_sample`](#clipreplace_sample) | Replace Sample | `edit` |  |  |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
+| [`clip.reverse`](#clipreverse) | Reverse Clip | `edit` |  |  |
+| [`clip.reverse_file`](#clipreverse_file) | Reverse Clip | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
@@ -199,6 +202,7 @@ Each command has:
 | [`clip.set_midi_loop`](#clipset_midi_loop) | Set MIDI Clip Loop | `edit` |  |  |
 | [`clip.set_midi_region`](#clipset_midi_region) | Set MIDI Clip Start and End | `edit` |  |  |
 | [`clip.set_mute`](#clipset_mute) | Activate/Deactivate Clip | `edit` | `0` | `0` |
+| [`clip.set_pitch`](#clipset_pitch) | Set Clip Pitch | `edit` |  |  |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | Set Clip RAM Mode | `edit` |  |  |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
@@ -292,6 +296,7 @@ Each command has:
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
+| [`device.set_role`](#deviceset_role) | Use as MIDI Effect | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
 | [`device.set_sample_bpm`](#deviceset_sample_bpm) | Set Device Sample BPM | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
@@ -430,6 +435,7 @@ Each command has:
 | [`rack.set_macro_count`](#rackset_macro_count) | Show More or Fewer Macros | `edit` |  |  |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | Change Macro Info Text | `edit` |  |  |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | Exclude Macro from Randomization | `edit` |  |  |
+| [`rack.set_macro_style`](#rackset_macro_style) | Change Macro Style | `edit` |  |  |
 | [`rack.set_macro_variation_excluded`](#rackset_macro_variation_excluded) | Exclude Macro from Variations | `edit` |  |  |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | Change parameter | `edit` |  |  |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | Change Macro Mapping | `edit` |  |  |
@@ -1208,6 +1214,28 @@ Arguments:
 | `to` | [`Position`](#position) or null | no | Where `anchor`'s edge goes; the other clips' edges move as far. |
 
 Result: [`EditResult`](#editresult).
+
+#### `arrangement.reverse`
+
+**Reverse Clip(s)**. Permission: `edit`. Contexts: `arrangement`.
+
+Reverses the audio in a span of the Arrangement, across several clips: the time selection, or the span of the selected clips (`tracks`, with `start` and `end`). The clips the span's edges cross are split there first, each part inside is reversed, and the parts are mirrored within the span on their tracks, so the span plays backwards as a whole. A span holding a MIDI clip isn't reversed, and nothing changes. R (Ctrl-R) runs it on the selection.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-ARR-029 | `R` | `R` | `arrangement` | Reverse the selected clips | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+| `tracks` | array or null | no | The tracks a span of time covers. Left out, the selected tracks. |
+
+Result: [`ReverseRangeResult`](#reverserangeresult).
 
 #### `arrangement.scroll`
 
@@ -3275,6 +3303,40 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.reverse`
+
+**Reverse Clip**. Permission: `edit`. Contexts: `arrangement`, `session`, `clip-view`.
+
+Gives an audio clip a backwards copy of its file: the copy is written through the processed-file writer, and the clip plays it, with its Start and End markers, loop brace and warp markers mirrored about the file, so it plays the same stretch of sound backwards. The clip's envelopes stay where they are, and its loop switch, gain, transpose, detune, warp mode and fades don't change. Reversing a clip whose file is already a reversed copy gives it back the file it was made from, writing nothing. `clip` names the clip (left out, the selected one). A MIDI clip isn't reversed, and nothing changes.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The clip to reverse. Left out, the one clip the Arrangement or the Session View has selected. |
+
+Result: [`ReverseResult`](#reverseresult).
+
+#### `clip.reverse_file`
+
+**Reverse Clip**. Permission: `edit`. Contexts: `clip-view`.
+
+Reverses an audio clip's file: the clip plays `media`, a reversed copy of its file, with its Start and End markers, loop brace and warp markers mirrored about the file, so it plays the same stretch of sound backwards. Its clip envelopes stay where they are, and its loop switch, gain, transpose, detune, warp mode and fades don't change. `seconds` is the length of the file the markers are mirrored about. `clip.reverse` is the command a person and an agent run: it writes the new file through the processed-file writer and applies this one.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `seconds` | number | yes | The length of the file in seconds, which the markers are mirrored about. |
+| `media` | [`ContentHash`](#contenthash) or null | no | The file it plays now: the reversed copy. `null` (or nothing) leaves the file as it is, for a clip whose file is already a reversed copy and goes back to the one it was made from. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.save_default`
 
 **Save Default Clip**. Permission: `external`. Contexts: `clip-view`.
@@ -3638,6 +3700,24 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `mute` | boolean | yes | Whether it's muted. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_pitch`
+
+**Set Clip Pitch**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets an audio clip's pitch: `transpose`, in whole semitones from -48 to 48, and `detune`, in cents from -50 to 50 (`data.audio.transpose` and `data.audio.detune`; a new clip has neither). Give either of them, or both, in one undo step; a value out of range refuses the whole command. The clip's pitch moves by the sum, and its timing stays with its warp map. In Re-Pitch the two are drawn switched off and don't act, and their values stay with the clip. With Warp off the clip's speed changes with its pitch, as a tape running faster does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `detune` | number or null | no | The Detune, in cents, from −50 to 50. |
+| `transpose` | integer or null | no | The Transpose, in whole semitones, from −48 to 48. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5356,6 +5436,23 @@ Arguments:
 | `media` | [`ContentHash`](#contenthash) | yes | The copy, by content hash. |
 | `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
 | `crop` | [`SampleRange`](#samplerange) or null | no | The edited sample's span the copy keeps, or `null` for all of it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_role`
+
+**Use as MIDI Effect**. Permission: `edit`. Contexts: `device-view`.
+
+Places a device in another position of its chain (IMP-24): a plug-in that sends notes on from a note output can sit in the MIDI-effect position, before the instrument; `role` is where it goes (`midi_effect`, `instrument` or `audio_effect`), or left out to take the other position. A plug-in without a note output is refused, as is a role that breaks the chain's order (MIDI effects, then the instrument, then audio effects). The device keeps where it was placed, saved with the set. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `role` | [`DeviceRole`](#devicerole) or null | no | Where it goes in the chain; the other position if left out. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -7783,6 +7880,25 @@ Arguments:
 | `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
 | `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
 | `excluded` | boolean | yes | Whether it's left out. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `rack.set_macro_style`
+
+**Change Macro Style**. Permission: `edit`. Contexts: `device-view`.
+
+Sets how macro `macro_number` is drawn and which positions it takes: `style` is `knob`, Live's continuous control, `stepped`, a knob that takes `steps` steps, or `radio_buttons`, a stepped macro drawn as its steps' buttons. A stepped macro takes from 2 to 16 steps, 8 by default, and only the positions `k / (steps - 1)`: a drag, an arrow key and `device.set_param` all move it a step at a time. A macro that becomes stepped moves to its nearest step. One undo step, saved with the set and with the rack in a preset.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `rack` | [`DeviceId`](#deviceid) | yes | The rack. |
+| `macro_number` | integer from 0 to 255 | yes | The macro, numbered from 1. |
+| `style` | [`MacroStyle`](#macrostyle) | yes | The style. |
+| `steps` | integer or null | no | How many steps a stepped macro takes, from 2 to 16; the macro's own number of steps when left out. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10474,6 +10590,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.nudge`](#arrangementnudge) | the query tool's `track` | `clips` |
 | [`arrangement.paste`](#arrangementpaste) | the query tool's `track` | `clips` |
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
+| [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
 | [`assistant.forget_key`](#assistantforget_key) | `settings.state` | `assistant.key_set` |
 | [`assistant.set_base_url`](#assistantset_base_url) | `settings.state` | `assistant.base_url` |
@@ -10543,6 +10660,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
 | [`clip.replace_sample`](#clipreplace_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
+| [`clip.reverse`](#clipreverse) | the query tool's `clip` | `data` |
+| [`clip.reverse_file`](#clipreverse_file) | the query tool's `clip` | `data` |
 | [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -10563,6 +10682,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_midi_loop`](#clipset_midi_loop) | the query tool's `clip` | `data.midi.loop_start` |
 | [`clip.set_midi_region`](#clipset_midi_region) | the query tool's `clip` | `data.midi.start` |
 | [`clip.set_mute`](#clipset_mute) | the query tool's `clip` | `mute` |
+| [`clip.set_pitch`](#clipset_pitch) | the query tool's `clip` | `data.audio` |
 | [`clip.set_ram_mode`](#clipset_ram_mode) | the query tool's `clip` | `data.audio.ram` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
 | [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -10630,6 +10750,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
+| [`device.set_role`](#deviceset_role) | the query tool's `device` | `role` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
 | [`device.set_sample_bpm`](#deviceset_sample_bpm) | the query tool's `device` | `warp.bpm` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
@@ -10720,6 +10841,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`rack.set_macro_count`](#rackset_macro_count) | `rack.macros` | `count` |
 | [`rack.set_macro_info_text`](#rackset_macro_info_text) | `rack.macros` | `macros` |
 | [`rack.set_macro_randomize_excluded`](#rackset_macro_randomize_excluded) | `rack.macros` | `macros` |
+| [`rack.set_macro_style`](#rackset_macro_style) | `rack.macros` | `macros` |
 | [`rack.set_macro_variation_excluded`](#rackset_macro_variation_excluded) | `rack.macros` | `macros` |
 | [`rack.set_mapped_value`](#rackset_mapped_value) | `rack.macros` | `macros` |
 | [`rack.set_mapping_range`](#rackset_mapping_range) | `rack.macros` | `macros` |
@@ -11545,6 +11667,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `media` | [`ContentHash`](#contenthash) | yes | The media file the clip plays, by content hash. |
+| `detune` | number from -50 to 50 | no | The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
 | `end` | number or null | no | The End marker: where in the file, in seconds, a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the file. |
 | `fade_in` | number, at least 0 | no | The fade-in's length in seconds, from the clip's start in the Arrangement: 0 (no fade) unless given. |
 | `fade_out` | number, at least 0 | no | The fade-out's length in seconds, up to the clip's end in the Arrangement: 0 (no fade) unless given. |
@@ -11559,6 +11682,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
 | `tempo_leader` | boolean | no | The Lead/Follow switch (the warping spec, R43): whether this Arrangement clip leads the set's tempo instead of following it. Off unless given, a follower. Only a warped Arrangement clip can lead. |
 | `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
+| `transpose` | integer from -48 to 48 | no | The clip's Transpose, in whole semitones, from −48 to 48 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 | `warp_mode` | [`WarpMode`](#warpmode) | no | The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on. |
@@ -11570,6 +11694,13 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 {
   "description": "An audio clip's data: the audio file it plays, named by content hash, and how it plays it. Times are seconds into the file. Every field but `media` is optional: a new clip plays the whole file once, at 0 dB, with no fades.",
   "properties": {
+    "detune": {
+      "description": "The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26).",
+      "format": "double",
+      "maximum": 50.0,
+      "minimum": -50.0,
+      "type": "number"
+    },
     "end": {
       "description": "The End marker: where in the file, in seconds, a clip whose loop is off stops playing, after the Start marker; `null` (or nothing) for the end of the file.",
       "format": "double",
@@ -11660,6 +11791,13 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
     "transient_edits": {
       "$ref": "#/$defs/TransientEdits",
       "description": "The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27)."
+    },
+    "transpose": {
+      "description": "The clip's Transpose, in whole semitones, from −48 to 48 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26).",
+      "format": "int32",
+      "maximum": 48,
+      "minimum": -48,
+      "type": "integer"
     },
     "warp": {
       "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
@@ -20940,7 +21078,7 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
 
 ### `Macro`
 
-One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30). A macro's value is a parameter of its rack, in `Device::params`.
+One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and R30). A macro's value is a parameter of its rack, in `Device::params`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -20948,13 +21086,15 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30)
 | `info` | string | no | The info text the user gave it (Edit Info Text). |
 | `name` | string | no | The name Rename gave it; empty for its default name (R10). |
 | `randomize_excluded` | boolean | no | Whether Randomize leaves it alone (R16). |
+| `steps` | integer from 0 to 255 | no | How many steps a stepped macro takes, from 2 to 16 (R22). |
+| `style` | [`MacroStyle`](#macrostyle) | no | How it is drawn and which positions it takes (R21). |
 | `variation_excluded` | boolean | no | Whether a variation launch leaves it alone (R30). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
+  "description": "One macro's saved settings beside its value (macros spec, R10, R14, R16, R21 and R30). A macro's value is a parameter of its rack, in `Device::params`.",
   "properties": {
     "colour": {
       "description": "A swatch of the palette of 5 rows of 14, from 0 to 69, or none.",
@@ -20978,6 +21118,17 @@ One macro's saved settings beside its value (macros spec, R10, R14, R16 and R30)
       "description": "Whether Randomize leaves it alone (R16).",
       "type": "boolean"
     },
+    "steps": {
+      "description": "How many steps a stepped macro takes, from 2 to 16 (R22).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/MacroStyle",
+      "description": "How it is drawn and which positions it takes (R21)."
+    },
     "variation_excluded": {
       "description": "Whether a variation launch leaves it alone (R30).",
       "type": "boolean"
@@ -21000,6 +21151,8 @@ One macro as `rack.macros` reports it.
 | `colour` | integer or null | yes | Its colour: a swatch of the palette of 5 rows of 14, or null. |
 | `value` | number | yes | Its value, from 0 to 1. |
 | `text` | string | yes | How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10). |
+| `style` | [`MacroStyle`](#macrostyle) | yes | How it is drawn and which positions it takes (R21). |
+| `steps` | integer from 0 to 255 | yes | How many steps a stepped macro takes (R22). |
 | `randomize_excluded` | boolean | yes | Whether Randomize leaves it alone (R16). |
 | `variation_excluded` | boolean | yes | Whether a variation launch leaves it alone (R30). |
 | `mappings` | array of [`MacroMappingInfo`](#macromappinginfo) | yes | What it drives, in the order the mappings were made (R9). |
@@ -21042,6 +21195,17 @@ One macro as `rack.macros` reports it.
       "description": "Whether Randomize leaves it alone (R16).",
       "type": "boolean"
     },
+    "steps": {
+      "description": "How many steps a stepped macro takes (R22).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/MacroStyle",
+      "description": "How it is drawn and which positions it takes (R21)."
+    },
     "text": {
       "description": "How it reads: its parameter's value and unit, 0 to 127, or a shared unit (R10).",
       "type": "string"
@@ -21063,6 +21227,8 @@ One macro as `rack.macros` reports it.
     "colour",
     "value",
     "text",
+    "style",
+    "steps",
     "randomize_excluded",
     "variation_excluded",
     "mappings"
@@ -21243,6 +21409,43 @@ What `rack.macros` reports (macros spec, R19 and R32).
     "variations"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `MacroStyle`
+
+How a macro is drawn and which positions it takes (macros spec, R21 to R23). Every macro starts as a knob, Live's continuous control.
+
+One of:
+
+- `"knob"`: Live's continuous knob.
+- `"stepped"`: A knob that takes a number of steps.
+- `"radio_buttons"`: A stepped macro drawn as its steps' buttons.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a macro is drawn and which positions it takes (macros spec, R21 to R23). Every macro starts as a knob, Live's continuous control.",
+  "oneOf": [
+    {
+      "const": "knob",
+      "description": "Live's continuous knob.",
+      "type": "string"
+    },
+    {
+      "const": "stepped",
+      "description": "A knob that takes a number of steps.",
+      "type": "string"
+    },
+    {
+      "const": "radio_buttons",
+      "description": "A stepped macro drawn as its steps' buttons.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -26017,6 +26220,102 @@ A return chain's output (drum racks spec, R8).
 
 </details>
 
+### `ReverseRangeResult`
+
+What `arrangement.reverse` did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The clips it reversed. |
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks they sit on. |
+| `files` | array of string | no | The new files, one per reversed clip, and where each is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `arrangement.reverse` did.",
+  "properties": {
+    "clips": {
+      "description": "The clips it reversed.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The new files, one per reversed clip, and where each is.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tracks": {
+      "description": "The tracks they sit on.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "clips",
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ReverseResult`
+
+What `clip.reverse` did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, reversed. |
+| `media` | [`ContentHash`](#contenthash) or null | no | The new file the clip plays, named by its content hash; `null` for a MIDI clip, which isn't reversed. |
+| `path` | string or null | no | Where the new file is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.reverse` did.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip, reversed."
+    },
+    "media": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The new file the clip plays, named by its content hash; `null` for a MIDI clip, which isn't reversed."
+    },
+    "path": {
+      "description": "Where the new file is.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RunningRecording`
 
 The recording under way, in `transport.state`.
@@ -26683,6 +26982,7 @@ A plug-in the scanner found.
 | `plugin_id` | string | yes | Its identifier within its format (a CLAP ID, or a VST3 class ID). |
 | `name` | string | yes | Its name. |
 | `role` | [`DeviceRole`](#devicerole) | yes | What it is in a chain. |
+| `note_output` | boolean | yes | Whether it sends notes on from a note output (IMP-24): such a plug-in can sit in the MIDI-effect position of a MIDI track's chain. |
 | `hidden` | boolean | yes | Whether the browser hides it (IMP-07). |
 | `vendor` | string or null | no | Its vendor, if it gives one. |
 | `version` | string or null | no | Its version, if it gives one. |
@@ -26704,6 +27004,10 @@ A plug-in the scanner found.
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "note_output": {
+      "description": "Whether it sends notes on from a note output (IMP-24): such a plug-in can sit in the MIDI-effect position of a MIDI track's chain.",
+      "type": "boolean"
     },
     "path": {
       "description": "The file or bundle it's in.",
@@ -26738,6 +27042,7 @@ A plug-in the scanner found.
     "plugin_id",
     "name",
     "role",
+    "note_output",
     "hidden"
   ],
   "type": "object"

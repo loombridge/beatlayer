@@ -17,8 +17,8 @@ use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Regis
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
     ChainId, ChainZones, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind,
-    DeviceLayout, DeviceRole, MacroTarget, ParamDescriptor, ParamId, RackKind, RackView, RackViews,
-    Tap, TrackId, TrackKind, WindowFrame, ZoneKind,
+    DeviceLayout, DeviceRole, MacroStyle, MacroTarget, ParamDescriptor, ParamId, RackKind,
+    RackView, RackViews, Tap, TrackId, TrackKind, WindowFrame, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,6 +141,10 @@ pub const SET_WINDOW: &str = "device.set_window";
 /// `device.set_floating`: the document's command that floats or docks a
 /// device (`bl-model`'s).
 pub const SET_FLOATING: &str = "device.set_floating";
+/// `device.set_role`: the document's command that places a device in the
+/// MIDI-effect position of a MIDI track's chain, before the instrument, or
+/// back where its type goes (IMP-24, `bl-model`'s).
+pub const SET_ROLE: &str = "device.set_role";
 
 /// `device.compare_switch`: make a native device's other A/B state active
 /// (`bl-model`'s).
@@ -210,6 +214,7 @@ pub const ON_SELECTED: &[&str] = &[
     "device.set_enabled",
     "device.set_show_preset_name",
     SET_FLOATING,
+    SET_ROLE,
     COMPARE_SWITCH,
     COMPARE_COPY,
 ];
@@ -1402,6 +1407,10 @@ pub struct MacroInfo {
     /// How it reads: its parameter's value and unit, 0 to 127, or a shared
     /// unit (R10).
     pub text: String,
+    /// How it is drawn and which positions it takes (R21).
+    pub style: MacroStyle,
+    /// How many steps a stepped macro takes (R22).
+    pub steps: u8,
     /// Whether Randomize leaves it alone (R16).
     pub randomize_excluded: bool,
     /// Whether a variation launch leaves it alone (R30).

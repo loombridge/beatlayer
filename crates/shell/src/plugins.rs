@@ -423,6 +423,7 @@ pub fn scan_report(
                 vendor: p.vendor,
                 version: p.version,
                 role: p.role,
+                note_output: p.note_output,
             })
             .collect(),
         blocked: report

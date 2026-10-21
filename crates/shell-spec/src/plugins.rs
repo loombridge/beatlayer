@@ -340,6 +340,9 @@ pub struct ScannedItem {
     pub version: Option<String>,
     /// What it is in a chain.
     pub role: DeviceRole,
+    /// Whether it sends notes on from a note output (IMP-24): such a
+    /// plug-in can sit in the MIDI-effect position of a MIDI track's chain.
+    pub note_output: bool,
     /// Whether the browser hides it (IMP-07).
     pub hidden: bool,
 }

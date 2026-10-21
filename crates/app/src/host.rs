@@ -330,6 +330,9 @@ struct Host {
     theme_choice: ThemeChoice,
     theme: Theme,
     keymap: Keymap,
+    /// The shell's keymap revision the keymap was built at, so a change
+    /// rebuilds it and the native menu (the custom-shortcuts spec, R10).
+    keymap_revision: u64,
     platform: Platform,
     menus: Vec<Menu>,
     proxy: EventLoopProxy<UserEvent>,
@@ -516,12 +519,17 @@ pub fn run(args: Args) -> Result<(), String> {
                 let _ = render_proxy.send_event(UserEvent::Rendered);
             }
         });
+    // The keymap in use: Live 12's shortcuts with the person's own layered
+    // over them (the custom-shortcuts spec, R3).
+    let keymap = Keymap::from_data(shell.keymap().clone());
+    let keymap_revision = shell.keymap_revision();
     let mut host = Host {
         args,
         shell,
         theme_choice,
         theme: Theme::builtin(theme_choice),
-        keymap: Keymap::live12(),
+        keymap,
+        keymap_revision,
         platform,
         menus,
         proxy,
@@ -768,6 +776,31 @@ impl Host {
         Ok(())
     }
 
+    /// Builds the native menu bar again, after a binding changed, so its
+    /// key equivalents are the ones in use (the custom-shortcuts spec,
+    /// R10).
+    #[cfg(any(target_os = "macos", windows))]
+    fn rebuild_native_menu(&mut self, window: &winit::window::Window) {
+        let built = crate::native_menu::NativeMenu::build(
+            &self.menus,
+            &self.shell,
+            &self.keymap,
+            self.platform,
+        );
+        let menu = match built {
+            Ok(menu) => menu,
+            Err(error) => {
+                self.shell.set_message(error, true);
+                return;
+            }
+        };
+        if let Err(error) = menu.attach(window) {
+            self.shell.set_message(error, true);
+            return;
+        }
+        self.native_menu = Some(menu);
+    }
+
     fn open_settings_window(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(settings) = &self.settings {
             settings.window.focus_window();
@@ -997,6 +1030,17 @@ impl Host {
         let Some(mut surface) = self.surface(kind).take() else {
             return;
         };
+        // The person's own shortcuts changed: the keymap the window matches
+        // keys against, and the native menu's key equivalents, follow (the
+        // custom-shortcuts spec, R10).
+        if self.keymap_revision != self.shell.keymap_revision() {
+            self.keymap_revision = self.shell.keymap_revision();
+            self.keymap = Keymap::from_data(self.shell.keymap().clone());
+            #[cfg(any(target_os = "macos", windows))]
+            if kind == WindowKind::Main {
+                self.rebuild_native_menu(&surface.window);
+            }
+        }
         egui_winit::update_viewport_info(&mut surface.info, &surface.ctx, &surface.window, false);
         let mut input = surface.state.take_egui_input(&surface.window);
         input
@@ -1013,7 +1057,16 @@ impl Host {
             WindowKind::Assistant => &mut self.assistant_keys,
             WindowKind::Device(_) => &mut self.device_keys,
         };
-        let invocations = keys.take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+        let invocations = if kind == WindowKind::Settings && self.settings_ui.recording() {
+            // The keys being recorded on the Shortcuts page are the
+            // person's, not the app's (the custom shortcuts spec, R8).
+            self.settings_ui
+                .take_recorded_key(&mut input, &self.shell)
+                .into_iter()
+                .collect()
+        } else {
+            keys.take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused)
+        };
         if kind == WindowKind::Settings {
             self.settings_ui.prepare(&mut self.shell);
         } else {

@@ -1,6 +1,6 @@
 //! The default keymap (WP-1.7; the architecture, "The keymap").
 //!
-//! `crates/ui/keymaps/live12.toml` is generated from the UI parity
+//! `crates/shell-spec/keymaps/live12.toml` is generated from the UI parity
 //! reference's shortcuts and the command registry: every shortcut in
 //! the shortcut reference, in its order, with what it does in
 //! Beatlayer. A shortcut is `bound` when a registered command binds it, and
@@ -23,7 +23,7 @@ use crate::commands;
 use crate::ui_parity::{self, KeySource};
 
 /// The generated keymap, relative to the workspace root.
-pub const PATH: &str = "crates/ui/keymaps/live12.toml";
+pub const PATH: &str = "crates/shell-spec/keymaps/live12.toml";
 
 /// Shortcuts the operating system handles, with how: the platform's menus,
 /// and items its standard menus provide with their keys.
@@ -530,6 +530,6 @@ mod tests {
             eprintln!("{}", ui_parity::ABSENT);
             return;
         }
-        check(root).expect("crates/ui/keymaps/live12.toml is in sync");
+        check(root).expect("crates/shell-spec/keymaps/live12.toml is in sync");
     }
 }

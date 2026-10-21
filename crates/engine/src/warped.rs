@@ -85,11 +85,6 @@ const MAX_SEGMENT_RUNS: usize = 4_096;
 /// warping spec, R12 allows a hundredth of a frame).
 const TOLERANCE: f64 = 0.005;
 
-/// The clip's pitch ratio (the warp modes spec, R25): 1 until WP-4.7 wires
-/// Transpose and Detune. A Beats clip's segments read at this ratio (R14,
-/// R17).
-const PITCH: f64 = 1.0;
-
 /// How long a mode change takes to crossfade into the new one, in seconds
 /// (R8, Beatlayer's own).
 const CHANGE_SECONDS: f64 = 0.020;
@@ -102,6 +97,13 @@ pub(crate) struct Playing {
     pub(crate) tones: bl_model::TonesSettings,
     pub(crate) texture: bl_model::TextureSettings,
     pub(crate) clip_id: u64,
+    /// The clip's pitch ratio (R25): 1 where it isn't transposed. Every mode
+    /// but Re-Pitch takes it on its own path (R26); Re-Pitch ignores it
+    /// (R10).
+    pub(crate) pitch: f64,
+    /// Whether the clip is warped: an unwarped one reads its file at the
+    /// pitch ratio instead of through a mode (R27).
+    pub(crate) warp: bool,
 }
 
 /// A warped clip's contents, in beats of the clip: where it starts, ends and
@@ -217,7 +219,7 @@ impl Warped {
             warped.table = if warped.plan.is_empty() {
                 warped.tabulate(clip, tempo, r)
             } else {
-                warped.beats_table(clip, tempo, r)
+                warped.beats_table(clip, tempo, r, audio.pitch_ratio())
             };
         }
         Some(warped)
@@ -303,11 +305,12 @@ impl Warped {
         (longest.ceil() as usize).max(self.window_frames())
     }
 
-    /// The table of a Beats clip: its plan's stretches (R14 to R17).
-    fn beats_table(&self, clip: &Clip, tempo: &TempoMap, r: f64) -> WarpTable {
+    /// The table of a Beats clip: its plan's stretches (R14 to R17), read at
+    /// the clip's pitch ratio (R17).
+    fn beats_table(&self, clip: &Clip, tempo: &TempoMap, r: f64, pitch: f64) -> WarpTable {
         let mut pieces: Vec<Piece> = self
             .plan
-            .stretches(PITCH)
+            .stretches(pitch)
             .into_iter()
             .map(|stretch| Piece {
                 frame: stretch.frame,
@@ -674,6 +677,25 @@ pub(crate) enum Positions<'a> {
         launch: i64,
         rate: f64,
     },
+    /// An unwarped clip transposed: its file read at the pitch ratio (R27),
+    /// from the song frame it starts playing at.
+    Flat(Flat),
+}
+
+/// Where an unwarped clip transposed reads (R27): its file at the pitch
+/// ratio, so its speed and its pitch move together.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Flat {
+    /// The song frame the clip starts playing at.
+    pub(crate) origin: i64,
+    /// The file frame it plays there.
+    pub(crate) start: f64,
+    /// The file frame its region ends at.
+    pub(crate) end: f64,
+    /// Its loop brace, where it loops.
+    pub(crate) loop_brace: Option<(f64, f64)>,
+    /// The pitch ratio (R25).
+    pub(crate) ratio: f64,
 }
 
 /// A run of frames over which the position advances smoothly.
@@ -757,6 +779,47 @@ impl Positions<'_> {
                     sound: true,
                     speed,
                     neutral,
+                }
+            }
+            Positions::Flat(flat) => {
+                // Spec: warp-modes R27. The file is read at the pitch ratio
+                // from the clip's Start marker, so its speed and its pitch
+                // move together.
+                let mut frames = 0;
+                let mut previous: Option<f64> = None;
+                for (i, position) in out.iter_mut().enumerate() {
+                    let elapsed = (first + i as i64 - flat.origin).max(0) as f64;
+                    let linear = flat.start + elapsed * flat.ratio;
+                    let at = match flat.loop_brace {
+                        Some((loop_start, loop_end)) if loop_end > loop_start => {
+                            let length = loop_end - loop_start;
+                            if linear < loop_end {
+                                linear
+                            } else {
+                                loop_start + (linear - loop_end) % length
+                            }
+                        }
+                        _ => {
+                            if linear >= flat.end {
+                                break;
+                            }
+                            linear
+                        }
+                    };
+                    // A loop's wrap: the run ends there, and the next starts
+                    // afresh at the brace.
+                    if previous.is_some_and(|before| at < before) {
+                        break;
+                    }
+                    *position = at;
+                    previous = Some(at);
+                    frames = i + 1;
+                }
+                Fill {
+                    frames,
+                    sound: frames > 0,
+                    speed: flat.ratio,
+                    neutral: flat.ratio == 1.0,
                 }
             }
         }
@@ -1099,31 +1162,48 @@ impl WarpScratch {
             Out::Previous => rendered_previous,
         };
         let mut n = fill.frames;
-        let mode: &mut dyn WarpMode = match playing.mode {
-            ClipWarpMode::Beats => beats,
-            ClipWarpMode::Tones => {
-                tones.set_grain_size(playing.tones.grain_size);
-                tones
+        // Spec: warp-modes R10, R26, R27. An unwarped clip reads its file at
+        // the pitch ratio, and Re-Pitch reads the file at the clip's speed
+        // and changes nothing else, so both read the positions they're given.
+        let mode: &mut dyn WarpMode = if !playing.warp {
+            repitch
+        } else {
+            match playing.mode {
+                ClipWarpMode::Beats => beats,
+                ClipWarpMode::Tones => {
+                    tones.set_grain_size(playing.tones.grain_size);
+                    tones
+                }
+                ClipWarpMode::Texture => {
+                    texture.set_clip_id(playing.clip_id);
+                    texture.set_grain_size(playing.texture.grain_size);
+                    texture.set_flux(playing.texture.flux);
+                    texture
+                }
+                _ => repitch,
             }
-            ClipWarpMode::Texture => {
-                texture.set_clip_id(playing.clip_id);
-                texture.set_grain_size(playing.texture.grain_size);
-                texture.set_flux(playing.texture.flux);
-                texture
-            }
-            _ => repitch,
         };
         let plan = plan.unwrap_or(&EMPTY_PLAN);
+        // Spec: warp-modes R10, R20, R26. A mode that takes the clip's
+        // pitch reads the file at the ratio, so its run isn't the neutral
+        // one; Re-Pitch and the modes that have not landed yet ignore the
+        // clip's pitch, and keep the neutral run.
+        let takes_pitch = !playing.warp
+            || matches!(
+                playing.mode,
+                ClipWarpMode::Beats | ClipWarpMode::Tones | ClipWarpMode::Texture
+            );
+        let neutral = fill.neutral && !(takes_pitch && playing.pitch != 1.0);
         let (request, lo, len) = loop {
             let run = &all[..n];
             let request = Request {
                 positions: run,
                 first,
                 speed: fill.speed,
-                neutral: fill.neutral,
+                neutral,
                 high_quality: playing.high_quality,
                 beats: plan,
-                pitch: PITCH,
+                pitch: playing.pitch,
             };
             let (before, after) = mode.reach(&request);
             // The window holds every position the run reads, whichever way it
@@ -1131,7 +1211,7 @@ impl WarpScratch {
             // and last frames don't bound it.
             let (mut lo, mut hi) = (i64::MAX, i64::MIN);
             for &position in run {
-                if fill.neutral {
+                if neutral {
                     let frame = position.round() as i64;
                     lo = lo.min(frame);
                     hi = hi.max(frame + 1);
@@ -1176,7 +1256,7 @@ impl Positions<'_> {
     /// The tempo map a launched clip follows; empty for a table.
     fn tempo(&self) -> &TempoMap {
         match self {
-            Self::Table(_) => unreachable!("a table has no tempo map"),
+            Self::Table(_) | Self::Flat(_) => unreachable!("no tempo map"),
             Self::Launched { tempo, .. } => tempo,
         }
     }
@@ -1184,7 +1264,7 @@ impl Positions<'_> {
     /// The rate a launched clip reads at.
     fn rate(&self) -> f64 {
         match self {
-            Self::Table(_) => unreachable!("a table has no rate"),
+            Self::Table(_) | Self::Flat(_) => unreachable!("no rate"),
             Self::Launched { rate, .. } => *rate,
         }
     }

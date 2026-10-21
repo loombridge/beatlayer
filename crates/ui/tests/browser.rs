@@ -422,11 +422,13 @@ fn option_5_and_cmd_f_reach_the_browser() {
     assert!(!h.shell.browser_visible());
     // Option-5 (Alt-5) shows the browser and focuses it.
     let platform = Platform::current();
-    let alt = Mods {
-        alt: true,
-        ..Mods::default()
-    }
-    .to_egui(platform);
+    let alt = bl_ui::keymap::mods_to_egui(
+        Mods {
+            alt: true,
+            ..Mods::default()
+        },
+        platform,
+    );
     h.key(Key::Num5, alt);
     assert!(h.shell.browser_visible());
     assert_eq!(h.shell.focused_area(), Area::Browser);

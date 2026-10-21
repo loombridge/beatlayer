@@ -7,7 +7,7 @@ use bl_shell::{Invocation, Shell};
 use egui::{Event, Key, RawInput};
 use serde_json::{Value, json};
 
-use crate::keymap::{Hit, Keymap, LATCH_HOLD_SECONDS, Mods, Platform, Trigger};
+use crate::keymap::{Hit, Keymap, LATCH_HOLD_SECONDS, Platform, Trigger, mods_from_egui};
 
 /// A key the dispatcher took, kept until it's released.
 #[derive(Clone, Debug)]
@@ -176,7 +176,7 @@ impl KeyDispatcher {
             if !*pressed || *repeat {
                 return true;
             }
-            let mods = Mods::from_egui(*modifiers, self.platform);
+            let mods = mods_from_egui(*modifiers, self.platform);
             let args_of = |hit: &Hit<'_>| {
                 let mut fields = hit.command.args.clone();
                 // F1 to F8 switch the track their number names (the mixer

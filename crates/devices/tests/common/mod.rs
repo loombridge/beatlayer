@@ -18,6 +18,7 @@ pub const CHANNELS: usize = 2;
 
 pub fn config(max_frames: usize) -> NodeConfig {
     NodeConfig {
+        round_trip_latency: 0,
         sample_rate: RATE,
         max_frames,
         channels: CHANNELS,

@@ -443,6 +443,7 @@ fn timing_jitter_with_a_real_time_audio_thread_and_a_midi_thread() {
         count: Arc::clone(&count),
     };
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         ..NullOptions::default()
     });

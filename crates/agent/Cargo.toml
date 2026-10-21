@@ -41,6 +41,9 @@ bl-plugin-host.workspace = true
 # The VST3 test plug-in, built from source, which the agent's VST3 test
 # loads by path.
 bl-test-vst3 = { path = "../test-vst3" }
+# The CLAP test plug-in, built from source, which the agent's MIDI-effect
+# test loads by path (IMP-24).
+bl-test-clap = { path = "../test-clap" }
 lspk-example-gain.workspace = true
 lspk-plugin = { workspace = true, features = ["clap"] }
 lspk-plugin-agent.workspace = true

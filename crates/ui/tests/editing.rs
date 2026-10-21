@@ -217,7 +217,7 @@ impl Set {
             .chord_for_shortcut(shortcut, platform)
             .unwrap_or_else(|| panic!("{shortcut} has a key chord"))
             .clone();
-        self.key(chord.key, chord.mods.to_egui(platform));
+        self.key(chord.key, bl_ui::keymap::mods_to_egui(chord.mods, platform));
     }
 
     /// Checks the newest step undoes to exactly `before` and redoes, with

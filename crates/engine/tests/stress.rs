@@ -105,6 +105,7 @@ fn recompiles_during_playback(workers: usize) {
 
     let wrong_samples = Arc::new(AtomicU64::new(0));
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         pacing: Pacing::RealTime,
         frame_limit: None,
         channels: 2,

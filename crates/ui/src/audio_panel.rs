@@ -4,17 +4,20 @@
 //!
 //! Each control runs the command agents run: the Warp switch, the Warp Mode
 //! chooser and the chosen mode's own controls, the BPM field with ×2 and ÷2,
-//! the Lead/Follow switch, Edit, RAM, HiQ and Gain. The controls whose
-//! command hasn't landed yet — Reverse and Transpose with Detune (WP-4.7)
-//! and the Session View's Clip Fade switch — are drawn pending, naming the
-//! package that brings them.
+//! the Lead/Follow switch, Reverse, Edit, RAM, HiQ and Gain, and Transpose
+//! with Detune. The control whose command hasn't landed yet — the Session
+//! View's Clip Fade switch — is drawn pending, naming the package that
+//! brings it.
 //!
 //! With several clips selected the panel shows what they share and, on a
 //! control whose values differ, their range.
 
 use std::cell::Cell;
 
-use bl_model::{AudioData, ClipData, ClipId, Document, Preserve, TransientLoopMode, WarpMode};
+use bl_model::{
+    AudioData, ClipData, ClipId, DETUNE_MAX, DETUNE_MIN, Document, Preserve, TRANSPOSE_MAX,
+    TRANSPOSE_MIN, TransientLoopMode, WarpMode,
+};
 use bl_shell::{Area, Invocation, Shell};
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::{Value, json};
@@ -231,8 +234,17 @@ fn mixed_text(ui: &mut Ui, theme: &Theme, rect: Rect) {
     );
 }
 
-/// A control that can't be used now, drawn quiet and announced as disabled.
-fn disabled(ui: &mut Ui, theme: &Theme, salt: &str, name: &str, rect: Rect, text: &str) {
+/// A control that can't be used now, drawn quiet and announced as disabled,
+/// with the reason why.
+fn disabled(
+    ui: &mut Ui,
+    theme: &Theme,
+    salt: &str,
+    name: &str,
+    rect: Rect,
+    text: &str,
+    reason: &str,
+) {
     let id = Id::new(("disabled", salt));
     let response = ui.interact(rect, id, Sense::hover());
     let c = &theme.colors;
@@ -247,7 +259,7 @@ fn disabled(ui: &mut Ui, theme: &Theme, salt: &str, name: &str, rect: Rect, text
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, false, name));
     ui.ctx().accesskit_node_builder(id, |node| {
-        node.set_description("the clip isn't warped: switch Warp on first".to_owned());
+        node.set_description(reason.to_owned());
         node.set_value(text.to_owned());
     });
 }
@@ -503,9 +515,10 @@ pub fn show(
     let half = Rect::from_min_size(at + vec2(80.0, 0.0), vec2(SMALL, CONTROL.y));
     if !audio.warp {
         // R15: with Warp off the tempo controls are disabled.
-        disabled(ui, theme, "audio-bpm", "BPM", field, &text);
-        disabled(ui, theme, "audio-bpm-twice", "×2", twice, "×2");
-        disabled(ui, theme, "audio-bpm-half", "÷2", half, "÷2");
+        let reason = "the clip isn't warped: switch Warp on first";
+        disabled(ui, theme, "audio-bpm", "BPM", field, &text, reason);
+        disabled(ui, theme, "audio-bpm-twice", "×2", twice, "×2", reason);
+        disabled(ui, theme, "audio-bpm-half", "÷2", half, "÷2", reason);
     } else {
         if let Some(bpm) = widgets::number_box(
             ui,
@@ -559,17 +572,17 @@ pub fn show(
         }
     }
 
-    // Reverse: WP-4.7 hasn't landed.
+    // Reverse (the audio clip editing spec, R7).
     let at = row(&painter, "Reverse");
-    pending(
+    if button(
         ui,
         theme,
         "audio-reverse",
         "Reverse",
         Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
-        "Reverse",
-        "Not built yet: arrives with WP-4.7.",
-    );
+    ) {
+        each(events, "clip.reverse", json!({}));
+    }
 
     // Edit.
     let at = row(&painter, "Edit");
@@ -674,26 +687,89 @@ pub fn show(
         each(events, "clip.set_gain", json!({ "gain": gain_linear(db) }));
     }
 
-    // Transpose, with Detune beside it: WP-4.7 hasn't landed.
+    // Transpose, with Detune beside it (the warp modes spec, R2 and R25).
+    let transposes: Vec<f64> = data.iter().map(|d| f64::from(d.transpose)).collect();
+    let detunes: Vec<f64> = data.iter().map(|d| d.detune).collect();
     let at = row(&painter, "Transpose");
-    pending(
-        ui,
-        theme,
-        "audio-transpose",
-        "Transpose",
-        Rect::from_min_size(at, vec2(48.0, CONTROL.y)),
-        "0 st",
-        "Not built yet: arrives with WP-4.7.",
-    );
-    pending(
-        ui,
-        theme,
-        "audio-detune",
-        "Detune",
-        Rect::from_min_size(at + vec2(52.0, 0.0), vec2(48.0, CONTROL.y)),
-        "0 ct",
-        "Not built yet: arrives with WP-4.7.",
-    );
+    let (shown, text) = match shared_number(&transposes) {
+        Shared::One(value) => (value, format!("{value:.0} st")),
+        Shared::Range(low, high) => (low, format!("{low:.0} – {high:.0} st")),
+    };
+    let (detune, detune_text) = match shared_number(&detunes) {
+        Shared::One(value) => (value, format!("{value:.0} ct")),
+        Shared::Range(low, high) => (low, format!("{low:.0} – {high:.0} ct")),
+    };
+    let transpose_rect = Rect::from_min_size(at, vec2(48.0, CONTROL.y));
+    let detune_rect = Rect::from_min_size(at + vec2(52.0, 0.0), vec2(48.0, CONTROL.y));
+    // Spec: warp-modes R10. In Re-Pitch the Transpose and the Detune don't
+    // act, and the panel draws them switched off.
+    if data
+        .iter()
+        .all(|d| d.warp && d.warp_mode == WarpMode::RePitch)
+    {
+        let reason = "the clip is in Re-Pitch: Transpose and Detune don't act there";
+        disabled(
+            ui,
+            theme,
+            "audio-transpose",
+            "Transpose",
+            transpose_rect,
+            &text,
+            reason,
+        );
+        disabled(
+            ui,
+            theme,
+            "audio-detune",
+            "Detune",
+            detune_rect,
+            &detune_text,
+            reason,
+        );
+    } else {
+        crate::focus::register(
+            ui.ctx(),
+            Id::new(("number-box", "audio-transpose")),
+            Area::Detail,
+            None,
+        );
+        if let Some(value) = widgets::number_box(
+            ui,
+            theme,
+            "audio-transpose",
+            "Transpose",
+            transpose_rect,
+            shown,
+            (TRANSPOSE_MIN as f64, TRANSPOSE_MAX as f64),
+            &|value, steps| value + f64::from(steps),
+            &text,
+        ) {
+            each(
+                events,
+                "clip.set_pitch",
+                json!({ "transpose": value.round() as i32 }),
+            );
+        }
+        crate::focus::register(
+            ui.ctx(),
+            Id::new(("number-box", "audio-detune")),
+            Area::Detail,
+            None,
+        );
+        if let Some(value) = widgets::number_box(
+            ui,
+            theme,
+            "audio-detune",
+            "Detune",
+            detune_rect,
+            detune,
+            (DETUNE_MIN, DETUNE_MAX),
+            &|value, steps| value + f64::from(steps),
+            &detune_text,
+        ) {
+            each(events, "clip.set_pitch", json!({ "detune": value }));
+        }
+    }
 }
 
 /// The mode's own controls, under the Warp Mode chooser (the warp modes

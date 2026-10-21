@@ -30,8 +30,8 @@ use bl_model::WarpMode as ClipWarpMode;
 use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
 use bl_stretch::{
-    Beats, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode, WarpTable,
-    Window, window_frames,
+    Beats, Complex, Interpolation, Piece, RePitch, Request, Texture, Tones, WarpMap, WarpMode,
+    WarpTable, Window, window_frames,
 };
 
 use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
@@ -41,11 +41,15 @@ use crate::clip_source::WINDOW_FRAMES as NARROW_WINDOW;
 pub(crate) const CUE_BACK: u64 = 264;
 
 /// The file frames a mode's reads need at `rate`: the widest any mode's
-/// window reaches for a grain mode (Tones and Texture, R18 and R19), the
-/// narrow one for the rest.
+/// window reaches for a grain mode (Tones and Texture, R18 and R19) and for
+/// the frequency-domain modes, whose stretcher reads ahead of the run by its
+/// own latency (Complex and Complex Pro, R24), the narrow one for the rest.
 pub(crate) fn window_of(mode: ClipWarpMode, rate: f64) -> usize {
     match mode {
-        ClipWarpMode::Tones | ClipWarpMode::Texture => window_frames(rate),
+        ClipWarpMode::Tones
+        | ClipWarpMode::Texture
+        | ClipWarpMode::Complex
+        | ClipWarpMode::ComplexPro => window_frames(rate),
         _ => NARROW_WINDOW,
     }
 }
@@ -96,6 +100,8 @@ pub(crate) struct Playing {
     pub(crate) high_quality: bool,
     pub(crate) tones: bl_model::TonesSettings,
     pub(crate) texture: bl_model::TextureSettings,
+    /// Complex Pro's Formants and Envelope (R22, R23); Complex ignores them.
+    pub(crate) complex_pro: bl_model::ComplexProSettings,
     pub(crate) clip_id: u64,
     /// The clip's pitch ratio (R25): 1 where it isn't transposed. Every mode
     /// but Re-Pitch takes it on its own path (R26); Re-Pitch ignores it
@@ -989,6 +995,10 @@ pub(crate) struct WarpScratch {
     beats: Beats,
     tones: Tones,
     texture: Texture,
+    /// Complex's own stretcher and Complex Pro's, each made here, with the
+    /// track's clip list, off the audio thread (R5).
+    complex: Complex,
+    complex_pro: Complex,
 }
 
 impl WarpScratch {
@@ -1006,6 +1016,8 @@ impl WarpScratch {
             beats: Beats,
             tones: Tones::new(channels, rate.as_f64()),
             texture: Texture::new(channels, rate.as_f64(), 0),
+            complex: Complex::new(channels, rate.as_f64(), false),
+            complex_pro: Complex::new(channels, rate.as_f64(), true),
         }
     }
 
@@ -1155,6 +1167,8 @@ impl WarpScratch {
             beats,
             tones,
             texture,
+            complex,
+            complex_pro,
             ..
         } = self;
         let rendered = match out {
@@ -1182,18 +1196,37 @@ impl WarpScratch {
                 }
                 _ => repitch,
             }
+                ClipWarpMode::Complex => complex,
+                ClipWarpMode::ComplexPro => {
+                    complex_pro.set_formants(playing.complex_pro.formants);
+                    complex_pro.set_envelope(playing.complex_pro.envelope);
+                    complex_pro
+                }
+                ClipWarpMode::RePitch => repitch,
+            }
         };
         let plan = plan.unwrap_or(&EMPTY_PLAN);
         // Spec: warp-modes R10, R20, R26. A mode that takes the clip's
         // pitch reads the file at the ratio, so its run isn't the neutral
         // one; Re-Pitch and the modes that have not landed yet ignore the
-        // clip's pitch, and keep the neutral run.
+        // clip's pitch, and keep the neutral run. The frequency-domain modes
+        // are never neutral, and read their own latency either side however
+        // steady the run is (R21, R24).
         let takes_pitch = !playing.warp
             || matches!(
                 playing.mode,
-                ClipWarpMode::Beats | ClipWarpMode::Tones | ClipWarpMode::Texture
+                ClipWarpMode::Beats
+                    | ClipWarpMode::Tones
+                    | ClipWarpMode::Texture
+                    | ClipWarpMode::Complex
+                    | ClipWarpMode::ComplexPro
             );
-        let neutral = fill.neutral && !(takes_pitch && playing.pitch != 1.0);
+        let neutral = fill.neutral
+            && !(takes_pitch && playing.pitch != 1.0)
+            && !matches!(
+                playing.mode,
+                ClipWarpMode::Complex | ClipWarpMode::ComplexPro
+            );
         let (request, lo, len) = loop {
             let run = &all[..n];
             let request = Request {

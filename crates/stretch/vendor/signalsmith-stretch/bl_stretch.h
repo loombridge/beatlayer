@@ -45,10 +45,15 @@ void bl_stretch_set_formant_factor(BlStretch *stretch, double multiplier,
 // sample rate (a frequency in Hz divided by it).
 void bl_stretch_set_formant_base(BlStretch *stretch, double base_freq);
 
-// Primes the stretcher with the `input_samples` frames ending at the point
-// playback is to start, without pre-calculating output (a resume).
-void bl_stretch_seek(BlStretch *stretch, const float *const *inputs,
-                     int input_samples, double playback_rate);
+// The frames `bl_stretch_output_seek` wants for `playback_rate`: the input
+// and output latency the seek pre-rolls.
+int bl_stretch_output_seek_length(const BlStretch *stretch,
+                                  double playback_rate);
+// Moves the input position to the point `input_samples` frames end at,
+// pre-computing the output before it, so the next `bl_stretch_process` output
+// is aligned to that point (the warp modes spec, R7 and R24).
+void bl_stretch_output_seek(BlStretch *stretch, const float *const *inputs,
+                            int input_samples);
 // Consumes `input_samples` input frames and writes `output_samples` output
 // frames.
 void bl_stretch_process(BlStretch *stretch, const float *const *inputs,

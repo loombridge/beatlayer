@@ -8,8 +8,9 @@
 //! feeds the file to the stretcher at the run's speed and asks for the run's
 //! frames out, so the audio lands where the warp map puts it (R24), and the
 //! output depends only on the song, the media and the frame playback began on
-//! (R6). A locate, a launch or a jump primes the stretcher with the audio just
-//! before the point and drops its own output latency (R7, R24).
+//! (R6). A start, a locate or a launch primes the stretcher with the audio
+//! before the point and drops the stretcher's own latency, so the clip is at
+//! its level from its first frame and its reads add no latency (R7, R24).
 //!
 //! Complex uses the library's own default configuration and never corrects
 //! formants; Complex Pro uses a finer configuration and, when the pitch
@@ -57,7 +58,7 @@ const MAX_RATE: f64 = 4.0;
 /// rounding reaches past what [`Complex::reach`] asked the window to hold.
 const MARGIN: usize = 32;
 
-/// The frames a prime's discarded output is written into, a chunk at a time so
+/// The frames a prime's dropped output is written into, a chunk at a time so
 /// this stays small.
 const SCRATCH_FRAMES: usize = 2_048;
 
@@ -65,31 +66,21 @@ const SCRATCH_FRAMES: usize = 2_048;
 /// modes' latencies, which is what a window must be sized for.
 const WIDEST_HALF: f64 = PRO_BLOCK_SECONDS / 2.0;
 
-/// How far before a position a Complex read reaches at `sample_rate`: the
-/// audio a prime seeks with, so a locate starts at the right level (R7).
+/// How far before a position a Complex read reaches at `rate` file frames per
+/// song frame, at `sample_rate`: the audio a prime seeks with, so a locate or a
+/// launch starts at the right level (R7, R24).
 #[must_use]
-fn pre_roll(sample_rate: f64) -> usize {
-    ((sample_rate * WIDEST_HALF).ceil() as usize).max(1) + MARGIN
-}
-
-/// How far beyond a run's last position a Complex read reaches at `rate` file
-/// frames per song frame, at `sample_rate`: the stretcher's input and output
-/// latency, which is what makes the output land on the warp map (R24).
-#[must_use]
-fn lead(sample_rate: f64, rate: f64) -> usize {
+fn seek_reach(sample_rate: f64, rate: f64) -> usize {
     let half = sample_rate * WIDEST_HALF;
-    let discard = (half + half / rate.max(1e-6)).round() + 2.0;
-    // A run feeds up to the frame one past its last, so the reach also covers
-    // the frame a run's own speed adds.
-    (rate.max(0.0) * discard).round() as usize + rate.max(0.0).ceil() as usize + MARGIN
+    ((half * (1.0 + rate.max(0.0))).ceil() as usize).max(1) + MARGIN
 }
 
-/// The most file frames any Complex read reaches each way, at `rate`'s sample
-/// rate: what a window around a run must hold, and what a clip's source must
-/// keep ready. Kept in step with [`Complex::reach`], which no setting widens.
+/// The most file frames any Complex read reaches each way, at `sample_rate`:
+/// what a window around a run must hold, and what a clip's source must keep
+/// ready. Kept in step with [`Complex::reach`], which no setting widens.
 #[must_use]
 pub fn max_reach(sample_rate: f64) -> usize {
-    lead(sample_rate, MAX_RATE).max(pre_roll(sample_rate))
+    seek_reach(sample_rate, MAX_RATE)
 }
 
 /// The frames of channel `channel` at file frames `first..first + frames`,
@@ -121,7 +112,7 @@ pub struct Complex {
     ended: Option<i64>,
     /// The file frame the input has been fed up to.
     fed: i64,
-    /// The room a prime's discarded output is written into, in frames per
+    /// The room a prime's dropped output is written into, in frames per
     /// channel: made once, so no prime allocates (R5).
     scratch: Vec<f32>,
     scratch_frames: usize,
@@ -129,8 +120,8 @@ pub struct Complex {
 
 impl Complex {
     /// The file frames the input is fed ahead of the audio it makes, at
-    /// `rate`: the frames a prime discards, in file frames, so a run's feed
-    /// and a prime's agree (R6, R24).
+    /// `rate`: the frames a prime drops, in file frames, so a run's feed and a
+    /// prime's agree (R6, R24).
     fn lead_frames(&self, rate: f64) -> usize {
         (rate.max(0.0) * self.discard_frames(rate) as f64).round() as usize
     }
@@ -141,14 +132,15 @@ impl Complex {
         self.lead_frames(rate) + rate.max(0.0).ceil() as usize + MARGIN
     }
 
-    /// The pre-roll a prime seeks with.
-    fn pre_roll_frames(&self) -> usize {
-        // The library primes its analysis over the half-block either side.
-        (self.stretcher.block_samples() / 2).max(self.stretcher.input_latency()) + MARGIN
+    /// The audio a prime seeks with, at `rate`: the audio the stretcher reads
+    /// ahead of the point it lands on (R7, R24).
+    fn pre_roll_frames(&self, rate: f64) -> usize {
+        self.stretcher.output_seek_length(rate) + MARGIN
     }
 
-    /// How many output frames a prime discards at `rate`: the library's input
-    /// and output latency (R24).
+    /// How many output frames a prime drops at `rate`: the library's output
+    /// latency, and its input latency in the output frames it feeds while
+    /// dropping them (R24).
     fn discard_frames(&self, rate: f64) -> usize {
         let input = self.stretcher.input_latency() as f64;
         let output = self.stretcher.output_latency() as f64;
@@ -167,7 +159,10 @@ impl Complex {
         };
         let block_samples = (sample_rate * block).round() as usize;
         let interval_samples = (sample_rate * interval).round() as usize;
-        let stretcher = Stretcher::new(channels.max(1), block_samples, interval_samples, false);
+        let mut stretcher = Stretcher::new(channels.max(1), block_samples, interval_samples, false);
+        // Grow the library's own scratch here, off the audio thread, so no
+        // render or prime allocates later (R5).
+        stretcher.warm();
         Self {
             stretcher,
             channels: channels.max(1),
@@ -231,47 +226,53 @@ impl Complex {
         self.stretcher.set_formant_base(base);
     }
 
-    /// The input frames from `self.fed` up to file frame `until`, in each
-    /// channel, and how many.
-    fn inputs<'a>(&self, window: &'a Window<'_>, until: i64) -> (Vec<&'a [f32]>, usize) {
-        let need = (until - self.fed).max(0) as usize;
-        let channels: Vec<&[f32]> = (0..self.channels)
-            .map(|c| slice(window, c, self.fed, need.max(1)).unwrap_or(&[]))
-            .collect();
-        (channels, need)
+    /// The input frames from `self.fed` up to file frame `until`, one channel
+    /// an item, and how many: the window holds them, and the iterator builds
+    /// no collection, so a render allocates nothing (R5).
+    fn inputs<'a>(
+        &self,
+        window: &'a Window<'_>,
+        until: i64,
+    ) -> (impl Iterator<Item = &'a [f32]> + 'a, usize) {
+        let room = (window.first + window.frames as i64 - self.fed).max(0);
+        let need = (until - self.fed).max(0).min(room) as usize;
+        let fed = self.fed;
+        let channels = self.channels;
+        (
+            (0..channels).map(move |c| slice(window, c, fed, need.max(1)).unwrap_or(&[])),
+            need,
+        )
     }
 
-    /// Starts afresh at the run's first frame: primes the stretcher with the
-    /// audio just before the point (R7) and discards its own output latency
-    /// (R24).
+    /// Starts afresh at the run's first frame: seeks the stretcher to the
+    /// point, delivering the audio just before it, and drops the stretcher's
+    /// own input and output latency, so the run's first frame comes out
+    /// aligned to the point (R7, R24).
     fn prime(&mut self, request: &Request<'_>, window: &Window<'_>) {
         let rate = request.speed.max(1e-6);
-        let p0 = request.positions[0];
-        self.stretcher.reset();
+        let p0 = request.positions[0].round() as i64;
+        // `output_seek` resets the stretcher itself, so the settings go on
+        // before it.
         self.tune(request.pitch);
-        let pre = self.pre_roll_frames();
-        let from = (p0 - pre as f64).round() as i64;
-        let before: Vec<&[f32]> = (0..self.channels)
-            .map(|c| slice(window, c, from, pre).unwrap_or(&[]))
-            .collect();
-        self.stretcher.seek(&before, rate);
+        let seek = self.stretcher.output_seek_length(rate).max(1);
+        let from = p0 - seek as i64;
+        let before = (0..self.channels).map(|c| slice(window, c, from, seek).unwrap_or(&[]));
+        self.stretcher.output_seek(before, seek);
+        // The dropped output: the seek's pre-computed latency, while the input
+        // it needs is fed from the point on.
         let discard = self.discard_frames(rate);
-        // The input the discarded stretch needs: `rate` file frames per
-        // output frame, fed from the point.
-        let base = p0;
-        self.fed = p0.round() as i64;
+        self.fed = p0;
         let mut produced = 0;
         while produced < discard {
             let n = (discard - produced).min(self.scratch_frames);
-            let until = (base + rate * (produced + n) as f64).round() as i64;
+            let until = (p0 as f64 + rate * (produced + n) as f64).round() as i64;
             let (inputs, need) = self.inputs(window, until);
-            let mut columns: Vec<&mut [f32]> = self
+            let columns = self
                 .scratch
                 .chunks_mut(self.scratch_frames)
                 .take(self.channels)
-                .map(|channel| &mut channel[..n])
-                .collect();
-            self.stretcher.process(&inputs, need, &mut columns);
+                .map(|channel| &mut channel[..n]);
+            self.stretcher.process(inputs, need, columns, n);
             self.fed = until;
             produced += n;
         }
@@ -288,17 +289,24 @@ impl Complex {
         n: usize,
     ) {
         let rate = request.speed.max(1e-6);
-        let lead = self.lead_frames(rate);
-        // Feed up to the position one frame past the run: the input a run
-        // takes is then exactly its own span, whatever the block size (R6).
-        let until = (request.positions[0] + rate * n as f64).round() as i64 + lead as i64;
+        let lead = self.lead_frames(rate) as i64;
+        let start = request.positions[0].round() as i64 + lead;
+        // The run feeds its own span, from the frame its first one plays, ahead
+        // by the lead. A run the last didn't leave the input at (a clip loop
+        // brace's wrap, which jumps the file back while the song runs on)
+        // re-anchors there, so the mode goes on rather than restarting (R7).
+        if (start - self.fed).abs() > MARGIN as i64 {
+            self.fed = start;
+        }
+        // Feed up to the position one frame past the run: the input a run takes
+        // is then exactly its own span, whatever the block size (R6).
+        let until = (request.positions[0] + rate * n as f64).round() as i64 + lead;
         let (inputs, need) = self.inputs(window, until);
-        let mut columns: Vec<&mut [f32]> = out
+        let columns = out
             .chunks_mut(stride)
             .take(self.channels)
-            .map(|channel| &mut channel[..n])
-            .collect();
-        self.stretcher.process(&inputs, need, &mut columns);
+            .map(|channel| &mut channel[..n]);
+        self.stretcher.process(inputs, need, columns, n);
         self.fed = until;
     }
 }
@@ -307,7 +315,7 @@ impl WarpMode for Complex {
     // Spec: warp-modes R6, R7, R24
     fn reach(&self, request: &Request<'_>) -> (usize, usize) {
         let rate = request.speed.max(1e-6);
-        (self.pre_roll_frames(), self.after_frames(rate))
+        (self.pre_roll_frames(rate), self.after_frames(rate))
     }
 
     // Spec: warp-modes R21 to R24

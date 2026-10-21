@@ -27,18 +27,14 @@ unsafe extern "C" {
     fn bl_stretch_free(stretch: *mut Raw);
     fn bl_stretch_block_samples(stretch: *const Raw) -> c_int;
     fn bl_stretch_interval_samples(stretch: *const Raw) -> c_int;
-    fn bl_stretch_input_latency(stretch: *const Raw) -> c_int;
-    fn bl_stretch_output_latency(stretch: *const Raw) -> c_int;
     fn bl_stretch_reset(stretch: *mut Raw);
     fn bl_stretch_set_transpose_factor(stretch: *mut Raw, multiplier: f64, tonality_limit: f64);
     fn bl_stretch_set_formant_factor(stretch: *mut Raw, multiplier: f64, compensate_pitch: bool);
     fn bl_stretch_set_formant_base(stretch: *mut Raw, base_freq: f64);
-    fn bl_stretch_seek(
-        stretch: *mut Raw,
-        inputs: *const *const f32,
-        input_samples: c_int,
-        playback_rate: f64,
-    );
+    fn bl_stretch_input_latency(stretch: *const Raw) -> c_int;
+    fn bl_stretch_output_latency(stretch: *const Raw) -> c_int;
+    fn bl_stretch_output_seek_length(stretch: *const Raw, playback_rate: f64) -> c_int;
+    fn bl_stretch_output_seek(stretch: *mut Raw, inputs: *const *const f32, input_samples: c_int);
     fn bl_stretch_process(
         stretch: *mut Raw,
         inputs: *const *const f32,
@@ -112,20 +108,6 @@ impl Stretcher {
         unsafe { bl_stretch_interval_samples(self.raw) as usize }
     }
 
-    /// How far ahead of the output's own time the input is read, in frames.
-    #[must_use]
-    pub fn input_latency(&self) -> usize {
-        // SAFETY: `self.raw` is a live handle for as long as `self` is.
-        unsafe { bl_stretch_input_latency(self.raw) as usize }
-    }
-
-    /// How far behind that time the output comes out, in frames.
-    #[must_use]
-    pub fn output_latency(&self) -> usize {
-        // SAFETY: `self.raw` is a live handle for as long as `self` is.
-        unsafe { bl_stretch_output_latency(self.raw) as usize }
-    }
-
     /// Forgets everything it holds, as at a locate or a launch.
     pub fn reset(&mut self) {
         // SAFETY: `self.raw` is a live handle for as long as `self` is.
@@ -155,30 +137,60 @@ impl Stretcher {
         unsafe { bl_stretch_set_formant_base(self.raw, base_freq) }
     }
 
-    /// Primes the stretcher with the `input` frames just before playback
-    /// starts, so the output begins at the right level (R7).
-    pub fn seek(&mut self, input: &[&[f32]], playback_rate: f64) {
-        let samples = input.first().map_or(0, |channel| channel.len());
-        self.gather_in(input, samples);
+    /// How far ahead of the output's own time the input is read, in frames.
+    #[must_use]
+    pub fn input_latency(&self) -> usize {
+        // SAFETY: `self.raw` is a live handle for as long as `self` is.
+        unsafe { bl_stretch_input_latency(self.raw) as usize }
+    }
+
+    /// How far behind that time the output comes out, in frames.
+    #[must_use]
+    pub fn output_latency(&self) -> usize {
+        // SAFETY: `self.raw` is a live handle for as long as `self` is.
+        unsafe { bl_stretch_output_latency(self.raw) as usize }
+    }
+
+    /// The frames [`output_seek`](Self::output_seek) wants at
+    /// `playback_rate`: the input and output latency it pre-rolls.
+    #[must_use]
+    pub fn output_seek_length(&self, playback_rate: f64) -> usize {
+        // SAFETY: `self.raw` is a live handle for as long as `self` is.
+        unsafe { bl_stretch_output_seek_length(self.raw, playback_rate) as usize }
+    }
+
+    /// Moves the input position to the point `input`'s `frames` end at, and
+    /// pre-computes the output before it, so the next
+    /// [`process`](Self::process) output is aligned to that point (R7). One
+    /// channel per item, all the same length; called on the audio thread, so it
+    /// builds no collection.
+    pub fn output_seek<'i>(&mut self, input: impl Iterator<Item = &'i [f32]>, frames: usize) {
+        let mut samples = 0;
+        self.gather_in(input, &mut samples);
+        debug_assert!(samples >= frames, "a channel is shorter than the seek");
         // SAFETY: `self.raw` is a live handle; `in_ptrs` holds one pointer
-        // per channel, each to a slice of at least `samples` frames, which
+        // per channel, each to a slice of at least `frames` frames, which
         // `gather_in` has just checked and the library reads no further.
-        unsafe {
-            bl_stretch_seek(
-                self.raw,
-                self.in_ptrs.as_ptr(),
-                samples as c_int,
-                playback_rate,
-            )
-        }
+        unsafe { bl_stretch_output_seek(self.raw, self.in_ptrs.as_ptr(), frames as c_int) }
     }
 
     /// Consumes `input_frames` frames of each channel of `input` and writes
-    /// `out` frames to each channel of `output`.
-    pub fn process(&mut self, input: &[&[f32]], input_frames: usize, output: &mut [&mut [f32]]) {
-        let out_frames = output.first().map_or(0, |channel| channel.len());
-        self.gather_in(input, input_frames);
+    /// `out_frames` frames to each channel of `output`; both are iterators,
+    /// one channel an item, so a call builds no collection (R5).
+    pub fn process<'i, 'o>(
+        &mut self,
+        input: impl Iterator<Item = &'i [f32]>,
+        input_frames: usize,
+        output: impl Iterator<Item = &'o mut [f32]>,
+        out_frames: usize,
+    ) {
+        let mut samples = 0;
+        self.gather_in(input, &mut samples);
         self.gather_out(output);
+        debug_assert!(
+            samples >= input_frames,
+            "a channel is shorter than its read"
+        );
         // SAFETY: `self.raw` is a live handle; `in_ptrs` and `out_ptrs` hold
         // one pointer per channel into slices the caller has lent for this
         // call, and the library touches only the frames asked for.
@@ -193,22 +205,43 @@ impl Stretcher {
         }
     }
 
-    /// Points the wrapper's input array at `input`'s first `samples` frames.
-    fn gather_in(&mut self, input: &[&[f32]], samples: usize) {
+    /// Points the wrapper's input array at each channel of `input`, and
+    /// reports the frames of the last one.
+    fn gather_in<'i>(&mut self, input: impl Iterator<Item = &'i [f32]>, samples: &mut usize) {
         for (pointer, channel) in self.in_ptrs.iter_mut().zip(input) {
-            debug_assert!(
-                channel.len() >= samples,
-                "a channel is shorter than its read"
-            );
+            *samples = channel.len();
             *pointer = channel.as_ptr();
         }
     }
 
     /// Points the wrapper's output array at each channel of `output`.
-    fn gather_out(&mut self, output: &mut [&mut [f32]]) {
+    fn gather_out<'o>(&mut self, output: impl Iterator<Item = &'o mut [f32]>) {
         for (pointer, channel) in self.out_ptrs.iter_mut().zip(output) {
             *pointer = channel.as_mut_ptr();
         }
+    }
+
+    /// Grows every scratch buffer the library makes for itself, by running a
+    /// block and a seek on silent input, so no [`process`](Self::process) or
+    /// [`output_seek`](Self::output_seek) call on the audio thread allocates
+    /// (R5). Called once, from
+    /// [`Complex::new`](crate::Complex::new), off the audio thread.
+    pub fn warm(&mut self) {
+        let channels = self.channels;
+        let frames = self.block_samples() + self.interval_samples() + 2;
+        let input = vec![0.0f32; frames];
+        let mut output = vec![vec![0.0f32; frames]; channels];
+        self.process(
+            (0..channels).map(|_| input.as_slice()),
+            frames,
+            output.iter_mut().map(Vec::as_mut_slice),
+            frames,
+        );
+        self.reset();
+        let seek = self.output_seek_length(1.0) + 2;
+        let input = vec![0.0f32; seek];
+        self.output_seek((0..channels).map(|_| input.as_slice()), seek);
+        self.reset();
     }
 }
 

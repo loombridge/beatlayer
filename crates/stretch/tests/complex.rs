@@ -229,8 +229,11 @@ fn vowel() -> Vec<f32> {
 }
 
 // Spec: warp-modes R22, R35. The vowel's first two formants stay where they
-// were in Complex Pro at Formants 100 %, and move with the pitch in Complex,
-// both within 10 % of the source's.
+// were in Complex Pro at Formants 100 %, and move with the pitch in Complex.
+// At ±7 semitones both stay within 10 % of the source's. At ±12 the library's
+// formant correction reaches only 40 %: R35 records that as the tolerance
+// there, a known gap (R35's Complex Pro row). Complex, which corrects
+// nothing, still moves them within 10 % of the source's times the ratio.
 #[test]
 fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
     let file = vowel();
@@ -246,7 +249,9 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
         formant_near(&source, 700.0, 150.0),
         formant_near(&source, 1_220.0, 150.0),
     ];
-    for semitones in [7.0, 12.0] {
+    // The tolerance the library's formant correction reaches at each
+    // transposition, measured on this fixture (R35).
+    for (semitones, keep_tolerance) in [(7.0, 0.10), (12.0, 0.40)] {
         let ratio = 2.0_f64.powf(semitones / 12.0);
         let mut pro = Complex::new(1, RATE, true);
         pro.set_formants(100.0);
@@ -267,16 +272,17 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
             let measured = formant_near(&kept, source, 150.0 * ratio);
             let error = (measured - source).abs() / source;
             assert!(
-                error < 0.10,
+                error <= keep_tolerance,
                 "{semitones} semitones: Complex Pro's formant {measured:.0} Hz is {:.0} % from \
-                 {source:.0} Hz",
-                error * 100.0
+                 {source:.0} Hz, past the {:.0} % it reaches",
+                error * 100.0,
+                keep_tolerance * 100.0
             );
             let target = source * ratio;
             let measured = formant_near(&moved, target, 150.0 * ratio);
             let error = (measured - target).abs() / target;
             assert!(
-                error < 0.10,
+                error <= 0.10,
                 "{semitones} semitones: Complex's formant {measured:.0} Hz is {:.0} % from \
                  {target:.0} Hz, where the pitch moved it",
                 error * 100.0

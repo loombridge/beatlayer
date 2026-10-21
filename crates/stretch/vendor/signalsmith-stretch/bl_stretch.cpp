@@ -82,10 +82,18 @@ void bl_stretch_set_formant_base(BlStretch *stretch, double base_freq) {
   stretch->stretch.setFormantBase(static_cast<float>(base_freq));
 }
 
-void bl_stretch_seek(BlStretch *stretch, const float *const *inputs,
-                     int input_samples, double playback_rate) {
+int bl_stretch_output_seek_length(const BlStretch *stretch,
+                                  double playback_rate) {
+  return stretch->stretch.outputSeekLength(
+      static_cast<float>(playback_rate));
+}
+
+void bl_stretch_output_seek(BlStretch *stretch, const float *const *inputs,
+                            int input_samples) {
   gather_in(stretch, inputs);
-  stretch->stretch.seek(stretch->in_ptrs, input_samples, playback_rate);
+  // `outputSeek` infers the playback rate from the input's own length, which
+  // the caller gives as `bl_stretch_output_seek_length`.
+  stretch->stretch.outputSeek(stretch->in_ptrs, input_samples);
 }
 
 void bl_stretch_process(BlStretch *stretch, const float *const *inputs,

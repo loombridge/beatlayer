@@ -364,6 +364,120 @@ fn texture_at_its_largest_grain_size_still_plays() {
     }
 }
 
+/// The click file's media, a click at file frame `click_at`.
+const CLICK: ContentHash = ContentHash([11; 32]);
+
+/// A quiet file holding one click at frame `at`, one channel.
+fn click_file(frames: usize, at: usize) -> Arc<SampleData> {
+    let mut left = vec![0.0f32; frames];
+    for sample in left
+        .iter_mut()
+        .take((at + 2).min(frames))
+        .skip(at.saturating_sub(1))
+    {
+        *sample = 1.0;
+    }
+    Arc::new(SampleData::new(48_000, vec![left]).unwrap())
+}
+
+/// A song of the click file warped at 120 BPM in `mode`, in a song at 120 BPM,
+/// one whole note long: at speed 1 the file frame a moment plays is the song
+/// frame its warp map puts it on.
+fn click_song(mode: WarpMode) -> Editor {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(120.0).unwrap()),
+        })
+        .unwrap();
+    let audio_track = track(&mut editor, TrackKind::Audio, None);
+    let audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(CLICK)
+    };
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        ClipData::Audio(audio),
+    );
+    editor
+        .apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        })
+        .unwrap();
+    editor
+}
+
+/// The frame of the loudest sample of `out` within `window` frames of
+/// `around`.
+fn loudest(out: &[f32], around: usize, window: usize) -> usize {
+    let lo = around.saturating_sub(window);
+    let hi = (around + window).min(out.len() - 1);
+    (lo..=hi)
+        .max_by(|&a, &b| out[a].abs().total_cmp(&out[b].abs()))
+        .unwrap()
+}
+
+/// Plays `editor` with `media` for `frames` frames in blocks of `block`, under
+/// the allocation trap, and returns the left channel.
+fn play_with(editor: &Editor, media: &MediaMap, frames: u64, block: usize) -> Vec<f32> {
+    let registry = Registry::new().with_media(Arc::new(media.clone()));
+    let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+    offline.sync(editor.document());
+    assert!(offline.missing_media().is_empty());
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(frames, |output| out.extend_from_slice(output.channel(0)));
+    assert_eq!(offline.heap_operations(), 0, "block size {block}");
+    out
+}
+
+// Spec: warp-modes R24, R35 (Complex's timing row). A Complex or Complex Pro
+// clip's click lands on the frame its warp map puts it on, within 20 ms, and
+// the mode reports no latency: it plays the same frame as the same file in
+// Re-Pitch, which adds none, so the stretcher's own read-ahead reaches the
+// mixer as no delay.
+#[test]
+fn complex_clips_land_on_time_and_report_no_latency() {
+    let click_at = 48_000usize;
+    let mut media = MediaMap::new();
+    media.insert(CLICK, click_file(96_000, click_at));
+    // Re-Pitch reads the file frame for frame at speed 1, so its click is the
+    // reference: the frame the warp map puts it on.
+    let reference = play_with(&click_song(WarpMode::RePitch), &media, 60_000, 512);
+    let want = loudest(&reference, click_at, 4_800);
+    assert!(
+        (want as i64 - click_at as i64).abs() <= 48,
+        "Re-Pitch's own click landed at {want}"
+    );
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for block in [64, 512] {
+            let out = play_with(&click_song(mode), &media, 60_000, block);
+            let at = loudest(&out, click_at, 2_400);
+            let off = (at as i64 - click_at as i64).abs();
+            assert!(
+                off <= 960,
+                "{mode:?} at blocks of {block}: its click landed at {at}, {off} frames from \
+                 {click_at}, past 20 ms"
+            );
+            let late = (at as i64 - want as i64).abs();
+            assert!(
+                late <= 960,
+                "{mode:?}: its click landed {late} frames from Re-Pitch's own, so the mode \
+                 reports latency"
+            );
+        }
+    }
+}
+
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from
 // what was playing, in a straight line over 20 ms.
 #[test]

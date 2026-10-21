@@ -19,6 +19,7 @@ use bl_model::{DeviceKind, DeviceRole, ParamId, ParamKind, PluginFormat, PluginS
 use bl_plugin_host::vst3::{ParamChange, Vst3Error, Vst3Host, plugin_state};
 use common::{
     CHANNELS, FRAMES, config, modulation_for, run, run_at, set, vst3_bundle, vst3_device,
+    vst3_device_with_role,
 };
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -172,6 +173,51 @@ fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
             note(40, NoteKind::Off, 72, 0.0)
         ],
         "echoed an octave up on the same frames"
+    );
+}
+
+// Spec: vst3-hosting R1, R4; IMP-24
+#[test]
+fn a_vst3_plugin_with_an_event_output_bus_has_a_note_output() {
+    let host = Vst3Host::new();
+    let types = host.load(vst3_bundle()).expect("the test plug-in loads");
+    let found = &types[0].device_type;
+    assert_eq!(found.role, DeviceRole::AudioEffect);
+    assert!(
+        found.note_output,
+        "its event output bus lets it sit as a MIDI effect"
+    );
+}
+
+// Spec: vst3-hosting R4; IMP-24
+#[test]
+fn a_vst3_plugin_placed_as_a_midi_effect_passes_notes_on_and_drops_its_audio() {
+    let host = Vst3Host::new();
+    host.load(vst3_bundle()).expect("the test plug-in loads");
+    let node = host
+        .factory()
+        .create(
+            &vst3_device_with_role(1, &[(bl_test_vst3::GAIN, 0.5)], DeviceRole::MidiEffect),
+            &config(),
+        )
+        .expect("a node for a VST3 device");
+    let mut node = node;
+    let notes = [
+        note(5, NoteKind::On, 60, 0.5),
+        note(40, NoteKind::Off, 60, 0.0),
+    ];
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &notes);
+    for channel in &out.channels {
+        // The audio it receives passes through: its own output is dropped.
+        assert!(channel.iter().all(|s| *s == 1.0), "{channel:?}");
+    }
+    assert_eq!(
+        out.notes,
+        [
+            note(5, NoteKind::On, 72, 0.5),
+            note(40, NoteKind::Off, 72, 0.0)
+        ],
+        "its notes go on, an octave up on their frames"
     );
 }
 

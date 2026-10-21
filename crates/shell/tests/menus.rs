@@ -136,8 +136,17 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // control chooser reaches view.clip_envelope (L-CLIP-017).
         commands::VIEW_CLIP_TAB,
         commands::VIEW_CLIP_ENVELOPE,
+        // The list of the set's plug-ins' Show Only Missing switch (the
+        // plug-in list spec, R3), which the list's own switch reaches.
+        commands::VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
+        // The Shortcuts page's buttons (the custom shortcuts spec, R8 and
+        // R10), and the query for agents.
+        commands::KEYMAP_BIND,
+        commands::KEYMAP_UNBIND,
+        commands::KEYMAP_RESET,
+        commands::KEYMAP_STATE,
         // The File & Folder page's Sample Editor row (the sample editor
         // spec, R16), the Audio Utilities panel's Edit button (R16), and the
         // file dropped on the Clip View that replaces a clip's sample (R18).

@@ -33,7 +33,9 @@ use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
 use crate::warp::{TransientEdits, WarpMarker};
-use crate::warp_settings::{WarpMode, WarpSettings};
+use crate::warp_settings::{
+    DETUNE_MAX, DETUNE_MIN, TRANSPOSE_MAX, TRANSPOSE_MIN, WarpMode, WarpSettings,
+};
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -505,6 +507,17 @@ pub struct AudioData {
     /// band-limited interpolator wherever it is read at another rate than 1.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub high_quality: bool,
+    /// The clip's Transpose, in whole semitones, from −48 to 48 (R2): 0
+    /// unless given. It shifts the clip's pitch in every mode but Re-Pitch
+    /// (R10, R26).
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    #[schemars(range(min = -48, max = 48))]
+    pub transpose: i32,
+    /// The clip's Detune, in cents, from −50 to 50 (R2): 0 unless given.
+    /// It shifts the clip's pitch in every mode but Re-Pitch (R10, R26).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = -50.0, max = 50.0))]
+    pub detune: f64,
     /// The clip's edits to its file's detected transients (the warping spec,
     /// R23): none unless given. They belong to the file, so replacing the
     /// file drops them (R27).
@@ -537,6 +550,8 @@ impl AudioData {
             tempo_leader: false,
             ram: false,
             high_quality: true,
+            transpose: 0,
+            detune: 0.0,
             transient_edits: TransientEdits::default(),
         }
     }
@@ -591,6 +606,121 @@ impl AudioData {
             ..self
         }
     }
+
+    /// The clip's pitch change, in semitones (R25): its Transpose plus its
+    /// Detune in semitones, each held to its range. The envelopes and
+    /// automation that add to them come with WP-4.8.
+    #[must_use]
+    pub fn pitch_change(&self) -> f64 {
+        let transpose = f64::from(self.transpose.clamp(TRANSPOSE_MIN, TRANSPOSE_MAX));
+        let detune = self.detune.clamp(DETUNE_MIN, DETUNE_MAX) / 100.0;
+        transpose + detune
+    }
+
+    /// The clip's pitch ratio (R25): 2 raised to its pitch change over 12,
+    /// so 1 where it isn't transposed.
+    #[must_use]
+    pub fn pitch_ratio(&self) -> f64 {
+        2f64.powf(self.pitch_change() / 12.0)
+    }
+
+    /// The data with its file reversed (the audio clip editing spec, R8):
+    /// the same stretch of sound played backwards. Its Start and End
+    /// markers, its loop brace and its warp markers are mirrored about the
+    /// file, so a position *t* seconds into the source becomes *L* − *t* in
+    /// the new file, and each warp marker keeps its point in the audio. The
+    /// loop switch, gain, transpose, detune, warp mode, fades and the rest
+    /// don't change, and the clip's envelopes stay where they are (R9).
+    #[must_use]
+    pub fn reversed(&self, seconds: f64, media: Option<ContentHash>) -> Self {
+        let mirror = |at: f64| (seconds - at).max(0.0);
+        let mut next = self.clone();
+        if self.warp {
+            // A warped clip's markers are ticks of its contents, so they go
+            // through its warp map: the time each falls at is mirrored about
+            // the file, and the new map says which beat that is.
+            let (Ok(map), true) = (self.warp_map(), !self.warp_markers.is_empty()) else {
+                return next;
+            };
+            let markers = self.mirrored_markers(seconds);
+            // Each marker keeps its point in the audio: its beat becomes the
+            // first marker's beat plus the last marker's less its own, as
+            // the warp markers' do.
+            let first_beat = self.warp_markers[0].beat.get() as f64;
+            let last_beat = self.warp_markers[self.warp_markers.len() - 1].beat.get() as f64;
+            let mirror_beat = |beat: f64| (first_beat + last_beat - beat).round();
+            // The region from Start *s* to End *e* becomes one from *L* - *e*
+            // to *L* - *s*, the file's end standing in for an End marker the
+            // clip doesn't set.
+            let end = self.end.unwrap_or_else(|| map.time_to_beat(seconds));
+            next.start = mirror_beat(end);
+            next.end = if map.beat_to_time(self.start).abs() < 1e-9 {
+                None
+            } else {
+                Some(mirror_beat(self.start))
+            };
+            // The loop brace likewise.
+            let loop_end = self.loop_end.unwrap_or_else(|| map.time_to_beat(seconds));
+            next.loop_start = mirror_beat(loop_end);
+            next.loop_end = if map.beat_to_time(self.loop_start).abs() < 1e-9 {
+                None
+            } else {
+                Some(mirror_beat(self.loop_start))
+            };
+            next.warp_markers = markers;
+            if let Some(media) = media {
+                next.media = media;
+            }
+            return next;
+        }
+        // The region: from Start *s* to End *e* becomes one from *L* − *e* to
+        // *L* − *s*, the file's end standing in for an End marker the clip
+        // doesn't set.
+        let end = self.end.unwrap_or(seconds);
+        next.start = mirror(end);
+        next.end = ending(mirror(self.start), seconds);
+        // The loop brace likewise.
+        let loop_end = self.loop_end.unwrap_or(seconds);
+        next.loop_start = mirror(loop_end);
+        next.loop_end = ending(mirror(self.loop_start), seconds);
+        // Each warp marker keeps its point in the audio: its file position is
+        // mirrored, and its beat becomes the first marker's beat plus the
+        // last marker's less its own.
+        next.warp_markers = self.mirrored_markers(seconds);
+        if let Some(media) = media {
+            next.media = media;
+        }
+        next
+    }
+
+    /// The clip's warp markers mirrored about the file (R8): each one's file
+    /// position is mirrored, and its beat becomes the first marker's beat
+    /// plus the last marker's less its own. They run backwards afterwards, so
+    /// both their times and their beats keep rising.
+    fn mirrored_markers(&self, seconds: f64) -> Vec<WarpMarker> {
+        if self.warp_markers.is_empty() {
+            return Vec::new();
+        }
+        let first = self.warp_markers[0].beat;
+        let last = self.warp_markers[self.warp_markers.len() - 1].beat;
+        let mut markers: Vec<WarpMarker> = self
+            .warp_markers
+            .iter()
+            .map(|marker| WarpMarker {
+                time: (seconds - marker.time).max(0.0),
+                beat: first + last - marker.beat,
+            })
+            .collect();
+        markers.reverse();
+        markers
+    }
+}
+
+/// A marker's new place after a reversal: the file's end standing in for a
+/// marker the clip doesn't set, so that reversing again gives the clip back
+/// exactly as it was (R10).
+fn ending(at: f64, seconds: f64) -> Option<f64> {
+    ((at - seconds).abs() > 1e-9).then_some(at)
 }
 
 /// One recorded pass on a take lane: where it sits, how long it is, and the
@@ -627,6 +757,10 @@ pub struct TakeLane {
 
 fn is_zero(value: &f64) -> bool {
     *value == 0.0
+}
+
+fn is_zero_i32(value: &i32) -> bool {
+    *value == 0
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1063,5 +1197,94 @@ impl Default for Note {
             mute: false,
             pressure: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Spec: warp-modes R25. A clip's pitch change is its Transpose plus its
+    // Detune in semitones, each held to its range.
+    #[test]
+    fn the_pitch_change_sums_and_holds_its_parts() {
+        let mut audio = AudioData::new(ContentHash([1; 32]));
+        assert_eq!(audio.pitch_change(), 0.0);
+        assert_eq!(audio.pitch_ratio(), 1.0);
+        audio.transpose = 12;
+        audio.detune = 50.0;
+        assert_eq!(audio.pitch_change(), 12.5);
+        assert!((audio.pitch_ratio() - 2f64.powf(12.5 / 12.0)).abs() < 1e-12);
+        // Each part is held to its own range.
+        audio.transpose = 60;
+        audio.detune = 80.0;
+        assert_eq!(audio.pitch_change(), 48.5);
+        audio.transpose = -60;
+        audio.detune = -80.0;
+        assert_eq!(audio.pitch_change(), -48.5);
+        // An octave up is twice the speed.
+        audio.transpose = 12;
+        audio.detune = 0.0;
+        assert!((audio.pitch_ratio() - 2.0).abs() < 1e-12);
+    }
+
+    // Spec: audio-clip-editing R8. A reversal mirrors the markers, the loop
+    // brace and the warp markers about the file.
+    #[test]
+    fn reversing_mirrors_the_markers_the_loop_and_the_warp_markers() {
+        // An unwarped clip's markers are seconds into its file.
+        let mut audio = AudioData {
+            start: 1.0,
+            end: Some(3.0),
+            loop_start: 1.5,
+            loop_end: Some(2.5),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let reversed = audio.reversed(4.0, None);
+        // The region from 1 to 3 becomes one from 1 to 3: L - e to L - s.
+        assert_eq!(reversed.start, 1.0);
+        assert_eq!(reversed.end, Some(3.0));
+        // The loop brace likewise.
+        assert_eq!(reversed.loop_start, 1.5);
+        assert_eq!(reversed.loop_end, Some(2.5));
+        // Reversing again gives the clip back exactly as it was.
+        assert_eq!(reversed.reversed(4.0, None), audio);
+        // A clip with no End marker keeps none.
+        audio.end = None;
+        audio.loop_end = None;
+        let reversed = audio.reversed(4.0, None);
+        assert_eq!(reversed.start, 0.0);
+        assert_eq!(reversed.end, Some(3.0));
+        assert_eq!(reversed.loop_start, 0.0);
+        assert_eq!(reversed.loop_end, Some(2.5));
+        assert_eq!(reversed.reversed(4.0, None), audio);
+
+        // A warped clip's markers are ticks of its contents, and its warp
+        // markers keep their points in the audio.
+        let audio = AudioData {
+            warp: true,
+            warp_markers: vec![
+                WarpMarker {
+                    time: 0.0,
+                    beat: Ticks::ZERO,
+                },
+                WarpMarker {
+                    time: 2.0,
+                    beat: Ticks::QUARTER * 4,
+                },
+            ],
+            tempo: Some(120.0),
+            ..AudioData::new(ContentHash([1; 32]))
+        };
+        let reversed = audio.reversed(4.0, None);
+        // Each warp marker's file position is mirrored, and its beat becomes
+        // the first marker's beat plus the last marker's less its own.
+        assert_eq!(reversed.warp_markers.len(), 2);
+        assert_eq!(reversed.warp_markers[0].time, 2.0);
+        assert_eq!(reversed.warp_markers[0].beat, Ticks::ZERO);
+        assert_eq!(reversed.warp_markers[1].time, 4.0);
+        assert_eq!(reversed.warp_markers[1].beat, Ticks::QUARTER * 4);
+        // Reversing again gives the clip back exactly as it was.
+        assert_eq!(reversed.reversed(4.0, None), audio);
     }
 }

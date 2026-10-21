@@ -17,8 +17,8 @@ use bl_model::{DeviceKind, DeviceRole, ParamId, ParamKind, PluginFormat};
 use bl_plugin_host::clap::{ClapError, ClapHost, ParamChange};
 use common::{
     BAR, CHANNELS, DEPTH, DEPTH_MOD, EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, FRAMES, GAIN,
-    LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME, bundle, config, device, modulation_for, run,
-    run_at, set,
+    LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME, bundle, config, device, device_with_role,
+    modulation_for, run, run_at, set,
 };
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -176,6 +176,80 @@ fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
         }]
     );
     assert!(host.take_param_changes().is_empty());
+}
+
+// Spec: clap-hosting R1; IMP-24
+#[test]
+fn a_note_effect_without_the_audio_effect_feature_is_a_midi_effect() {
+    // SAFETY: the plug-in reads this when it is asked for its features, and
+    // this test runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_clap::FEATURES_VAR, "note-effect") };
+    let host = ClapHost::new();
+    let types = host.load(bundle()).expect("the test plug-in loads");
+    let found = &types[0].device_type;
+    assert_eq!(found.role, DeviceRole::MidiEffect);
+    assert!(found.note_output, "a note effect sends notes on");
+}
+
+// Spec: clap-hosting R1; IMP-24
+#[test]
+fn a_note_and_audio_plug_in_is_an_audio_effect_with_a_note_output() {
+    // SAFETY: the plug-in reads this when it is asked for its features, and
+    // this test runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_clap::FEATURES_VAR, "note-and-audio") };
+    let host = ClapHost::new();
+    let types = host.load(bundle()).expect("the test plug-in loads");
+    let found = &types[0].device_type;
+    assert_eq!(found.role, DeviceRole::AudioEffect);
+    assert!(
+        found.note_output,
+        "it can be placed as a MIDI effect too (IMP-24)"
+    );
+}
+
+// Spec: clap-hosting R1, R4; IMP-24
+#[test]
+fn a_plugin_without_a_note_output_has_none() {
+    // SAFETY: the plug-in reads this when it is asked for its note ports,
+    // and this test runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_clap::NOTE_PORTS_VAR, "none") };
+    let host = ClapHost::new();
+    let types = host.load(bundle()).expect("the test plug-in loads");
+    let found = &types[0].device_type;
+    assert_eq!(found.role, DeviceRole::AudioEffect);
+    assert!(!found.note_output, "it declares no note output");
+}
+
+// Spec: clap-hosting R4; IMP-24
+#[test]
+fn a_plugin_placed_as_a_midi_effect_passes_notes_on_and_drops_its_audio() {
+    let host = ClapHost::new();
+    host.load(bundle()).expect("the test plug-in loads");
+    let node = host
+        .factory()
+        .create(
+            &device_with_role(1, &[(GAIN, 0.5)], DeviceRole::MidiEffect),
+            &config(),
+        )
+        .expect("a node for a CLAP device");
+    let mut node = node;
+    let notes = [
+        note(5, NoteKind::On, 60, 0.5),
+        note(40, NoteKind::Off, 60, 0.0),
+    ];
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &notes);
+    for channel in &out.channels {
+        // The audio it receives passes through: its own output is dropped.
+        assert!(channel.iter().all(|s| *s == 1.0), "{channel:?}");
+    }
+    assert_eq!(
+        out.notes,
+        [
+            note(5, NoteKind::On, 72, 0.5),
+            note(40, NoteKind::Off, 72, 0.0)
+        ],
+        "its notes go on, an octave up on their frames"
+    );
 }
 
 // Spec: clap-hosting R20

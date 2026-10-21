@@ -9,7 +9,9 @@ use bl_model::{ClipData, ClipId, Track, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::audio_editing as ids;
-use bl_shell::audio_editing::{ConsolidateResult, ConsolidateSceneResult, CropResult};
+use bl_shell::audio_editing::{
+    ConsolidateResult, ConsolidateSceneResult, CropResult, ReverseRangeResult, ReverseResult,
+};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use serde_json::json;
@@ -796,4 +798,140 @@ fn consolidate_on_a_grouped_track_keeps_its_clips() {
         .expect("the consolidated clip is on the track");
     assert_eq!(created.start, Ticks::ZERO);
     assert!(matches!(created.data, ClipData::Audio(_)));
+}
+
+fn reverse(shell: &mut Shell, args: serde_json::Value) -> Result<ReverseResult, String> {
+    shell
+        .run(ids::REVERSE, args)
+        .map(|value| serde_json::from_value(value).unwrap())
+        .map_err(|error| error.to_string())
+}
+
+// Spec: audio-clip-editing R7, R8.
+#[test]
+fn reverse_writes_the_files_frames_backwards() {
+    let scratch = Scratch::new("reverse");
+    let mut shell = new_shell(&scratch);
+    let song = saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 1.0, 2, 0.1);
+    let clip = place(&mut shell, track, &source, 0);
+
+    let made = reverse(&mut shell, json!({ "clip": clip })).unwrap();
+    let path = PathBuf::from(made.path.clone().unwrap());
+    assert_eq!(
+        path,
+        song.parent()
+            .unwrap()
+            .join("Samples/Processed/Reverse/Tone Reverse.wav"),
+        "the copy goes into the project's Reverse folder under its source's name"
+    );
+    let reversed = decode_file(&path).unwrap();
+    let source_audio = decode_file(&source).unwrap();
+    assert_eq!(reversed.frames(), source_audio.frames());
+    // Spec: R7. Frame n of the new file is frame L - 1 - n of the source.
+    for channel in 0..2 {
+        let source_channel = source_audio.channel(channel).unwrap();
+        let reversed_channel = reversed.channel(channel).unwrap();
+        for (n, frame) in reversed_channel.iter().enumerate() {
+            assert_eq!(
+                *frame,
+                source_channel[source_channel.len() - 1 - n],
+                "channel {channel}, frame {n}"
+            );
+        }
+    }
+    // The clip plays the new file.
+    let data = audio(&shell, clip);
+    assert_eq!(data.media, made.media.unwrap());
+}
+
+// Spec: audio-clip-editing R10. Reversing a clip whose file is a reversed
+// copy gives it back the file it was made from, writing nothing.
+#[test]
+fn reversing_twice_returns_the_clip_exactly() {
+    let scratch = Scratch::new("reverse-twice");
+    let mut shell = new_shell(&scratch);
+    saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 1.0, 1, 0.1);
+    let clip = place(&mut shell, track, &source, 0);
+    let before = audio(&shell, clip);
+
+    let made = reverse(&mut shell, json!({ "clip": clip })).unwrap();
+    assert_ne!(audio(&shell, clip).media, before.media);
+    assert_ne!(made.media, Some(before.media));
+    let again = reverse(&mut shell, json!({ "clip": clip })).unwrap();
+    assert_eq!(again.media, Some(before.media), "the original file is back");
+    assert_eq!(audio(&shell, clip), before, "the clip is exactly as it was");
+}
+
+// Spec: audio-clip-editing R12. A selection that holds a MIDI clip isn't
+// reversed, and nothing changes.
+#[test]
+fn a_selection_with_a_midi_clip_isnt_reversed() {
+    let scratch = Scratch::new("reverse-midi");
+    let mut shell = new_shell(&scratch);
+    saved(&scratch, &mut shell);
+    let audio_track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 1.0, 1, 0.1);
+    let clip = place(&mut shell, audio_track, &source, 0);
+    let before = audio(&shell, clip);
+    let midi_track = track(&shell, TrackKind::Midi);
+    let midi = bl_model::Clip::new(
+        shell.new_id(),
+        Ticks::ZERO,
+        Ticks::QUARTER * 4,
+        ClipData::Midi(bl_model::MidiData::default()),
+    );
+    shell
+        .run("clip.create", json!({ "track": midi_track, "clip": midi }))
+        .unwrap();
+    let refused = shell.run(
+        ids::ARRANGEMENT_REVERSE,
+        json!({ "tracks": [audio_track, midi_track], "start": 0, "end": 1920 }),
+    );
+    assert!(refused.is_err(), "a MIDI clip in the selection is refused");
+    assert_eq!(audio(&shell, clip), before, "nothing changed");
+}
+
+// Spec: audio-clip-editing R11. A time selection across several clips is
+// reversed, and the parts are mirrored within it, so the selection plays
+// backwards as a whole.
+#[test]
+fn reversing_a_selection_across_clips_plays_it_backwards() {
+    let scratch = Scratch::new("reverse-range");
+    let mut shell = new_shell(&scratch);
+    saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    let first = scratch.path("First.wav");
+    wav(&first, 1.0, 1, 0.1);
+    let second = scratch.path("Second.wav");
+    wav(&second, 1.0, 1, 0.2);
+    // Two clips side by side, a second each at 120 BPM.
+    let one = place(&mut shell, track, &first, 0);
+    let two = place(&mut shell, track, &second, 1_411_200);
+    let media_one = audio(&shell, one).media;
+    let media_two = audio(&shell, two).media;
+
+    let value = shell
+        .run(
+            ids::ARRANGEMENT_REVERSE,
+            json!({ "tracks": [track], "start": 0, "end": 2_822_400 }),
+        )
+        .unwrap();
+    let reversed: ReverseRangeResult = serde_json::from_value(value).unwrap();
+    assert_eq!(reversed.clips.len(), 2, "{reversed:?}");
+    // Each part plays a reversed copy of its own file.
+    assert_ne!(audio(&shell, one).media, media_one);
+    assert_ne!(audio(&shell, two).media, media_two);
+    // The parts are mirrored within the selection: the first now ends where
+    // the second began.
+    let start_of =
+        |shell: &Shell, clip: ClipId| shell.editor().document().clip(clip).unwrap().start;
+    assert_eq!(start_of(&shell, one), Ticks(1_411_200));
+    assert_eq!(start_of(&shell, two), Ticks::ZERO);
 }

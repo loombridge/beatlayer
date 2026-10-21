@@ -975,6 +975,32 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// The Shortcuts page, narrowed to Duplicate Track Without Clips, with a
+/// key of the person's own on it (the custom shortcuts spec, R8).
+fn a_bound_shortcut(h: &mut Harness) {
+    let (platform, keys) = if cfg!(target_os = "macos") {
+        ("mac", "Cmd+Option+D")
+    } else {
+        ("win", "Ctrl+Alt+D")
+    };
+    h.shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": [keys],
+                "platform": platform,
+                "context": "global",
+            }),
+        )
+        .unwrap();
+    // The search field, narrowed to the command.
+    h.click(egui::Pos2::new(400.0, 20.0));
+    h.frame(vec![egui::Event::Text(
+        "Duplicate Track Without Clips".to_owned(),
+    )]);
+}
+
 /// A Session clip on the first MIDI track, selected, with the Clip View on
 /// its Envelopes tab showing Pan (WP-3.16).
 fn envelopes_tab(h: &mut Harness) {
@@ -1074,6 +1100,7 @@ fn four_channel_interface(h: &mut Harness) {
     use bl_shell::settings::Preferences;
 
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         channels: 4,
         ..NullOptions::default()
     });
@@ -1541,6 +1568,20 @@ fn device_view(h: &mut Harness) {
     });
 }
 
+/// The list of the set's plug-ins, open in the detail area, with the
+/// keyboard in it (IMP-29, WP-6.41).
+fn plugin_list(h: &mut Harness) {
+    h.shell
+        .run("view.toggle_plugin_list", json!({}))
+        .expect("the list opens");
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 /// A Simpler on the first MIDI track, that track selected, no device selected
 /// (WP-5.15b): the Warp controls show in the Device View.
 fn a_snapshot(h: &mut Harness) {
@@ -1997,6 +2038,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "midi.set_port",
             settings("tempo-midi", a_midi_port, "In: Keys Track", Key::Enter),
         ),
+        // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
+        // Remove and Reset buttons.
+        (
+            "keymap.unbind",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Remove Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.reset",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Reset Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.bind",
+            Exception(Equivalent(
+                "the Shortcuts page's keys cell takes the key press that becomes the shortcut, so \
+                 the command's keyboard path is the shortcut itself (the custom shortcuts spec, \
+                 R8)",
+            )),
+        ),
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
@@ -2009,6 +2078,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        ("keymap.state", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.
         (
@@ -2286,6 +2356,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The reversal's commands (WP-4.7): `clip.reverse` is the one a
+        // person and an agent run, from the Audio Utilities panel's Reverse
+        // button, and it applies `clip.reverse_file`.
+        ("clip.reverse", Exception(audio_panel)),
+        (
+            "clip.reverse_file",
+            Exception(Equivalent(
+                "clip.reverse, from the Audio Utilities panel's Reverse button (audio-clip-editing R7)",
+            )),
+        ),
+        // The clip's pitch (WP-4.7): the Audio Utilities panel's Transpose
+        // and Detune fields.
+        ("clip.set_pitch", Exception(audio_panel)),
         // The freeze's document-level commands (WP-4.14): `track.freeze` and
         // `track.unfreeze` are the ones a person and an agent run, from the
         // menus and Cmd-Option-Shift-F, and they apply these.
@@ -2423,6 +2506,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),
+        // The list of the set's plug-ins (IMP-29, WP-6.41): Enter on its
+        // Show Only Missing switch.
+        (
+            "view.set_plugin_list_only_missing",
+            main(nothing, plugin_list, "Show Only Missing", Key::Enter),
+        ),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -2441,6 +2530,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(an_expandable_device, device_view, "Expand", Key::Enter),
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
+        ("device.set_role", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         ("device.swap_to_snapshot", Exception(device_menu)),
         ("track.set_devices_enabled", Exception(track_menu)),
@@ -2702,6 +2792,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "Exclude Macro from Randomization on a macro's context menu",
             )),
+        ),
+        (
+            "rack.set_macro_style",
+            Exception(Equivalent("Macro Style on a macro's context menu")),
         ),
         (
             "rack.set_mapped_value",
@@ -3316,9 +3410,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.rescan",
             settings("plug-ins", nothing, "Rescan Plug-Ins", Key::Enter),
         ),
+        ("plugin.list", Exception(Query)),
         (
-            "plugin.list",
-            Exception(LaterView("the set's plug-ins view (Phase 6, IMP-29)")),
+            "plugin.export_list",
+            Exception(Equivalent(
+                "the Export… button in the list of the set's plug-ins, which asks where to \
+                 save the list",
+            )),
         ),
         (
             "plugin.settings",
@@ -3556,6 +3654,32 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        ("export.realtime.status", Exception(Query)),
+        (
+            "export.realtime.restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Restart, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.skip",
+            Exception(Equivalent(
+                "the real-time render's dialog's Skip, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.cancel",
+            Exception(Equivalent(
+                "the real-time render's dialog's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.auto_restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Auto-Restart on Drop-Outs switch, which Tab \
+                 reaches",
+            )),
         ),
         // Slice to New MIDI Track's dialog (WP-4.16).
         (

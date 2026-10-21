@@ -91,7 +91,6 @@ pub struct DeviceViewUi {
     seen_selected: Option<DeviceId>,
     /// How far each rack's chain list is scrolled, in points.
     pub(crate) chain_scrolls: std::collections::HashMap<DeviceId, f32>,
-    pub(crate) keymap: Keymap,
     pub(crate) platform: Platform,
     menu: Vec<MenuItem>,
     rack_menu: Vec<MenuItem>,
@@ -276,7 +275,6 @@ impl DeviceViewUi {
             scroll: 0.0,
             seen_selected: None,
             chain_scrolls: std::collections::HashMap::new(),
-            keymap: Keymap::live12(),
             platform: Platform::current(),
             menu: context_menus::device(),
             rack_menu: context_menus::rack(),
@@ -1101,6 +1099,8 @@ impl DeviceViewUi {
     /// shortcut runs in the Device View, or names the package that builds
     /// it.
     fn menu(&self, ui: &mut Ui, shell: &Shell, frame: &DeviceFrame, events: &mut Vec<UiEvent>) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = Keymap::from_data(shell.keymap().clone());
         // Spec: racks R26. A rack's menu adds Ungroup and disables Compare.
         let menu = if frame.rack.is_some() {
             &self.rack_menu
@@ -1112,7 +1112,7 @@ impl DeviceViewUi {
                 ui.separator();
                 continue;
             }
-            let response = crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+            let response = crate::menus::item(ui, item, shell, &keymap, self.platform, events);
             let rack_compare =
                 frame.rack.is_some() && context_menus::RACK_COMPARE_ROWS.contains(&item.row);
             let response = match context_menus::pending_package(item.row) {
@@ -1142,8 +1142,7 @@ impl DeviceViewUi {
                 && shell.can_invoke(bl_shell::pad_commands::GROUP_TO_DRUM_RACK, &json!({}))
             {
                 let drum = context_menus::group_to_drum_rack();
-                let response =
-                    crate::menus::item(ui, &drum, shell, &self.keymap, self.platform, events);
+                let response = crate::menus::item(ui, &drum, shell, &keymap, self.platform, events);
                 crate::menus::take_focus_first(ui, &response);
             }
         }

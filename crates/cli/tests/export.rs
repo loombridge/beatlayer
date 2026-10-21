@@ -1175,6 +1175,7 @@ fn save_set(dir: &Path, name: &str) -> PathBuf {
             hash: file.hash,
             path: MediaPath::new(format!("Samples/Imported/{}", file.name)).unwrap(),
             size: file.bytes.len() as u64,
+            reversed_from: None,
         });
     }
     let project = Project::from_editor(&scene.editor, media);

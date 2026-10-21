@@ -423,6 +423,7 @@ pub fn scan_report(
                 vendor: p.vendor,
                 version: p.version,
                 role: p.role,
+                note_output: p.note_output,
             })
             .collect(),
         blocked: report
@@ -488,10 +489,17 @@ pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
                     .find(|b| b.path.to_string_lossy() == p)
                     .map(|b| b.reason.clone())
             });
+            // Spec: plugin-list R5. The preset the device holds.
+            let preset = device.preset_name.clone().filter(|name| !name.is_empty());
             let existing = order.iter_mut().find(|(k, _)| *k == key);
             if let Some((_, plugin)) = existing {
                 plugin.devices.push(device.id);
                 plugin.tracks.push(track.id());
+                if let Some(preset) = preset
+                    && !plugin.preset_names.contains(&preset)
+                {
+                    plugin.preset_names.push(preset);
+                }
                 continue;
             }
             order.push((
@@ -505,6 +513,7 @@ pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
                     version: known.and_then(|p| p.version.clone()),
                     devices: vec![device.id],
                     tracks: vec![track.id()],
+                    preset_names: preset.into_iter().collect(),
                     missing: known.is_none() || blocked_reason.is_some(),
                     blocked: blocked_reason,
                 },
@@ -514,4 +523,41 @@ pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
     let mut plugins: Vec<SetPlugin> = order.into_iter().map(|(_, p)| p).collect();
     plugins.sort_by(|a, b| a.name.cmp(&b.name).then(a.plugin_id.cmp(&b.plugin_id)));
     SetPluginList { plugins }
+}
+
+/// Writes the set's plug-in list to `path`, as the plug-in list spec's R7
+/// says: the set's name and the date, a header line, and one line per
+/// plug-in with its name, format, vendor, version, preset names, tracks,
+/// and `Missing` where this computer doesn't have it, separated by tabs.
+/// The file is written whole or not at all.
+pub fn export_list(
+    doc: &Document,
+    list: &SetPluginList,
+    path: &Path,
+    set_name: &str,
+) -> Result<PathBuf, String> {
+    let mut text = String::new();
+    let date = bl_project::utc_stamp(std::time::SystemTime::now());
+    text.push_str(&format!("{set_name}\t{}\n", &date[..10]));
+    text.push_str("Name\tFormat\tVendor\tVersion\tPresets\tTracks\tMissing\n");
+    for plugin in &list.plugins {
+        let tracks: Vec<&str> = plugin
+            .tracks
+            .iter()
+            .filter_map(|track| doc.track(*track))
+            .map(|track| track.name())
+            .collect();
+        text.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            plugin.name,
+            plugin.format.short_name(),
+            plugin.vendor.as_deref().unwrap_or_default(),
+            plugin.version.as_deref().unwrap_or_default(),
+            plugin.preset_names.join(", "),
+            tracks.join(", "),
+            if plugin.missing { "Missing" } else { "" },
+        ));
+    }
+    bl_project::preset::write_whole(path, text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path.to_path_buf())
 }

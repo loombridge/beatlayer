@@ -405,10 +405,9 @@ mod tests {
         let package = |name: &str| Reach::Package(name.to_owned());
         let everything = |path: &str| matches!(reach(&ws, path), Reach::Everything(_));
         assert_eq!(reach(&ws, "crates/ui/src/lib.rs"), package("bl-ui"));
-        assert_eq!(
-            reach(&ws, "crates/ui/keymaps/live12.toml"),
-            package("bl-ui")
-        );
+        // A file beside a package's sources reaches that package, such as
+        // the keymap's data file (crates/shell-spec/keymaps/live12.toml).
+        assert_eq!(reach(&ws, "crates/ui/themes/dark.toml"), package("bl-ui"));
         assert_eq!(reach(&ws, "crates/app/Cargo.toml"), package("beatlayer"));
         // Markdown in a package can be compiled in.
         assert_eq!(reach(&ws, "crates/core/guide.md"), package("bl-core"));

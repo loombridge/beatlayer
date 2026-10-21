@@ -96,7 +96,9 @@ mod audio_panel;
 pub mod autosample;
 mod capture;
 mod freeze;
+mod keymap;
 mod multisampler;
+mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
@@ -248,6 +250,12 @@ pub enum Effect {
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
+    /// Ask where to save the set's plug-in list, then run
+    /// `plugin.export_list` there (IMP-29, WP-6.41).
+    PickPluginListPath {
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -386,6 +394,14 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keymap in use: Live 12's shortcuts with the person's own layered
+    /// over them (the custom-shortcuts spec, R3).
+    keymap: crate::keymap::Keymap,
+    /// The person's own shortcuts, as `keymap.toml` holds them.
+    user_keymap: crate::keymap::UserKeymap,
+    /// The number of times the keymap changed, so a host knows to rebuild
+    /// the keymap it matches keys against.
+    keymap_revision: u64,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -403,6 +419,9 @@ pub struct Shell {
     /// keyboard, so its keys go to it (WP-2.5).
     value_focused: bool,
     effects: Vec<Effect>,
+    /// The state of the real-time render an export with external hardware
+    /// runs, which the app's dialog shows and its buttons set (WP-5.35).
+    realtime: crate::realtime::Session,
     message: Option<Message>,
     /// What the pointer is over says about itself, while there's no message.
     hint: Option<String>,
@@ -444,6 +463,9 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
+    /// in the detail area's place, and whether Show Only Missing is on.
+    plugin_list: plugin_list::PluginList,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -791,6 +813,12 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A macro's style changed, so it may have moved to another step
+    /// (R21, R22).
+    Style {
+        rack: bl_model::DeviceId,
+        number: u8,
+    },
     /// A variation launch set the macros (R27).
     Variation { rack: bl_model::DeviceId },
 }
@@ -891,6 +919,9 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            keymap: crate::keymap::Keymap::live12(),
+            user_keymap: crate::keymap::UserKeymap::default(),
+            keymap_revision: 0,
             settings_open: false,
             prefs,
             config_dir,
@@ -903,6 +934,7 @@ impl Shell {
             focused_track: None,
             value_focused: false,
             effects: Vec::new(),
+            realtime: crate::realtime::Session::default(),
             message: None,
             hint: None,
             revision: 0,
@@ -919,6 +951,7 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
@@ -970,6 +1003,7 @@ impl Shell {
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
+        shell.load_user_keymap();
         shell
     }
 
@@ -1759,6 +1793,16 @@ impl Shell {
             .map(|path| bl_project::ProjectFolder::of_set(path).root().to_owned())
     }
 
+    /// The file name the plug-in list's Export… suggests: `<set name>
+    /// Plug-Ins.txt` (the plug-in list spec, R7).
+    #[must_use]
+    pub fn plugin_list_file_name(&self) -> String {
+        format!(
+            "{} Plug-Ins.txt",
+            bl_project::preset::file_safe(&self.set_name())
+        )
+    }
+
     /// Whether the set has changes that aren't saved.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
@@ -2463,6 +2507,7 @@ impl Shell {
                     })?;
                 self.refresh_device_types();
                 let device_type = found.device_type;
+                let preset = found.preset;
                 let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
                     device_ids::ADD,
                     to_value(&device_ids::AddDeviceArgs {
@@ -2491,6 +2536,9 @@ impl Shell {
                         data: Vec::new(),
                     }),
                 );
+                // Spec: plugin-list R5. The name of the preset the unit
+                // holds, as it reports it.
+                let _ = self.editor.amend_device_preset_name(added.device, preset);
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
@@ -2818,8 +2866,34 @@ impl Shell {
             }
             plugin_ids::LIST => {
                 let _: plugin_ids::ListArgs = Self::args(id, args)?;
-                let list = crate::plugins::set_plugin_list(self.editor.document(), &self.scanner);
+                let list = self.set_plugin_list();
                 Ok(to_value(&list))
+            }
+            plugin_ids::EXPORT_LIST => {
+                // Spec: plugin-list R7, R10.
+                let plugin_ids::ExportListArgs { path } = Self::args(id, args)?;
+                let Some(path) = path else {
+                    // The list's Export… button: the app asks where to
+                    // save it, and runs this again with the path.
+                    self.effects.push(Effect::PickPluginListPath {
+                        default_name: self.plugin_list_file_name(),
+                    });
+                    return Ok(Value::Null);
+                };
+                let path = std::path::PathBuf::from(path);
+                let written = crate::plugins::export_list(
+                    self.editor.document(),
+                    &self.set_plugin_list(),
+                    &path,
+                    &self.set_name(),
+                )
+                .map_err(|message| ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                })?;
+                Ok(to_value(&plugin_ids::ExportedList {
+                    path: written.to_string_lossy().into_owned(),
+                }))
             }
             plugin_ids::SETTINGS => {
                 let plugin_ids::PluginSettingsArgs {
@@ -3742,6 +3816,18 @@ impl Shell {
     #[must_use]
     pub fn clip_view(&self) -> &ClipView {
         &self.clip_view
+    }
+
+    /// The list of the set's plug-ins (IMP-29, WP-6.41).
+    #[must_use]
+    pub fn plugin_list(&self) -> &plugin_list::PluginList {
+        &self.plugin_list
+    }
+
+    /// The set's plug-in list, as `plugin.list` reports it.
+    #[must_use]
+    pub fn set_plugin_list(&self) -> plugin_ids::SetPluginList {
+        crate::plugins::set_plugin_list(self.editor.document(), &self.scanner)
     }
 
     /// What the mixers show (WP-1.9).
@@ -5287,6 +5373,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
@@ -5371,6 +5458,23 @@ impl Shell {
                     }
                     .to_owned(),
                 )
+            }
+            // IMP-24: the item follows the selected device's position.
+            device_ids::SET_ROLE => {
+                let selected = self
+                    .devices
+                    .selected()
+                    .and_then(|device| self.editor.document().device(device));
+                Some(match selected {
+                    Some(device) if device.role == bl_model::DeviceRole::MidiEffect => {
+                        let role = self
+                            .devices
+                            .device_type(&device.kind)
+                            .map_or(bl_model::DeviceRole::AudioEffect, |kind| kind.role);
+                        format!("Use as {}", role.label())
+                    }
+                    _ => "Use as MIDI Effect".to_owned(),
+                })
             }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
@@ -6514,6 +6618,12 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::SetMacroStyle {
+                rack, macro_number, ..
+            } => Some(MacroEdit::Style {
+                rack: *rack,
+                number: *macro_number,
+            }),
             bl_model::Command::LaunchVariation { rack, .. } => {
                 Some(MacroEdit::Variation { rack: *rack })
             }
@@ -6547,13 +6657,26 @@ impl Shell {
                         return Vec::new();
                     };
                     let position = info.travel.position(*value);
-                    vec![bl_model::Command::SetMappedValue {
+                    // Spec: macros R22. A stepped macro takes only its
+                    // steps, so the macro moves to the nearest step, and
+                    // the parameter takes the value that step gives.
+                    let step = device.macros.setting(*number).position_of(position);
+                    let mut commands = vec![bl_model::Command::SetMappedValue {
                         target: bl_model::MacroTarget::Device {
                             device: *rack,
                             param: bl_model::macro_param(*number),
                         },
-                        value: position,
-                    }]
+                        value: step,
+                    }];
+                    if step != position
+                        && let Some(mapping) = device.macros.mapping(*target)
+                    {
+                        commands.push(bl_model::Command::SetMappedValue {
+                            target: *target,
+                            value: info.travel.value(mapping.position(step)),
+                        });
+                    }
+                    commands
                 } else {
                     self.devices.target_commands(doc, device, *target)
                 }
@@ -6564,6 +6687,9 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Style { rack, number } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.macro_commands(doc, rack, *number)
+            }),
             MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
                 (1..=bl_model::MACROS)
                     .filter(|number| !rack.macros.setting(*number).variation_excluded)
@@ -6575,7 +6701,73 @@ impl Shell {
 
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
+        let args = self.prepare_device_role(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: device-chains R2, R3, and IMP-24. A device may take the
+    /// MIDI-effect position only if its type sends notes on from a note
+    /// output; otherwise its role is its type's role. The document can't
+    /// check this: only the host knows whether a plug-in has a note output.
+    fn prepare_device_role(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        let Ok(bl_model::Command::SetDeviceRole { device, role }) =
+            model::command_from_args(id, args.clone())
+        else {
+            return Ok(args);
+        };
+        // An unknown device is the document's to refuse.
+        let Some(current) = self.editor.document().device(device) else {
+            return Ok(args);
+        };
+        // A type the host hasn't met can't be checked; the chain's order
+        // still is.
+        let Some(kind) = self.devices.device_type(&current.kind) else {
+            return Ok(args);
+        };
+        // Left out, the role is the other position: into the MIDI-effect
+        // position when the type sends notes on and isn't there already,
+        // and back where the type goes otherwise. A type that sends no
+        // notes on can't take the MIDI-effect position at all, so the
+        // menu's item says why rather than doing nothing.
+        let role = match role {
+            Some(role) => role,
+            None if current.role == bl_model::DeviceRole::MidiEffect => kind.role,
+            None if kind.note_output => bl_model::DeviceRole::MidiEffect,
+            None => {
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!(
+                        "{} has no note output, so it can't go in the MIDI-effect position",
+                        current.title()
+                    ),
+                });
+            }
+        };
+        if kind.role != role && !(role == bl_model::DeviceRole::MidiEffect && kind.note_output) {
+            let message = if role == bl_model::DeviceRole::MidiEffect {
+                format!(
+                    "{} has no note output, so it can't go in the MIDI-effect position",
+                    current.title()
+                )
+            } else {
+                format!(
+                    "{} goes in the chain as {}",
+                    current.title(),
+                    kind.role.label()
+                )
+            };
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message,
+            });
+        }
+        if let Some(object) = args.as_object_mut() {
+            object.insert(
+                "role".to_owned(),
+                serde_json::to_value(role).unwrap_or_default(),
+            );
+        }
+        Ok(args)
     }
 
     /// Spec: warping R7, R11. A warp marker edit on several clips needs
@@ -7187,6 +7379,11 @@ impl Shell {
             return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
+            if id != export_ids::AUDIO {
+                // Spec: external-devices R23. The real-time render's
+                // dialog: its buttons set the session's flags.
+                return self.run_realtime(id, args);
+            }
             // Spec: export R15. The set, its media, the Arrangement's time
             // selection, and the engine's rate; the export changes none.
             let engine_rate = self.engine_rate();
@@ -7197,14 +7394,23 @@ impl Shell {
                 let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
             }
             let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+            // The plug-in hosts, without borrowing the whole shell: the
+            // export may render in real time, which needs the audio host.
+            let hosts = bl_plugin_host::Hosts {
+                clap: Some(&self.plugins),
+                vst3: Some(&self.vst3),
+                au: Some(&self.au),
+            };
             return crate::export::run_command(
                 self.editor.document(),
                 media,
-                self.plugin_hosts(),
+                hosts,
                 self.arrangement.time_selection(),
                 self.arrangement.selected_tracks(),
                 engine_rate,
                 &args,
+                Some(&mut self.audio),
+                &self.realtime,
             )
             .map(|result| to_value(&result));
         }
@@ -7230,6 +7436,60 @@ impl Shell {
             .sample_rate()
             .or(self.audio.settings().sample_rate)
             .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
+    }
+
+    /// The state of the real-time render an export with external hardware
+    /// runs: the app's dialog shows it, and its buttons set it (the
+    /// external devices spec, R23).
+    #[must_use]
+    pub fn realtime_session(&self) -> crate::realtime::Session {
+        self.realtime.clone()
+    }
+
+    /// What the real-time render is doing now (the external devices spec,
+    /// R23).
+    #[must_use]
+    pub fn realtime_status(&self) -> export_ids::RealtimeStatus {
+        let status = self.realtime.status();
+        let phase = match status.phase {
+            crate::realtime::Phase::Idle => export_ids::RealtimePhase::Idle,
+            crate::realtime::Phase::Waiting => export_ids::RealtimePhase::Waiting {
+                seconds: status.seconds,
+            },
+            crate::realtime::Phase::Rendering => export_ids::RealtimePhase::Rendering,
+        };
+        export_ids::RealtimeStatus {
+            phase,
+            progress: status.progress,
+            attempts: status.attempts,
+            auto_restart: status.auto_restart,
+        }
+    }
+
+    /// Runs the real-time render's dialog's commands (the external devices
+    /// spec, R23).
+    fn run_realtime(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        match id {
+            export_ids::REALTIME_STATUS => Ok(to_value(&self.realtime_status())),
+            export_ids::REALTIME_RESTART => {
+                self.realtime.restart();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_SKIP => {
+                self.realtime.skip();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_CANCEL => {
+                self.realtime.cancel();
+                Ok(to_value(&self.realtime_status()))
+            }
+            export_ids::REALTIME_AUTO_RESTART => {
+                let args = Self::args::<export_ids::AutoRestartArgs>(id, args)?;
+                self.realtime.set_auto_restart(args.auto_restart);
+                Ok(to_value(&self.realtime_status()))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// Runs a MIDI port or computer MIDI keyboard command (WP-2.2).
@@ -7947,6 +8207,21 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                 ))
             }
+            ids::VIEW_TOGGLE_PLUGIN_LIST => {
+                // Spec: plugin-list R1, R3. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.plugin_list.toggle();
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
+            ids::VIEW_SET_PLUGIN_LIST_ONLY_MISSING => {
+                // Spec: plugin-list R3, R10. View state only.
+                let ids::PluginListOnlyMissingArgs { only_missing } = Self::args(id, args)?;
+                self.plugin_list
+                    .set_only_missing(only_missing.unwrap_or(!self.plugin_list.only_missing()));
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
             ids::VIEW_DRAW_MODE => {
                 // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
                 Self::args::<NoArgs>(id, args)?;
@@ -8042,6 +8317,7 @@ impl Shell {
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
+                    plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     plug_in_windows: self.plug_in_windows,
                 }))
@@ -8123,6 +8399,30 @@ impl Shell {
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::KEYMAP_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&self.keymap_state()))
+            }
+            ids::KEYMAP_BIND => {
+                let bind: crate::keymap::BindArgs = Self::args(id, args)?;
+                self.bind_keys(id, &bind)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_UNBIND => {
+                let crate::keymap::UnbindArgs {
+                    shortcut,
+                    command,
+                    keys,
+                    platform,
+                } = Self::args(id, args)?;
+                self.unbind_keys(id, shortcut.as_deref(), command.as_deref(), &keys, platform)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_RESET => {
+                let crate::keymap::ResetArgs { command } = Self::args(id, args)?;
+                self.reset_keys(command.as_deref());
+                Ok(to_value(&self.keymap_result()))
             }
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;

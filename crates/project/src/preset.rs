@@ -291,7 +291,7 @@ impl Preset {
 /// Writes `bytes` to `path`, making its folder if need be. The file is
 /// written beside it under a hidden name and renamed into place, so `path`
 /// holds a whole file, old or new, whenever the write stops.
-pub(crate) fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), PresetError> {
+pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), PresetError> {
     let io = |error| PresetError::Io {
         path: path.to_owned(),
         error,

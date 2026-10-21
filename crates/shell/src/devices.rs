@@ -351,6 +351,13 @@ impl DeviceView {
             .map_or(&[], |t| &t.outputs)
     }
 
+    /// The device type of devices of `kind`, if the host has met it (IMP-24):
+    /// its role and whether it sends notes on from a note output.
+    #[must_use]
+    pub fn device_type(&self, kind: &DeviceKind) -> Option<&DeviceType> {
+        self.types.iter().find(|t| t.kind == *kind)
+    }
+
     /// The description of devices of `kind`, if their type has one.
     #[must_use]
     pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {
@@ -1397,6 +1404,14 @@ impl DeviceView {
                 port: external.port.clone(),
                 channel: external.channel,
                 audio_from: external.audio_from.label(),
+                // Spec: external-devices R17. The External Audio Effect
+                // sends its signal to the interface's outputs and hears it
+                // back: it has an Audio To and no MIDI To.
+                audio_to: external.audio_to.map(|channel| channel.label()),
+                output: self
+                    .types
+                    .iter()
+                    .any(|t| t.kind == d.kind && t.external_output),
                 hardware_latency: external.hardware_latency,
             }),
             midi_sidechain: d
@@ -2232,6 +2247,12 @@ impl DeviceView {
                     }
                 };
                 rack_presets::save_device(current, media, &path)?;
+                // Spec: plugin-list R5. A plug-in device holds the preset it
+                // was saved as; a native device's preset is in its name.
+                if matches!(current.kind, DeviceKind::Plugin { .. }) {
+                    let _ =
+                        editor.amend_device_preset_name(device, Some(preset::preset_name(&path)));
+                }
                 outcome.message = Some(format!("Saved preset {}.", path.display()));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
@@ -3373,6 +3394,12 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     // starts with its routing, which `device.set_external` sets.
     if known.is_some_and(|t| t.external) {
         device = device.with_external();
+    }
+    // Spec: external-devices R17. The External Audio Effect sends its signal
+    // to the interface's outputs and hears it back: it starts with an Audio
+    // To.
+    if known.is_some_and(|t| t.external_output) {
+        device = device.with_external_output();
     }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();

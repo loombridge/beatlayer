@@ -334,6 +334,140 @@ fn rack_macros_reads_back_names_values_mappings_and_the_count() {
     assert_eq!(state["count"], 12);
 }
 
+// Spec: macros R21
+#[test]
+fn a_new_macro_is_a_knob_and_style_changes_are_one_undo_step() {
+    let mut set = set();
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    assert_eq!(
+        state["macros"][0]["style"], "knob",
+        "a macro starts as a knob"
+    );
+    assert_eq!(state["macros"][0]["steps"], 8, "eight steps by default");
+    let before = set.shell.editor().undo_history().count();
+    set.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": set.rack, "macro_number": 1, "style": "stepped" }),
+        )
+        .unwrap();
+    assert_eq!(set.shell.editor().undo_history().count(), before + 1);
+    assert_eq!(last_undo(&set), "Change Macro Style");
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    assert_eq!(state["macros"][0]["style"], "stepped");
+    // The steps are the macro's own, and it takes only them.
+    set.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": set.rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+        )
+        .unwrap();
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    assert_eq!(state["macros"][0]["steps"], 4);
+    set.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": set.rack, "param": bl_model::macro_param(1), "value": 0.4 }),
+        )
+        .unwrap();
+    assert!(
+        (macro_value(&set, 1) - 1.0 / 3.0).abs() < 1e-9,
+        "the nearest step: {}",
+        macro_value(&set, 1)
+    );
+}
+
+// Spec: macros R24
+#[test]
+fn a_stepped_macro_maps_randomises_and_stores_as_a_knob_does() {
+    let mut set = set();
+    map(&mut set, 1, WIDTH);
+    set.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": set.rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+        )
+        .unwrap();
+    // It maps as a knob does: the macro still drives the parameter, and it
+    // takes only its steps, so 0.5 lands on the third of four.
+    set.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": set.rack, "param": bl_model::macro_param(1), "value": 0.5 }),
+        )
+        .unwrap();
+    assert!((macro_value(&set, 1) - 2.0 / 3.0).abs() < 1e-9);
+    assert!((param(&set, set.utility, WIDTH).unwrap() - 400.0 / 3.0).abs() < 1e-9);
+    // It randomises to a step.
+    set.shell
+        .invoke(
+            "rack.randomize_macros",
+            json!({ "rack": set.rack, "seed": 7 }),
+        )
+        .unwrap();
+    let value = macro_value(&set, 1);
+    assert!(
+        (value * 3.0 - (value * 3.0).round()).abs() < 1e-9,
+        "a random step: {value}"
+    );
+    // It stores with the set: the rack reads back as it was.
+    let rack = set
+        .shell
+        .editor()
+        .document()
+        .device(set.rack)
+        .unwrap()
+        .clone();
+    let json = serde_json::to_value(&rack).unwrap();
+    let back: bl_model::Device = serde_json::from_value(json).unwrap();
+    assert_eq!(back.macros.setting(1).style, bl_model::MacroStyle::Stepped);
+    assert_eq!(back.macros.setting(1).steps, 4);
+}
+
+// Spec: macros R22, R24
+#[test]
+fn a_stepped_macro_keeps_its_steps_when_a_parameter_is_mapped_to_it() {
+    let mut set = set();
+    set.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": set.rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+        )
+        .unwrap();
+    // The macro is mapped after it was stepped: the macro moves to the
+    // nearest step, and the parameter takes the value that step gives.
+    map(&mut set, 1, WIDTH);
+    let value = macro_value(&set, 1);
+    assert!(
+        (value - 2.0 / 3.0).abs() < 1e-9,
+        "the macro's nearest step: {value}"
+    );
+    let width = param(&set, set.utility, WIDTH).expect("the width");
+    assert!(
+        (width - 400.0 / 3.0).abs() < 1e-9,
+        "the parameter follows the step: {width}"
+    );
+    // The macro's value is read back as the step it took.
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    assert!(
+        (state["macros"][0]["value"].as_f64().expect("a value") - 2.0 / 3.0).abs() < 1e-9,
+        "the macro reads back its step: {}",
+        state["macros"][0]["value"]
+    );
+}
+
 // Spec: macros R3
 #[test]
 fn map_mode_turns_on_and_off_as_view_state() {

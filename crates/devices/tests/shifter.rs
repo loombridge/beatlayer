@@ -752,6 +752,7 @@ fn the_sample_rate_sets_the_latency_in_frames() {
             .create(
                 &device,
                 &bl_engine::NodeConfig {
+                    round_trip_latency: 0,
                     sample_rate: rate,
                     max_frames: 256,
                     channels: 2,

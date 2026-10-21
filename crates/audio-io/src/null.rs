@@ -68,6 +68,9 @@ pub struct NullOptions {
     /// How many input and output channels each device has. Zero — and the
     /// default — means [`CHANNELS`], two.
     pub channels: u16,
+    /// The block after which the stream reports a dropout, as a device does
+    /// when it underruns: none for none (WP-5.35).
+    pub dropout_after: Option<u64>,
 }
 
 impl Default for NullOptions {
@@ -76,6 +79,7 @@ impl Default for NullOptions {
             pacing: Pacing::default(),
             frame_limit: None,
             channels: CHANNELS,
+            dropout_after: None,
         }
     }
 }
@@ -891,6 +895,13 @@ impl NullEngine {
             }
 
             let timestamp = frames_to_duration(self.blocks * frames, self.sample_rate);
+            if let Some(after) = self.options.dropout_after
+                && self.blocks == after
+            {
+                // The device underruns, as it does when the machine is too
+                // busy (WP-5.35).
+                self.counters.record_xrun();
+            }
             if let Some(interval) = &self.interval {
                 // Only fails if the thread isn't in the interval, which set-up
                 // reports; the block runs either way.
@@ -1188,6 +1199,7 @@ mod tests {
             pacing: Pacing::Free,
             frame_limit: Some(300 * 48_000),
             channels: 2,
+            dropout_after: None,
         };
         let run = run(options, 128, None);
         assert_eq!(run.blocks, 112_500);
@@ -1208,6 +1220,7 @@ mod tests {
             pacing: Pacing::RealTime,
             frame_limit: Some(20 * 480),
             channels: 2,
+            dropout_after: None,
         };
         let run = run(options, 480, None);
         assert_eq!(run.stats.blocks, 20);
@@ -1227,6 +1240,7 @@ mod tests {
             pacing: Pacing::RealTime,
             frame_limit: Some(10 * 64),
             channels: 2,
+            dropout_after: None,
         };
         let run = run(options, 64, Some((3, Duration::from_millis(20))));
         assert!(run.stats.late_blocks >= 1);
@@ -1242,6 +1256,7 @@ mod tests {
             pacing: Pacing::RealTime,
             frame_limit: Some(10 * 128),
             channels: 2,
+            dropout_after: None,
         };
         let run = run(options, 128, None);
         assert_eq!(run.faults, 0);
@@ -1267,6 +1282,7 @@ mod tests {
             pacing: Pacing::Manual,
             frame_limit: None,
             channels: 2,
+            dropout_after: None,
         };
         let (backend, control) = NullBackend::with_devices(options, &[(LOCAL, NAME)]);
         let clock = control.clock().expect("a manual clock");
@@ -1298,6 +1314,7 @@ mod tests {
             pacing: Pacing::Free,
             frame_limit: Some(10 * 128),
             channels: 2,
+            dropout_after: None,
         };
         let report = run(options, 128, None)
             .stats
@@ -1322,6 +1339,7 @@ mod tests {
             pacing: Pacing::Free,
             frame_limit: None,
             channels: 2,
+            dropout_after: None,
         });
         let stream = free.open_stream(&duplex(256), Box::new(Silence)).unwrap();
         assert!(stream.info().workgroup.is_none());
@@ -1342,6 +1360,7 @@ mod tests {
             pacing: Pacing::Free,
             frame_limit: Some(10 * 64),
             channels: 2,
+            dropout_after: None,
         };
         let run = run(options, 64, Some((3, Duration::from_millis(5))));
         assert_eq!(run.stats.dropouts, 0);
@@ -1353,6 +1372,7 @@ mod tests {
             pacing: Pacing::Free,
             frame_limit: None,
             channels: 2,
+            dropout_after: None,
         });
         let blocks = Arc::new(AtomicU64::new(0));
         let faults = Arc::new(AtomicU64::new(0));
@@ -1508,6 +1528,7 @@ mod tests {
     fn an_input_tone_reaches_only_the_channels_it_is_set_on() {
         let options = NullOptions {
             channels: 4,
+            dropout_after: None,
             ..NullOptions::default()
         };
         let (backend, control) = NullBackend::with_devices(options, &[(LOCAL, NAME)]);

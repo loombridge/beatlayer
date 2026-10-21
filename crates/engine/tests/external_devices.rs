@@ -262,6 +262,7 @@ fn the_instrument_ends_its_notes_when_its_device_goes() {
         }),
         channel: None,
         audio_from: None,
+        audio_to: None,
         hardware_latency: None,
     });
     notes.run();

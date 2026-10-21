@@ -872,6 +872,15 @@ pub struct ExternalSection {
     pub channel: u8,
     /// What Audio From shows: a channel `3` or a pair `3/4`.
     pub audio_from: String,
+    /// What Audio To shows: a channel `3` or a pair `3/4`, for a device that
+    /// sends its signal to the interface's outputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_to: Option<String>,
+    /// Whether the device sends its signal to the interface's outputs and
+    /// hears it back, as the External Audio Effect does: it has an Audio To
+    /// and no MIDI To (WP-5.35).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub output: bool,
     /// Hardware Latency, in the unit its switch is on.
     pub hardware_latency: bl_model::HardwareLatency,
 }

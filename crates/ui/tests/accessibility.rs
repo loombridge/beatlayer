@@ -1074,6 +1074,7 @@ fn four_channel_interface(h: &mut Harness) {
     use bl_shell::settings::Preferences;
 
     let backend = NullBackend::with_options(NullOptions {
+        dropout_after: None,
         channels: 4,
         ..NullOptions::default()
     });
@@ -3575,6 +3576,32 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "stems.close",
             Exception(Equivalent("the Separate Stems dialog's Cancel, or Esc")),
+        ),
+        ("export.realtime.status", Exception(Query)),
+        (
+            "export.realtime.restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Restart, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.skip",
+            Exception(Equivalent(
+                "the real-time render's dialog's Skip, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.cancel",
+            Exception(Equivalent(
+                "the real-time render's dialog's Cancel, which Tab reaches",
+            )),
+        ),
+        (
+            "export.realtime.auto_restart",
+            Exception(Equivalent(
+                "the real-time render's dialog's Auto-Restart on Drop-Outs switch, which Tab \
+                 reaches",
+            )),
         ),
         // Slice to New MIDI Track's dialog (WP-4.16).
         (

@@ -27,6 +27,7 @@ use serde_json::json;
 fn rig() -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
+            dropout_after: None,
             channels: 4,
             pacing: Pacing::Manual,
             ..NullOptions::default()

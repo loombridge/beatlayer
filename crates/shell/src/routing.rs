@@ -991,6 +991,11 @@ pub struct ExternalChoosers {
     /// Audio From: the interface's input channels, the single channels then
     /// the pairs, and Configure… at the end.
     pub audio_from: Chooser,
+    /// Audio To: the interface's output channels an external effect sends
+    /// to, the single channels then the pairs, and Configure… at the end.
+    /// `None` for a device without an Audio To, such as an external
+    /// instrument.
+    pub audio_to: Option<Chooser>,
 }
 
 fn set_external(device: DeviceId, change: Value) -> Invocation {
@@ -1049,6 +1054,20 @@ pub fn external_choosers(
     if audio.text.is_empty() {
         external.audio_from.label().clone_into(&mut audio.text);
     }
+    // Spec: external-devices R17. An external effect sends its signal to
+    // the interface's outputs, which it chooses as it chooses its inputs.
+    let audio_to = external.audio_to.map(|channel| {
+        let mut entries = interface_channels(interface.outputs, channel, |channel| {
+            set_external(device, json!({ "audio_to": channel_value(channel) }))
+        });
+        entries.push(Entry::Separator);
+        entries.push(configure("audio"));
+        let mut chooser = chooser("External Audio To", entries);
+        if chooser.text.is_empty() {
+            channel.label().clone_into(&mut chooser.text);
+        }
+        chooser
+    });
     Some(ExternalChoosers {
         midi_to: chooser("External MIDI To", midi_to),
         channel: Chooser {
@@ -1066,6 +1085,7 @@ pub fn external_choosers(
             pending: None,
         },
         audio_from: audio,
+        audio_to,
     })
 }
 

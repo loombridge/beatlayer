@@ -113,6 +113,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
         port: Some("Rack".to_owned()),
         channel: 2,
         audio_from: Channel::Pair(3),
+        audio_to: None,
         hardware_latency: HardwareLatency::Milliseconds { value: 3.0 },
     });
     editor

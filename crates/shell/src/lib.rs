@@ -87,6 +87,7 @@ pub mod permission;
 pub mod placeholders;
 pub mod plugins;
 pub mod processed;
+pub mod realtime;
 pub mod recording;
 pub mod routing;
 pub mod sample_editor;

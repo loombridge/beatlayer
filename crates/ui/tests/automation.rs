@@ -477,6 +477,225 @@ fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
     assert_eq!(s.steps(), before + 1, "the drag is one undo step");
 }
 
+// Spec: automation-editing R2. Dragging a selected breakpoint moves every
+// selected breakpoint by the same time and the same share of the travel, as
+// one undo step.
+#[test]
+fn dragging_selected_breakpoints_moves_them_all_in_one_undo_step() {
+    let mut s = set();
+    // A breakpoint in the middle, so the time selection covers two of them.
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR * 2,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(s.x(Ticks::ZERO) + 20.0, s.y(-0.4));
+    drag(&mut s.h, from, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(points.len(), 3, "{points:?}");
+    let kept = points
+        .iter()
+        .find(|point| point.at == Ticks(BAR * 2))
+        .expect("the breakpoint outside the selection stays");
+    assert!((kept.value - 0.8).abs() < 0.001, "{points:?}");
+    let moved: Vec<&Breakpoint> = points
+        .iter()
+        .filter(|point| point.at != Ticks(BAR * 2))
+        .collect();
+    assert!(
+        moved.iter().all(|point| point.value > -0.8),
+        "both selected breakpoints went up the travel: {points:?}"
+    );
+    assert!(
+        moved.iter().any(|point| point.at > Ticks(BAR)),
+        "the second selected breakpoint moved in time too: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R2, R3. Shift keeps a breakpoint drag to the axis
+// it started along; a vertical drag changes the value and leaves the time.
+#[test]
+fn shift_keeps_a_breakpoint_drag_to_one_axis() {
+    let mut s = set();
+    let before = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(from.x + 2.0, s.y(-0.4));
+    drag(&mut s.h, from, to, Modifiers::SHIFT);
+    let points = s.points();
+    let point = points
+        .iter()
+        .find(|point| point.at == Ticks::ZERO)
+        .unwrap_or_else(|| panic!("the breakpoint stays in time: {points:?}"));
+    assert!(
+        point.value > -0.75,
+        "the breakpoint moved up the travel: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R4. Dragging a segment inside the time selection
+// adds breakpoints at the selection's edges and moves the stretch between
+// them, as one undo step.
+#[test]
+fn dragging_a_segment_inside_a_time_selection_adds_breakpoints_at_its_edges() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    let before = s.steps();
+    let at = pos2(s.x(Ticks(BAR / 2)), s.y(-0.4));
+    let to = pos2(at.x + 20.0, at.y - 20.0);
+    drag(&mut s.h, at, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(
+        points.len(),
+        3,
+        "the selection's edge gained a breakpoint: {points:?}"
+    );
+    assert!(
+        points.iter().any(|point| point.at == Ticks(BAR * 2)),
+        "the envelope outside the selection stays: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R6. Option (Alt) with an edit key applies it to
+// the automation lanes shown under the selection's tracks.
+#[test]
+fn option_with_an_edit_key_acts_on_the_shown_automation_lanes() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": 0, "end": BAR, "tracks": [s.track] }),
+        )
+        .unwrap();
+    s.h.settle();
+    s.h.key(
+        Key::C,
+        Modifiers {
+            alt: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+    );
+    s.h.settle();
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.copy".to_owned()),
+        "{commands:?}"
+    );
+    assert!(
+        s.h.shell.envelope_clipboard().is_some(),
+        "the envelope was copied, not the clips"
+    );
+}
+
+// Spec: automation-editing R4. Shift-clicking a segment selects its two
+// breakpoints, and dragging the selected segment moves them, as one undo
+// step.
+#[test]
+fn dragging_a_selected_segment_moves_it_in_one_undo_step() {
+    let mut s = set();
+    // The middle of the two-bar segment: the pan is 0 there.
+    let at = pos2(s.x(Ticks(BAR)), s.y(0.0));
+    click(&mut s.h, at, Modifiers::SHIFT);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.select_segment".to_owned()),
+        "{commands:?}"
+    );
+    let before = s.steps();
+    let to = pos2(at.x + 40.0, at.y - 20.0);
+    drag(&mut s.h, at, to, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    let points = s.points();
+    assert_eq!(points.len(), 2, "{points:?}");
+    assert!(
+        points
+            .iter()
+            .all(|point| point.at != Ticks::ZERO && point.at != Ticks(BAR * 2)),
+        "both of the segment's breakpoints moved: {points:?}"
+    );
+    assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: automation-editing R2. Esc during a drag puts the envelope back and
+// records nothing.
+#[test]
+fn esc_cancels_an_automation_drag() {
+    let mut s = set();
+    let before = s.doc().clone();
+    let steps = s.steps();
+    let from = pos2(s.x(Ticks::ZERO), s.y(-0.8));
+    let to = pos2(s.x(Ticks(BAR / 2)), s.y(0.5));
+    let held = Event::ModifiersChanged(Modifiers::NONE);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(from)]);
+    s.h.frame(vec![
+        held.clone(),
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.frame(vec![held.clone(), Event::PointerMoved(to)]);
+    assert!(s.h.shell.gesture_open(), "the drag is under way");
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.h.frame(vec![
+        held.clone(),
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    s.h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    s.h.settle();
+    assert_eq!(*s.doc(), before, "the envelope is back");
+    assert!(!s.h.shell.gesture_open());
+    assert_eq!(s.steps(), steps, "nothing is recorded");
+}
+
 // Spec: accessibility R10, automation-editing R8. The Lock Envelopes
 // switch above the track headers is live, and in the Tab order.
 #[test]

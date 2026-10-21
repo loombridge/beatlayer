@@ -1384,7 +1384,6 @@ impl ArrangementUi {
                 WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
             });
         }
-    }
 
         // L-ARR-017: Optimize Height and Width, live; WP-2.12: Automation Mode.
         for (rect, id, name, text, on, command) in [
@@ -1447,6 +1446,8 @@ impl ArrangementUi {
             }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
+    }
+
     /// The view's own accessible node, a pane named as the main view is, and
     /// the clips on screen as items in it.
     fn accessibility(

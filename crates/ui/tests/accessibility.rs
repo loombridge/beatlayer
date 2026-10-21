@@ -930,6 +930,16 @@ fn the_navigate_and_options_menus_reach_their_commands() {
     assert_eq!(menu_item(&h, "M-OPT-025").checked, Some(false));
     h.shell.invoke("edit.undo", json!({})).unwrap();
     assert!(h.shell.editor().document().settings().solo_in_place);
+    // Options ▸ Lock Envelopes switches the set's setting, one undo step
+    // (automation-editing R8).
+    let lock = menu_item(&h, "M-OPT-026");
+    assert_eq!((lock.enabled, lock.checked), (true, Some(false)));
+    let invocation = lock.invocation.unwrap();
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(h.shell.editor().document().settings().lock_envelopes);
+    assert_eq!(menu_item(&h, "M-OPT-026").checked, Some(true));
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(!h.shell.editor().document().settings().lock_envelopes);
 }
 
 /// How a command is reached without a pointer, when it has no key and no

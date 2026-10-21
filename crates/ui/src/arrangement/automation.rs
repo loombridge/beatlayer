@@ -15,7 +15,7 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, ParamId,
+    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam,
     TrackId,
 };
 use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
@@ -84,6 +84,8 @@ pub(super) struct Lane<'a> {
     /// The breakpoints that are selected in this lane (the automation
     /// editing spec, R2).
     pub selected: Vec<Ticks>,
+    /// The time selection covering the lane, if any (R4).
+    pub span: Option<(Ticks, Ticks)>,
 }
 
 impl Lane<'_> {
@@ -206,6 +208,7 @@ impl Lanes<'_> {
             horizontal: self.horizontal,
             scale: travel(self.doc, shell.devices(), target),
             selected: selected_breakpoints(self.doc, self.view, row.track, target),
+            span: self.view.time_selection(),
         })
     }
 
@@ -567,11 +570,23 @@ impl AutomationGestures {
             // breakpoints, or the stretch of envelope the time selection
             // covers when the segment lies inside it.
             LaneHit::Segment(at) => {
-                let at = if lane.selected.contains(&at) {
+                let mut at = if lane.selected.contains(&at) {
                     lane.selected.clone()
                 } else {
                     vec![at]
                 };
+                // Spec: automation-editing R4. A segment inside the time
+                // selection gets breakpoints at the selection's edges, which
+                // move with it.
+                if let Some((start, end)) = lane.span
+                    && at.first().is_some_and(|at| *at >= start && *at < end)
+                {
+                    for edge in [start, end] {
+                        if !at.contains(&edge) {
+                            at.push(edge);
+                        }
+                    }
+                }
                 let value = lane
                     .envelope()
                     .and_then(|envelope| envelope.point(at[0]))
@@ -627,6 +642,11 @@ impl AutomationGestures {
             } => {
                 let by = horizontal.at(f64::from(pointer.x - rect.left()))
                     - horizontal.at(f64::from(from.x - rect.left()));
+                // Spec: automation-editing R3. Shift keeps the drag to the
+                // axis it started along, and makes a vertical one finer.
+                let vertical = modifiers.shift
+                    && (pointer.y - from.y).abs() > (pointer.x - from.x).abs();
+                let by = if vertical { Ticks::ZERO } else { by };
                 // S-ENV-006: Cmd (Alt on Windows) bypasses grid snapping.
                 let invert = if cfg!(target_os = "macos") {
                     modifiers.mac_cmd
@@ -636,17 +656,24 @@ impl AutomationGestures {
                 let snapped = view.snap_drag(doc, *grabbed + by, invert);
                 // Spec: automation-editing R3. The drag snaps to the
                 // positions of the breakpoints next to it.
-                let to = neighbours
-                    .iter()
-                    .map(|at| (*at, (horizontal.x(*at) - horizontal.x(snapped)).abs()))
-                    .filter(|(_, away)| *away <= NEIGHBOUR_GRAB)
-                    .min_by(|(_, away), (_, other)| away.total_cmp(other))
-                    .map_or(snapped, |(at, _)| at);
+                let to = if vertical {
+                    *grabbed
+                } else {
+                    neighbours
+                        .iter()
+                        .map(|at| (*at, (horizontal.x(*at) - horizontal.x(snapped)).abs()))
+                        .filter(|(_, away)| *away <= NEIGHBOUR_GRAB)
+                        .min_by(|(_, away), (_, other)| away.total_cmp(other))
+                        .map_or(snapped, |(at, _)| at)
+                };
                 let t = ((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0);
                 let raw = scale.value(f64::from(t));
-                // S-ENV-002: Shift drags the value in finer steps.
-                let value = if modifiers.shift {
+                // S-ENV-002: Shift drags the value in finer steps. A Shift
+                // drag along the time axis keeps the value where it was.
+                let value = if vertical {
                     *old_value + (raw - *old_value) * FINE_VALUE
+                } else if modifiers.shift {
+                    *old_value
                 } else {
                     raw
                 };

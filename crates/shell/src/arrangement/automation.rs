@@ -509,7 +509,6 @@ pub fn run(
             let lanes = lanes_of(view, lanes)?;
             let (start, end) = span(&doc, view, start, end)?;
             let copied = copy(&doc, devices, &lanes, start, end);
-            let tracks: Vec<TrackId> = lanes.iter().map(|(track, _)| *track).collect();
             let (_, recorded) = transaction(editor, label(id), |editor| {
                 paste(editor, devices, &lanes, &copied, end)
             })?;
@@ -522,7 +521,6 @@ pub fn run(
                 })
                 .collect();
             view.select_span_on(lanes, end, end + copied.length);
-            let _ = tracks;
             Ok(to_value(&result(&doc, editor, view, recorded)))
         }
         other => Err(EditFailure::InvalidArgs(format!(

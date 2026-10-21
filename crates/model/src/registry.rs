@@ -581,6 +581,32 @@ const ENTRIES: &[Entry] = &[
             `track.unfreeze` is the command a person and an agent run.",
     },
     Entry {
+        id: "track.set_bounced",
+        action: Action::Apply("bounce_track_in_place"),
+        label: "Set Track Bounced",
+        permission: Permission::Destructive,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Replaces a track with the audio track a bounce made: no devices, the \
+            track's name with \" (Bounce)\" after it, its mixer settings, and its clips playing \
+            the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is \
+            the command a person and an agent run: it renders the file and applies this one. \
+            Used directly, it names a file the caller has already written.",
+    },
+    Entry {
+        id: "track.create_bounced_track",
+        action: Action::Apply("bounce_to_new_track"),
+        label: "Create Bounced Track",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Makes a new audio track directly after the track that was bounced, \
+            holding the bounced audio. `bounced` is what the new track holds. \
+            `track.bounce_to_new_track` is the command a person and an agent run: it renders \
+            the file and applies this one. Used directly, it names a file the caller has \
+            already written.",
+    },
+    Entry {
         id: "mixer.set_volume",
         action: Action::Apply("set_volume"),
         label: "Set Track Volume",

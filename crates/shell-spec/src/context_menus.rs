@@ -56,7 +56,11 @@ const CLIP: &[Row] = &[
     ("C-CLIP-ARR-012", "Loop Selection", Key(&["S-ARR-011"])),
     SEPARATOR,
     ("C-CLIP-ARR-013", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-CLIP-ARR-014", "Bounce Track in Place", Pending(None)),
+    (
+        "C-CLIP-ARR-014",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     (
         "C-CLIP-ARR-015",
         "Bounce to New Track",
@@ -98,7 +102,11 @@ const TIME: &[Row] = &[
     ("C-TIME-007", "Loop Selection", Key(&["S-ARR-011"])),
     SEPARATOR,
     ("C-TIME-008", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-TIME-009", "Bounce Track in Place", Pending(None)),
+    (
+        "C-TIME-009",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     ("C-TIME-010", "Bounce to New Track", Key(&["S-BOUNCE-001"])),
     ("C-TIME-011", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
     SEPARATOR,
@@ -243,7 +251,11 @@ const TRACK: &[Row] = &[
     ("C-TRACK-006", "Edit Info Text", Pending(None)),
     SEPARATOR,
     ("C-TRACK-007", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("C-TRACK-008", "Bounce Track in Place", Pending(None)),
+    (
+        "C-TRACK-008",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     SEPARATOR,
     ("C-TRACK-009", "Insert Audio Track", Key(&["S-TRACK-001"])),
     ("C-TRACK-010", "Insert MIDI Track", Key(&["S-TRACK-002"])),
@@ -283,7 +295,11 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
     match after {
         "C-TRACK-008" => {
             if state.group {
-                rows.push(("C-TRACK-017c", "Bounce Group to New Track", Pending(None)));
+                rows.push((
+                    "C-TRACK-017c",
+                    "Bounce Group to New Track",
+                    Cmd("track.bounce_to_new_track"),
+                ));
             }
             if state.time_selection {
                 rows.push(("C-TRACK-020", "Crop Clip", Key(&["S-ARR-003"])));
@@ -353,7 +369,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
         }
-        "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
         "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
         "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
             Some("Phase 6 (take lanes and comping)")

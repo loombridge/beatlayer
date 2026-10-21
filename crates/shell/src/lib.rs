@@ -157,7 +157,7 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::{audio_editing, commands, context_menus, freeze, menus, register};
+pub use bl_shell_spec::{audio_editing, bounce, commands, context_menus, freeze, menus, register};
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{

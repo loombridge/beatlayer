@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        206,
+        208,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -81,7 +81,8 @@ WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 
          set_macro_randomize_excluded and set_mapped_value, and WP-5.5 seven \
          for the macro variations: store_variation, launch_variation, \
          overwrite_variation, rename_variation, duplicate_variation, \
-         delete_variation and set_macro_variation_excluded"
+         delete_variation and set_macro_variation_excluded, and WP-4.15 the two for \
+         bouncing a track in place and to a new track"
     );
 
     for op in &ops {
@@ -189,6 +190,21 @@ fn every_command_runs_by_id() {
     assert_eq!(document.parent(bass), Some(group));
     assert_eq!(document.track(drums).unwrap().name(), "Break");
     assert_eq!(document.track(reverb).unwrap().kind(), TrackKind::Return);
+
+    // Bounces: a track in place, and a new track beside its source.
+    let bounced: TrackId = agent.new_id();
+    agent.run(
+        "track.set_bounced",
+        json!({ "track": drums, "bounced": { "name": "Drums (Bounce)" } }),
+    );
+    agent.run(
+        "track.create_bounced_track",
+        json!({ "source": bass, "track": bounced, "bounced": { "name": "Bass (Bounce)" } }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.track(drums).unwrap().name(), "Drums (Bounce)");
+    assert_eq!(document.track(drums).unwrap().kind(), TrackKind::Audio);
+    assert_eq!(document.track(bounced).unwrap().name(), "Bass (Bounce)");
 
     // Mixer.
     agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
@@ -2089,6 +2105,21 @@ fn schemas_match_what_commands_serialise() {
             "track.clear_frozen",
             Command::UnfreezeTracks {
                 tracks: vec![track],
+            },
+        ),
+        (
+            "track.set_bounced",
+            Command::BounceTrackInPlace {
+                track,
+                bounced: bl_model::BouncedTrack::default(),
+            },
+        ),
+        (
+            "track.create_bounced_track",
+            Command::BounceToNewTrack {
+                source: track,
+                track: TrackId(fresh()),
+                bounced: bl_model::BouncedTrack::default(),
             },
         ),
         (

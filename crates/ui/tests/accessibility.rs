@@ -2301,6 +2301,21 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "track.unfreeze, the same item read as Unfreeze Track (freeze-and-bounce R10, R13)",
             )),
         ),
+        // The bounces' document-level commands (WP-4.15): the three bounce
+        // commands are the ones a person and an agent run, from the menus
+        // and the keys, and they apply these.
+        (
+            "track.set_bounced",
+            Exception(Equivalent(
+                "track.bounce_in_place, from the Edit menu and the track and clip menus (freeze-and-bounce R21, R26)",
+            )),
+        ),
+        (
+            "track.create_bounced_track",
+            Exception(Equivalent(
+                "track.bounce_to_new_track, from the Edit menu, the clip and slot menus, and Cmd-B (freeze-and-bounce R22, R26)",
+            )),
+        ),
         (
             "track.unfreeze",
             Exception(Equivalent(

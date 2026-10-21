@@ -22,6 +22,7 @@ use bl_core::time::Ticks;
 use bl_model::{ClipData, ClipId, Document, Editor, TrackId, TrackKind};
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::audio_editing::CropArgs;
+use bl_shell_spec::bounce::{self as bounce_ids, PasteBouncedAudioArgs};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
@@ -49,6 +50,7 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     browser_ids::LOAD_SELECTED,
     midi_ids::IMPORT,
     SET_CLIP_DATA,
+    bounce_ids::PASTE_BOUNCED_AUDIO,
 ];
 
 /// Whether `id`'s class can rise with its arguments.
@@ -189,6 +191,7 @@ pub(crate) fn assess(
         }
         audio_ids::CROP => cropping(args, registered, scene),
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
+        bounce_ids::PASTE_BOUNCED_AUDIO => paste_bounced(args, registered, scene),
         _ => tried(id, args, registered, scene),
     }
 }
@@ -305,6 +308,76 @@ fn notes_set(args: &Value, registered: Permission, editor: &mut Editor) -> CallP
             ..unchanged
         },
         _ => unchanged,
+    }
+}
+
+/// `track.paste_bounced_audio`: destructive when the pasted audio would
+/// replace or shorten a clip it doesn't act on (the freeze and bounce spec,
+/// R26; the agent permissions spec, R1).
+fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Ok(args) = serde_json::from_value::<PasteBouncedAudioArgs>(args.clone()) else {
+        return unchanged;
+    };
+    let Some(clipboard) = scene.clipboard else {
+        return unchanged;
+    };
+    if clipboard.tracks.is_empty() {
+        return unchanged;
+    }
+    let doc = scene.editor.document();
+    // A Session slot: the clip it holds is the one replaced.
+    if let Some(slot) = args.scene {
+        let track = args.track.or(scene.selected_track);
+        let Some(track) = track else {
+            return unchanged;
+        };
+        let replaces = doc
+            .slot(track, slot)
+            .map(|clip| vec![clip.id])
+            .unwrap_or_default();
+        return CallPermission {
+            registered,
+            replaces,
+            may: false,
+            fewer_notes: None,
+            cropped: None,
+        };
+    }
+    let track = args
+        .track
+        .or(scene.selected_track)
+        .or_else(|| clipboard.source.first().copied());
+    let Some(track) = track else {
+        return unchanged;
+    };
+    let at = match &args.at {
+        Some(at) => match at.resolve(&doc.settings().time_signatures) {
+            Ok(at) => at,
+            Err(_) => return unchanged,
+        },
+        None => scene
+            .view
+            .time_selection()
+            .map_or(scene.insert_marker, |(start, _)| start),
+    };
+    let end = at + clipboard.length;
+    let replaces: Vec<ClipId> = doc
+        .track(track)
+        .map(|track| {
+            track
+                .clips()
+                .filter(|clip| clip.start < end && clip.end() > at)
+                .map(|clip| clip.id)
+                .collect()
+        })
+        .unwrap_or_default();
+    CallPermission {
+        registered,
+        replaces,
+        may: false,
+        fewer_notes: None,
+        cropped: None,
     }
 }
 

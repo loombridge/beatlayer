@@ -6,7 +6,7 @@ use bl_core::id::Id;
 use bl_core::time::{
     Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
-use imbl::Vector;
+use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -311,6 +311,26 @@ pub enum Command {
     UnfreezeTracks {
         /// The tracks to unfreeze.
         tracks: Vec<TrackId>,
+    },
+    /// Replaces a track with the audio track a bounce made (WP-4.15, R21,
+    /// R23). The track keeps its ID, so its colour and the routing that
+    /// points at it stay, and undoing the bounce gives the source track
+    /// back exactly, with every device's state.
+    BounceTrackInPlace {
+        /// The track that was bounced.
+        track: TrackId,
+        /// What the bounced track holds.
+        bounced: crate::bounce::BouncedTrack,
+    },
+    /// Makes a new audio track beside a bounced one (WP-4.15, R22, R24).
+    /// The new track goes directly after its source, in the same group.
+    BounceToNewTrack {
+        /// The track that was bounced.
+        source: TrackId,
+        /// The new track's ID.
+        track: TrackId,
+        /// What the new track holds.
+        bounced: crate::bounce::BouncedTrack,
     },
     /// Gives a scene a tempo to set when it is launched, from 20 to 999
     /// BPM, or switches it off with `None` (WP-3.5).
@@ -2156,6 +2176,8 @@ impl Command {
             Self::RenameTrack { .. } => "Rename track",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
+            Self::BounceTrackInPlace { .. } => "Bounce track in place",
+            Self::BounceToNewTrack { .. } => "Bounce to new track",
             Self::SetVolume { .. } => "Change volume",
             Self::SetPan { .. } => "Change pan",
             Self::SetMute { .. } => "Mute track",
@@ -2429,6 +2451,14 @@ impl Command {
             Self::AddChain { chain, .. } => chain.ids(),
             Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
+            Self::BounceTrackInPlace { bounced, .. } => {
+                bounced.clip_ids().iter().map(|clip| clip.0).collect()
+            }
+            Self::BounceToNewTrack { track, bounced, .. } => {
+                let mut ids = vec![track.0];
+                ids.extend(bounced.clip_ids().iter().map(|clip| clip.0));
+                ids
+            }
             Self::DuplicateScene { id, clips, .. } => {
                 let mut ids = vec![id.0];
                 ids.extend(clips.iter().map(|(_, copy)| copy.0));
@@ -2648,6 +2678,39 @@ impl Document {
                     held.frozen = None;
                 }
                 Ok(())
+            }
+            Command::BounceTrackInPlace { track, bounced } => {
+                // A group's tracks go with it (R23).
+                let children: Vec<TrackId> =
+                    self.track_ref(*track)?.children.iter().copied().collect();
+                for child in children {
+                    self.delete_track(child)?;
+                }
+                self.replace_with_bounced(*track, bounced.clone())
+            }
+            Command::BounceToNewTrack {
+                source,
+                track,
+                bounced,
+            } => {
+                // The new track goes directly after its source, in the same
+                // group (R22).
+                let parent = self.parent(*source);
+                let kind = self.track_ref(*source)?.kind;
+                if kind == TrackKind::Main || kind == TrackKind::Return {
+                    return Err(ModelError::MainTrack);
+                }
+                let list = self.containing_list(kind, parent)?;
+                let position = position_in(list, |id| *id == *source)
+                    .ok_or(ModelError::NoSuchTrack(*source))?;
+                self.create_track(
+                    *track,
+                    TrackKind::Audio,
+                    &bounced.name,
+                    parent,
+                    position + 1,
+                )?;
+                self.fill_bounced(*track, bounced.clone())
             }
             Command::SetVolume { track, volume } => {
                 self.check_not_held(crate::modulator::ModTarget::Mixer {
@@ -4253,6 +4316,103 @@ impl Document {
         }
         self.tracks
             .insert(id, Shared::new(Track::new(id, kind, name.to_owned())));
+        Ok(())
+    }
+
+    /// Replaces a track's contents with the audio track a bounce made
+    /// (WP-4.15, R21, R23): the track keeps its place in the tree and its
+    /// ID, and loses its devices, its clips, and its take lanes.
+    fn replace_with_bounced(
+        &mut self,
+        id: TrackId,
+        bounced: crate::bounce::BouncedTrack,
+    ) -> Result<(), ModelError> {
+        let old: Vec<crate::ids::ClipId> = self
+            .track_ref(id)?
+            .clips
+            .keys()
+            .copied()
+            .chain(self.track_ref(id)?.slots.values().map(|clip| clip.id))
+            .collect();
+        for clip in old {
+            self.index.clip_track.remove(&clip);
+        }
+        {
+            let track = self.track_mut(id)?;
+            track.devices = Vector::new();
+            track.clips = OrdMap::new();
+            track.slots = OrdMap::new();
+            track.removed_stop_buttons = BTreeSet::new();
+            track.take_lanes = Vector::new();
+            track.automation = OrdMap::new();
+            track.frozen = None;
+            track.delay = TrackDelay::default();
+            track.keep_monitoring_latency = true;
+        }
+        self.fill_bounced(id, bounced)
+    }
+
+    /// Gives a track the contents of the audio track a bounce made
+    /// (WP-4.15, R21): its name, its mixer, its sends, its output routing,
+    /// its mixer automation, and its clips.
+    fn fill_bounced(
+        &mut self,
+        id: TrackId,
+        bounced: crate::bounce::BouncedTrack,
+    ) -> Result<(), ModelError> {
+        let crate::bounce::BouncedTrack {
+            name,
+            mixer,
+            sends,
+            output,
+            automation,
+            clips,
+            slots,
+        } = bounced;
+        for clip in &clips {
+            check_clip(clip)?;
+            check_extent(clip.start, clip.length)?;
+            self.check_fresh(clip.id.0)?;
+        }
+        for (_, clip) in &slots {
+            check_clip(clip)?;
+            check_extent(clip.start, clip.length)?;
+            self.check_fresh(clip.id.0)?;
+        }
+        let clip_ids: Vec<crate::ids::ClipId> = clips.iter().map(|clip| clip.id).collect();
+        let slot_ids: Vec<crate::ids::ClipId> = slots.iter().map(|(_, clip)| clip.id).collect();
+        {
+            let track = self.track_mut(id)?;
+            track.kind = TrackKind::Audio;
+            track.name = name;
+            track.mixer = mixer;
+            track.sends = sends.into_iter().collect();
+            track.routing = crate::track::Routing::new(TrackKind::Audio);
+            track.routing.output = output;
+            track.automation = automation
+                .into_iter()
+                .map(|entry| {
+                    (
+                        entry.target,
+                        crate::automation::Automation {
+                            envelope: entry.envelope,
+                            enabled: entry.enabled,
+                        },
+                    )
+                })
+                .collect();
+            track.clips = clips
+                .into_iter()
+                .map(|clip| (clip.id, Shared::new(clip)))
+                .collect();
+            track.slots = slots
+                .into_iter()
+                .map(|(scene, clip)| (scene, Shared::new(clip)))
+                .collect();
+        }
+        for clip in clip_ids.into_iter().chain(slot_ids) {
+            self.index.clip_track.insert(clip, id);
+        }
         Ok(())
     }
 
@@ -6207,6 +6367,22 @@ impl Document {
             TrackKind::Main => Err(ModelError::MainTrack),
             TrackKind::Return => Ok(&mut self.returns),
             _ => self.list_mut(parent),
+        }
+    }
+
+    /// The list a track is in now, to look at it.
+    fn containing_list(
+        &self,
+        kind: TrackKind,
+        parent: Option<TrackId>,
+    ) -> Result<&Vector<TrackId>, ModelError> {
+        match kind {
+            TrackKind::Main => Err(ModelError::MainTrack),
+            TrackKind::Return => Ok(&self.returns),
+            _ => match parent {
+                None => Ok(&self.top),
+                Some(parent) => Ok(&self.track_ref(parent)?.children),
+            },
         }
     }
 

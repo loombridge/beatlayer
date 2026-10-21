@@ -1346,6 +1346,9 @@ pub fn run_command(
             message: error.to_string(),
         },
     };
+    // A render that ran before leaves nothing behind: the session forgets
+    // its cancel, its skip and its restart.
+    session.reset();
     let cancel = session.cancel_flag();
     let (mut reports, partials) =
         render_multi(&offline, media, plugins, &cancel, &mut |_| {}).map_err(failed)?;
@@ -1362,7 +1365,7 @@ pub fn run_command(
             .iter()
             .map(|(track, _, job)| (*track, (*job).clone()))
             .collect();
-        let (live_reports, live_outcome) = crate::realtime::render(
+        let (live_reports, live_outcome) = match crate::realtime::render(
             audio,
             &jobs,
             document,
@@ -1373,8 +1376,18 @@ pub fn run_command(
             args.max_attempts,
             session,
             &mut |_| {},
-        )
-        .map_err(failed)?;
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                // The outputs that rendered offline leave no file behind
+                // either: the export failed.
+                for (_, job) in &offline {
+                    let _ = fs::remove_file(hidden_beside(&job.path, "partial"));
+                    let _ = fs::remove_file(hidden_beside(&job.path, "render"));
+                }
+                return Err(failed(error));
+            }
+        };
         reports.extend(live_reports);
         outcome = live_outcome;
         let live_partials: Vec<PathBuf> = jobs

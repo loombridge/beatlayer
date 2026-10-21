@@ -104,7 +104,7 @@ fn shell_on_manual_loopback(dropout_after: Option<u64>) -> (Shell, NullControl) 
 fn drive(control: NullControl, session: bl_shell::realtime::Session) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut rendering = false;
-        for _ in 0..2_000 {
+        for _ in 0..400 {
             control.run_blocks(10);
             match session.status().phase {
                 Phase::Idle if rendering => break,

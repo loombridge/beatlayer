@@ -207,6 +207,15 @@ impl Session {
         self.auto_restart.store(on, Ordering::Relaxed);
     }
 
+    /// Forgets what a render was asked to do, so a new one starts afresh: a
+    /// cancel from an earlier render doesn't stop this one.
+    pub fn reset(&self) {
+        self.skip.store(false, Ordering::Relaxed);
+        self.restart.store(false, Ordering::Relaxed);
+        self.cancel.store(false, Ordering::Relaxed);
+        self.set_state(Phase::Idle, 0.0, 0);
+    }
+
     /// Changes the state, under the lock.
     fn with_state(&self, change: impl FnOnce(&mut State)) {
         if let Ok(mut state) = self.state.lock() {

@@ -19,6 +19,7 @@ fn make_node(params: &[(ParamId, f64)], max_frames: usize) -> NativeNode<Oscillo
     let desc = oscilloscope_type();
     let dev = device(&desc, params);
     let config = NodeConfig {
+        round_trip_latency: 0,
         sample_rate: RATE,
         max_frames,
         channels: 2,

@@ -1498,6 +1498,50 @@ fn the_assistant_settings_are_the_person_s_own_through_the_agent_api() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// An agent writes the set's plug-in list to a text file, and only when it
+/// may: the command writes outside the set, so it asks first (the plug-in
+/// list spec, R7 and R10).
+#[test]
+fn an_agent_writes_the_plug_in_list_only_when_it_may() {
+    let dir = TempDir::new("plug-in-list");
+    let list = dir.0.join("Plug-Ins.txt");
+    // Not autonomous: the command is external, so it asks.
+    let mut client = bl_cli_mcp(&[]);
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "plugin.export_list",
+                                   "args": { "path": list.to_string_lossy() } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(
+        refused.text.contains("`plugin.export_list` is external"),
+        "{}",
+        refused.text
+    );
+    assert!(!list.exists(), "nothing was written");
+    assert!(client.into_transport().finish().unwrap().success());
+
+    // Autonomous: the list is written.
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let written = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.export_list",
+                               "args": { "path": list.to_string_lossy() } }] }),
+    );
+    assert_eq!(written["ran"], 1, "{written}");
+    let text = fs::read_to_string(&list).expect("the list was written");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert_eq!(
+        lines[1],
+        "Name\tFormat\tVendor\tVersion\tPresets\tTracks\tMissing"
+    );
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
 /// An agent sets the Temporary Folder by command ID and reads it back from
 /// `settings.state` (WP-4.20).
 #[test]
@@ -3436,7 +3480,14 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
 
     // A new clip has the table's defaults, which are not saved.
     let new = audio(&mut client);
-    for key in ["warp_mode", "warp_settings", "ram", "high_quality"] {
+    for key in [
+        "warp_mode",
+        "warp_settings",
+        "ram",
+        "high_quality",
+        "transpose",
+        "detune",
+    ] {
         assert!(new.get(key).is_none(), "{key} in a new clip: {new}");
     }
     let mode = run(
@@ -3486,10 +3537,32 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
         json!({ "clip": clip, "high_quality": false }),
     );
     assert_eq!(hiq["high_quality"], false);
+    // Spec: warp-modes R3. The clip's pitch, in semitones and in cents.
+    let pitch = run(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "transpose": 7, "detune": -25.0 }),
+    );
+    assert_eq!(pitch["transpose"], 7);
+    assert_eq!(pitch["detune"], -25.0);
+    // A value out of range changes nothing, and so does naming neither.
+    refused(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "transpose": 49 }),
+    );
+    refused(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "detune": 50.5 }),
+    );
+    refused(&mut client, "clip.set_pitch", json!({ "clip": clip }));
     // Each reads back as it was set after the others.
     let all = audio(&mut client);
     assert_eq!(all["warp_mode"], "re_pitch");
     assert_eq!(all["ram"], true);
+    assert_eq!(all["transpose"], 7);
+    assert_eq!(all["detune"], -25.0);
 
     // Only a warped clip loops.
     refused(

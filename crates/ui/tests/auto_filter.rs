@@ -102,8 +102,17 @@ fn the_devices_menu_ends_with_mono_sidechain_ticked_and_hi_quality() {
     };
     let save = place(&nodes, "Save as Default Preset");
     let (mono, quality) = (place(&nodes, "Mono Sidechain"), place(&nodes, "Hi-Quality"));
+    // The menu's drawn order, top to bottom: the accessibility tree lists a
+    // menu's items in no order of its own.
+    let above = |first: &common::Node, second: &common::Node| {
+        let (first, second) = (
+            first.bounds.expect("a drawn menu item"),
+            second.bounds.expect("a drawn menu item"),
+        );
+        first.y0 < second.y0
+    };
     assert!(
-        save < mono && mono < quality,
+        above(&nodes[save], &nodes[mono]) && above(&nodes[mono], &nodes[quality]),
         "after Save as Default Preset, in order"
     );
     assert!(

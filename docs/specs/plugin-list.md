@@ -1,6 +1,6 @@
 # The list of a set's plug-ins
 
-- **Status:** draft
+- **Status:** implemented (every rule below has a passing test; the four choices the spec notes leave to the maintainer — the item's name and place, the preset name's source, the export's format, and Show Only Missing — are the drafts the rules describe, and the decisions on them are still open; R5's program name comes from an Audio Unit, which reports the preset it holds, as CLAP's preset extension and the VST3 bindings report no program name)
 - **Work packages:** WP-6.41 (R1 to R11). The command that lists them, `plugin.list`, is WP-2.9's ([plugin-scanning.md](plugin-scanning.md) R8)
 - **Parity-matrix row:** none (Beatlayer's own); [the improvements](../05-improvements.md), IMP-29 (list of a set's plug-ins)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, chapter 5 "Managing Files and Sets" (sections 5.4.6 and 5.6 to 5.8) and chapter 24 "Using Plug-Ins"; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [menus.md](../ui-parity/menus.md) M-FILE-007 and [layout.md](../ui-parity/layout.md) L-OTH-002 and L-BRW-016
@@ -42,14 +42,14 @@ This spec covers the view, the preset names it shows, its export, and its comman
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.41 | |
-| R2 | to be written in WP-6.41 | |
-| R3 | to be written in WP-6.41 | |
-| R4 | to be written in WP-6.41 | |
-| R5 | to be written in WP-6.41 | |
-| R6 | to be written in WP-6.41 | |
-| R7 | to be written in WP-6.41 | |
-| R8 | to be written in WP-6.41 | |
-| R9 | to be written in WP-6.41 | |
-| R10 | to be written in WP-6.41 | |
-| R11 | to be written in WP-6.41 | |
+| R1 | `crates/ui/tests/plugin_list.rs`, `the_list_opens_in_the_detail_area_and_its_rows_reach_assistive_technology`; `crates/shell/tests/menus.rs`, `every_item_reaches_a_command_or_is_pending` | UI script, unit |
+| R2 | `crates/ui/tests/plugin_list.rs`, `the_list_opens_in_the_detail_area_and_its_rows_reach_assistive_technology`; `crates/shell/tests/plugin_list.rs`, `the_set_list_names_the_plug_ins_with_their_tracks_and_preset_names` | UI script, unit |
+| R3 | `crates/ui/tests/plugin_list.rs`, `show_only_missing_hides_the_plug_ins_this_computer_has`; `crates/shell/tests/plugin_list.rs`, `the_view_state_says_whether_the_list_shows_and_shows_only_the_missing` | UI script, unit |
+| R4 | `crates/ui/tests/plugin_list.rs`, `the_list_follows_the_set` | UI script |
+| R5 | `crates/shell/tests/plugin_list.rs`, `the_set_list_names_the_plug_ins_with_their_tracks_and_preset_names`, `a_preset_name_survives_the_set_being_saved_and_opened_again`, `an_audio_unit_keeps_the_name_of_the_preset_it_reports` (macOS) | unit |
+| R6 | `crates/ui/tests/plugin_list.rs`, `a_click_on_a_track_name_selects_the_device` | UI script |
+| R7 | `crates/shell/tests/plugin_list.rs`, `the_export_writes_the_list_as_tab_separated_text`; `crates/cli/tests/agent.rs`, `an_agent_writes_the_plug_in_list_only_when_it_may` | unit, through the agent API |
+| R8 | `crates/ui/tests/plugin_list.rs`, `the_list_opens_in_the_detail_area_and_its_rows_reach_assistive_technology`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | UI script |
+| R9 | `crates/ui/tests/plugin_list.rs`, `the_list_scales_with_the_interface_zoom` | UI script |
+| R10 | `crates/shell/tests/plugin_list.rs`, `the_view_state_says_whether_the_list_shows_and_shows_only_the_missing`; `cargo xtask commands` | unit |
+| R11 | `crates/shell/tests/plugin_list.rs`, `the_set_list_names_the_plug_ins_with_their_tracks_and_preset_names` | unit |

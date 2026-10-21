@@ -15,7 +15,8 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, TrackId,
+    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, ParamId,
+    TrackId,
 };
 use bl_shell::arrangement::rows::Row;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
@@ -222,6 +223,8 @@ pub(crate) enum LaneScale {
     Pan,
     /// A switch or radio button, whose axis is discrete (0 or 1).
     Switch,
+    /// A stepped macro, whose axis is discrete, its steps (macros spec, R22).
+    Steps { steps: u8 },
     /// A device parameter, from its descriptor's low value to its high one.
     Linear { min: f64, max: f64 },
 }
@@ -234,6 +237,7 @@ impl LaneScale {
             Self::Send => mixer_controls::send_position(value),
             Self::Pan => (value + 1.0) / 2.0,
             Self::Switch => value,
+            Self::Steps { .. } => value,
             Self::Linear { min, max } => {
                 if max > min {
                     (value - min) / (max - min)
@@ -253,6 +257,8 @@ impl LaneScale {
             Self::Send => mixer_controls::send_level(t),
             Self::Pan => t * 2.0 - 1.0,
             Self::Switch => t.round(),
+            // Spec: macros R22. A stepped macro's lane has a stepped axis.
+            Self::Steps { steps } => bl_model::macro_step_position(steps, t),
             Self::Linear { min, max } => min + (max - min) * t,
         }
     }
@@ -284,6 +290,10 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
         } => LaneScale::Switch,
         AutomationTarget::Send { .. } | AutomationTarget::ChainSend { .. } => LaneScale::Send,
         AutomationTarget::Device { device, param } => {
+            // Spec: macros R22. A stepped macro's lane has a stepped axis.
+            if let Some(steps) = macro_steps(doc, device, param) {
+                return LaneScale::Steps { steps };
+            }
             let range = doc
                 .device(device)
                 .and_then(|device| shell.devices().description(&device.kind))
@@ -301,6 +311,15 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
             LaneScale::Linear { min, max }
         }
     }
+}
+
+/// The number of steps a stepped macro of `device` takes, if `param` is one
+/// (macros spec, R22).
+fn macro_steps(doc: &Document, device: DeviceId, param: ParamId) -> Option<u8> {
+    let number = bl_model::macro_number(param)?;
+    let rack = doc.device(device)?;
+    let setting = rack.macros.setting(number);
+    setting.is_stepped().then_some(setting.steps)
 }
 
 /// The device chooser's options: the track mixer, each device in the track's

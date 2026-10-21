@@ -97,6 +97,7 @@ pub mod autosample;
 mod capture;
 mod freeze;
 mod multisampler;
+mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
@@ -248,6 +249,12 @@ pub enum Effect {
     /// Ask for a program, then run `settings.set_sample_editor` with it
     /// (WP-4.10b).
     PickSampleEditor,
+    /// Ask where to save the set's plug-in list, then run
+    /// `plugin.export_list` there (IMP-29, WP-6.41).
+    PickPluginListPath {
+        /// The file name the dialog suggests.
+        default_name: String,
+    },
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -444,6 +451,9 @@ pub struct Shell {
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
     /// the notes selected in its MIDI Note Editor.
     clip_view: ClipView,
+    /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
+    /// in the detail area's place, and whether Show Only Missing is on.
+    plugin_list: plugin_list::PluginList,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -791,6 +801,12 @@ enum MacroEdit {
     },
     /// Randomize set the mapped macros (R15).
     Randomize { rack: bl_model::DeviceId },
+    /// A macro's style changed, so it may have moved to another step
+    /// (R21, R22).
+    Style {
+        rack: bl_model::DeviceId,
+        number: u8,
+    },
     /// A variation launch set the macros (R27).
     Variation { rack: bl_model::DeviceId },
 }
@@ -924,6 +940,7 @@ impl Shell {
             assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
+            plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
@@ -1764,6 +1781,16 @@ impl Shell {
             .map(|path| bl_project::ProjectFolder::of_set(path).root().to_owned())
     }
 
+    /// The file name the plug-in list's Export… suggests: `<set name>
+    /// Plug-Ins.txt` (the plug-in list spec, R7).
+    #[must_use]
+    pub fn plugin_list_file_name(&self) -> String {
+        format!(
+            "{} Plug-Ins.txt",
+            bl_project::preset::file_safe(&self.set_name())
+        )
+    }
+
     /// Whether the set has changes that aren't saved.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
@@ -2468,6 +2495,7 @@ impl Shell {
                     })?;
                 self.refresh_device_types();
                 let device_type = found.device_type;
+                let preset = found.preset;
                 let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
                     device_ids::ADD,
                     to_value(&device_ids::AddDeviceArgs {
@@ -2496,6 +2524,9 @@ impl Shell {
                         data: Vec::new(),
                     }),
                 );
+                // Spec: plugin-list R5. The name of the preset the unit
+                // holds, as it reports it.
+                let _ = self.editor.amend_device_preset_name(added.device, preset);
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
@@ -2823,8 +2854,34 @@ impl Shell {
             }
             plugin_ids::LIST => {
                 let _: plugin_ids::ListArgs = Self::args(id, args)?;
-                let list = crate::plugins::set_plugin_list(self.editor.document(), &self.scanner);
+                let list = self.set_plugin_list();
                 Ok(to_value(&list))
+            }
+            plugin_ids::EXPORT_LIST => {
+                // Spec: plugin-list R7, R10.
+                let plugin_ids::ExportListArgs { path } = Self::args(id, args)?;
+                let Some(path) = path else {
+                    // The list's Export… button: the app asks where to
+                    // save it, and runs this again with the path.
+                    self.effects.push(Effect::PickPluginListPath {
+                        default_name: self.plugin_list_file_name(),
+                    });
+                    return Ok(Value::Null);
+                };
+                let path = std::path::PathBuf::from(path);
+                let written = crate::plugins::export_list(
+                    self.editor.document(),
+                    &self.set_plugin_list(),
+                    &path,
+                    &self.set_name(),
+                )
+                .map_err(|message| ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                })?;
+                Ok(to_value(&plugin_ids::ExportedList {
+                    path: written.to_string_lossy().into_owned(),
+                }))
             }
             plugin_ids::SETTINGS => {
                 let plugin_ids::PluginSettingsArgs {
@@ -3749,6 +3806,18 @@ impl Shell {
         &self.clip_view
     }
 
+    /// The list of the set's plug-ins (IMP-29, WP-6.41).
+    #[must_use]
+    pub fn plugin_list(&self) -> &plugin_list::PluginList {
+        &self.plugin_list
+    }
+
+    /// The set's plug-in list, as `plugin.list` reports it.
+    #[must_use]
+    pub fn set_plugin_list(&self) -> plugin_ids::SetPluginList {
+        crate::plugins::set_plugin_list(self.editor.document(), &self.scanner)
+    }
+
     /// What the mixers show (WP-1.9).
     #[must_use]
     pub fn mixer_view(&self) -> &MixerView {
@@ -3789,6 +3858,21 @@ impl Shell {
     #[must_use]
     pub fn meter(&self, track: TrackId) -> Option<&bl_engine::TrackMeter> {
         self.meters.iter().find(|meter| meter.track == track)
+    }
+
+    /// Each track's Performance Impact, as the engine last published it:
+    /// the track's share of the set's processing time and how many of the
+    /// six segments it lights (the mixer spec, R31).
+    #[must_use]
+    pub fn impact_values(&self) -> Vec<bl_shell_spec::mixer_view::TrackImpact> {
+        self.meters
+            .iter()
+            .map(|meter| bl_shell_spec::mixer_view::TrackImpact {
+                track: meter.track,
+                segments: bl_shell_spec::mixer_view::impact_segments(meter.impact),
+                share: meter.impact,
+            })
+            .collect()
     }
 
     /// One track's gain reduction in dB, as its compressors and limiters
@@ -5267,6 +5351,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_TOGGLE_PLUGIN_LIST => Some(self.plugin_list.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             ids::VIEW_FOLD_NOTES => Some(
                 self.clip_view
@@ -5351,6 +5436,23 @@ impl Shell {
                     }
                     .to_owned(),
                 )
+            }
+            // IMP-24: the item follows the selected device's position.
+            device_ids::SET_ROLE => {
+                let selected = self
+                    .devices
+                    .selected()
+                    .and_then(|device| self.editor.document().device(device));
+                Some(match selected {
+                    Some(device) if device.role == bl_model::DeviceRole::MidiEffect => {
+                        let role = self
+                            .devices
+                            .device_type(&device.kind)
+                            .map_or(bl_model::DeviceRole::AudioEffect, |kind| kind.role);
+                        format!("Use as {}", role.label())
+                    }
+                    _ => "Use as MIDI Effect".to_owned(),
+                })
             }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
@@ -6494,6 +6596,12 @@ impl Shell {
             bl_model::Command::RandomizeMacros { rack, .. } => {
                 Some(MacroEdit::Randomize { rack: *rack })
             }
+            bl_model::Command::SetMacroStyle {
+                rack, macro_number, ..
+            } => Some(MacroEdit::Style {
+                rack: *rack,
+                number: *macro_number,
+            }),
             bl_model::Command::LaunchVariation { rack, .. } => {
                 Some(MacroEdit::Variation { rack: *rack })
             }
@@ -6527,13 +6635,26 @@ impl Shell {
                         return Vec::new();
                     };
                     let position = info.travel.position(*value);
-                    vec![bl_model::Command::SetMappedValue {
+                    // Spec: macros R22. A stepped macro takes only its
+                    // steps, so the macro moves to the nearest step, and
+                    // the parameter takes the value that step gives.
+                    let step = device.macros.setting(*number).position_of(position);
+                    let mut commands = vec![bl_model::Command::SetMappedValue {
                         target: bl_model::MacroTarget::Device {
                             device: *rack,
                             param: bl_model::macro_param(*number),
                         },
-                        value: position,
-                    }]
+                        value: step,
+                    }];
+                    if step != position
+                        && let Some(mapping) = device.macros.mapping(*target)
+                    {
+                        commands.push(bl_model::Command::SetMappedValue {
+                            target: *target,
+                            value: info.travel.value(mapping.position(step)),
+                        });
+                    }
+                    commands
                 } else {
                     self.devices.target_commands(doc, device, *target)
                 }
@@ -6544,6 +6665,9 @@ impl Shell {
             MacroEdit::Randomize { rack } => doc
                 .device(*rack)
                 .map_or_else(Vec::new, |rack| self.devices.randomized_commands(doc, rack)),
+            MacroEdit::Style { rack, number } => doc.device(*rack).map_or_else(Vec::new, |rack| {
+                self.devices.macro_commands(doc, rack, *number)
+            }),
             MacroEdit::Variation { rack } => doc.device(*rack).map_or_else(Vec::new, |rack| {
                 (1..=bl_model::MACROS)
                     .filter(|number| !rack.macros.setting(*number).variation_excluded)
@@ -6555,7 +6679,73 @@ impl Shell {
 
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
+        let args = self.prepare_device_role(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: device-chains R2, R3, and IMP-24. A device may take the
+    /// MIDI-effect position only if its type sends notes on from a note
+    /// output; otherwise its role is its type's role. The document can't
+    /// check this: only the host knows whether a plug-in has a note output.
+    fn prepare_device_role(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        let Ok(bl_model::Command::SetDeviceRole { device, role }) =
+            model::command_from_args(id, args.clone())
+        else {
+            return Ok(args);
+        };
+        // An unknown device is the document's to refuse.
+        let Some(current) = self.editor.document().device(device) else {
+            return Ok(args);
+        };
+        // A type the host hasn't met can't be checked; the chain's order
+        // still is.
+        let Some(kind) = self.devices.device_type(&current.kind) else {
+            return Ok(args);
+        };
+        // Left out, the role is the other position: into the MIDI-effect
+        // position when the type sends notes on and isn't there already,
+        // and back where the type goes otherwise. A type that sends no
+        // notes on can't take the MIDI-effect position at all, so the
+        // menu's item says why rather than doing nothing.
+        let role = match role {
+            Some(role) => role,
+            None if current.role == bl_model::DeviceRole::MidiEffect => kind.role,
+            None if kind.note_output => bl_model::DeviceRole::MidiEffect,
+            None => {
+                return Err(ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!(
+                        "{} has no note output, so it can't go in the MIDI-effect position",
+                        current.title()
+                    ),
+                });
+            }
+        };
+        if kind.role != role && !(role == bl_model::DeviceRole::MidiEffect && kind.note_output) {
+            let message = if role == bl_model::DeviceRole::MidiEffect {
+                format!(
+                    "{} has no note output, so it can't go in the MIDI-effect position",
+                    current.title()
+                )
+            } else {
+                format!(
+                    "{} goes in the chain as {}",
+                    current.title(),
+                    kind.role.label()
+                )
+            };
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message,
+            });
+        }
+        if let Some(object) = args.as_object_mut() {
+            object.insert(
+                "role".to_owned(),
+                serde_json::to_value(role).unwrap_or_default(),
+            );
+        }
+        Ok(args)
     }
 
     /// Spec: warping R7, R11. A warp marker edit on several clips needs
@@ -6937,6 +7127,9 @@ impl Shell {
                     // Spec: mixer-view R40. The strips' gain-reduction bars
                     // read with the meters.
                     state.gain_reduction = self.gain_reductions();
+                    // Spec: mixer R31. The Performance Impact values the
+                    // engine last published, one per track.
+                    state.performance_impact_values = self.impact_values();
                     state
                 });
             if result.is_ok() && id == mixer_ids::FOCUS {
@@ -7924,6 +8117,21 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                 ))
             }
+            ids::VIEW_TOGGLE_PLUGIN_LIST => {
+                // Spec: plugin-list R1, R3. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.plugin_list.toggle();
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
+            ids::VIEW_SET_PLUGIN_LIST_ONLY_MISSING => {
+                // Spec: plugin-list R3, R10. View state only.
+                let ids::PluginListOnlyMissingArgs { only_missing } = Self::args(id, args)?;
+                self.plugin_list
+                    .set_only_missing(only_missing.unwrap_or(!self.plugin_list.only_missing()));
+                self.touch();
+                Ok(to_value(&self.plugin_list.state()))
+            }
             ids::VIEW_DRAW_MODE => {
                 // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
                 Self::args::<NoArgs>(id, args)?;
@@ -8019,6 +8227,7 @@ impl Shell {
                     clip_view: self
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
+                    plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
                     plug_in_windows: self.plug_in_windows,
                 }))

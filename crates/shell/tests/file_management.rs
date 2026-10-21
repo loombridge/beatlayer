@@ -245,6 +245,7 @@ fn a_moved_file_is_found_by_the_automatic_search() {
         hash: bl_model::ContentHash(*hash.as_bytes()),
         path: MediaPath::new("Samples/Imported/Kick.wav").unwrap(),
         size,
+        reversed_from: None,
     });
     let set_path = project.set_path("Song");
     SetFile::new(&set_path).save(&data).unwrap();

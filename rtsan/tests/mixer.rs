@@ -181,3 +181,73 @@ fn the_mixer_passes_under_rtsan() {
         state.cpu_load_max * 100.0
     );
 }
+
+// Spec: IMP-15. Devices and tracks leaving the schedule and rejoining it,
+// under RealtimeSanitizer: a device switched off and on, and a track's
+// activator off and on, while the blocks run.
+#[test]
+fn deactivated_devices_and_tracks_pass_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, Registry::new(), collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    tone(&mut editor, a, 330.0);
+    let device = editor
+        .document()
+        .track(a)
+        .unwrap()
+        .devices()
+        .next()
+        .unwrap()
+        .id;
+    let b = track(&mut editor, TrackKind::Midi, None);
+    tone(&mut editor, b, 440.0);
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let mut programs = 1;
+    for round in 0..500u64 {
+        let command = match round % 4 {
+            0 => Some(Command::SetDeviceEnabled {
+                device,
+                enabled: round % 8 == 0,
+            }),
+            2 => Some(Command::SetMute {
+                track: b,
+                mute: round % 8 == 2,
+            }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            let update = compiler.sync(editor.document());
+            programs += u64::from(update.program.is_some());
+            sender.send_update(update);
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert_eq!(state.counters.migration_mismatches, 0);
+    assert_eq!(state.swaps, programs);
+    assert!(programs > 5, "{programs} programs");
+    eprintln!(
+        "500 blocks of deactivated devices and tracks under RealtimeSanitizer: {} parameter \
+         changes, {} swaps, peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.swaps,
+        state.cpu_load_max * 100.0
+    );
+}

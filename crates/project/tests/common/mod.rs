@@ -407,6 +407,7 @@ impl Recipe {
                 hash,
                 path: MediaPath::new(self.paths[i % self.paths.len()].clone()).unwrap(),
                 size: self.sizes[i % self.sizes.len()],
+                reversed_from: None,
             })
             .collect();
 

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-576 commands in 38 areas.
+581 commands in 38 areas.
 
 ## Permission classes
 
@@ -552,14 +552,19 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
 | [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | Create Bounced Track | `edit` |  |  |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
 | [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | Paste Bounced Audio | `edit` | `Cmd+Option+V` | `Ctrl+Alt+V` |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
 | [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
@@ -9825,6 +9830,47 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.bounce_in_place`
+
+**Bounce Track in Place**. Permission: `destructive`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and replaces each with an audio track holding it: no devices, the track's name with " (Bounce)" after it, its volume, pan, sends, activator, solo, output routing, and mixer automation, and its clips playing the bounced audio. `tracks` names them (left out, the selected tracks). A group is bounced as one track, after its mixer. The files go into Samples/Processed/Bounce. It is destructive, since it deletes the track's devices and clips, and undoing it gives the source track back exactly.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
+#### `track.bounce_to_new_track`
+
+**Bounce to New Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected clips, or the time selection on the selected tracks, to audio on a new track directly after each source track, and switches the source material off. `tracks` names the source tracks (left out, the selected ones), `clips` the clips to bounce (left out, the selected clips, or the time selection), and `start` and `end` the time selection. The new track takes its source's name with " (Bounce)" after it, its colour, and its mixer settings, and the files go into Samples/Processed/Bounce. It is an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-001 | `Cmd+B` | `Ctrl+B` | `global` | Bounce the selection to a new audio track | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `clips` | array or null | no | The clips to bounce. Left out, the selected clips, or the time selection on the tracks. |
+| `end` | [`Position`](#position) or null | no | Where the time selection ends. Left out, the Arrangement's time selection. |
+| `start` | [`Position`](#position) or null | no | Where the time selection starts. Left out, the Arrangement's time selection. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.clear_frozen`
 
 **Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
@@ -9864,6 +9910,24 @@ Arguments:
 | `name` | string | yes | Its name. |
 | `index` | integer, at least 0 | yes | Where it goes in its list, from 0 to the list's length. |
 | `parent` | [`TrackId`](#trackid) or null | no | The group to put it in, or `null` (or nothing) for the top level. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.create_bounced_track`
+
+**Create Bounced Track**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Makes a new audio track directly after the track that was bounced, holding the bounced audio. `bounced` is what the new track holds. `track.bounce_to_new_track` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `track` | [`TrackId`](#trackid) | yes | The new track's ID. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the new track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9961,6 +10025,29 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.paste_bounced_audio`
+
+**Paste Bounced Audio**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders what Copy last put on the clipboard as it is at the moment of pasting, and places it as Paste places clips: on the track, or in the slot, named. The destination is an audio track, an empty MIDI track, which becomes an audio track, or a take lane. The audio replaces what it covers. With nothing copied, or with the copied source deleted, the command is unavailable. It is an edit, and destructive when it would replace or shorten a clip.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-002 | `Cmd+Option+V` | `Ctrl+Alt+V` | `arrangement` | Paste bounced audio into the lane or slot | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the audio goes in the Arrangement. Left out, the time selection's start, or the insert marker. |
+| `channels` | [`Channels`](#channels) | no | How many channels the pasted file holds. |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot to paste into. Left out, the Arrangement. |
+| `track` | [`TrackId`](#trackid) or null | no | The track to paste onto. Left out, the selected track. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.rename`
 
 **Rename Track**. Permission: `edit`. Contexts: `track-headers`.
@@ -9979,6 +10066,23 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.set_bounced`
+
+**Set Track Bounced**. Permission: `destructive`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Replaces a track with the audio track a bounce made: no devices, the track's name with " (Bounce)" after it, its mixer settings, and its clips playing the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the bounced track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -11067,14 +11171,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.bounce_in_place`](#trackbounce_in_place) | the query tool's `song` | `tracks` |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | the query tool's `song` | `tracks` |
 | [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
 | [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | the query tool's `track` | `clips` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
 | [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
@@ -13015,6 +13124,194 @@ A plug-in that failed a scan, and why.
 
 </details>
 
+### `BounceResult`
+
+What a bounce did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks the bounce made or changed. |
+| `clips` | array of [`ClipId`](#clipid) | no | The clips it made. |
+| `files` | array of string | no | The files it wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a bounce did.",
+  "properties": {
+    "clips": {
+      "description": "The clips it made.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The files it wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tracks": {
+      "description": "The tracks the bounce made or changed.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedAutomation`
+
+One automated mixer control of a bounced track: the control it drives and its envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The control: a mixer control or a send. |
+| `envelope` | [`Envelope`](#envelope) | yes | Its envelope. |
+| `enabled` | boolean | yes | Whether the envelope drove the control. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One automated mixer control of a bounced track: the control it drives and its envelope.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the envelope drove the control.",
+      "type": "boolean"
+    },
+    "envelope": {
+      "$ref": "#/$defs/Envelope",
+      "description": "Its envelope."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The control: a mixer control or a send."
+    }
+  },
+  "required": [
+    "target",
+    "envelope",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedTrack`
+
+The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The track's name: its source's name with " (Bounce)" after it. |
+| `automation` | array of [`BouncedAutomation`](#bouncedautomation) | no | Its mixer automation: one envelope per automated mixer control. |
+| `clips` | array of [`Clip`](#clip) | no | The clips on its Arrangement lane. |
+| `mixer` | [`Mixer`](#mixer) | no | Its mixer settings: its source's volume, pan, activator, and solo. |
+| `output` | [`Output`](#output) | no | Where its audio goes. |
+| `sends` | array of pair of [`TrackId`](#trackid) and number | no | Its sends, by return track: the level of each send that isn't at −∞ dB. |
+| `slots` | array of pair of [`SceneId`](#sceneid) and [`Clip`](#clip) | no | The clips in its Session slots, by scene. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.",
+  "properties": {
+    "automation": {
+      "description": "Its mixer automation: one envelope per automated mixer control.",
+      "items": {
+        "$ref": "#/$defs/BouncedAutomation"
+      },
+      "type": "array"
+    },
+    "clips": {
+      "description": "The clips on its Arrangement lane.",
+      "items": {
+        "$ref": "#/$defs/Clip"
+      },
+      "type": "array"
+    },
+    "mixer": {
+      "$ref": "#/$defs/Mixer",
+      "default": {
+        "arm": false,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false,
+        "volume": 1.0
+      },
+      "description": "Its mixer settings: its source's volume, pan, activator, and solo."
+    },
+    "name": {
+      "description": "The track's name: its source's name with \" (Bounce)\" after it.",
+      "type": "string"
+    },
+    "output": {
+      "$ref": "#/$defs/Output",
+      "default": {
+        "type": "default"
+      },
+      "description": "Where its audio goes."
+    },
+    "sends": {
+      "description": "Its sends, by return track: the level of each send that isn't at −∞ dB.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/TrackId"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "slots": {
+      "description": "The clips in its Session slots, by scene.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/SceneId"
+          },
+          {
+            "$ref": "#/$defs/Clip"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Bpm`
 
 A tempo in quarter notes per minute, whatever the time signature.
@@ -14152,6 +14449,43 @@ One channel's levels.
     "rms_dbfs"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Channels`
+
+How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.
+
+One of:
+
+- `"auto"`: One channel when the render's two channels are equal at every frame, two otherwise.
+- `"mono"`: One channel: the mean of the two.
+- `"stereo"`: Two channels: a mono render's in both.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.",
+  "oneOf": [
+    {
+      "const": "auto",
+      "description": "One channel when the render's two channels are equal at every frame, two otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "mono",
+      "description": "One channel: the mean of the two.",
+      "type": "string"
+    },
+    {
+      "const": "stereo",
+      "description": "Two channels: a mono render's in both.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -22470,6 +22804,87 @@ One of:
     }
   ],
   "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
+}
+```
+
+</details>
+
+### `Mixer`
+
+A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `volume` | number | yes | Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative. |
+| `pan` | number | yes | Stereo position from −1.0 (left) to 1.0 (right). |
+| `mute` | boolean | yes | Whether the track is muted: its Track Activator is off. Always off on the Main track. |
+| `solo` | boolean | yes | Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track. |
+| `arm` | boolean | yes | Whether the track is armed for recording. Only audio and MIDI tracks can be armed. |
+| `crossfade` | [`CrossfadeAssign`](#crossfadeassign) | no | Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged. |
+| `pan_mode` | [`PanMode`](#panmode) | no | The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode. |
+| `split_left` | number | no | In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre). |
+| `split_right` | number | no | In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default. |
+| `tap` | [`SendTap`](#sendtap) | no | Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.",
+  "properties": {
+    "arm": {
+      "description": "Whether the track is armed for recording. Only audio and MIDI tracks can be armed.",
+      "type": "boolean"
+    },
+    "crossfade": {
+      "$ref": "#/$defs/CrossfadeAssign",
+      "description": "Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged."
+    },
+    "mute": {
+      "description": "Whether the track is muted: its Track Activator is off. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "pan": {
+      "description": "Stereo position from −1.0 (left) to 1.0 (right).",
+      "format": "double",
+      "type": "number"
+    },
+    "pan_mode": {
+      "$ref": "#/$defs/PanMode",
+      "description": "The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode."
+    },
+    "solo": {
+      "description": "Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "split_left": {
+      "description": "In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre).",
+      "format": "double",
+      "type": "number"
+    },
+    "split_right": {
+      "description": "In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default.",
+      "format": "double",
+      "type": "number"
+    },
+    "tap": {
+      "$ref": "#/$defs/SendTap",
+      "description": "Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged."
+    },
+    "volume": {
+      "description": "Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "volume",
+    "pan",
+    "mute",
+    "solo",
+    "arm"
+  ],
+  "type": "object"
 }
 ```
 

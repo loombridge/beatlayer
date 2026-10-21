@@ -21,8 +21,8 @@ use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIG
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
-    Align2, Color32, DragAndDrop, Id, Key, Modifiers, Rect, Sense, Shape, Stroke, StrokeKind, Ui,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Color32, DragAndDrop, Event, Id, Key, Modifiers, Rect, Response, Sense, Shape, Stroke,
+    StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::json;
 
@@ -1074,6 +1074,28 @@ fn macro_button(
     pressed
 }
 
+/// The steps the arrow keys move a stepped macro by (macros spec, R22):
+/// one per key press, up or down.
+fn arrow_steps(ui: &Ui) -> i32 {
+    let mut up = 0;
+    let mut down = 0;
+    ui.input(|i| {
+        for event in &i.events {
+            if let Event::Key {
+                key, pressed: true, ..
+            } = event
+            {
+                match key {
+                    Key::ArrowUp => up += 1,
+                    Key::ArrowDown => down += 1,
+                    _ => {}
+                }
+            }
+        }
+    });
+    up - down
+}
+
 /// One of a variation row's buttons (macros spec, R25): Overwrite at the
 /// row's left, drawn as a down arrow, or Launch at its right, drawn as a
 /// right triangle.
@@ -2081,66 +2103,6 @@ impl DeviceViewUi {
             theme.small_font(),
             ink,
         );
-        let id = Id::new(("macro-knob", frame.id, item.number));
-        let response = ui.interact(item.knob, id, Sense::click_and_drag());
-        crate::focus::register(ui.ctx(), id, Area::Detail, None);
-        let param = bl_model::macro_param(item.number);
-        if response.drag_started() {
-            events.push(UiEvent::BeginNamedGesture(format!("Change \"{name}\"")));
-        }
-        if response.dragged() {
-            let delta = f64::from(response.drag_delta().y) / 100.0;
-            let moved = (value - delta).clamp(0.0, 1.0);
-            invoke(
-                events,
-                "device.set_param",
-                json!({ "device": frame.id, "param": param, "value": moved }),
-            );
-        }
-        if response.drag_stopped() {
-            events.push(UiEvent::EndGesture);
-        }
-        if response.double_clicked() {
-            invoke(
-                events,
-                "device.set_param",
-                json!({ "device": frame.id, "param": param, "value": 0.0 }),
-            );
-        }
-        if response.clicked() {
-            invoke(
-                events,
-                "rack.select_macro",
-                json!({ "rack": frame.id, "macro_number": item.number }),
-            );
-        }
-        let colour = info
-            .and_then(|m| m.colour)
-            .map_or(c.accent.0, |index| swatch(theme, index));
-        let centre = item.knob.center();
-        let radius = (item.knob.height().min(item.knob.width()) / 2.0 - 2.0).max(4.0);
-        let (from, sweep) = (
-            std::f32::consts::PI * 0.5 + std::f32::consts::PI / 6.0,
-            std::f32::consts::PI * 5.0 / 3.0,
-        );
-        let arc = |to: f32| -> Vec<egui::Pos2> {
-            let steps = 24;
-            (0..=steps)
-                .map(|i| {
-                    let a = from + sweep * to * i as f32 / steps as f32;
-                    centre + vec2(a.cos(), a.sin()) * radius
-                })
-                .collect()
-        };
-        painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        if value > 0.0 {
-            painter.add(Shape::line(arc(value as f32), Stroke::new(2.0, colour)));
-        }
-        let a = from + sweep * value as f32;
-        painter.line_segment(
-            [centre, centre + vec2(a.cos(), a.sin()) * radius],
-            Stroke::new(1.5, c.text.0),
-        );
         painter.text(
             item.value.center(),
             Align2::CENTER_CENTER,
@@ -2148,25 +2110,22 @@ impl DeviceViewUi {
             theme.small_font(),
             ink,
         );
-        if response.has_focus() && crate::focus::outlined(ui.ctx()) {
-            ui.painter().rect_stroke(
-                item.knob.expand(1.5),
-                theme.sizes.corner,
-                Stroke::new(1.0, c.focus.0),
-                StrokeKind::Outside,
-            );
-        }
-        response.widget_info(|| WidgetInfo::slider(true, value, &name));
-        ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(Role::Slider);
-            node.set_label(name.clone());
-            node.set_value(text.clone());
-            node.set_numeric_value(value);
-            node.set_min_numeric_value(0.0);
-            node.set_max_numeric_value(1.0);
-            node.add_action(egui::accesskit::Action::Increment);
-            node.add_action(egui::accesskit::Action::Decrement);
-        });
+        let style = info.map_or(bl_model::MacroStyle::Knob, |m| m.style);
+        let steps = info.map_or(bl_model::MACRO_STEPS_DEFAULT, |m| m.steps);
+        let colour = info
+            .and_then(|m| m.colour)
+            .map_or(c.accent.0, |index| swatch(theme, index));
+        let response = if style == bl_model::MacroStyle::RadioButtons {
+            // Spec: macros R23. A radio-button macro draws its steps as
+            // buttons in the knob's place.
+            self.macro_buttons(ui, shell, theme, frame, item, &name, value, steps, events)
+        } else {
+            // A stepped macro's knob moves a step at a time (R22).
+            let stepped = (style == bl_model::MacroStyle::Stepped).then_some(steps);
+            self.macro_knob(
+                ui, theme, frame, item, &name, &text, value, colour, stepped, events,
+            )
+        };
         response.context_menu(|ui| {
             if ui.button("Rename").clicked() {
                 self.renaming_macro = Some(MacroRenaming {
@@ -2215,6 +2174,49 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
+            // Spec: macros R21. The Macro Style submenu, after the
+            // exclusion items.
+            ui.menu_button("Macro Style", |ui| {
+                for (choice, label) in [
+                    (bl_model::MacroStyle::Knob, "Knob"),
+                    (bl_model::MacroStyle::Stepped, "Stepped"),
+                    (bl_model::MacroStyle::RadioButtons, "Radio Buttons"),
+                ] {
+                    if ui.selectable_label(choice == style, label).clicked() {
+                        invoke(
+                            events,
+                            "rack.set_macro_style",
+                            json!({
+                                "rack": frame.id,
+                                "macro_number": item.number,
+                                "style": choice,
+                            }),
+                        );
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.menu_button("Steps", |ui| {
+                    for count in bl_model::MACRO_STEPS_MIN..=bl_model::MACRO_STEPS_MAX {
+                        if ui
+                            .selectable_label(count == steps, count.to_string())
+                            .clicked()
+                        {
+                            invoke(
+                                events,
+                                "rack.set_macro_style",
+                                json!({
+                                    "rack": frame.id,
+                                    "macro_number": item.number,
+                                    "style": style,
+                                    "steps": count,
+                                }),
+                            );
+                            ui.close();
+                        }
+                    }
+                });
+            });
             ui.menu_button("Colour", |ui| {
                 for index in 0..PALETTE_COLUMNS as u8 {
                     let at = Rect::from_min_size(ui.cursor().min, vec2(14.0, 14.0));
@@ -2276,6 +2278,253 @@ impl DeviceViewUi {
             }
         }
         let _ = shell;
+    }
+
+    /// A macro's knob (macros spec, R20): its arc, its pointer and its
+    /// value, dragged as a device's knob is.
+    #[expect(clippy::too_many_arguments, reason = "the knob's inputs")]
+    fn macro_knob(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        item: &MacroItem,
+        name: &str,
+        text: &str,
+        value: f64,
+        colour: Color32,
+        steps: Option<u8>,
+        events: &mut Vec<UiEvent>,
+    ) -> Response {
+        let c = &theme.colors;
+        let painter = ui.painter_at(item.slot);
+        let id = Id::new(("macro-knob", frame.id, item.number));
+        let response = ui.interact(item.knob, id, Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let param = bl_model::macro_param(item.number);
+        // A stepped macro takes the keyboard, so the arrow keys step it.
+        if steps.is_some() && (response.clicked() || response.drag_started()) {
+            response.request_focus();
+        }
+        if response.drag_started() {
+            events.push(UiEvent::BeginNamedGesture(format!("Change \"{name}\"")));
+        }
+        if response.dragged() {
+            let delta = f64::from(response.drag_delta().y) / 100.0;
+            let moved = (value - delta).clamp(0.0, 1.0);
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": frame.id, "param": param, "value": moved }),
+            );
+        }
+        if response.drag_stopped() {
+            events.push(UiEvent::EndGesture);
+        }
+        if response.double_clicked() {
+            invoke(
+                events,
+                "device.set_param",
+                json!({ "device": frame.id, "param": param, "value": 0.0 }),
+            );
+        }
+        if response.clicked() {
+            invoke(
+                events,
+                "rack.select_macro",
+                json!({ "rack": frame.id, "macro_number": item.number }),
+            );
+        }
+        // Spec: macros R22. The arrow keys move a stepped macro a step at a
+        // time.
+        if response.has_focus()
+            && let Some(steps) = steps
+        {
+            // The arrow keys are the macro's, not the view's.
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            let move_by = f64::from(arrow_steps(ui));
+            if move_by != 0.0 {
+                let step = 1.0 / f64::from(steps - 1);
+                let moved = (value + move_by * step).clamp(0.0, 1.0);
+                invoke(
+                    events,
+                    "device.set_param",
+                    json!({ "device": frame.id, "param": param, "value": moved }),
+                );
+            }
+        }
+        let centre = item.knob.center();
+        let radius = (item.knob.height().min(item.knob.width()) / 2.0 - 2.0).max(4.0);
+        let (from, sweep) = (
+            std::f32::consts::PI * 0.5 + std::f32::consts::PI / 6.0,
+            std::f32::consts::PI * 5.0 / 3.0,
+        );
+        let arc = |to: f32| -> Vec<egui::Pos2> {
+            let steps = 24;
+            (0..=steps)
+                .map(|i| {
+                    let a = from + sweep * to * i as f32 / steps as f32;
+                    centre + vec2(a.cos(), a.sin()) * radius
+                })
+                .collect()
+        };
+        painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
+        if value > 0.0 {
+            painter.add(Shape::line(arc(value as f32), Stroke::new(2.0, colour)));
+        }
+        let a = from + sweep * value as f32;
+        painter.line_segment(
+            [centre, centre + vec2(a.cos(), a.sin()) * radius],
+            Stroke::new(1.5, c.text.0),
+        );
+        if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+            ui.painter().rect_stroke(
+                item.knob.expand(1.5),
+                theme.sizes.corner,
+                Stroke::new(1.0, c.focus.0),
+                StrokeKind::Outside,
+            );
+        }
+        response.widget_info(|| WidgetInfo::slider(true, value, name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Slider);
+            node.set_label(name.to_owned());
+            node.set_value(text.to_owned());
+            node.set_numeric_value(value);
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(1.0);
+            node.add_action(egui::accesskit::Action::Increment);
+            node.add_action(egui::accesskit::Action::Decrement);
+        });
+        response
+    }
+
+    /// A radio-button macro's steps as buttons in the knob's place (macros
+    /// spec, R23): each labelled with the value text that step gives, the
+    /// current one lit, and a click moves the macro to that step.
+    #[expect(clippy::too_many_arguments, reason = "the buttons' inputs")]
+    fn macro_buttons(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        item: &MacroItem,
+        name: &str,
+        value: f64,
+        steps: u8,
+        events: &mut Vec<UiEvent>,
+    ) -> Response {
+        let c = &theme.colors;
+        let group = Id::new(("macro-radios", frame.id, item.number));
+        // The buttons read as a radio group named for the macro.
+        ui.ctx().accesskit_node_builder(group, |node| {
+            node.set_role(Role::RadioGroup);
+            node.set_label(name.to_owned());
+        });
+        let texts =
+            shell
+                .devices()
+                .macro_step_texts(shell.editor().document(), frame.id, item.number);
+        let current = bl_model::macro_step_position(steps, value);
+        let count = steps.max(2);
+        let height = item.knob.height() / f32::from(count);
+        let group_response = ui.interact(item.knob, group, Sense::hover());
+        // The buttons are the group's children, so a screen reader reads them
+        // as a radio group.
+        let mut focused: Option<Id> = None;
+        let buttons = ui.scope_builder(
+            egui::UiBuilder::new()
+                .id(Id::new(("macro-radios-ui", frame.id, item.number)))
+                .max_rect(item.knob)
+                .accessibility_parent(group),
+            |child| {
+                let mut last = None;
+                for (step, text) in texts.iter().enumerate() {
+                    let rect = Rect::from_min_max(
+                        pos2(item.knob.left(), item.knob.top() + step as f32 * height),
+                        pos2(
+                            item.knob.right(),
+                            item.knob.top() + (step + 1) as f32 * height,
+                        ),
+                    );
+                    let id = Id::new(("macro-radio", frame.id, item.number, step));
+                    let clicked = child.interact(rect, id, Sense::click());
+                    focused = focused.or_else(|| clicked.has_focus().then_some(id));
+                    let position = step as f64 / f64::from(count - 1);
+                    let lit = (position - current).abs() < 1e-9;
+                    child.painter().rect_filled(
+                        rect,
+                        theme.sizes.corner,
+                        if lit { c.accent.0 } else { c.control.0 },
+                    );
+                    if rect.height() >= 9.0 {
+                        child.painter().text(
+                            rect.center(),
+                            Align2::CENTER_CENTER,
+                            text,
+                            theme.small_font(),
+                            if lit { c.accent_text.0 } else { c.text.0 },
+                        );
+                    }
+                    child.ctx().accesskit_node_builder(id, |node| {
+                        node.set_role(Role::RadioButton);
+                        node.set_label(text.clone());
+                        node.set_selected(lit);
+                    });
+                    if clicked.clicked() {
+                        invoke(
+                            events,
+                            "device.set_param",
+                            json!({
+                                "device": frame.id,
+                                "param": bl_model::macro_param(item.number),
+                                "value": position,
+                            }),
+                        );
+                    }
+                    last = Some(clicked);
+                }
+                last
+            },
+        );
+        // Spec: macros R22. The arrow keys move a stepped macro a step at a
+        // time.
+        if let Some(id) = focused {
+            // The arrow keys are the macro's, not the view's.
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            let move_by = f64::from(arrow_steps(ui));
+            if move_by != 0.0 {
+                let step = 1.0 / f64::from(count - 1);
+                let moved = (current + move_by * step).clamp(0.0, 1.0);
+                invoke(
+                    events,
+                    "device.set_param",
+                    json!({
+                        "device": frame.id,
+                        "param": bl_model::macro_param(item.number),
+                        "value": moved,
+                    }),
+                );
+            }
+        }
+        buttons.inner.unwrap_or(group_response)
     }
 
     /// Draws the Macro Variations view (macros spec, R25, R29): New above the
@@ -3084,6 +3333,8 @@ impl DeviceViewUi {
         row: &ChainRow,
         events: &mut Vec<UiEvent>,
     ) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = crate::keymap::Keymap::from_data(shell.keymap().clone());
         let mut contexts = vec![bl_commands::Context::RackChains];
         contexts.extend(shell.active_contexts());
         for item in bl_shell::menus::shown(&self.chain_menu) {
@@ -3096,15 +3347,8 @@ impl DeviceViewUi {
                 self.chain_palette(ui, theme, row, events);
                 continue;
             }
-            let response = crate::menus::item_in(
-                ui,
-                item,
-                shell,
-                &self.keymap,
-                self.platform,
-                &contexts,
-                events,
-            );
+            let response =
+                crate::menus::item_in(ui, item, shell, &keymap, self.platform, &contexts, events);
             let response = match context_menus::pending_package(item.row) {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");

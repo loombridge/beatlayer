@@ -41,6 +41,11 @@ pub enum Travel {
     Pan,
     /// A switch or radio button, whose axis is discrete (0 or 1).
     Switch,
+    /// A stepped macro, whose axis is discrete, its steps (macros spec, R22).
+    Steps {
+        /// The number of steps.
+        steps: u8,
+    },
     /// A device parameter, from its descriptor's low value to its high one.
     Linear {
         /// The parameter's lowest value.
@@ -59,6 +64,7 @@ impl Travel {
             Self::Send => bl_model::fader::send_position(value),
             Self::Pan => (value + 1.0) / 2.0,
             Self::Switch => value,
+            Self::Steps { .. } => value,
             Self::Linear { min, max } => {
                 if max > min {
                     (value - min) / (max - min)
@@ -80,6 +86,8 @@ impl Travel {
             Self::Send => bl_model::fader::send_level(t),
             Self::Pan => t * 2.0 - 1.0,
             Self::Switch => t.round(),
+            // Spec: macros R22. A stepped macro's lane has a stepped axis.
+            Self::Steps { steps } => bl_model::macro_step_position(steps, t),
             Self::Linear { min, max } => min + (max - min) * t,
         }
     }
@@ -113,6 +121,10 @@ pub fn travel(doc: &Document, devices: &DeviceView, target: AutomationTarget) ->
         } => Travel::Switch,
         AutomationTarget::Send { .. } | AutomationTarget::ChainSend { .. } => Travel::Send,
         AutomationTarget::Device { device, param } => {
+            // Spec: macros R22. A stepped macro's lane has a stepped axis.
+            if let Some(steps) = macro_steps(doc, device, param) {
+                return Travel::Steps { steps };
+            }
             let range = doc
                 .device(device)
                 .and_then(|device| devices.description(&device.kind))
@@ -130,6 +142,15 @@ pub fn travel(doc: &Document, devices: &DeviceView, target: AutomationTarget) ->
             Travel::Linear { min, max }
         }
     }
+}
+
+/// The number of steps a stepped macro of `device` takes, if `param` is one
+/// (macros spec, R22).
+fn macro_steps(doc: &Document, device: bl_model::DeviceId, param: bl_model::ParamId) -> Option<u8> {
+    let number = bl_model::macro_number(param)?;
+    let rack = doc.device(device)?;
+    let setting = rack.macros.setting(number);
+    setting.is_stepped().then_some(setting.steps)
 }
 
 /// A copied shape of envelope: one lane's shape over a span, with its

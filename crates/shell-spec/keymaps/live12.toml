@@ -2856,7 +2856,10 @@ trigger = "press"
 milestone = "M4"
 mac = ["R"]
 win = ["R"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.reverse", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-030"

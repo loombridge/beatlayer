@@ -590,6 +590,11 @@ fn hardware() -> Value {
     json!({ "kind": t.kind, "name": t.name, "role": t.role })
 }
 
+fn effect() -> Value {
+    let t = bl_devices::hardware_effect_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role })
+}
+
 fn external_of(h: &Harness, device: DeviceId) -> bl_shell::device_commands::ExternalSection {
     h.shell
         .device_view_state()
@@ -702,6 +707,36 @@ fn the_external_instruments_choosers_route_it() {
     assert_eq!(f64::from(samples), (value * 48.0).round());
     let nodes = Harness::nodes(&h.settle());
     assert_eq!(Harness::node(&nodes, "Hardware Latency Unit").value, "smp");
+}
+
+// Spec: external-devices R17. The External Audio Effect sends its signal to
+// the interface's outputs and hears it back: its section has an Audio To
+// chooser and no MIDI To.
+#[test]
+fn the_external_effects_choosers_route_it() {
+    let mut h = harness();
+    let device = add(&mut h, effect());
+    let frame = frame_of(&mut h, device);
+    let section = external_of(&h, device);
+    assert!(section.output, "the effect sends its signal out");
+    assert_eq!(section.audio_to.as_deref(), Some("1/2"));
+    assert_eq!(section.port, None, "the effect sends no notes");
+    let nodes = Harness::nodes(&h.settle());
+    for (name, value) in [
+        ("External Audio To", "1/2"),
+        ("External Audio From", "1/2"),
+        ("Hardware Latency", "0.00 ms"),
+        ("Hardware Latency Unit", "ms"),
+    ] {
+        assert_eq!(Harness::node(&nodes, name).value, value, "{name}");
+    }
+    assert!(
+        Harness::nodes(&h.settle())
+            .iter()
+            .all(|n| n.label != "External MIDI To"),
+        "the effect has no MIDI To"
+    );
+    let _ = frame;
 }
 
 // Spec: delay-compensation R7; external-devices R14. While Delay Compensation

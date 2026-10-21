@@ -122,9 +122,14 @@ pub struct MainWindowUi {
     devices: crate::device_view::DeviceViewUi,
     /// The Clip View's note editor (WP-2.3): its scroll and drags.
     clip_view: crate::clip_view::ClipViewUi,
-    /// The keymap, read the first time something shows a key from it (the
-    /// Info View, the Mixer Config Menu's items).
+    /// The list of the set's plug-ins (IMP-29, WP-6.41).
+    plugin_list: crate::plugin_list::PluginListUi,
+    /// The keymap in use, read the first time something shows a key from it
+    /// (the Info View, the Mixer Config Menu's items), and read again when
+    /// the person's own shortcuts change (R10).
     keymap: Option<crate::keymap::Keymap>,
+    /// The shell's keymap revision the keymap was read at.
+    keymap_revision: u64,
     /// What the Info View last showed, for headless reads (WP-2.24).
     info: InfoViewContent,
     /// Whether a value was being typed into a track header's volume field
@@ -211,7 +216,9 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
             clip_view: crate::clip_view::ClipViewUi::default(),
+            plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
+            keymap_revision: 0,
             info: InfoViewContent::default(),
             mixer_typing: false,
             menu_open: false,
@@ -457,7 +464,13 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            if let Some(scene) = shell.scene_view_scene() {
+            if shell.plugin_list().visible() {
+                // Spec: plugin-list R1. The list of the set's plug-ins takes
+                // the detail area's place, where the File Manager opens
+                // (L-OTH-002), in front of the Clip or Device View.
+                self.plugin_list
+                    .show(ui, shell, theme, layout.device_view, &mut events);
+            } else if let Some(scene) = shell.scene_view_scene() {
                 // Spec: session-view R21. A selected scene takes the detail
                 // area for the Scene View (L-SES-011).
                 crate::scene_view::show(ui, shell, theme, layout.device_view, scene, &mut events);
@@ -477,7 +490,10 @@ impl MainWindowUi {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
             }
-            if !shell.clip_view().visible() && shell.scene_view_scene().is_none() {
+            if !shell.plugin_list().visible()
+                && !shell.clip_view().visible()
+                && shell.scene_view_scene().is_none()
+            {
                 // Spec: multisampler R1. The zone editor sits above the
                 // Device View.
                 self.devices
@@ -502,6 +518,10 @@ impl MainWindowUi {
         // Spec: stem-separation R1. Separate Stems' dialog sits over the
         // window while it's open.
         crate::stems_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: external-devices R23. The real-time render's dialog sits
+        // over the window while a render that runs through external
+        // hardware is under way.
+        crate::realtime_dialog::show(ctx, shell, theme, &mut events);
         // Spec: multisampler R64. The autosampler's dialog sits over the
         // window while it's open.
         crate::autosampler::show(ctx, shell, theme, &mut events);
@@ -928,9 +948,8 @@ impl MainWindowUi {
     /// The Mixer Config Menu (L-STAT-008): the Mixer Controls choices, as
     /// View ▸ Mixer Controls has them (the mixer view spec, R12).
     fn mixer_menu(&mut self, response: &egui::Response, shell: &Shell, events: &mut Vec<UiEvent>) {
-        let keymap = self
-            .keymap
-            .get_or_insert_with(crate::keymap::Keymap::live12);
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
         let platform = crate::keymap::Platform::current();
         let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
         let Some(controls) = menus
@@ -1084,9 +1103,8 @@ impl MainWindowUi {
         // (L-INFO-002, I-FOCUS-012): the control's name, the help text of
         // the command it runs, and its key on a separate line; nothing
         // while the pointer is over empty space.
-        let keymap = self
-            .keymap
-            .get_or_insert_with(crate::keymap::Keymap::live12);
+        let keymap =
+            crate::keymap::keymap_in_use(&mut self.keymap, &mut self.keymap_revision, shell);
         self.info = info_content(self.hovered, shell, keymap);
         if self.info.title.is_empty() {
             return;

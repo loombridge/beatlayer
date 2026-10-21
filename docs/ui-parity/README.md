@@ -18,7 +18,7 @@ It records function and placement only. It holds no Ableton artwork, icons, scre
 
 1. **Cite rows.** A UI package's pull request lists the layout rows (L-), menu rows (M-, C-), interaction rows (I-), and shortcuts (S-) it implements. A row is done when its placement, controls, order, and behaviour match.
 2. **Compare side by side at 1600 × 1000.** Set Beatlayer's window and Live's window to 1600 × 1000 points (outer frame), put them side by side in the same state (the "default state" in layout.md, or the state the row describes), and compare positions, proportions, and order. Paste the comparison notes in the PR. Live's screenshots are never committed.
-3. **Bind the shortcuts.** Every shortcut whose milestone is the package's milestone, in a context the package builds, is bound in the default keymap (`crates/ui/keymaps/live12.toml`, generated from shortcuts.toml). The keymap test fails if a shortcut is neither bound nor marked with a later milestone.
+3. **Bind the shortcuts.** Every shortcut whose milestone is the package's milestone, in a context the package builds, is bound in the default keymap (`crates/shell-spec/keymaps/live12.toml`, generated from shortcuts.toml). The keymap test fails if a shortcut is neither bound nor marked with a later milestone.
 4. **Differences need a decision.** A deliberate difference from a row (for example a Live menu item that names an Ableton service) needs its own entry in the decisions log, and the row gets a note pointing at it.
 
 ## Sources

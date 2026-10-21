@@ -88,6 +88,74 @@ fn a_macro_is_a_knob_with_its_name_and_value() {
     assert_eq!(node.value, "100 %");
 }
 
+// Spec: macros R23
+#[test]
+fn a_radio_button_macro_draws_its_steps_and_a_click_selects_one() {
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let (rack, utility) = set(&mut h);
+    h.shell
+        .invoke(
+            "rack.map_macro",
+            json!({
+                "rack": rack,
+                "macro_number": 1,
+                "target": { "type": "device", "device": utility, "param": 6 },
+            }),
+        )
+        .unwrap();
+    h.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": rack, "macro_number": 1, "style": "radio_buttons", "steps": 4 }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    // The buttons read as a radio group named for the macro.
+    let group = nodes
+        .iter()
+        .find(|node| node.role == Role::RadioGroup && node.label == "Width")
+        .unwrap_or_else(|| panic!("a radio group named for the macro: {nodes:?}"));
+    assert_eq!(group.label, "Width");
+    let mut buttons: Vec<&common::Node> = nodes
+        .iter()
+        .filter(|node| node.role == Role::RadioButton)
+        .collect();
+    // The buttons are in a column, top to bottom: the steps in order.
+    buttons.sort_by(|a, b| {
+        let key = |node: &common::Node| node.bounds.map_or(0.0, |b| b.y0);
+        key(a)
+            .partial_cmp(&key(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    assert_eq!(buttons.len(), 4, "one button per step: {buttons:?}");
+    for button in &buttons {
+        assert!(
+            Harness::descends_from(&nodes, button.id, group.id),
+            "the button is in the group"
+        );
+    }
+    // The current step's button is lit.
+    assert_eq!(
+        buttons.iter().filter(|b| b.selected == Some(true)).count(),
+        1
+    );
+    // A click on a button moves the macro to that step.
+    let button = buttons[2];
+    let bounds = button.bounds.expect("the button's bounds");
+    let at = egui::pos2(
+        (bounds.x0 + bounds.x1) as f32 / 2.0,
+        (bounds.y0 + bounds.y1) as f32 / 2.0,
+    );
+    h.click(at);
+    let state: Value = h
+        .shell
+        .invoke("rack.macros", json!({ "rack": rack }))
+        .unwrap();
+    let value = state["macros"][0]["value"].as_f64().expect("a value");
+    assert!((value - 2.0 / 3.0).abs() < 1e-9, "the third step: {value}");
+}
+
 // Spec: macros R3, R9
 #[test]
 fn map_mode_and_the_mappings_list_run_their_commands() {

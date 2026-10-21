@@ -15,7 +15,8 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, TrackId,
+    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, ParamId,
+    TrackId,
 };
 use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
 use bl_shell::arrangement::rows::Row;

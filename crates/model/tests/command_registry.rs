@@ -11,12 +11,12 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Breakpoint, Chain, ChainId, Change,
     ChangeSet, Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate,
-    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor,
-    ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency, Input,
-    LaunchMode, LaunchQuantization, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
-    MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve,
-    RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId,
-    TrackKind, WarpFrom, WarpMode, WarpPoint,
+    ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError,
+    Editor, ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency,
+    Input, LaunchMode, LaunchQuantization, MacroStyle, MacroTarget, MetronomeRhythm,
+    MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, Note, Output, PanMode,
+    ParamId, PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap,
+    TonesUpdate, TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -54,34 +54,36 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        208,
+        212,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
-         the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
-         routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
-         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
-         WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
-         clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
-         envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
-         two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
-         settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
-         set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
-         their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
-         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
-         three for a sample's edits, WP-5.15b eight for the sampler's warp controls and manual \
-         slices, WP-3.10 the two for follow actions, WP-4.2 four for the \
-         warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
-         four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
-WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
-         set_configured_params, WP-4.13 the two for Crop Clip, WP-5.36 seven for track \
-         delay, the pan mode, each split side, and the two latency switches, WP-4.11 \
-         four for tempo leaders, stretching and sliding, and WP-5.4 ten \
-         for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
-         rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
-         set_macro_randomize_excluded and set_mapped_value, and WP-5.5 seven \
-         for the macro variations: store_variation, launch_variation, \
-         overwrite_variation, rename_variation, duplicate_variation, \
-         delete_variation and set_macro_variation_excluded"
+             the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
+             routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
+             set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
+             WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
+             WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
+             clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 \
+             set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
+             envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
+             two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
+             settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
+             set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
+             their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
+             unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
+             three for a sample's edits, WP-5.15b eight for the sampler's warp controls and manual \
+             slices, WP-3.10 the two for follow actions, WP-4.2 four for the \
+             warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, WP-4.9 \
+             four for auto-warp, WP-5.34 set_external, WP-5.6 five for a drum rack's chains, \
+    WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
+             set_configured_params, WP-4.13 the two for Crop Clip, WP-5.36 seven for track \
+             delay, the pan mode, each split side, and the two latency switches, WP-4.11 \
+             four for tempo leaders, stretching and sliding, and WP-5.4 eleven \
+             for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
+             rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
+             set_macro_randomize_excluded, set_macro_style and set_mapped_value, and WP-5.5 seven \
+             for the macro variations: store_variation, launch_variation, \
+             overwrite_variation, rename_variation, duplicate_variation, \
+             delete_variation and set_macro_variation_excluded, WP-4.7 the two \
+             for a clip's pitch and its reversal, and WP-5.33 set_device_role"
     );
 
     for op in &ops {
@@ -749,6 +751,14 @@ fn every_command_runs_by_id() {
         "clip.set_high_quality",
         json!({ "clip": loop_clip, "high_quality": false }),
     );
+    agent.run(
+        "clip.set_pitch",
+        json!({ "clip": loop_clip, "transpose": 7, "detune": -25.0 }),
+    );
+    agent.run(
+        "clip.reverse_file",
+        json!({ "clip": loop_clip, "seconds": 4.0 }),
+    );
     let audio = warped(&agent);
     assert_eq!(audio.warp_mode, WarpMode::RePitch);
     assert_eq!(
@@ -1003,6 +1013,12 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_floating",
         json!({ "device": eq, "floating": false }),
+    );
+    // Spec: device-chains R2, R3; IMP-24. A native device keeps its type's
+    // role: this one is an audio effect already.
+    agent.run(
+        "device.set_role",
+        json!({ "device": eq, "role": "audio_effect" }),
     );
     // Spec: device-compare R11. A switch makes B active, a copy takes the
     // active state over the other.
@@ -1909,6 +1925,10 @@ fn every_command_runs_by_id() {
         "rack.set_macro_randomize_excluded",
         json!({ "rack": rack, "macro_number": 1, "excluded": true }),
     );
+    agent.run(
+        "rack.set_macro_style",
+        json!({ "rack": rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+    );
     agent.run("rack.randomize_macros", json!({ "rack": rack, "seed": 3 }));
     agent.run(
         "rack.set_mapped_value",
@@ -2569,6 +2589,22 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "clip.set_pitch",
+            Command::SetClipPitch {
+                clip,
+                transpose: Some(7),
+                detune: Some(-25.0),
+            },
+        ),
+        (
+            "clip.reverse_file",
+            Command::ReverseClip {
+                clip,
+                media: None,
+                seconds: 4.0,
+            },
+        ),
+        (
             "clip.set_tempo_leader",
             Command::SetTempoLeader { clip, leader: true },
         ),
@@ -2767,6 +2803,13 @@ fn schemas_match_what_commands_serialise() {
             Command::SetDeviceFloating {
                 device,
                 floating: true,
+            },
+        ),
+        (
+            "device.set_role",
+            Command::SetDeviceRole {
+                device,
+                role: Some(DeviceRole::MidiEffect),
             },
         ),
         (
@@ -3081,6 +3124,7 @@ fn schemas_match_what_commands_serialise() {
             "device.set_external",
             Command::SetExternal {
                 device,
+                audio_to: None,
                 midi_to: Some(ExternalPort::Port {
                     name: "Synth".to_owned(),
                 }),
@@ -3441,6 +3485,15 @@ fn schemas_match_what_commands_serialise() {
                 rack,
                 macro_number: 1,
                 excluded: true,
+            },
+        ),
+        (
+            "rack.set_macro_style",
+            Command::SetMacroStyle {
+                rack,
+                macro_number: 1,
+                style: MacroStyle::Stepped,
+                steps: Some(4),
             },
         ),
         (

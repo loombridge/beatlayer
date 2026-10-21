@@ -981,6 +981,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
         track: t[2],
         peak: [half, half * 0.5],
         rms: [half * 0.5, half * 0.25],
+        impact: 0.0,
         gain_reduction: -6.0,
     }];
     h.shell.set_meters(&meters);
@@ -1011,6 +1012,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
         track: t[2],
         peak: [0.0; 2],
         rms: [0.0; 2],
+        impact: 0.0,
         gain_reduction: 0.0,
     }]);
     h.frame(vec![]);
@@ -1036,6 +1038,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
         track: t[2],
         peak: [0.0; 2],
         rms: [0.0; 2],
+        impact: 0.0,
         gain_reduction: -6.0,
     }]);
     h.frame(vec![]);
@@ -1105,9 +1108,10 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
     let labels: Vec<&str> = items.iter().map(|(_, l, _)| *l).collect();
     assert_eq!(labels, MIXER_CONTROLS);
-    // Track Options (WP-5.36) and the Crossfader section (WP-3.17) are built
-    // now; Performance Impact waits, and Sends is enabled.
-    assert!(!items[3].2 && !items[4].2 && items[5].2 && !items[1].2);
+    // Track Options (WP-5.36), the Crossfader section (WP-3.17), and the
+    // Performance Impact section (WP-5.38) are built now; Sends is
+    // enabled.
+    assert!(!items[3].2 && !items[4].2 && !items[5].2 && !items[1].2);
     let at = nodes
         .iter()
         .find(|n| n.role == Role::Button && name(&n.label) == Some("Sends"))
@@ -1162,9 +1166,14 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
             && track_options.chord.is_none()
     );
     assert!(menu_item(&h, "M-VIEW-033c").enabled);
-    for row in ["M-VIEW-032f", "M-VIEW-033a"] {
-        assert!(!menu_item(&h, row).enabled, "{row} waits");
-    }
+    assert!(!menu_item(&h, "M-VIEW-033a").enabled, "it waits");
+    // Performance Impact is built now (WP-5.38), unticked in a new set
+    // (observed: hidden by default).
+    let impact = menu_item(&h, "M-VIEW-032f");
+    assert!(impact.enabled && impact.checked == Some(false) && impact.chord.is_none());
+    h.shell.run(ids::PERFORMANCE_IMPACT, json!({})).unwrap();
+    assert_eq!(menu_item(&h, "M-VIEW-032f").checked, Some(true));
+    h.shell.run(ids::PERFORMANCE_IMPACT, json!({})).unwrap();
     let shown = state(&mut h.shell);
     assert!(!shown.in_out && !shown.sends && !shown.return_tracks && shown.volume);
     key(&mut h, Key::M, both);
@@ -1215,6 +1224,67 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
         .run("view.toggle_session_arrangement", json!({}))
         .unwrap();
     assert!(!menu_item(&h, "M-VIEW-033").enabled);
+}
+
+// Spec: mixer-view R12, the mixer spec R31.
+#[test]
+fn the_performance_impact_section_shows_under_the_strips_and_hides_by_its_menu_item() {
+    let mut h = session();
+    // Hidden in a new set (observed).
+    assert!(!state(&mut h.shell).performance_impact);
+    let nodes = tree(&mut h);
+    assert!(
+        nodes.iter().all(|n| n.label != "Performance Impact"),
+        "the section doesn't show"
+    );
+
+    h.shell.run(ids::PERFORMANCE_IMPACT, json!({})).unwrap();
+    assert!(state(&mut h.shell).performance_impact);
+    let nodes = tree(&mut h);
+    // The 12-point section under the strips, over the colour strip.
+    let mixer_rect = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(mixer_rect.top(), 766.0 - 300.5 - 12.0);
+    let section = inside(&nodes, "3 Audio", "Performance Impact")
+        .unwrap_or_else(|| panic!("the section shows in the track's column"));
+    assert_eq!(section.role, Role::Group);
+
+    // The segments are lit from the left with the track's share of the
+    // set's processing time. The engine publishes the meters, so a test
+    // sets them as the engine would with the engine off.
+    h.shell.run("audio.toggle_engine", json!({})).unwrap();
+    h.frame(vec![]);
+    h.shell.set_meters(&[TrackMeter {
+        track: tracks(&h.shell)[2],
+        peak: [0.0; 2],
+        rms: [0.0; 2],
+        impact: 0.5,
+        gain_reduction: 0.0,
+    }]);
+    h.settle();
+    let nodes = tree(&mut h);
+    let section = inside(&nodes, "3 Audio", "Performance Impact").unwrap();
+    assert_eq!(section.value.as_str(), "3 of 6 segments");
+}
+
+// Spec: mixer-view R12, the mixer spec R31.
+#[test]
+fn the_mixer_view_state_reports_the_performance_impact() {
+    let mut h = session();
+    let track = tracks(&h.shell)[2];
+    h.shell.run("audio.toggle_engine", json!({})).unwrap();
+    h.shell.set_meters(&[TrackMeter {
+        track,
+        peak: [0.0; 2],
+        rms: [0.0; 2],
+        impact: 0.5,
+        gain_reduction: 0.0,
+    }]);
+    let state = state(&mut h.shell);
+    assert_eq!(state.performance_impact_values.len(), 1);
+    let impact = state.performance_impact_values[0];
+    assert_eq!(impact.track, track);
+    assert_eq!(impact.segments, 3);
+    assert!((impact.share - 0.5).abs() < 1e-6);
 }
 
 // Spec: mixer-view R13.

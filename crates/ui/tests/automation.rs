@@ -500,8 +500,7 @@ fn the_lock_envelopes_switch_is_in_the_tab_order() {
 fn the_edit_keys_in_an_automation_lane_act_on_the_envelopes() {
     let mut s = set();
     // The time selection is in the track's automation lane.
-    s.h
-        .shell
+    s.h.shell
         .run(
             "arrangement.select_time",
             json!({

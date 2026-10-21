@@ -7,16 +7,16 @@ use std::path::{Path, PathBuf};
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, AutomationTarget, Clip, ClipData, ContentHash, Command, Document, Editor, MixerParam,
-    TrackId,
+    AudioData, AutomationTarget, Clip, ClipData, Command, ContentHash, Document, Editor,
+    MixerParam, TrackId,
 };
+use bl_shell::Shell;
 use bl_shell::arrangement_commands::{self as view_ids, ArrangementState, Lane};
 use bl_shell::audio::AudioHost;
 use bl_shell::automation_commands::{self as ids, EnvelopeClipboardState};
 use bl_shell::editing_commands::{self as edit_ids};
 use bl_shell::files::{SetStore, factory_default_set};
 use bl_shell::settings::Preferences;
-use bl_shell::Shell;
 use serde_json::{Value, json};
 
 const BAR: i64 = Ticks::WHOLE.get();
@@ -151,7 +151,8 @@ impl Song {
 fn a_selection_names_the_lanes_it_covers() {
     let mut song = song();
     song.select();
-    let state: ArrangementState = serde_json::from_value(song.run(view_ids::STATE, json!({}))).unwrap();
+    let state: ArrangementState =
+        serde_json::from_value(song.run(view_ids::STATE, json!({}))).unwrap();
     assert_eq!(
         state.time_selection_lanes,
         vec![Lane::Automation {
@@ -161,7 +162,10 @@ fn a_selection_names_the_lanes_it_covers() {
             }
         }]
     );
-    assert_eq!(state.time_selection.map(|range| range.start), Some(Ticks(BAR)));
+    assert_eq!(
+        state.time_selection.map(|range| range.start),
+        Some(Ticks(BAR))
+    );
 }
 
 // Spec: automation-editing R5.
@@ -240,11 +244,15 @@ fn moving_a_clip_carries_its_automation_with_it() {
     // new one.
     assert_eq!(envelope[0], (0, 0.0), "{envelope:?}");
     assert!(
-        envelope.iter().any(|(bar, value)| *bar == 3 && (*value - 1.0).abs() < 0.001),
+        envelope
+            .iter()
+            .any(|(bar, value)| *bar == 3 && (*value - 1.0).abs() < 0.001),
         "{envelope:?}"
     );
     assert!(
-        envelope.iter().any(|(bar, value)| *bar == 4 && (*value - 0.5).abs() < 0.001),
+        envelope
+            .iter()
+            .any(|(bar, value)| *bar == 4 && (*value - 0.5).abs() < 0.001),
         "{envelope:?}"
     );
 }

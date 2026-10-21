@@ -916,7 +916,7 @@ milestone = "M2"
 mac = ["Option (with the command)"]
 win = ["Alt (with the command)"]
 status = "widget"
-handler = "the Arrangement's edit keys with Option (Alt on Windows) held apply to the automation lanes under the tracks of the time selection"
+handler = "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held apply to the envelopes (the automation editing spec, R6)"
 
 [[shortcut]]
 id = "S-VAL-001"

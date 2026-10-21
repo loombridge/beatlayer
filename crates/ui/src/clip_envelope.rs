@@ -30,16 +30,16 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::arrangement::automation::{
-    AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE,
-    SEGMENT_GRAB, belongs_to, control_choices, default_target, device_choices, device_of,
-    mark_controls, mark_devices, target_label,
+    AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE, SEGMENT_GRAB,
+    belongs_to, control_choices, default_target, device_choices, device_of, mark_controls,
+    mark_devices, target_label,
 };
-use bl_shell::arrangement::automation::Travel as LaneScale;
 use crate::arrangement::editing::EditKeys;
 use crate::clip_view::{grid_rect, paint_grid_lines, tick_at, x_of_tick};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
+use bl_shell::arrangement::automation::Travel as LaneScale;
 
 /// How tall the row under the editor is, in points: the device chooser, the
 /// control chooser and the Linked switch (L-CLIP-017).

@@ -541,12 +541,17 @@ fn an_older_set_loads_with_lock_envelopes_off() {
     let project = Project::from_editor(&editor, Media::default());
     let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     assert!(
-        saved["document"]["settings"].get("lock_envelopes").is_none(),
+        saved["document"]["settings"]
+            .get("lock_envelopes")
+            .is_none(),
         "a set saved before Lock Envelopes has no such field"
     );
 
-    let (loaded, _) =
-        decode_json(&serde_json::to_vec(&saved).unwrap(), &LoadOptions::default()).unwrap();
+    let (loaded, _) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
     assert!(!loaded.document.settings().lock_envelopes);
 
     // A set saved with it on keeps it.

@@ -120,10 +120,7 @@ pub fn travel(doc: &Document, devices: &DeviceView, target: AutomationTarget) ->
                 .map(|descriptor| (descriptor.min(), descriptor.max()));
             match range {
                 Some((min, max)) => Travel::Linear { min, max },
-                None => Travel::Linear {
-                    min: 0.0,
-                    max: 1.0,
-                },
+                None => Travel::Linear { min: 0.0, max: 1.0 },
             }
         }
         AutomationTarget::MidiCc { .. }
@@ -198,12 +195,14 @@ fn span(
     let signatures = &doc.settings().time_signatures;
     let (start, end) = match (start, end) {
         (Some(start), Some(end)) => (
-            start.resolve(signatures).map_err(EditFailure::InvalidArgs)?,
+            start
+                .resolve(signatures)
+                .map_err(EditFailure::InvalidArgs)?,
             end.resolve(signatures).map_err(EditFailure::InvalidArgs)?,
         ),
-        (None, None) => view.time_selection().ok_or_else(|| {
-            EditFailure::Unavailable("no time is selected".to_owned())
-        })?,
+        (None, None) => view
+            .time_selection()
+            .ok_or_else(|| EditFailure::Unavailable("no time is selected".to_owned()))?,
         _ => {
             return Err(EditFailure::InvalidArgs(
                 "give `start` and `end`, or neither".to_owned(),
@@ -219,11 +218,7 @@ fn span(
 }
 
 /// The envelope of a track's parameter, if it has one.
-pub fn envelope_of<'a>(
-    doc: &'a Document,
-    track: TrackId,
-    target: AutomationTarget,
-) -> Option<&'a Envelope> {
+pub fn envelope_of(doc: &Document, track: TrackId, target: AutomationTarget) -> Option<&Envelope> {
     doc.track(track)?
         .automation_for(&target)
         .map(|automation| &automation.envelope)
@@ -393,11 +388,7 @@ pub fn label(id: &str) -> &'static str {
 /// Whether a person can run automation editing command `id` now: there's
 /// an automation lane to act on, or something on the clipboard to paste.
 #[must_use]
-pub fn can_run(
-    id: &str,
-    view: &ArrangementView,
-    clipboard: Option<&EnvelopeClipboard>,
-) -> bool {
+pub fn can_run(id: &str, view: &ArrangementView, clipboard: Option<&EnvelopeClipboard>) -> bool {
     let lanes = view.time_selection_lanes();
     let has_lane = lanes.iter().any(|lane| lane.target().is_some());
     match id {
@@ -668,15 +659,15 @@ fn move_breakpoints(
         if moved.contains(&point.at) {
             return true;
         }
-        !moves.iter().any(|(from, to, _)| {
-            point.at >= *from.min(to) && point.at <= *from.max(to)
-        })
+        !moves
+            .iter()
+            .any(|(from, to, _)| point.at >= *from.min(to) && point.at <= *from.max(to))
     });
     // The moved breakpoints go out first, so that one of them landing where
     // another was doesn't lose either.
     let mut moved_points: Vec<Breakpoint> = Vec::new();
-    points.retain(|point| {
-        match moves.iter().find(|(from, _, _)| *from == point.at) {
+    points.retain(
+        |point| match moves.iter().find(|(from, _, _)| *from == point.at) {
             Some((_, to, value)) => {
                 moved_points.push(Breakpoint {
                     at: *to,
@@ -686,8 +677,8 @@ fn move_breakpoints(
                 false
             }
             None => true,
-        }
-    });
+        },
+    );
     for point in moved_points {
         let at = points.partition_point(|other| other.at < point.at);
         points.insert(at, point);

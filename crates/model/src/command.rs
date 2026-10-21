@@ -2191,7 +2191,8 @@ impl Command {
             Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
             Self::SetAutomationEnvelope { .. } => "Set Automation Envelope",
-            Self::DeleteAutomation { .. } => "Delete Automation",            Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
+            Self::DeleteAutomation { .. } => "Delete Automation",
+            Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
             Self::SetCrossfader { .. } => "Change crossfader",
@@ -2810,8 +2811,7 @@ impl Document {
                     self.track_mut(*track)?.automation.remove(target);
                     return Ok(());
                 }
-                let automation =
-                    entry(&mut self.track_mut(*track)?.automation, *target);
+                let automation = entry(&mut self.track_mut(*track)?.automation, *target);
                 automation.envelope = envelope;
                 Ok(())
             }

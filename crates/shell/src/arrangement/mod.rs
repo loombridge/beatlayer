@@ -399,12 +399,7 @@ impl ArrangementView {
 
     /// Selects a segment in a track's automation lane, or clears it with
     /// `at` `None` (the automation editing spec, R4).
-    pub fn select_segment(
-        &mut self,
-        track: TrackId,
-        target: AutomationTarget,
-        at: Option<Ticks>,
-    ) {
+    pub fn select_segment(&mut self, track: TrackId, target: AutomationTarget, at: Option<Ticks>) {
         match at {
             Some(at) => {
                 self.automation_segment.insert(track, (target, at));

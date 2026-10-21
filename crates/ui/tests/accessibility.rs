@@ -459,7 +459,8 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
     // Live's order (12.4.6), without the controls Beatlayer doesn't have
     // yet: the selected track's header (its In/Out choosers, its mixer
-    // column, its sends), then Optimize Height and Width.
+    // column, its sends), then Lock Envelopes, the control above the
+    // headers (accessibility R10), then Optimize Height and Width.
     let expected = [
         title_id(tracks[2]),
         in_out(Slot::InputType),
@@ -474,6 +475,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         pan_id(Place::Header, tracks[2]),
         send_id(Place::Header, tracks[2], returns[0]),
         send_id(Place::Header, tracks[2], returns[1]),
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -1674,8 +1676,24 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
     );
+    // The Arrangement's automation lanes (WP-6.25): the edit keys with
+    // Option (Alt on Windows) apply to the envelopes (S-EDIT-016), and the
+    // lane's own gestures reach the rest.
+    let envelope_edit = Equivalent(
+        "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) apply to \
+         the envelopes (S-EDIT-016), and the lane's gestures move and select their breakpoints \
+         (automation-editing R2 to R4)",
+    );
     BTreeMap::from([
         // The Control Bar's transport (control-bar-transport R11).
+        ("automation.copy", Exception(envelope_edit)),
+        ("automation.cut", Exception(envelope_edit)),
+        ("automation.delete_range", Exception(envelope_edit)),
+        ("automation.duplicate", Exception(envelope_edit)),
+        ("automation.move_breakpoints", Exception(envelope_edit)),
+        ("automation.paste", Exception(envelope_edit)),
+        ("automation.select_segment", Exception(envelope_edit)),
+        ("automation.set_envelope", Exception(envelope_edit)),
         (
             "transport.play",
             main(nothing, control_bar, "Play", Key::Enter),

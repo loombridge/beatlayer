@@ -156,27 +156,20 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "one spec per command, written out in full"
-)]
 fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new(
-            MOVE_BREAKPOINTS,
-            "Move Automation Breakpoints",
-        )
-        .description(
-            "Moves several breakpoints of one track's parameter at once, as dragging a \
+        CommandSpec::new(MOVE_BREAKPOINTS, "Move Automation Breakpoints")
+            .description(
+                "Moves several breakpoints of one track's parameter at once, as dragging a \
              selected breakpoint on an automation lane does: each moves `by` ticks in time and \
              `share` of the parameter's travel in value, staying within the parameter's \
              range, and a breakpoint the moved ones pass over is removed. `at` names the \
              breakpoints to move, where they are now. One undo step.",
-        )
-        .permission(Permission::Edit)
-        .contexts([Arrangement, Envelope])
-        .args::<MoveBreakpointsArgs>()
-        .result::<AutomationResult>(),
+            )
+            .permission(Permission::Edit)
+            .contexts([Arrangement, Envelope])
+            .args::<MoveBreakpointsArgs>()
+            .result::<AutomationResult>(),
         CommandSpec::new(COPY, "Copy Automation")
             .description(
                 "Copies the shape of the envelopes the time selection covers to the \

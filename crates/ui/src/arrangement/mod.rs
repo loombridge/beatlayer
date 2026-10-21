@@ -550,9 +550,10 @@ impl ArrangementUi {
             );
         }
 
-        // The headers.
-        self.headers(ui, shell, theme, &layout, scroll_y, &pinned, events);
+        // The controls above the track headers, then the headers: the
+        // controls come first in the Tab order (accessibility R10).
         self.header_controls(ui, view, doc, theme, &layout, events);
+        self.headers(ui, shell, theme, &layout, scroll_y, &pinned, events);
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
         self.accessibility(ui, view, doc, &layout);
@@ -1346,6 +1347,45 @@ impl ArrangementUi {
                 node.set_description(format!("Not built yet: arrives with {package}."));
             });
         }
+        // L-ARR-010: Lock Envelopes, live (the automation editing spec, R8).
+        {
+            let rect = layout.lock_envelopes;
+            let id = lock_envelopes_id();
+            let on = doc.settings().lock_envelopes;
+            let response = ui.interact(rect, id, Sense::click());
+            let fill = if on {
+                theme.colors.accent.0
+            } else if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            };
+            let ink = if on {
+                theme.colors.accent_text.0
+            } else {
+                theme.colors.text.0
+            };
+            let painter = ui.painter_at(rect.expand(1.0));
+            painter.rect_filled(rect, theme.sizes.corner, fill);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "L",
+                theme.small_font(),
+                ink,
+            );
+            if response.clicked() {
+                invoke(events, "song.set_lock_envelopes", json!({ "enabled": !on }));
+            }
+            // Spec: accessibility R10. The switch is in the Tab order,
+            // after Automation Mode.
+            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
+            });
+        }
+    }
+
         // L-ARR-017: Optimize Height and Width, live; WP-2.12: Automation Mode.
         for (rect, id, name, text, on, command) in [
             (
@@ -1407,45 +1447,6 @@ impl ArrangementUi {
             }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
-        // L-ARR-010: Lock Envelopes, live (the automation editing spec, R8).
-        {
-            let rect = layout.lock_envelopes;
-            let id = lock_envelopes_id();
-            let on = doc.settings().lock_envelopes;
-            let response = ui.interact(rect, id, Sense::click());
-            let fill = if on {
-                theme.colors.accent.0
-            } else if response.hovered() {
-                theme.colors.control_hover.0
-            } else {
-                theme.colors.control.0
-            };
-            let ink = if on {
-                theme.colors.accent_text.0
-            } else {
-                theme.colors.text.0
-            };
-            let painter = ui.painter_at(rect.expand(1.0));
-            painter.rect_filled(rect, theme.sizes.corner, fill);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "L",
-                theme.small_font(),
-                ink,
-            );
-            if response.clicked() {
-                invoke(events, "song.set_lock_envelopes", json!({ "enabled": !on }));
-            }
-            // Spec: accessibility R10. The switch is in the Tab order,
-            // after Automation Mode.
-            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
-            response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
-            });
-        }
-    }
-
     /// The view's own accessible node, a pane named as the main view is, and
     /// the clips on screen as items in it.
     fn accessibility(
@@ -1718,13 +1719,15 @@ fn lanes_crossed(
         if lo < own && hi > top {
             out.push(Lane::Track { track: row.track });
         }
-        if row.automation > 0.0 && hi > own && lo < bottom {
-            if let Some(target) = view.automation_lane(row.track) {
-                out.push(Lane::Automation {
-                    track: row.track,
-                    target,
-                });
-            }
+        if row.automation > 0.0
+            && hi > own
+            && lo < bottom
+            && let Some(target) = view.automation_lane(row.track)
+        {
+            out.push(Lane::Automation {
+                track: row.track,
+                target,
+            });
         }
     }
     out

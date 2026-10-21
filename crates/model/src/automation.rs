@@ -513,7 +513,8 @@ impl Envelope {
         }
         let value_at_start = self.value_at(start);
         let value_at_end = self.value_at(end);
-        self.points.retain(|point| point.at < start || point.at >= end);
+        self.points
+            .retain(|point| point.at < start || point.at >= end);
         if let Some(value) = value_at_start {
             let at = start;
             match self.points.binary_search_by_key(&at, |point| point.at) {
@@ -530,18 +531,18 @@ impl Envelope {
                 ),
             }
         }
-        if let Some(value) = value_at_end {
-            if self.point(end).is_none() {
-                let index = self.points.partition_point(|point| point.at < end);
-                self.points.insert(
-                    index,
-                    Breakpoint {
-                        at: end,
-                        value,
-                        bend: 0.0,
-                    },
-                );
-            }
+        if let Some(value) = value_at_end
+            && self.point(end).is_none()
+        {
+            let index = self.points.partition_point(|point| point.at < end);
+            self.points.insert(
+                index,
+                Breakpoint {
+                    at: end,
+                    value,
+                    bend: 0.0,
+                },
+            );
         }
     }
 
@@ -554,7 +555,8 @@ impl Envelope {
         if end < start {
             return;
         }
-        self.points.retain(|point| point.at < start || point.at >= end);
+        self.points
+            .retain(|point| point.at < start || point.at >= end);
         for point in points {
             let at = start + point.at;
             match self.points.binary_search_by_key(&at, |point| point.at) {

@@ -454,12 +454,7 @@ fn tracks_by_distance(
         .unwrap_or(0);
     by_track
         .iter()
-        .map(|(track, _)| {
-            (
-                lane_index(&lanes, *track).unwrap_or(first) - first,
-                *track,
-            )
-        })
+        .map(|(track, _)| (lane_index(&lanes, *track).unwrap_or(first) - first, *track))
         .collect()
 }
 
@@ -729,7 +724,8 @@ impl ArrangementView {
         self.selected_clips.clone_from(&from.selected_clips);
         self.selected.clone_from(&from.selected);
         self.time_selection = from.time_selection;
-        self.time_selection_lanes.clone_from(&from.time_selection_lanes);
+        self.time_selection_lanes
+            .clone_from(&from.time_selection_lanes);
         self.insert_marker = from.insert_marker;
         self.title_bars = from.title_bars;
     }

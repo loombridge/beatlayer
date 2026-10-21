@@ -16936,6 +16936,8 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
 | `channel` | integer from 0 to 255 | yes | The MIDI channel, 1 to 16. |
 | `audio_from` | string | yes | What Audio From shows: a channel `3` or a pair `3/4`. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | yes | Hardware Latency, in the unit its switch is on. |
+| `audio_to` | string or null | no | What Audio To shows: a channel `3` or a pair `3/4`, for a device that sends its signal to the interface's outputs. |
+| `output` | boolean | no | Whether the device sends its signal to the interface's outputs and hears it back, as the External Audio Effect does: it has an Audio To and no MIDI To (WP-5.35). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16947,6 +16949,13 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
       "description": "What Audio From shows: a channel `3` or a pair `3/4`.",
       "type": "string"
     },
+    "audio_to": {
+      "description": "What Audio To shows: a channel `3` or a pair `3/4`, for a device that sends its signal to the interface's outputs.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "channel": {
       "description": "The MIDI channel, 1 to 16.",
       "format": "uint8",
@@ -16957,6 +16966,10 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",
       "description": "Hardware Latency, in the unit its switch is on."
+    },
+    "output": {
+      "description": "Whether the device sends its signal to the interface's outputs and hears it back, as the External Audio Effect does: it has an Audio To and no MIDI To (WP-5.35).",
+      "type": "boolean"
     },
     "port": {
       "description": "MIDI To: the output port's name, or none for No Output.",

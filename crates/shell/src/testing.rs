@@ -37,8 +37,7 @@ pub fn advance(control: &NullControl, shell: &mut Shell, millis: u64) {
 /// Waits until the engine plays the set as it is now: the change has reached
 /// the audio thread and a few blocks have run with it, so a note played next
 /// reaches a track just armed or changed.
-pub fn settle(control: &NullControl, shell: &mut Shell) {
-    assert!(
+pub fn settle(control: &NullControl, shell: &mut Shell) {    assert!(
         shell.audio().flush(Duration::from_secs(10)),
         "the engine never took the set"
     );
@@ -70,4 +69,13 @@ pub fn wait_for(
         advance(control, shell, STEP_MS);
     }
     panic!("waited for {what}");
+}
+
+/// Puts the real-time render's session into its waiting period, so a test
+/// can show the dialog an export with external hardware opens (the external
+/// devices spec, R23).
+pub fn realtime_waiting(shell: &Shell, seconds: u64) {
+    shell
+        .realtime_session()
+        .begin_wait(Duration::from_secs(seconds));
 }

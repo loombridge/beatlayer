@@ -61,15 +61,12 @@ pub struct Dropout {
 }
 
 /// What a real-time render is doing now (R23): the app's dialog shows it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     /// Nothing is rendering.
     Idle,
-    /// Waiting for the hardware's sound to die away, until `until`.
-    Waiting {
-        /// When the wait is over and the render starts.
-        until: Instant,
-    },
+    /// Waiting for the hardware's sound to die away.
+    Waiting,
     /// Rendering the range.
     Rendering,
 }
@@ -79,6 +76,8 @@ pub enum Phase {
 pub struct Status {
     /// What the render is doing.
     pub phase: Phase,
+    /// The seconds left before the render starts, while it waits.
+    pub seconds: f64,
     /// How much of the range is written, from 0 to 1.
     pub progress: f64,
     /// How many times the render has started.
@@ -103,6 +102,10 @@ pub struct Session {
 #[derive(Clone, Copy, Debug)]
 struct State {
     phase: Phase,
+    /// When the waiting period is over.
+    until: Option<Instant>,
+    /// How long the waiting period is.
+    period: Duration,
     progress: f64,
     attempts: u32,
 }
@@ -112,6 +115,8 @@ impl Default for Session {
         Self {
             state: Arc::new(Mutex::new(State {
                 phase: Phase::Idle,
+                until: None,
+                period: Duration::from_secs(10),
                 progress: 0.0,
                 attempts: 0,
             })),
@@ -130,13 +135,21 @@ impl Session {
         let state = self.state.lock().map_or(
             State {
                 phase: Phase::Idle,
+                until: None,
+                period: Duration::from_secs(10),
                 progress: 0.0,
                 attempts: 0,
             },
             |state| *state,
         );
+        let seconds = state.until.map_or(0.0, |until| {
+            until
+                .saturating_duration_since(Instant::now())
+                .as_secs_f64()
+        });
         Status {
             phase: state.phase,
+            seconds,
             progress: state.progress,
             attempts: state.attempts,
             auto_restart: self.auto_restart(),
@@ -146,11 +159,23 @@ impl Session {
     /// Starts the render at once, without waiting (R23).
     pub fn skip(&self) {
         self.skip.store(true, Ordering::Relaxed);
+        // The wait is over: the dialog shows no time left.
+        self.with_state(|state| {
+            if state.phase == Phase::Waiting {
+                state.until = Some(Instant::now());
+            }
+        });
     }
 
     /// Starts the waiting period again (R23).
     pub fn restart(&self) {
         self.restart.store(true, Ordering::Relaxed);
+        // The count starts again, so the dialog shows the whole period.
+        self.with_state(|state| {
+            if state.phase == Phase::Waiting {
+                state.until = Some(Instant::now() + state.period);
+            }
+        });
     }
 
     /// Stops the render; its partial file is deleted (R23).
@@ -182,13 +207,33 @@ impl Session {
         self.auto_restart.store(on, Ordering::Relaxed);
     }
 
+    /// Changes the state, under the lock.
+    fn with_state(&self, change: impl FnOnce(&mut State)) {
+        if let Ok(mut state) = self.state.lock() {
+            change(&mut state);
+        }
+    }
+
     /// Says what the render is doing now.
     fn set_state(&self, phase: Phase, progress: f64, attempts: u32) {
-        if let Ok(mut state) = self.state.lock() {
+        self.with_state(|state| {
             state.phase = phase;
             state.progress = progress;
             state.attempts = attempts;
-        }
+            if phase != Phase::Waiting {
+                state.until = None;
+            }
+        });
+    }
+
+    /// Starts the waiting period, so the hardware's last sound dies away
+    /// (R23). The dialog shows it.
+    pub fn begin_wait(&self, period: Duration) {
+        self.with_state(|state| {
+            state.phase = Phase::Waiting;
+            state.period = period;
+            state.until = Some(Instant::now() + period);
+        });
     }
 
     /// Waits `period` before the render starts, so the hardware's last sound
@@ -196,8 +241,7 @@ impl Session {
     /// render at once, and a Cancel stops it. Returns whether the render
     /// should go on.
     pub fn wait(&self, period: Duration) -> bool {
-        let mut until = Instant::now() + period;
-        self.set_state(Phase::Waiting { until }, 0.0, self.status().attempts);
+        self.begin_wait(period);
         loop {
             if self.cancelled() {
                 return false;
@@ -206,10 +250,15 @@ impl Session {
                 break;
             }
             if self.restart.swap(false, Ordering::Relaxed) {
-                until = Instant::now() + period;
-                self.set_state(Phase::Waiting { until }, 0.0, self.status().attempts);
+                self.begin_wait(period);
                 continue;
             }
+            let until = self
+                .state
+                .lock()
+                .ok()
+                .and_then(|state| state.until)
+                .unwrap_or_else(Instant::now);
             let now = Instant::now();
             if now >= until {
                 break;

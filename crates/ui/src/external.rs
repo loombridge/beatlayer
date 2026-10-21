@@ -51,15 +51,42 @@ pub fn section_rect(frame: Rect) -> Rect {
 #[must_use]
 pub fn rows(frame: Rect) -> [Rect; 5] {
     let section = section_rect(frame).shrink2(vec2(3.0, 0.0));
-    // Each control has its name above it.
-    let row = |n: usize| {
-        let top = section.top() + 3.0 + (ROW + ROW_GAP) * (n * 2 + 1) as f32 - ROW_GAP;
-        Rect::from_min_size(pos2(section.left(), top), vec2(section.width(), ROW))
-    };
-    let latency = row(3);
-    let unit = Rect::from_min_size(pos2(latency.right() - 22.0, latency.top()), vec2(22.0, ROW));
+    let latency = row_at(section, 3);
+    let unit = unit_beside(latency);
     let latency = Rect::from_min_max(latency.min, pos2(unit.left() - 2.0, latency.bottom()));
-    [row(0), row(1), row(2), latency, unit]
+    [
+        row_at(section, 0),
+        row_at(section, 1),
+        row_at(section, 2),
+        latency,
+        unit,
+    ]
+}
+
+/// Where the External Audio Effect's controls sit, top to bottom: the Audio
+/// To chooser, the Audio From chooser, and Hardware Latency with its unit
+/// switch beside it (the box, then the switch).
+#[must_use]
+pub fn effect_rows(frame: Rect) -> [Rect; 4] {
+    let section = section_rect(frame).shrink2(vec2(3.0, 0.0));
+    let latency = row_at(section, 2);
+    let unit = unit_beside(latency);
+    let latency = Rect::from_min_max(latency.min, pos2(unit.left() - 2.0, latency.bottom()));
+    [row_at(section, 0), row_at(section, 1), latency, unit]
+}
+
+/// The row `n` of the section, each control with its name above it.
+fn row_at(section: Rect, n: usize) -> Rect {
+    let top = section.top() + 3.0 + (ROW + ROW_GAP) * (n * 2 + 1) as f32 - ROW_GAP;
+    Rect::from_min_size(pos2(section.left(), top), vec2(section.width(), ROW))
+}
+
+/// The unit switch, at the end of the Hardware Latency box.
+fn unit_beside(latency: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(latency.right() - 22.0, latency.top()),
+        vec2(22.0, ROW),
+    )
 }
 
 /// A Hardware Latency as the box shows it: `12.50 ms` or `600 smp`.
@@ -121,24 +148,34 @@ pub fn draw(
     let c = &theme.colors;
     let area = section_rect(frame);
     ui.painter_at(area).rect_filled(area, 0.0, c.control.0);
-    let [midi_to, channel, audio_from, latency, unit] = rows(frame);
     let Some(ExternalChoosers {
         midi_to: midi_to_chooser,
         channel: channel_chooser,
         audio_from: audio_from_chooser,
-        audio_to: _,
+        audio_to: audio_to_chooser,
     }) = routing::external_choosers(shell.editor().document(), device, &shell.interface())
     else {
         return;
+    };
+    // The External Audio Effect sends its signal out and hears it back: it
+    // has an Audio To and no MIDI To (WP-5.35, R17).
+    let (midi_to, channel, audio_to, audio_from, latency, unit) = if section.output {
+        let [audio_to, audio_from, latency, unit] = effect_rows(frame);
+        (None, None, Some(audio_to), audio_from, latency, unit)
+    } else {
+        let [midi_to, channel, audio_from, latency, unit] = rows(frame);
+        (Some(midi_to), Some(channel), None, audio_from, latency, unit)
     };
 
     // The names above the controls.
     let painter = ui.painter_at(area);
     for (rect, name) in [
         (midi_to, "MIDI To"),
-        (audio_from, "Audio From"),
-        (latency, "Hardware Latency"),
+        (audio_to, "Audio To"),
+        (Some(audio_from), "Audio From"),
+        (Some(latency), "Hardware Latency"),
     ] {
+        let Some(rect) = rect else { continue };
         painter.text(
             pos2(rect.left() + 1.0, rect.top() - 1.0),
             Align2::LEFT_BOTTOM,
@@ -147,22 +184,34 @@ pub fn draw(
             c.text_dim.0,
         );
     }
-    draw_chooser(
-        ui,
-        theme,
-        control_id(device, "midi-to"),
-        midi_to,
-        &midi_to_chooser,
-        events,
-    );
-    draw_chooser(
-        ui,
-        theme,
-        control_id(device, "channel"),
-        channel,
-        &channel_chooser,
-        events,
-    );
+    if let (Some(midi_to), Some(channel)) = (midi_to, channel) {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "midi-to"),
+            midi_to,
+            &midi_to_chooser,
+            events,
+        );
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "channel"),
+            channel,
+            &channel_chooser,
+            events,
+        );
+    }
+    if let (Some(audio_to), Some(chooser)) = (audio_to, audio_to_chooser.as_ref()) {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "audio-to"),
+            audio_to,
+            chooser,
+            events,
+        );
+    }
     draw_chooser(
         ui,
         theme,

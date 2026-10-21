@@ -6907,10 +6907,8 @@ impl Shell {
         let status = self.realtime.status();
         let phase = match status.phase {
             crate::realtime::Phase::Idle => export_ids::RealtimePhase::Idle,
-            crate::realtime::Phase::Waiting { until } => export_ids::RealtimePhase::Waiting {
-                seconds: until
-                    .saturating_duration_since(std::time::Instant::now())
-                    .as_secs_f64(),
+            crate::realtime::Phase::Waiting => export_ids::RealtimePhase::Waiting {
+                seconds: status.seconds,
             },
             crate::realtime::Phase::Rendering => export_ids::RealtimePhase::Rendering,
         };

@@ -141,6 +141,10 @@ pub const SET_WINDOW: &str = "device.set_window";
 /// `device.set_floating`: the document's command that floats or docks a
 /// device (`bl-model`'s).
 pub const SET_FLOATING: &str = "device.set_floating";
+/// `device.set_role`: the document's command that places a device in the
+/// MIDI-effect position of a MIDI track's chain, before the instrument, or
+/// back where its type goes (IMP-24, `bl-model`'s).
+pub const SET_ROLE: &str = "device.set_role";
 
 /// `device.compare_switch`: make a native device's other A/B state active
 /// (`bl-model`'s).
@@ -210,6 +214,7 @@ pub const ON_SELECTED: &[&str] = &[
     "device.set_enabled",
     "device.set_show_preset_name",
     SET_FLOATING,
+    SET_ROLE,
     COMPARE_SWITCH,
     COMPARE_COPY,
 ];

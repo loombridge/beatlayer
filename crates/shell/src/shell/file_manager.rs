@@ -79,10 +79,25 @@ impl Shell {
     /// Bar says so until none is.
     pub fn missing_files(&self) -> usize {
         let document = self.editor.document();
+        // The Status Bar asks every frame, so the clips are read once and
+        // the files counted from them, not the other way round.
+        let mut used = std::collections::HashSet::new();
+        for track in document.tracks() {
+            for clip in track.clips().chain(track.slots().map(|(_, clip)| clip)) {
+                if let ClipData::Audio(audio) = &clip.data {
+                    used.insert(ContentHash::from_bytes(audio.media.0));
+                }
+            }
+            for device in track.devices() {
+                for played in device.media.iter().flatten() {
+                    used.insert(ContentHash::from_bytes(played.0));
+                }
+            }
+        }
         self.media
             .entries()
             .into_iter()
-            .filter(|entry| !users_of(document, entry.hash).is_empty())
+            .filter(|entry| used.contains(&entry.hash))
             .filter(|entry| {
                 !matches!(
                     self.media.check(entry.hash),
@@ -363,6 +378,7 @@ impl Shell {
             ids::REPLACE_FILE => self.run_replace_file(id, args),
             ids::HOT_SWAP => self.run_hot_swap(id, args),
             ids::EDIT_FILE => self.run_edit_file(id, args),
+            ids::SET_SEARCH_FOLDER => self.run_set_search_folder(id, args),
             ids::DELETE_UNUSED => self.run_delete_unused(id, args),
             ids::SET_BACKUPS => self.run_set_backups(id, args),
             ids::SET_OPEN_BACKUP => self.run_open_backup(id, args),
@@ -445,6 +461,12 @@ impl Shell {
         }
         // The menu items again hide it.
         self.file_manager.open = open.unwrap_or(!self.file_manager.open);
+        if self.file_manager.open {
+            // Spec: file-management R10. The File Manager and the list of
+            // the set's plug-ins take the same place: showing either hides
+            // the other.
+            self.plugin_list.hide();
+        }
         Ok(to_value(&self.file_manager_state()))
     }
 
@@ -512,10 +534,11 @@ impl Shell {
             })?;
         self.file_manager.hot_swap = Some(HotSwap { hash });
         // The browser opens at the file's folder, where the file to use is
-        // chosen.
+        // chosen. `open` is given, so a folder that is open already stays
+        // open.
         self.run(
             crate::browser_commands::OPEN_FOLDER,
-            json!({ "path": folder.to_string_lossy() }),
+            json!({ "path": folder.to_string_lossy(), "open": true }),
         )?;
         Ok(to_value(&ReplacedFile {
             hash: hex(hash),
@@ -603,6 +626,16 @@ impl Shell {
             editor,
             opened: started,
         }))
+    }
+
+    /// Runs `file_manager.set_search_folder` (R14): the Automatic Search's
+    /// Search Folder names a folder, and the search covers it.
+    fn run_set_search_folder(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let ids::SearchFolderArgs { folder } = Self::args(id, args)?;
+        if let Some(folder) = folder {
+            self.file_manager.search.folder = Some(folder);
+        }
+        Ok(to_value(&self.file_manager_state()))
     }
 
     /// Runs `file_manager.delete_unused` (R17): the files go to the

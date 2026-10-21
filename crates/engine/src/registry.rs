@@ -74,6 +74,12 @@ pub struct DeviceType {
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
+    /// Whether its devices send notes on from a note output (IMP-24): a CLAP
+    /// plug-in's note output port, a VST3 class's event output bus, or an
+    /// Audio Unit's MIDI output. A device whose type has one can sit in the
+    /// MIDI-effect position of a MIDI track's chain, before the instrument;
+    /// one whose type has none can't. Every MIDI-effect type has one.
+    pub note_output: bool,
     /// The extra audio outputs its devices offer past their main one, by the
     /// names the device gives them (WP-5.45): another track can take one as
     /// its input ([`Input::Track`](bl_model::Input::Track)), and the node
@@ -97,6 +103,7 @@ impl DeviceType {
             sidechain: false,
             external: false,
             midi_sidechain: false,
+            note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
         }
     }
@@ -126,6 +133,15 @@ impl DeviceType {
     #[must_use]
     pub fn with_midi_sidechain(mut self) -> Self {
         self.midi_sidechain = true;
+        self
+    }
+
+    /// The same device type, declaring a note output (IMP-24): its devices
+    /// send notes on, so they can sit in the MIDI-effect position of a MIDI
+    /// track's chain.
+    #[must_use]
+    pub fn with_note_output(mut self) -> Self {
+        self.note_output = true;
         self
     }
 

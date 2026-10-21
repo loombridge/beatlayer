@@ -116,6 +116,10 @@ use Object::{Clip, Device, Scene, Song, Track};
 /// Why the Browser's commands read back through nothing a read command gives.
 const BROWSER: &str = "the Browser's state is read with `browser.state`, which is `external` \
                        because it lists files outside the project";
+/// Why the File Manager's commands read back through nothing a read command
+/// gives.
+const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
+                             is `external` because it lists files outside the project";
 /// Why Save Continuously has nothing to read.
 const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
                           reports Save Continuously; the command's own result does";
@@ -138,6 +142,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("app.quit", nothing("the app ends, so there is nothing left to read from")),
     ("arrangement.consolidate", query(Track, "clips")),
     ("arrangement.consolidate_to_scene", query(Song, "scenes")),
+    ("arrangement.reverse", query(Track, "clips")),
     ("arrangement.cut", query(Track, "clips")),
     ("arrangement.delete", query(Track, "clips")),
     ("arrangement.duplicate", query(Track, "clips")),
@@ -201,23 +206,9 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.quantize_audio", query(Clip, "data.audio.warp_markers")),
     ("clip.replace_sample", query(Clip, "data.audio.media")),
     ("clip.rename", query(Clip, "name")),
-    (
-        "file_manager.delete_unused",
-        nothing("moves files outside the set to the trash; the set doesn't change"),
-    ),
-    ("file_manager.edit_file", nothing(FILE)),
-    (
-        "file_manager.hot_swap",
-        nothing("arms the browser to replace a file; the set doesn't change"),
-    ),
-    ("file_manager.replace_file", query(Clip, "data.audio.media")),
-    (
-        "file_manager.state",
-        nothing(
-            "a query of its own: it reads the File Manager, and is `external` for the files it \
-             lists",
-        ),
-    ),    ("clip.reset_transients", read("clip.transients", "transients")),
+    ("clip.reverse", query(Clip, "data")),
+    ("clip.reverse_file", query(Clip, "data")),
+    ("clip.reset_transients", read("clip.transients", "transients")),
     ("clip.save_default", read("clip.defaults", "defaults")),
     ("clip.slice_to_midi_track", query(Song, "tracks")),
     ("clip.crop", query(Clip, "data")),
@@ -231,6 +222,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.set_gain", query(Clip, "data.audio.gain")),
     ("clip.set_follow_actions", query(Clip, "launch.follow")),
     ("clip.set_high_quality", query(Clip, "data.audio.high_quality")),
+    ("clip.set_pitch", query(Clip, "data.audio")),
     ("clip.set_launch_mode", query(Clip, "launch.mode")),
     ("clip.set_launch_quantization", query(Clip, "launch.quantization")),
     ("clip.set_length", query(Clip, "length")),
@@ -342,6 +334,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.set_sample", query(Device, "media")),
     ("device.set_sample_bpm", query(Device, "warp.bpm")),
     ("device.set_show_preset_name", query(Device, "show_preset_name")),
+    ("device.set_role", query(Device, "role")),
     ("device.set_midi_sidechain_source", query(Device, "midi_sidechain.source")),
     ("device.set_sidechain_enabled", query(Device, "sidechain.enabled")),
     ("device.set_sidechain_gain", query(Device, "sidechain.gain")),
@@ -361,6 +354,20 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("edit.redo", query(Song, "undo.next_redo")),
     ("edit.undo", query(Song, "undo.next_undo")),
     ("export.audio", nothing(FILE)),
+    (
+        "file_manager.delete_unused",
+        nothing("moves files outside the set to the trash; the set doesn't change"),
+    ),
+    ("file_manager.edit_file", query(Clip, "data.audio.media")),
+    ("file_manager.hot_swap", nothing(FILE_MANAGER)),
+    ("file_manager.replace_file", query(Clip, "data.audio.media")),
+    (
+        "file_manager.state",
+        nothing(
+            "a query of its own: it reads the File Manager, and is `external` for the files it \
+             lists",
+        ),
+    ),
     ("midi.export_clip", nothing(FILE)),
     ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),
@@ -416,6 +423,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("pad.swap", query(Device, "chains")),
     ("plugin.configure", read("device_view.state", "devices")),
     ("plugin.configure_param", read("device.parameters", "params")),
+    ("plugin.export_list", nothing(FILE)),
     ("plugin.load", query(Track, "devices")),
     ("plugin.load_au", query(Track, "devices")),
     ("plugin.move_configured_param", read("device.parameters", "params")),

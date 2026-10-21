@@ -462,3 +462,27 @@ fn a_frozen_return_renders_what_is_sent_to_it() {
     });
     assert!(loud, "R15: a frozen return's file holds what is sent to it");
 }
+
+// Spec: freeze-and-bounce R8. A clip on a frozen track keeps its settings:
+// reversing it, and reversing a selection it sits in, are refused.
+#[test]
+fn a_frozen_track_s_clips_arent_reversed() {
+    let scratch = Scratch::new("reverse");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip = place(&mut shell, track, &file, 0);
+    freeze(&mut shell, track);
+
+    let refused = shell.run("clip.reverse", json!({ "clip": clip }));
+    assert!(refused.is_err(), "a clip on a frozen track isn't reversed");
+    let refused = shell.run(
+        "arrangement.reverse",
+        json!({ "tracks": [track], "start": 0, "end": 2_822_400 }),
+    );
+    assert!(
+        refused.is_err(),
+        "a selection on a frozen track isn't reversed"
+    );
+}

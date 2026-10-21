@@ -608,8 +608,9 @@ pub fn backups(dir: &Path, stem: &str) -> Vec<Backup> {
             })
         })
         .collect();
-    // The stamps order oldest first.
-    found.sort();
+    // The stamps order oldest first: the time, then which backup of that
+    // second it is.
+    found.sort_by(|left, right| left.stamp.cmp(&right.stamp).then(left.n.cmp(&right.n)));
     found.reverse();
     found
 }
@@ -889,6 +890,41 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn the_backups_are_listed_newest_first() {
+        let dir = TestDir::new("backups");
+        let backup = dir.0.join("Backup");
+        std::fs::create_dir_all(&backup).unwrap();
+        for name in [
+            "Song [2026-10-10 143012].blset",
+            "Song [2026-10-10 143012 2].blset",
+            "Song [2026-10-10 143013].blset",
+            "Other [2026-10-10 143014].blset",
+        ] {
+            std::fs::write(backup.join(name), b"").unwrap();
+        }
+        let listed: Vec<String> = backups(&backup, "Song")
+            .into_iter()
+            .map(|backup| {
+                backup
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "Song [2026-10-10 143013].blset",
+                "Song [2026-10-10 143012 2].blset",
+                "Song [2026-10-10 143012].blset",
+            ],
+            "the newest is first, and the second backup of a second is before the first"
+        );
     }
 
     #[test]

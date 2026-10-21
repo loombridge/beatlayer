@@ -95,6 +95,10 @@ pub struct ClapNode {
     /// The output ports the node feeds: the plug-in's main one, then one
     /// per extra output (WP-5.45).
     ports: usize,
+    /// The device sits in the MIDI-effect position (IMP-24): its notes go
+    /// on, its audio output is dropped, and the audio it receives passes
+    /// through.
+    midi_effect: bool,
     max_frames: usize,
     steady: u64,
     /// The gain adjustment, in dB, the plug-in reported for the last block
@@ -106,8 +110,13 @@ pub struct ClapNode {
 impl ClapNode {
     /// A node for `config`, with the main thread's ends of its queues, and
     /// `extra_outputs` the plug-in's audio output ports past its main one
-    /// (WP-5.45).
-    pub(crate) fn new(config: &NodeConfig, extra_outputs: usize) -> (Self, HostEnds) {
+    /// (WP-5.45). With `midi_effect` the device is placed as a MIDI effect
+    /// (IMP-24), so its audio output is dropped.
+    pub(crate) fn new(
+        config: &NodeConfig,
+        extra_outputs: usize,
+        midi_effect: bool,
+    ) -> (Self, HostEnds) {
         let (to_node, from_host) = RingBuffer::new(1);
         let (to_host, from_node) = RingBuffer::new(2);
         let (params_out, params) = RingBuffer::new(PARAMS_OUT_CAPACITY);
@@ -133,6 +142,7 @@ impl ClapNode {
             in_ports: AudioPorts::with_capacity(MAX_CHANNELS, port_count),
             out_ports: AudioPorts::with_capacity(MAX_CHANNELS * port_count, port_count),
             ports: port_count,
+            midi_effect,
             max_frames,
             steady: 0,
             reduction: 0.0,
@@ -426,13 +436,22 @@ impl Node for ClapNode {
             self.fail(block);
             return;
         }
-        for c in 0..channels {
-            let out = block.channel_mut(c);
-            if outputs == 0 {
-                out.fill(0.0);
-            } else {
-                let from = c.min(outputs - 1) * stride;
-                out.copy_from_slice(&self.outs[from..from + frames]);
+        // Spec: device-chains R3 (IMP-24). A plug-in placed as a MIDI
+        // effect passes the audio it receives on, and its own audio output
+        // is dropped; its extra outputs carry nothing.
+        if self.midi_effect {
+            if let Some(outputs) = block.outputs_mut() {
+                outputs.fill(0.0);
+            }
+        } else {
+            for c in 0..channels {
+                let out = block.channel_mut(c);
+                if outputs == 0 {
+                    out.fill(0.0);
+                } else {
+                    let from = c.min(outputs - 1) * stride;
+                    out.copy_from_slice(&self.outs[from..from + frames]);
+                }
             }
         }
         self.send_out(Some(block));

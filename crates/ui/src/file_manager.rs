@@ -31,6 +31,8 @@ const DELETE_UNUSED: &str = "file_manager.delete_unused";
 const RELINK_MISSING: &str = "set.relink_missing";
 /// `set.collect_all_and_save`: the Collect and Save button.
 const COLLECT_ALL: &str = "set.collect_all_and_save";
+/// `file_manager.set_search_folder`: the Set Folder… button.
+const SET_SEARCH_FOLDER: &str = "file_manager.set_search_folder";
 
 /// What the File Manager shows that the shell doesn't keep: the switches
 /// the person sets, which the commands then use.
@@ -38,17 +40,21 @@ const COLLECT_ALL: &str = "set.collect_all_and_save";
 pub struct FileManagerUi {
     /// The External Files section's switches: which groups are collected.
     pub collect: Vec<(ExternalGroup, bool)>,
-    /// The Automatic Search's folder, the one Search Folder names.
-    pub search_folder: Option<String>,
-    /// Whether the Automatic Search searches the set's project folder.
+    /// The Automatic Search's switches, which the commands then use.
     pub search_project: bool,
     /// Whether the Automatic Search searches the User Library.
     pub search_library: bool,
+    /// The unused file whose Delete was asked for, waiting for the answer.
+    pub deleting: Option<String>,
     /// What the File Manager lists, as it was when the set last changed:
     /// a project's sets are read from the disk, which is too slow for
     /// every frame.
-    pub state: Option<(u64, FileManagerState)>,
+    pub state: Option<(StateKey, FileManagerState)>,
 }
+
+/// What the File Manager's state is cached on: the document's revision and
+/// the shell's, so the list is built again when either changes.
+type StateKey = (u64, u64);
 
 impl Default for FileManagerUi {
     fn default() -> Self {
@@ -60,9 +66,9 @@ impl Default for FileManagerUi {
                 (ExternalGroup::UserLibrary, false),
                 (ExternalGroup::Elsewhere, true),
             ],
-            search_folder: None,
             search_project: true,
             search_library: true,
+            deleting: None,
             state: None,
         }
     }
@@ -77,7 +83,7 @@ pub fn show(
     panel: &mut FileManagerUi,
     events: &mut Vec<UiEvent>,
 ) {
-    let revision = shell.document_revision();
+    let revision = (shell.document_revision(), shell.revision());
     let state = match &panel.state {
         Some((seen, state)) if *seen == revision => state.clone(),
         _ => {
@@ -103,7 +109,7 @@ pub fn show(
                 search(ui, theme, &state, panel, events);
                 external(ui, theme, &state, panel, events);
                 if state.scope != Scope::Set {
-                    unused(ui, theme, &state.unused, events);
+                    unused(ui, theme, &state.unused, panel, events);
                 }
                 if state.packing {
                     // Spec: file-management R16. The Packing section's
@@ -158,7 +164,11 @@ fn tabs(ui: &mut Ui, state: &FileManagerState, events: &mut Vec<UiEvent>) {
 fn files(ui: &mut Ui, theme: &Theme, rows: &[FileRow], events: &mut Vec<UiEvent>) {
     section(ui, theme, "Files", rows.len());
     for row in rows {
-        row_ui(ui, theme, row, events);
+        let rect = row_ui(ui, theme, row, "files", events);
+        // Spec: file-management R11, I-DROP-012. A file dropped from the
+        // browser on the row replaces it for every clip and device that
+        // uses it.
+        drop_file(ui, rect, &row.hash, events);
     }
 }
 
@@ -166,7 +176,7 @@ fn files(ui: &mut Ui, theme: &Theme, rows: &[FileRow], events: &mut Vec<UiEvent>
 fn missing(ui: &mut Ui, theme: &Theme, rows: &[FileRow], events: &mut Vec<UiEvent>) {
     section(ui, theme, "Missing Files", rows.len());
     for row in rows {
-        let rect = row_ui(ui, theme, row, events);
+        let rect = row_ui(ui, theme, row, "missing", events);
         // Spec: file-management R13, I-DROP-012. A file dropped from the
         // browser on the row relinks it.
         drop_file(ui, rect, &row.hash, events);
@@ -183,14 +193,19 @@ fn search(
 ) {
     section(ui, theme, "Automatic Search", 0);
     ui.horizontal(|ui| {
-        let mut folder = panel.search_folder.clone();
         if ui
             .button("Set Folder…")
             .on_hover_text("Choose the folder the search looks in")
             .clicked()
         {
-            // The folder is chosen in a dialog the app opens; until then the
-            // search uses the folders it has.
+            // The app asks the person for the folder.
+            events.push(UiEvent::Invoke(Invocation::new(
+                SET_SEARCH_FOLDER,
+                json!({}),
+            )));
+        }
+        if let Some(folder) = &state.search.folder {
+            ui.label(folder);
         }
         let mut project = panel.search_project;
         ui.checkbox(&mut project, "Search Project");
@@ -198,7 +213,6 @@ fn search(
         ui.checkbox(&mut library, "Search Library");
         panel.search_project = project;
         panel.search_library = library;
-        folder = state.search.folder.clone().or(folder);
         if ui
             .button("Go")
             .on_hover_text("Search for the missing files")
@@ -209,7 +223,7 @@ fn search(
                 json!({
                     "project": panel.search_project,
                     "library": panel.search_library,
-                    "folder": folder,
+                    "folder": state.search.folder,
                 }),
             )));
         }
@@ -249,13 +263,19 @@ fn external(
             }
         });
         for file in &group.files {
-            row_ui(ui, theme, file, events);
+            row_ui(ui, theme, file, "external", events);
         }
     }
 }
 
 /// The files in the project that nothing uses, grouped (R17).
-fn unused(ui: &mut Ui, theme: &Theme, groups: &[UnusedFiles], events: &mut Vec<UiEvent>) {
+fn unused(
+    ui: &mut Ui,
+    theme: &Theme,
+    groups: &[UnusedFiles],
+    panel: &mut FileManagerUi,
+    events: &mut Vec<UiEvent>,
+) {
     let count: usize = groups.iter().map(|group| group.count).sum();
     section(ui, theme, "Unused Files", count);
     for group in groups {
@@ -266,15 +286,26 @@ fn unused(ui: &mut Ui, theme: &Theme, groups: &[UnusedFiles], events: &mut Vec<U
         for file in &group.files {
             ui.horizontal(|ui| {
                 ui.label(&file.name);
-                if ui
+                // Spec: file-management R17. Delete asks first, warning that
+                // another project may use the file.
+                if panel.deleting.as_deref() == Some(file.path.as_str()) {
+                    ui.label("Another project may use this file. Delete it?");
+                    if ui.button("Delete it").clicked() {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            DELETE_UNUSED,
+                            json!({ "paths": [file.path] }),
+                        )));
+                        panel.deleting = None;
+                    }
+                    if ui.button("Keep it").clicked() {
+                        panel.deleting = None;
+                    }
+                } else if ui
                     .button("Delete")
                     .on_hover_text("Move it to the trash")
                     .clicked()
                 {
-                    events.push(UiEvent::Invoke(Invocation::new(
-                        DELETE_UNUSED,
-                        json!({ "paths": [file.path] }),
-                    )));
+                    panel.deleting = Some(file.path.clone());
                 }
             });
         }
@@ -307,9 +338,15 @@ fn collect_and_save(
 }
 
 /// One file's row: its name, its size, where it is, and what uses it.
-fn row_ui(ui: &mut Ui, theme: &Theme, row: &FileRow, events: &mut Vec<UiEvent>) -> Rect {
-    let id = ui.make_persistent_id(format!("file-manager-row-{}", row.hash));
-    let list = ui.make_persistent_id("file-manager-rows");
+fn row_ui(
+    ui: &mut Ui,
+    theme: &Theme,
+    row: &FileRow,
+    salt: &str,
+    events: &mut Vec<UiEvent>,
+) -> Rect {
+    let id = ui.make_persistent_id(format!("file-manager-row-{salt}-{}", row.hash));
+    let list = ui.make_persistent_id(format!("file-manager-rows-{salt}"));
     ui.ctx().accesskit_node_builder(list, |node| {
         node.set_role(Role::List);
         node.set_label("Files".to_owned());

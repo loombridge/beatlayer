@@ -122,6 +122,8 @@ pub struct MainWindowUi {
     devices: crate::device_view::DeviceViewUi,
     /// The Clip View's note editor (WP-2.3): its scroll and drags.
     clip_view: crate::clip_view::ClipViewUi,
+    /// The list of the set's plug-ins (IMP-29, WP-6.41).
+    plugin_list: crate::plugin_list::PluginListUi,
     /// The keymap, read the first time something shows a key from it (the
     /// Info View, the Mixer Config Menu's items).
     keymap: Option<crate::keymap::Keymap>,
@@ -213,6 +215,7 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
             clip_view: crate::clip_view::ClipViewUi::default(),
+            plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
             file_manager: crate::file_manager::FileManagerUi::default(),
             info: InfoViewContent::default(),
@@ -462,7 +465,8 @@ impl MainWindowUi {
             self.info_view(ui, theme, shell, layout.info_view);
             if shell.file_manager_open() {
                 // Spec: file-management R10. The File Manager takes the
-                // detail area's place, in front of the Clip or Device View.
+                // detail area's place, in front of the Clip or Device View,
+                // and the list of the set's plug-ins gives way to it.
                 crate::file_manager::show(
                     ui,
                     shell,
@@ -471,6 +475,12 @@ impl MainWindowUi {
                     &mut self.file_manager,
                     &mut events,
                 );
+            } else if shell.plugin_list().visible() {
+                // Spec: plugin-list R1. The list of the set's plug-ins takes
+                // the detail area's place, where the File Manager opens
+                // (L-OTH-002), in front of the Clip or Device View.
+                self.plugin_list
+                    .show(ui, shell, theme, layout.device_view, &mut events);
             } else if let Some(scene) = shell.scene_view_scene() {
                 // Spec: session-view R21. A selected scene takes the detail
                 // area for the Scene View (L-SES-011).
@@ -491,7 +501,8 @@ impl MainWindowUi {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
             }
-            if !shell.clip_view().visible()
+            if !shell.plugin_list().visible()
+                && !shell.clip_view().visible()
                 && shell.scene_view_scene().is_none()
                 && !shell.file_manager_open()
             {

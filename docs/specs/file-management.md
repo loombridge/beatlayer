@@ -60,7 +60,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 **Commands and access (WP-6.63)**
 
-- **R20.** Every action above is a registered command: `view.toggle_file_manager` (read) shows and hides the File Manager on a view; `file_manager.state` reports a view's sections and rows (external, as it lists files outside the project); `file_manager.replace_file` replaces or relinks a file (edit, or external when the new file is outside the project); `file_manager.hot_swap` arms the browser to replace a file and `file_manager.edit_file` opens one in the external sample editor; `set.relink_missing` takes the Automatic Search's switches and folder and returns each file's candidates; `set.collect_all_and_save` takes the groups to collect, and the project to collect for; `file_manager.delete_unused` moves files to the trash (destructive); `set.backups` (read) lists the backups, `set.open_backup` opens one, refusing while the open set has unsaved changes as `set.open` does, and `set.save_copy` saves a copy (both external). Each reads back in `file_manager.state`, `set.backups`, the query tool's `song`, or its result. (S16)
+- **R20.** Every action above is a registered command: `view.toggle_file_manager` (read) shows and hides the File Manager on a view; `file_manager.state` reports a view's sections and rows (external, as it lists files outside the project); `file_manager.replace_file` replaces or relinks a file (edit, or external when the new file is outside the project); `file_manager.hot_swap` arms the browser to replace a file, `file_manager.edit_file` opens one in the external sample editor and `file_manager.set_search_folder` names the folder the Automatic Search looks in; `set.relink_missing` takes the Automatic Search's switches and folder and returns each file's candidates; `set.collect_all_and_save` takes the groups to collect, and the project to collect for; `file_manager.delete_unused` moves files to the trash (destructive); `set.backups` (read) lists the backups, `set.open_backup` opens one, refusing while the open set has unsaved changes as `set.open` does, and `set.save_copy` saves a copy (both external). Each reads back in `file_manager.state`, `set.backups`, the query tool's `song`, or its result. (S16)
 - **R21.** The File Manager builds only the rows on screen, and every part reaches assistive technology: its view buttons as a tab list, each section as a group with its name and count, each row as a list item naming its file, its location and what uses it, and the switches and buttons with their names and states. The keyboard moves through it as through the browser's list (browser R7, R17). (S16)
 
 ## Tests
@@ -92,4 +92,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 ## Not built yet
 
 - A default set that uses samples: R1 opens the saved default set's document, but its media table isn't loaded into the media store yet, so such a set's clips play silence until relinked.
+- The External Files section's Show button, and the Unused Files section's Show button and preview (R15, R17): the files a group holds aren't listed in the browser yet.
+- The User Library's clip files and presets in Manage User Library (R16): only its sets are listed.
+- The query tool's report of a clip or a device whose file is missing (R12): nothing says so yet.
 

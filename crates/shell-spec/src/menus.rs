@@ -27,7 +27,8 @@ use crate::commands::{
     SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT,
     SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS,
-    VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
+    VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
@@ -113,6 +114,10 @@ pub const IMP_12: &str = "IMP-12";
 /// The row of Beatlayer's own Close All Plug-in Windows (IMP-25), after
 /// Plug-In Windows: an improvement, so not a row of menus.md.
 pub const IMP_25_CLOSE_WINDOWS: &str = "IMP-25-close-windows";
+
+/// The row of Beatlayer's own Manage Plug-Ins (IMP-29), after Manage
+/// Files: an improvement, so not a row of menus.md.
+pub const IMP_29: &str = "IMP-29";
 
 /// The rows of the Create menu's Sample Editor items, which menus.md's note
 /// under the Create menu names but gives no rows (WP-4.10).
@@ -264,6 +269,7 @@ const FILE: &[Row] = &[
     ),
     SEPARATOR,
     ("M-FILE-007", "Manage Files", Cmd(VIEW_TOGGLE_FILE_MANAGER)),
+    (IMP_29, "Manage Plug-Ins", Cmd(VIEW_TOGGLE_PLUGIN_LIST)),
     ("M-FILE-008", "Open Beatlayer Set Backups", Submenu),
     SEPARATOR,
     ("M-FILE-009", "Save Beatlayer Set", Cmd(SET_SAVE)),

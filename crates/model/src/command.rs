@@ -17,7 +17,7 @@ use crate::automation::{
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, Note, TakeLane, clip_entry,
 };
-use crate::device::{Device, DeviceRole};
+use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{ExternalPort, HardwareLatency};
@@ -40,7 +40,10 @@ use crate::track::{
     TrackDelay, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
-use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
+use crate::warp_settings::{
+    BeatsUpdate, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN, TRANSPOSE_MAX, TRANSPOSE_MIN,
+    TextureUpdate, TonesUpdate, WarpMode,
+};
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -741,6 +744,24 @@ pub enum Command {
         /// Where it ends, after `start`.
         end: Ticks,
     },
+    /// Reverses an audio clip (the audio clip editing spec, R7 to R10): it
+    /// plays `media`, a reversed copy of its file, and its Start and End
+    /// markers, loop brace and warp markers are mirrored about the file, so
+    /// it plays the same stretch of sound backwards. Its envelopes stay
+    /// where they are, and its loop switch, gain, transpose, detune, warp
+    /// mode and fades don't change.
+    ReverseClip {
+        /// The clip.
+        clip: ClipId,
+        /// The file it plays now: the reversed copy. `null` (or nothing)
+        /// leaves the file as it is, for a clip whose file is already a
+        /// reversed copy and goes back to the one it was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+        /// The length of the file in seconds, which the markers are
+        /// mirrored about.
+        seconds: f64,
+    },
     /// Moves a clip's left edge to `start`, keeping its end and where its
     /// contents play: the clip shows more or less of its contents. An audio
     /// clip's Start marker moves by the time the edge moved, as Live's does,
@@ -1105,6 +1126,18 @@ pub enum Command {
         /// Whether the clip is resampled by the band-limited interpolator.
         high_quality: bool,
     },
+    /// Sets an audio clip's Transpose and Detune (WP-4.7): either of them,
+    /// or both, in one step.
+    SetClipPitch {
+        /// The audio clip.
+        clip: ClipId,
+        /// The Transpose, in whole semitones, from −48 to 48.
+        #[serde(default)]
+        transpose: Option<i32>,
+        /// The Detune, in cents, from −50 to 50.
+        #[serde(default)]
+        detune: Option<f64>,
+    },
     /// Switches a Session clip's Legato: on, it takes over the play position
     /// of the clip playing on its track when it launches.
     SetClipLegato {
@@ -1399,6 +1432,17 @@ pub enum Command {
         device: DeviceId,
         /// Float (true) or dock (false).
         floating: bool,
+    },
+    /// Places a device in another position of its chain (IMP-24): a plug-in
+    /// that sends notes on can sit in the MIDI-effect position, before the
+    /// instrument, and go back where its type goes. The placement is saved
+    /// with the set.
+    SetDeviceRole {
+        /// The device.
+        device: DeviceId,
+        /// Where it goes in the chain; the other position if left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<DeviceRole>,
     },
     /// Switches a device on or off.
     SetDeviceEnabled {
@@ -2217,6 +2261,7 @@ impl Command {
             Self::SetClipLaunchMode { .. } => "Change launch mode",
             Self::SetClipData { .. } => "Edit clip",
             Self::CropClip { .. } | Self::CropClipToRange { .. } => "Crop clip",
+            Self::ReverseClip { .. } => "Reverse clip",
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
@@ -2246,6 +2291,8 @@ impl Command {
             Self::SetClipWarpSettings { .. } => "Change Warp Settings",
             Self::SetClipRamMode { .. } => "Switch RAM Mode",
             Self::SetClipHighQuality { .. } => "Switch High Quality",
+            // WP-4.7. Live's name for the pitch controls is the Clip View's.
+            Self::SetClipPitch { .. } => "Change Clip Pitch",
             // WP-4.11. Live's undo names for these are to observe.
             Self::SetTempoLeader { .. } => "Switch Lead/Follow",
             Self::UnfollowTempoAutomation {} => "Unfollow Tempo Automation",
@@ -2299,6 +2346,8 @@ impl Command {
             Self::SetDeviceFloating {
                 floating: false, ..
             } => "Dock Device",
+            // IMP-24: Beatlayer's own, so Live has no name for it.
+            Self::SetDeviceRole { .. } => "Change Device Role",
             // Spec: device-compare R3, R4; `label_in` names the direction.
             Self::CompareSwitch { .. } => "Compare: Switch",
             Self::CompareCopy { .. } => "Compare: Copy",
@@ -2999,6 +3048,34 @@ impl Document {
             Command::SetClipLaunchMode { clip, mode } => {
                 self.edit_launch(*clip, |launch| launch.mode = *mode)
             }
+            Command::ReverseClip {
+                clip,
+                media,
+                seconds,
+            } => {
+                let current = self.clip_ref(*clip)?.clone();
+                let ClipData::Audio(audio) = &current.data else {
+                    return Err(ModelError::NotAudioClip(*clip));
+                };
+                if !seconds.is_finite() || *seconds <= 0.0 {
+                    return Err(ModelError::InvalidValue {
+                        what: "the file's length",
+                        value: *seconds,
+                    });
+                }
+                let mut data = audio.reversed(*seconds, *media);
+                // The transient edits belong to the file they were made on
+                // (the warping spec, R27).
+                if data.media != audio.media {
+                    data.transient_edits = TransientEdits::default();
+                }
+                let mut next = current;
+                next.data = ClipData::Audio(data);
+                check_clip_data(&next.data)?;
+                check_clip_fits(self.track_ref(self.clip_owner(*clip)?)?, &next.data)?;
+                *self.clip_mut(*clip)? = next;
+                Ok(())
+            }
             Command::SetClipData { clip, data } => {
                 let owner = self.clip_owner(*clip)?;
                 check_clip_fits(self.track_ref(owner)?, data)?;
@@ -3179,6 +3256,38 @@ impl Document {
             }
             Command::SetClipHighQuality { clip, high_quality } => {
                 self.edit_audio(*clip, |audio| audio.high_quality = *high_quality)
+            }
+            Command::SetClipPitch {
+                clip,
+                transpose,
+                detune,
+            } => {
+                let ClipData::Audio(audio) = &self.clip_ref(*clip)?.data else {
+                    return Err(ModelError::NotAudioClip(*clip));
+                };
+                if transpose.is_none() && detune.is_none() {
+                    return Err(ModelError::InvalidInput(
+                        "give `transpose`, `detune`, or both",
+                    ));
+                }
+                let transpose = transpose.unwrap_or(audio.transpose);
+                let detune = detune.unwrap_or(audio.detune);
+                if !(TRANSPOSE_MIN..=TRANSPOSE_MAX).contains(&transpose) {
+                    return Err(ModelError::InvalidValue {
+                        what: "Transpose",
+                        value: f64::from(transpose),
+                    });
+                }
+                if !detune.is_finite() || !(DETUNE_MIN..=DETUNE_MAX).contains(&detune) {
+                    return Err(ModelError::InvalidValue {
+                        what: "Detune",
+                        value: detune,
+                    });
+                }
+                self.edit_audio(*clip, |audio| {
+                    audio.transpose = transpose;
+                    audio.detune = detune;
+                })
             }
             Command::SetSegmentBpm { clip, marker, bpm } => {
                 self.edit_markers_with(*clip, |audio| audio.with_segment_bpm(*marker, *bpm))
@@ -3363,6 +3472,9 @@ impl Document {
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 loaded.set_name(name);
+                // The preset the device holds is the one its name names (the
+                // plug-in list spec, R5).
+                loaded.preset_name = (!name.is_empty()).then(|| name.clone());
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
                     *self.device_mut(*device)? = loaded;
@@ -3379,6 +3491,7 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetDeviceRole { device, role } => self.set_device_role(*device, *role),
             Command::SetDeviceEnabled { device, enabled } => {
                 if self.device_ref(*device)?.enabled != *enabled {
                     self.device_mut(*device)?.enabled = *enabled;
@@ -5547,6 +5660,56 @@ impl Document {
         Ok(())
     }
 
+    /// Places `device` where its new `role` goes in the chain it sits in
+    /// (IMP-24): after the devices of the same role or a smaller one,
+    /// before those of a greater one. The chain keeps its order (R3), so a
+    /// role that can't fit the track or its chain is refused.
+    fn set_device_role(
+        &mut self,
+        device: DeviceId,
+        role: Option<DeviceRole>,
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(device)?.role;
+        // Left out, the other position is taken: back where the type goes
+        // from the MIDI-effect position, and into it from anywhere else.
+        let role = role.unwrap_or(if current == DeviceRole::MidiEffect {
+            DeviceRole::AudioEffect
+        } else {
+            DeviceRole::MidiEffect
+        });
+        if current == role {
+            return Ok(());
+        }
+        // Spec: device-chains R2 (IMP-24). A native device keeps the role
+        // its type gives it; only a plug-in takes another position.
+        if matches!(self.device_ref(device)?.kind, DeviceKind::Native { .. }) {
+            return Err(ModelError::InvalidInput(
+                "a native device keeps the role its type gives it",
+            ));
+        }
+        let place = self
+            .device_place(device)
+            .ok_or(ModelError::NoSuchDevice(device))?;
+        let mut taken = self.take_device(device)?;
+        taken.role = role;
+        let index = match place.chain {
+            None => self
+                .track_ref(place.track)?
+                .devices
+                .iter()
+                .take_while(|d| d.role <= role)
+                .count(),
+            Some(chain) => self
+                .chain_ref(chain)?
+                .devices
+                .iter()
+                .take_while(|d| d.role <= role)
+                .count(),
+        };
+        self.put_device(place.track, place.chain, index, taken)?;
+        check_chain(self.track_ref(place.track)?)
+    }
+
     fn move_device(
         &mut self,
         id: DeviceId,
@@ -6241,6 +6404,21 @@ impl Document {
         Ok(())
     }
 
+    /// Sets the name of the preset a device holds (the plug-in list spec,
+    /// R5), outside the command system:
+    /// [`Editor::amend_device_preset_name`](crate::Editor::amend_device_preset_name)
+    /// calls it.
+    pub(crate) fn set_device_preset_name(
+        &mut self,
+        id: DeviceId,
+        name: Option<String>,
+    ) -> Result<(), ModelError> {
+        if self.device_ref(id)?.preset_name != name {
+            self.device_mut(id)?.preset_name = name;
+        }
+        Ok(())
+    }
+
     /// Takes every macro mapping whose target its rack no longer holds out
     /// of that rack (macros spec, R18): a device or chain that left it takes
     /// its mappings with it, in the same undo step.
@@ -6611,6 +6789,16 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         audio.warp_map()?;
     }
     audio.warp_settings.check()?;
+    check_value(
+        "Transpose",
+        f64::from(audio.transpose),
+        (TRANSPOSE_MIN..=TRANSPOSE_MAX).contains(&audio.transpose),
+    )?;
+    check_value(
+        "Detune",
+        audio.detune,
+        audio.detune.is_finite() && (DETUNE_MIN..=DETUNE_MAX).contains(&audio.detune),
+    )?;
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
         "fade-in length",
@@ -8432,6 +8620,56 @@ mod tests {
             .map(|d| d.role)
             .collect();
         assert_eq!(roles, [DeviceRole::MidiEffect, DeviceRole::Instrument]);
+    }
+
+    // Spec: device-chains R2, R3; IMP-24
+    #[test]
+    fn a_native_device_keeps_its_role_and_a_plug_in_takes_another_position() {
+        let mut song = Song::new();
+        let midi = song.track(TrackKind::Midi, None);
+        let native = song.device(midi);
+        // A native device keeps the role its type gives it.
+        assert_eq!(
+            song.reject(Command::SetDeviceRole {
+                device: native,
+                role: Some(DeviceRole::MidiEffect),
+            }),
+            ModelError::InvalidInput("a native device keeps the role its type gives it")
+        );
+        // A plug-in takes the MIDI-effect position, before the instrument.
+        let plugin = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track: midi,
+            index: 0,
+            device: Device::new(
+                plugin,
+                "Reverb",
+                DeviceKind::Plugin {
+                    format: crate::PluginFormat::Clap,
+                    plugin_id: "org.example.reverb".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+        song.apply(Command::SetDeviceRole {
+            device: plugin,
+            role: Some(DeviceRole::MidiEffect),
+        })
+        .unwrap();
+        let roles: Vec<_> = song
+            .doc
+            .track(midi)
+            .unwrap()
+            .devices()
+            .map(|d| (d.id, d.role))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                (plugin, DeviceRole::MidiEffect),
+                (native, DeviceRole::AudioEffect)
+            ]
+        );
     }
 
     // Spec: device-chains R10
@@ -10940,5 +11178,44 @@ mod tests {
         assert_eq!(envelope.target, target);
         assert_eq!(envelope.kind, EnvelopeKind::Modulation);
         assert_eq!(envelope.envelope.value_at(Ticks::ZERO), Some(0.25));
+    }
+    // Spec: audio-clip-editing R9, R13. Reversing a clip mirrors its
+    // markers and leaves its envelopes where they are, in one undo step.
+    #[test]
+    fn reversing_a_clip_leaves_its_envelopes_in_place() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            kind: EnvelopeKind::Modulation,
+            clip,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+        let envelopes = song.doc.clip(clip).unwrap().envelopes.clone();
+        let before = song.doc.clip(clip).unwrap().clone();
+        song.apply(Command::ReverseClip {
+            clip,
+            media: None,
+            seconds: 4.0,
+        })
+        .unwrap();
+        let after = song.doc.clip(clip).unwrap().clone();
+        // Spec: R9. The envelopes stay where they are in the clip's time.
+        assert_eq!(after.envelopes, envelopes);
+        // Spec: R8. The markers are mirrored about the file.
+        let ClipData::Audio(audio) = &after.data else {
+            panic!("an audio clip");
+        };
+        assert_eq!(audio.start, 0.0);
+        assert_eq!(audio.end, None);
+        // The clip's other settings don't change.
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.length, before.length);
     }
 }

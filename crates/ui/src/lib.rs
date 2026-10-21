@@ -66,6 +66,7 @@ pub mod mapping;
 pub mod menus;
 pub mod mixer;
 pub mod multisampler;
+pub mod plugin_list;
 pub mod rack_view;
 pub mod sample_display;
 pub mod sample_editor;

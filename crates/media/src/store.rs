@@ -360,29 +360,6 @@ impl MediaStore {
         Ok(found.into_iter().next().map(|(_, path)| path))
     }
 
-    /// Relinks every entry whose file is missing or changed, searching the
-    /// given folders as [`MediaStore::relink`] does, in one pass over them.
-    /// Returns the media relinked and where each was found.
-    ///
-    /// # Errors
-    ///
-    /// Fails on a read error while checking an entry's current file.
-    pub fn relink_missing(
-        &self,
-        folders: &[impl AsRef<Path>],
-    ) -> Result<Vec<(ContentHash, PathBuf)>, MediaError> {
-        let hashes: Vec<ContentHash> = self.read().keys().copied().collect();
-        let mut wanted: HashMap<u64, Vec<ContentHash>> = HashMap::new();
-        for hash in hashes {
-            if self.check(hash)? != MediaStatus::Available
-                && let Some(entry) = self.entry(hash)
-            {
-                wanted.entry(entry.size).or_default().push(hash);
-            }
-        }
-        Ok(self.relink_sizes(&wanted, folders))
-    }
-
     /// Looks for the files holding the media whose file is missing or
     /// changed, searching the given folders and their subfolders, and
     /// returns every candidate found for each of them (file-management R14).
@@ -472,50 +449,13 @@ impl MediaStore {
         wanted: &HashMap<u64, Vec<ContentHash>>,
         folders: &[impl AsRef<Path>],
     ) -> Vec<(ContentHash, PathBuf)> {
-        let mut remaining: usize = wanted.values().map(Vec::len).sum();
         let mut found = Vec::new();
-        let mut stack: Vec<PathBuf> = folders.iter().map(|f| f.as_ref().to_owned()).collect();
-        stack.reverse();
-        while remaining > 0
-            && let Some(folder) = stack.pop()
-        {
-            let Ok(listing) = fs::read_dir(&folder) else {
+        for (hash, paths) in self.candidates(wanted, folders) {
+            let Some(path) = paths.first() else {
                 continue;
             };
-            let mut children: Vec<_> = listing.filter_map(Result::ok).collect();
-            children.sort_by_key(fs::DirEntry::file_name);
-            let mut subfolders = Vec::new();
-            for child in children {
-                // Symbolic links aren't followed, so a link loop can't trap
-                // the search.
-                let Ok(kind) = child.file_type() else {
-                    continue;
-                };
-                if kind.is_dir() {
-                    subfolders.push(child.path());
-                    continue;
-                }
-                if !kind.is_file() {
-                    continue;
-                }
-                let Ok(metadata) = child.metadata() else {
-                    continue;
-                };
-                let Some(candidates) = wanted.get(&metadata.len()) else {
-                    continue;
-                };
-                let path = child.path();
-                let Ok(hash) = ContentHash::of_file(&path) else {
-                    continue;
-                };
-                if !candidates.contains(&hash) || found.iter().any(|(h, _)| *h == hash) {
-                    continue;
-                }
-                self.relocate(hash, &path);
-                found.push((hash, path));
-                remaining -= 1;
-            }
-            stack.extend(subfolders.into_iter().rev());
+            self.relocate(hash, path);
+            found.push((hash, path.clone()));
         }
         found
     }

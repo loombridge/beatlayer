@@ -25,6 +25,8 @@ pub const REPLACE_FILE: &str = "file_manager.replace_file";
 pub const HOT_SWAP: &str = "file_manager.hot_swap";
 /// `file_manager.edit_file`: open a file in the external sample editor.
 pub const EDIT_FILE: &str = "file_manager.edit_file";
+/// `file_manager.set_search_folder`: the folder the Automatic Search looks in.
+pub const SET_SEARCH_FOLDER: &str = "file_manager.set_search_folder";
 /// `file_manager.delete_unused`: move unused files to the system's trash.
 pub const DELETE_UNUSED: &str = "file_manager.delete_unused";
 /// `set.backups`: the open set's backups.
@@ -42,6 +44,7 @@ pub const IDS: &[&str] = &[
     REPLACE_FILE,
     HOT_SWAP,
     EDIT_FILE,
+    SET_SEARCH_FOLDER,
     DELETE_UNUSED,
     SET_BACKUPS,
     SET_OPEN_BACKUP,
@@ -278,6 +281,16 @@ pub struct EditFileArgs {
     pub hash: String,
 }
 
+/// Arguments of `file_manager.set_search_folder`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchFolderArgs {
+    /// The folder the Automatic Search's Search Folder names. Left out, the
+    /// app asks the person for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
 /// What `file_manager.edit_file` returns.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EditedFile {
@@ -435,6 +448,19 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<EditFileArgs>()
             .result::<EditedFile>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SEARCH_FOLDER, "Search Folder")
+            .description(
+                "The folder the Automatic Search's Search Folder names, as the Set Folder… \
+                 button does: the search covers it and its subfolders. `folder` names the \
+                 folder; left out, the app asks the person for one. The folder is view \
+                 state: it isn't saved with the set and it isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SearchFolderArgs>()
+            .result::<FileManagerState>(),
     )?;
     registry.register(
         CommandSpec::new(DELETE_UNUSED, "Delete Unused Files")

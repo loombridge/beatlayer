@@ -446,6 +446,7 @@ fn a_projects_collect_and_save_rewrites_its_sets_with_a_backup() {
         hash: bl_model::ContentHash(*ContentHash::of_file(&elsewhere).unwrap().as_bytes()),
         path: bl_project::MediaPath::new("../elsewhere/Tone.wav").unwrap(),
         size: std::fs::metadata(&elsewhere).unwrap().len(),
+        reversed_from: None,
     });
     SetFile::new(&second).save(&data).unwrap();
 
@@ -601,6 +602,62 @@ fn save_a_copy_leaves_the_open_set_alone() {
     );
 }
 
+// Spec: file-management R14.
+#[test]
+fn the_search_folder_is_the_one_the_person_names() {
+    let scratch = Scratch::new("search-folder");
+    let file = scratch.path("Kick.wav");
+    let moved = scratch.path("Moved/Kick.wav");
+    wav(&file, 480);
+    let (mut shell, _song) = set_with_files(&scratch, "Song", std::slice::from_ref(&file));
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    std::fs::rename(&file, &moved).unwrap();
+
+    // The folder is named, and the search covers it.
+    shell
+        .run(
+            "file_manager.set_search_folder",
+            json!({ "folder": text(&scratch.path("Moved")) }),
+        )
+        .unwrap();
+    let state = shell.run("file_manager.state", json!({})).unwrap();
+    assert_eq!(
+        state["search"]["folder"].as_str(),
+        Some(text(&scratch.path("Moved")).as_str()),
+        "the state names the folder: {state}"
+    );
+    let report = shell
+        .run(
+            "set.relink_missing",
+            json!({ "folder": text(&scratch.path("Moved")) }),
+        )
+        .unwrap();
+    assert_eq!(report["files"], 1, "the file was found in it: {report}");
+    assert_eq!(shell.missing_files(), 0, "nothing is missing any more");
+}
+
+// Spec: file-management R10.
+#[test]
+fn the_file_manager_and_the_plugin_list_hide_each_other() {
+    let mut shell = Shell::headless();
+    shell
+        .run("view.toggle_file_manager", json!({ "open": true }))
+        .unwrap();
+    assert!(shell.file_manager_open(), "the File Manager shows");
+    shell.run("view.toggle_plugin_list", json!({})).unwrap();
+    assert!(
+        !shell.file_manager_open(),
+        "the plug-in list hides the File Manager"
+    );
+    shell
+        .run("view.toggle_file_manager", json!({ "open": true }))
+        .unwrap();
+    assert!(
+        !shell.plugin_list().visible(),
+        "the File Manager hides the plug-in list"
+    );
+}
+
 // Spec: file-management R20.
 #[test]
 fn the_file_manager_commands_are_registered_and_reach_the_agent_api() {
@@ -628,6 +685,7 @@ fn the_file_manager_commands_are_registered_and_reach_the_agent_api() {
         ("file_manager.replace_file", Permission::Edit),
         ("file_manager.hot_swap", Permission::Edit),
         ("file_manager.edit_file", Permission::External),
+        ("file_manager.set_search_folder", Permission::Read),
         ("file_manager.delete_unused", Permission::Destructive),
         ("set.backups", Permission::Read),
         ("set.open_backup", Permission::External),
@@ -641,7 +699,7 @@ fn the_file_manager_commands_are_registered_and_reach_the_agent_api() {
     // The commands read back where the readback table says.
     for (id, field) in [
         ("file_manager.replace_file", "data.audio.media"),
-        ("file_manager.hot_swap", "arms the browser"),
+        ("file_manager.hot_swap", "file_manager.state"),
     ] {
         let readback = bl_commands::readback::READBACK
             .iter()

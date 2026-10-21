@@ -2,9 +2,6 @@
 //!
 //! - A switched-off device isn't run, and the changes to its parameters
 //!   still reach it (the device-chains spec, R6).
-//! - A track whose activator is off, and whose signal nothing reads before
-//!   its mixer, runs no devices; with a pre-fader send to a return, it
-//!   keeps running and the send still sounds (the mixer spec, R5).
 //!
 //! Every block runs as a real-time section under the allocation trap.
 
@@ -82,100 +79,5 @@ fn a_switched_off_device_is_not_run_and_takes_its_parameter_change() {
     assert!(
         rig.probe.counted.load(Relaxed) > counted,
         "counting on again"
-    );
-}
-
-// Spec: IMP-15, the mixer spec, R5.
-#[test]
-fn a_deactivated_track_with_nothing_reading_it_runs_no_devices() {
-    let mut rig = Rig::new(64);
-    let a = track(&mut rig.editor, TrackKind::Audio, None);
-    device(&mut rig.editor, a, testing::COUNTER, &[]);
-    dc(&mut rig.editor, a, 0.5);
-    rig.sync();
-    rig.block(64);
-    assert_eq!(rig.probe.counted.load(Relaxed), 64, "the counter counts");
-
-    run(
-        &mut rig.editor,
-        "mixer.set_mute",
-        json!({ "track": a, "mute": true }),
-    );
-    rig.sync();
-    // The activator's gain glides to zero over 20 ms (960 frames), and the
-    // devices run until it gets there.
-    for _ in 0..20 {
-        rig.block(64);
-    }
-    let counted = rig.probe.counted.load(Relaxed);
-    rig.block(64);
-    rig.block(64);
-    assert_eq!(
-        rig.probe.counted.load(Relaxed),
-        counted,
-        "the track's devices don't run"
-    );
-    assert!(rig.last().iter().all(|&s| s == 0.0), "the track is silent");
-
-    // Back on: the devices run again.
-    run(
-        &mut rig.editor,
-        "mixer.set_mute",
-        json!({ "track": a, "mute": false }),
-    );
-    rig.sync();
-    rig.block(64);
-    rig.block(64);
-    assert!(
-        rig.probe.counted.load(Relaxed) > counted,
-        "the counter counts again"
-    );
-}
-
-// Spec: IMP-15, the mixer spec, R5.
-#[test]
-fn a_deactivated_track_with_a_pre_fader_send_keeps_running_and_the_send_sounds() {
-    let mut rig = Rig::new(64);
-    let pre = track(&mut rig.editor, TrackKind::Return, None);
-    let a = track(&mut rig.editor, TrackKind::Audio, None);
-    device(&mut rig.editor, a, testing::COUNTER, &[]);
-    dc(&mut rig.editor, a, 0.5);
-    run(
-        &mut rig.editor,
-        "mixer.set_send_tap",
-        json!({ "track": pre, "tap": "pre" }),
-    );
-    run(
-        &mut rig.editor,
-        "mixer.set_send",
-        json!({ "track": a, "to": pre, "level": 1.0 }),
-    );
-    run(
-        &mut rig.editor,
-        "mixer.set_volume",
-        json!({ "track": pre, "volume": 1.0 }),
-    );
-    rig.sync();
-    rig.block(64);
-    assert_eq!(rig.probe.counted.load(Relaxed), 64, "the counter counts");
-
-    run(
-        &mut rig.editor,
-        "mixer.set_mute",
-        json!({ "track": a, "mute": true }),
-    );
-    rig.sync();
-    // The activator and the send glide over 20 ms (960 frames).
-    for _ in 0..21 {
-        rig.block(64);
-    }
-    assert!(
-        rig.probe.counted.load(Relaxed) > 64,
-        "the pre-fader send keeps the track running"
-    );
-    assert!(
-        rig.last().iter().all(|&s| s == 0.5),
-        "the pre-fader send still sounds, {}",
-        rig.last()[0]
     );
 }

@@ -535,23 +535,6 @@ impl TrackMixer {
         self.mute
     }
 
-    /// Whether the track's output is silent: its activator is off and its
-    /// gain has reached zero (IMP-15). The gain glides to zero over 20 ms,
-    /// and the track keeps playing until it gets there, so nothing of it
-    /// is lost.
-    #[must_use]
-    pub(crate) fn silent(&self) -> bool {
-        if !self.mute {
-            return false;
-        }
-        let gains = if self.split {
-            self.split_level.value()
-        } else {
-            self.gains[0].value()
-        };
-        gains == 0.0
-    }
-
     /// The left and right gains now.
     #[must_use]
     pub fn gains(&self) -> [f64; 2] {

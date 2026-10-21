@@ -709,26 +709,10 @@ impl Compiler {
         // they feed, their place among its inputs, and the output, whose
         // device is found once the tasks have added their chains.
         let mut output_taps: Vec<(TrackId, usize, DeviceOutput)> = Vec::new();
-        // Spec: IMP-15. The tracks whose signal something reads before its
-        // mixer, and the tracks whose devices write the modulation rows:
-        // they keep running while their activator is off.
-        let mut read_before_mixer: BTreeSet<TrackId> = BTreeSet::new();
-        for track in document.tracks() {
-            if track
-                .devices_deep()
-                .any(|device| bl_model::modulator::is_signal_kind(&device.kind))
-            {
-                read_before_mixer.insert(track.id());
-            }
-        }
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
-            if edge.tap != Tap::PostMixer || edge.output.is_some() || edge.via.sidechain().is_some()
-            {
-                read_before_mixer.insert(edge.from);
-            }
             let route = self.route(&mut build, document, &solo, edge, to);
             // A route that takes a device's extra output carries it whatever
             // tap it names, so its tap needs no copy of the track's own
@@ -781,9 +765,6 @@ impl Compiler {
                     delay: NO_DELAY,
                 });
                 taps.insert((track.id(), Tap::PostFx));
-                // Spec: IMP-15. The Cue Out reads every track after its
-                // devices, so no track is left out of the schedule.
-                read_before_mixer.insert(track.id());
             }
         }
 
@@ -798,7 +779,7 @@ impl Compiler {
                 document.settings().crossfader,
                 inputs.remove(&id).unwrap_or_default(),
                 &mut sidechain_inputs,
-                !read_before_mixer.contains(&id),
+                clips_audible(track),
             );
         }
         // The Cue Out's task comes last, and plays on the device channels
@@ -1073,9 +1054,6 @@ impl Compiler {
             task_times: (0..tasks)
                 .map(|_| core::sync::atomic::AtomicU64::new(0))
                 .collect(),
-            idle: (0..tasks)
-                .map(|_| core::sync::atomic::AtomicBool::new(false))
-                .collect(),
             bus: Shared::new(vec![
                 0.0;
                 (build.modulators.len() + build.signals.len())
@@ -1338,7 +1316,6 @@ impl Compiler {
             midi_keep: None,
             dependents: Span::default(),
             dependencies,
-            idle_ok: false,
         });
     }
 
@@ -1352,7 +1329,7 @@ impl Compiler {
         crossfader: f64,
         inputs: Vec<Input>,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
-        idle_ok: bool,
+        audible: bool,
     ) {
         let mut dependencies = inputs.len() as u32;
         let input_start = build.inputs.len() as u32;
@@ -1362,7 +1339,6 @@ impl Compiler {
             end: build.inputs.len() as u32,
         };
         let config = self.config.node_config();
-        let audible = clips_audible(track);
         // The track's own input from the audio interface, Ext. In
         // (WP-2.13): its own route, whose Monitor gate opens and closes it
         // like any other input.
@@ -1463,7 +1439,6 @@ impl Compiler {
             post_fx: None,
             dependents: Span::default(),
             dependencies,
-            idle_ok,
         });
     }
 

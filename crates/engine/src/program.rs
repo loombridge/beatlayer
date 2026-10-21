@@ -199,10 +199,6 @@ pub struct EngineProgram {
     /// processing time a task's is what the Performance Impact indicator
     /// shows (the mixer spec, R31).
     pub(crate) task_times: Vec<core::sync::atomic::AtomicU64>,
-    /// Whether each task's activator is off and nothing reads the track's
-    /// signal before its mixer (IMP-15): its devices don't run. The flag is
-    /// shared, so a rack's chains, which run on another thread, know.
-    pub(crate) idle: Vec<core::sync::atomic::AtomicBool>,
 }
 
 /// The frames a late row (WP-5.11) lags its modulator's by, and the longest
@@ -737,10 +733,6 @@ pub(crate) struct Task {
     pub(crate) dependents: Span,
     /// How many tasks feed this one.
     pub(crate) dependencies: u32,
-    /// Whether nothing reads this track's signal before its mixer (IMP-15):
-    /// no pre-fader send, no Pre FX or Post FX tap, and no sidechain keyed
-    /// from it. Its chain then runs only while its activator is on.
-    pub(crate) idle_ok: bool,
 }
 
 /// A parameter change routed to a slot, for the block being processed.
@@ -783,16 +775,6 @@ fn gather(
         }
     }
     scratch.len() as u64
-}
-
-/// Whether a track's mixer has its activator off and its gain at zero
-/// (IMP-15): the track's output is silent, and nothing reads its signal
-/// before its mixer, so its chain needn't run.
-fn mixer_muted(turn: &Turn<'_>, mixer: u32) -> bool {
-    match turn.slot(mixer).node.as_ref() {
-        Some(Instance::Mixer(mixer)) => mixer.silent(),
-        _ => false,
-    }
 }
 
 impl EngineProgram {
@@ -1262,12 +1244,6 @@ impl EngineProgram {
             turn.buffer(t)[c * stride..c * stride + frames].fill(0.0);
         }
 
-        // Spec: IMP-15. A track whose activator is off, and whose signal
-        // nothing reads before its mixer, runs no devices: its chain is
-        // left out of the schedule while it is off.
-        let idle = task.idle_ok && mixer_muted(&turn, task.mixer);
-        self.idle[t].store(idle, core::sync::atomic::Ordering::Relaxed);
-
         let notes = 2 * t;
         turn.notes(notes).clear();
 
@@ -1416,7 +1392,6 @@ impl EngineProgram {
             scratch: &mut lane.events,
             device: &mut lane.device,
             wake,
-            idle,
             delivered: 0,
         };
         let ended = self.run_steps(&mut pass, task, task.chain, t, notes, 0);
@@ -1952,9 +1927,6 @@ struct Pass<'a> {
     device: &'a mut [f32],
     /// The threads working on the block with this one, if there are any.
     wake: Option<&'a Wake>,
-    /// Whether the task's activator is off and nothing reads the track's
-    /// signal before its mixer (IMP-15): its devices don't run.
-    idle: bool,
     delivered: u64,
 }
 
@@ -2002,7 +1974,7 @@ impl EngineProgram {
                 .iter()
                 .find(|s| s.device == slot)
                 .copied();
-            let bypass = turn.slot(slot).bypass || pass.idle;
+            let bypass = turn.slot(slot).bypass;
             // What the detector hears, made before the device runs.
             let mut heard = None;
             if let Some(sidechain) = sidechain {
@@ -2604,7 +2576,6 @@ impl EngineProgram {
             scratch: &mut lane.events,
             device: &mut lane.device,
             wake: Some(wake),
-            idle: self.idle[t].load(core::sync::atomic::Ordering::Relaxed),
             delivered: 0,
         };
         let ran = panic::catch_unwind(AssertUnwindSafe(|| {

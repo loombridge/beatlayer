@@ -1,7 +1,7 @@
 # Freeze and bounce: Freeze Track, Bounce Track in Place, Bounce to New Track, Bounce Group, and Paste Bounced Audio
 
 - **Status:** draft
-- **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing)
+- **Work packages:** WP-4.14 (Freeze Track and unfreezing, with group and return tracks, IMP-19: R1 to R17, and R27 to R29 for freezing), WP-4.15 (the bounces and Paste Bounced Audio, with mono bounces, IMP-10 and rule G3: R18 to R26, and R27 to R29 for bouncing); WP-6.21 (take lanes in freezes and bounces, R30)
 - **Parity-matrix row:** Audio clips and warping: Freeze Track; Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -27,6 +27,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | S8 | Spec | [offline plug-in renders](offline-plugin-renders.md) R1 to R11; [export](export.md) R3, R10, R14 | A render borrows the engine's CLAP, VST3 and Audio Unit plug-ins and stops the transport while it does; renders are the same at any block size; a cancelled render leaves nothing. |
 | S9 | Spec | [routing](routing.md) R12 and R15; [mixer](mixer.md) R4 | Post FX is a track's signal after its devices and before its mixer; a track at rest passes its signal through to the bit. |
 | S10 | Spec | [audio clip editing](audio-clip-editing.md) R1 to R6 and R24; [arrangement editing](arrangement-editing.md) R6, R8, R11; [agent permissions](agent-permissions.md) R1 | Processed files' folders, format, names, media table, and Temporary Folder; consolidating on a frozen track; a clip placed over another replaces what it covers; Split; Paste's placing; a call that places clips over others is destructive. |
+| S11 | Release notes and spec | Live 12 release notes, 12.2.5 and 12.3, read 20 October 2026; [comping](comping.md) R1, R2, R14 | Bounce to New Track is unavailable for a time selection holding only take-lane clips, and skips a track whose selection holds only take-lane clips or deactivated clips, making no empty track; Paste Bounced Audio pastes onto a take lane. A track plays its main lane, and a take lane only while it's auditioned |
 
 ## Rules
 
@@ -71,6 +72,10 @@ This spec covers what each command renders, what it does to the tracks and clips
 - **R28.** The items sit at their menus.md rows in Live's order, with their keys: Freeze Track and Bounce Track in Place enabled with a track that can be frozen or bounced selected, Bounce to New Track with clips or time selected, and Paste Bounced Audio once a source is copied; S-TRACK-017, S-BOUNCE-001, and S-BOUNCE-002 are bound in their contexts. Frozen clips are drawn as frozen, in Beatlayer's own colours, and tail regions crosshatched. (S1, S6)
 - **R29.** An agent reaches every freeze and bounce through its command, with the tracks, clips, and ranges spelled out or the selection, and the call returns when the edit has landed, with the new tracks' and clips' IDs. (D17)
 
+**Take lanes (WP-6.21)**
+
+- **R30.** A freeze and every bounce render a track's main lane: its take lanes' clips aren't in them, auditioned or not. On a frozen track a take lane can't be auditioned and nothing is copied from a take lane to the main lane, both refused with the frozen-track message as R8 refuses new clips, while take lanes can still be inserted, renamed, moved and deleted and their clips edited, since they play no part in the freeze (Beatlayer's own). Bounce to New Track skips a source track whose selected material is all on take lanes or deactivated, making no track for it, and is disabled when the whole selection is; Bounce Track in Place gives the new track no take lanes (Beatlayer's own). Paste Bounced Audio onto a take lane places the audio on that lane (R25). (S1, S3, S11)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -104,3 +109,4 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R27 | `crates/shell/tests/bounce.rs`, `the_same_bounce_writes_the_same_bytes_at_any_block_size`; `rtsan/tests/freeze.rs`, `frozen_playback_passes_under_rtsan` | shell test, RealtimeSanitizer |
 | R28 | `crates/shell-spec/src/context_menus.rs`, `the_menus_follow_lives_rows_and_separators_in_order`; `crates/ui/tests/freeze.rs`, `freeze_and_bounce_items_enable_with_the_selection`; `xtask/src/keymap.rs` | unit, UI script, keymap test |
 | R29 | `crates/cli/tests/agent_bounce.rs`, `an_agent_freezes_one_track_and_bounces_another_headless` | agent test |
+| R30 | to be written in WP-6.21 | shell test |

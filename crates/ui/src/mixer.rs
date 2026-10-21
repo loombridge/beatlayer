@@ -13,15 +13,15 @@
 
 use bl_model::modulator::ModTarget;
 use bl_model::{
-    AutomationTarget, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
-    MixerParam, PanMode, TrackDelay, TrackId, TrackKind,
+    AutomationTarget, ChainId, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS,
+    MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, RackKind, TrackDelay, TrackId, TrackKind,
 };
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
     volume_spoken, volume_text,
 };
-use bl_shell::mixer_view::MixerOf;
+use bl_shell::mixer_view::{ChainStrip, MixerOf, RackFold};
 use bl_shell::mixer_view_commands as ids;
 use bl_shell::{Invocation, Shell};
 use egui::accesskit::{self, Action, Role};
@@ -33,9 +33,9 @@ use serde_json::json;
 
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
-    ARRANGEMENT_TITLE_ROW, Column, ColumnKind, MixerLayout, SCALE_LABELS, Sections, SessionLayout,
-    StripLayout, crossfade_buttons, crossfader_slider, in_out_row, send_knob, split_pans,
-    track_options,
+    ARRANGEMENT_TITLE_ROW, ChainColumn, ChainStripLayout, Column, ColumnKind, MixerLayout,
+    SCALE_LABELS, Sections, SessionLayout, StripLayout, TrackColumn, crossfade_buttons,
+    crossfader_slider, in_out_row, send_knob, split_pans, track_options,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -294,6 +294,7 @@ impl MixerUi {
         let returns: Vec<TrackId> = doc.returns().collect();
         let sections = sections(shell);
         let scroll = shell.mixer_view().of(of).scroll as f32;
+        let folds = folds(shell, &columns);
         let region = Id::new(("mixer", of));
         let _ = ui.interact(area, region, Sense::hover());
         ui.ctx().accesskit_node_builder(region, |node| {
@@ -318,7 +319,7 @@ impl MixerUi {
         };
         let layout = MixerLayout::compute(
             sections_area,
-            columns.len(),
+            &folds.columns,
             returns.len(),
             sections,
             scroll,
@@ -342,6 +343,13 @@ impl MixerUi {
         );
         for column in layout.every_column() {
             self.built += 1;
+            if let ColumnKind::Chain(chain) = column.kind {
+                let Some(strip) = folds.strips.iter().find(|s| s.chain == chain.chain) else {
+                    continue;
+                };
+                self.chain_column(&mut ui, shell, theme, column, strip, &layout, events);
+                continue;
+            }
             let track = column_track(doc, &columns, &returns, column);
             let Some(t) = doc.track(track) else {
                 continue;
@@ -465,6 +473,66 @@ impl MixerUi {
         }
         self.scroll(&ui, sections_area, of, events);
         self.focus(shell, &layout, &columns, of, events);
+        // A chain dropped out of the mixer's tracks (drum racks spec, R23,
+        // R24).
+        chain_extract(&ui, shell, &layout, events);
+    }
+
+    /// A chain's strip in the mixer (racks spec, R27): the column, the
+    /// chain's colour along its bottom, and the chain list's controls for
+    /// the chain.
+    #[expect(clippy::too_many_arguments, reason = "the strip's inputs")]
+    fn chain_column(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        column: &Column,
+        strip: &ChainStrip,
+        layout: &MixerLayout,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let group = crate::chain_strips::strip_id(strip.chain);
+        let clip = column.rect.intersect(layout.tracks);
+        // The column's group, in the mixer's own group.
+        let _ = ui.interact(clip, group, Sense::hover());
+        ui.ctx().accesskit_node_builder(group, |node| {
+            node.set_role(Role::Group);
+            node.set_label(format!("Chain Strip {} of {}", strip.name, strip.rack_name));
+            node.set_bounds(bounds(clip));
+        });
+        let mut column_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(clip)
+                .accessibility_parent(group),
+        );
+        column_ui.set_clip_rect(clip.intersect(layout.area));
+        let painter = column_ui.painter();
+        painter.rect_filled(
+            column.rect.shrink2(vec2(0.5, 0.0)),
+            0.0,
+            theme.colors.lane.0,
+        );
+        painter.line_segment(
+            [column.rect.right_top(), column.rect.right_bottom()],
+            Stroke::new(1.0, theme.colors.lane_line.0),
+        );
+        // The chain's colour along the column's bottom, where a track's own
+        // colour runs.
+        if let Some(colour) = strip.colour {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(column.rect.left() + 0.5, layout.colour.0),
+                    pos2(column.rect.right() - 0.5, layout.colour.1),
+                ),
+                0.0,
+                crate::rack_view::swatch(theme, colour),
+            );
+        }
+        if let Some(span) = layout.strip {
+            let strip_layout = ChainStripLayout::compute(column.rect, span);
+            crate::chain_strips::strip(&mut column_ui, shell, theme, &strip_layout, strip, events);
+        }
     }
 
     /// Left and Right with a column focused move the track selection, and
@@ -607,8 +675,17 @@ fn title_bars(
     let columns = shell.mixer_columns();
     let returns: Vec<TrackId> = doc.returns().collect();
     let scroll = shell.mixer_view().of(of).scroll as f32;
-    let layout = MixerLayout::compute(row, columns.len(), returns.len(), sections(shell), scroll);
+    let folds = folds(shell, &columns);
+    let layout = MixerLayout::compute(row, &folds.columns, returns.len(), sections(shell), scroll);
     for column in layout.every_column() {
+        if let ColumnKind::Chain(chain) = column.kind {
+            let Some(strip) = folds.strips.iter().find(|s| s.chain == chain.chain) else {
+                continue;
+            };
+            let bar = column.rect.shrink2(vec2(0.5, 0.0)).intersect(layout.tracks);
+            crate::chain_strips::title_bar(ui, shell, theme, bar, strip, events);
+            continue;
+        }
         let track = column_track(doc, &columns, &returns, column);
         let Some(t) = doc.track(track) else {
             continue;
@@ -625,9 +702,27 @@ fn title_bars(
             0.0,
             title_colour(theme, track, t.kind()).gamma_multiply(0.82),
         );
-        if !rename_edit(ui, theme, bar, track, t.name(), events) {
+        // The fold button for the track's rack, at the bar's right.
+        let fold = folds.racks.iter().find(|r| r.track == track).map(|r| {
+            (
+                r.rack,
+                r.folded,
+                Rect::from_min_max(
+                    pos2(bar.right() - 12.0, bar.top() + 2.0),
+                    pos2(bar.right() - 2.0, bar.bottom() - 2.0),
+                ),
+            )
+        });
+        let name = Rect::from_min_max(
+            pos2(bar.left() + 4.0, bar.top()),
+            pos2(
+                fold.map_or(bar.right(), |(_, _, rect)| rect.left()) - 2.0,
+                bar.bottom(),
+            ),
+        );
+        if !rename_edit(ui, theme, name, track, t.name(), events) {
             painter.text(
-                pos2(bar.left() + 4.0, bar.center().y),
+                pos2(name.left(), name.center().y),
                 Align2::LEFT_CENTER,
                 t.name(),
                 theme.small_font(),
@@ -635,6 +730,11 @@ fn title_bars(
             );
         }
         let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        // The fold button for the track's rack, at the bar's right, over the
+        // title bar's own click.
+        if let Some((rack, folded, rect)) = fold {
+            crate::chain_strips::fold_button(ui, theme, rect, rack, folded, events);
+        }
         crate::rack_view::focus_track_under_drag(ui, shell, track, bar, events);
         let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
         menus.title(
@@ -647,6 +747,136 @@ fn title_bars(
             events,
         );
     }
+    // A chain dropped out of the row leaves its rack (drum racks spec,
+    // R23, R24) before a drop among the strips moves it (racks spec, R29).
+    chain_extract(ui, shell, &layout, events);
+    chain_drop(ui, &layout, &folds.strips, events);
+}
+
+/// Moves a chain dragged from its strip among its rack's chains (racks
+/// spec, R29), where it lands among the rack's strips.
+fn chain_drop(ui: &Ui, layout: &MixerLayout, strips: &[ChainStrip], events: &mut Vec<UiEvent>) {
+    let Some(drag) = egui::DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(chain) = drag.chains.first().copied() else {
+        return;
+    };
+    let Some(strip) = strips.iter().find(|s| s.chain == chain) else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return;
+    };
+    // The chain lands where it is dropped, in the row of title bars that
+    // holds the strips.
+    if !layout.area.contains(pointer) {
+        return;
+    }
+    // The rack's strips, in order, and where each is.
+    let siblings: Vec<(ChainId, f32)> = strips
+        .iter()
+        .filter(|s| s.rack == strip.rack)
+        .filter_map(|s| {
+            let column = layout
+                .columns
+                .iter()
+                .find(|c| matches!(c.kind, ColumnKind::Chain(k) if k.chain == s.chain))?;
+            Some((s.chain, column.rect.center().x))
+        })
+        .collect();
+    // Where the chain would land: the rack's strips left of the pointer,
+    // the dragged one out of the way.
+    let at = siblings
+        .iter()
+        .filter(|(other, x)| *other != chain && *x < pointer.x)
+        .count();
+    if ui.input(|i| i.pointer.any_released()) {
+        egui::DragAndDrop::clear_payload(ui.ctx());
+        events.push(UiEvent::BeginNamedGesture("Move Chain".to_owned()));
+        events.push(UiEvent::Invoke(Invocation::new(
+            "chain.move",
+            json!({ "chain": chain, "rack": strip.rack, "index": at }),
+        )));
+        events.push(UiEvent::EndGesture);
+    }
+}
+
+/// Extracts a chain dragged out of the mixer (drum racks spec, R23, R24): a
+/// drum chain dropped on the drop area beside the tracks leaves its rack
+/// for a new MIDI track, and a return chain dropped on the returns leaves
+/// it for a new return track. Either is one undo step, named for the drag.
+fn chain_extract(ui: &Ui, shell: &Shell, layout: &MixerLayout, events: &mut Vec<UiEvent>) {
+    let Some(drag) = egui::DragAndDrop::payload::<crate::rack_view::ChainDrag>(ui.ctx()) else {
+        return;
+    };
+    let Some(chain) = drag.chains.first().copied() else {
+        return;
+    };
+    let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
+        return;
+    };
+    let doc = shell.editor().document();
+    let Some(row) = doc.chain(chain) else {
+        return;
+    };
+    let drum = doc.chain_rack(chain).and_then(|r| r.rack_kind()) == Some(RackKind::Drum);
+    let command =
+        if drum && !row.is_return && layout.drop_area.is_some_and(|drop| drop.contains(pointer)) {
+            "chain.extract"
+        } else if row.is_return && layout.returns.iter().any(|c| c.rect.contains(pointer)) {
+            "chain.extract_return"
+        } else {
+            return;
+        };
+    if !ui.input(|i| i.pointer.any_released()) {
+        return;
+    }
+    egui::DragAndDrop::clear_payload(ui.ctx());
+    let name = if command == "chain.extract" {
+        "Extract Chain"
+    } else {
+        "Extract Return Chain"
+    };
+    events.push(UiEvent::BeginNamedGesture(name.to_owned()));
+    events.push(UiEvent::Invoke(Invocation::new(
+        command,
+        json!({ "chain": chain }),
+    )));
+    events.push(UiEvent::EndGesture);
+}
+
+/// The mixer's columns and the racks and chains folded out in them (racks
+/// spec, R27): each track's column, then the chain strips folded out of
+/// its rack.
+pub(crate) struct Folds {
+    /// The columns, in order.
+    pub(crate) columns: Vec<TrackColumn>,
+    /// The racks whose chains fold out.
+    pub(crate) racks: Vec<RackFold>,
+    /// The chains folded out as strips.
+    pub(crate) strips: Vec<ChainStrip>,
+}
+
+/// The mixer's columns and the racks and chains folded out in them.
+pub(crate) fn folds(shell: &Shell, tracks: &[TrackId]) -> Folds {
+    let doc = shell.editor().document();
+    let (racks, strips) = shell.mixer_view().folds(doc, shell.arrangement());
+    let mut columns: Vec<TrackColumn> = Vec::with_capacity(tracks.len() + strips.len());
+    for track in tracks {
+        columns.push(TrackColumn::track());
+        for strip in strips.iter().filter(|s| s.track == *track) {
+            columns.push(TrackColumn::chain(ChainColumn {
+                chain: strip.chain,
+                rack: strip.rack,
+            }));
+        }
+    }
+    Folds {
+        columns,
+        racks,
+        strips,
+    }
 }
 
 /// The track a column shows.
@@ -658,6 +888,7 @@ fn column_track(
 ) -> TrackId {
     match column.kind {
         ColumnKind::Track => columns[column.index],
+        ColumnKind::Chain(_) => columns[column.index],
         ColumnKind::Return => returns[column.index],
         ColumnKind::Main => doc.main_id(),
     }
@@ -667,6 +898,7 @@ fn column_track(
 fn activator_label(column: &Column) -> String {
     match column.kind {
         ColumnKind::Track => (column.index + 1).to_string(),
+        ColumnKind::Chain(_) => String::new(),
         ColumnKind::Return => char::from(b'A' + (column.index % 26) as u8).to_string(),
         ColumnKind::Main => String::new(),
     }
@@ -787,6 +1019,7 @@ impl StripParts<'_> {
             let rect = send_knob(column.rect, span, index, returns.len());
             match column.kind {
                 ColumnKind::Main => self.pre_post(ui, rect, to, index, events),
+                ColumnKind::Chain(_) => {}
                 ColumnKind::Return => {
                     let letter = bl_shell::routing::return_letter(index);
                     let name = doc

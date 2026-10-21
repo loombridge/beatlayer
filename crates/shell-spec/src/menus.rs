@@ -431,7 +431,11 @@ const CREATE: &[Row] = &[
     (SAMPLE_INSERT, "Insert Transient", Key(&["S-SAMPLE-011"])),
     (SAMPLE_DELETE, "Delete Transient", Key(&["S-SAMPLE-012"])),
     SEPARATOR,
-    ("M-CREATE-011", "Slice to New MIDI Track", Pending(None)),
+    (
+        "M-CREATE-011",
+        "Slice to New MIDI Track",
+        Cmd(crate::slice::OPEN),
+    ),
     (
         "M-CREATE-012",
         "Convert Harmony to New MIDI Track",

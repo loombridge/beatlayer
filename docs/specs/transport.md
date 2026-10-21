@@ -1,9 +1,9 @@
 # Transport: play, stop, continue, the insert marker, and the Arrangement loop
 
-- **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-1.5
+- **Status:** partial (R1 to R20 each have a passing test; R21 and R22 are WP-6.24's, R23 WP-6.59's)
+- **Work packages:** WP-1.5 (R1 to R20); WP-6.24 (the song start time and the quantised locate that locators and the scrub area use, R21 and R22); WP-6.59 (the scrub area's held loop, R23)
 - **Parity-matrix row:** Views and workflow: Arrangement View; Control Bar
-- **Checked against:** the Live 12 reference manual, read 10 October 2026, and the UI parity reference's observations of Live 12.4.3 (10 October 2026)
+- **Checked against:** the Live 12 reference manual, read 10 October 2026, and for R21 to R23 the online edition, read 20 October 2026; and the UI parity reference's observations of Live 12.4.3 (10 October 2026)
 
 ## The behaviour
 
@@ -25,6 +25,11 @@ This spec covers the Arrangement's transport. It leaves to other specs and packa
 | S6 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [menus.md](../ui-parity/menus.md) (WP-0.13) | The Playback menu: Play, which toggles with Stop (M-PLAY-001); Continue Playback (M-PLAY-002); Play From Insert Marker (M-PLAY-003); Return Play Position to 1.1.1, with no key shown (M-PLAY-004); Move Insert Marker To Playhead (M-PLAY-005). |
 | S7 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [layout.md](../ui-parity/layout.md) (WP-0.13) | The Arrangement Position fields, where typing 3.3.1 moves the insert marker exactly there (L-CTRL-013); the Play and Stop buttons (L-CTRL-014); the Loop Start fields, the Arrangement Loop switch, and the Loop Length fields (L-CTRL-016 to L-CTRL-018). |
 | S8 | Spec | [musical-time.md](musical-time.md), "What Live does", items 2 and 8 | The arrangement starts at 1.1.1, tick 0. |
+| S9 | Manual | Live 12 reference manual (online edition, read 20 October 2026), chapter 6, section 6.4 "Launching the Arrangement with Locators" | Set Song Start Time Here, on a locator, makes playback start at the locator instead of at the selection, as it otherwise does. |
+| S10 | Manual | Same manual, section 6.6 "The Arrangement Loop" | The loop brace's context menu holds the same command, making playback start at the brace's start. |
+| S11 | Manual | Same manual, sections 6.1, 6.3 and 6.4 | Jumps to locators, and from a click in the scrub area, are quantised by the global launch quantisation (the Control Bar's Quantization Menu). |
+| S12 | Spec | [launch-quantisation.md](launch-quantisation.md) R13; [time-editing.md](time-editing.md) R5, R6, R10, R11 | The global launch quantisation's values and switch; the locator jumps, the scrub area's click and the song start time that use these rules. |
+| S13 | Manual | Same manual (online edition, read 20 October 2026), sections 6.1 and 6.3 | Holding the mouse button on a point of the scrub area plays a repeating section there, its length set by the global launch quantisation. |
 
 ## Rules
 
@@ -37,7 +42,7 @@ This spec covers the Arrangement's transport. It leaves to other specs and packa
 - **R7.** Setting the play position (the Arrangement Position fields) moves the insert marker. While playing, playback jumps there at once. While stopped, nothing plays, and Continue still resumes where playback stopped. (S1, S7)
 - **R8.** Return Play Position to 1.1.1 and the Home key (Fn-Left on a Mac) set the play position to 1.1.1, as R7 does. The menu item runs `transport.return_to_start` and Home runs `transport.locate` at 1.1.1 (added in WP-1.18). (S1, S2, S5, S6)
 - **R9.** Move Insert Marker To Playhead (Cmd-Shift-Space, Ctrl-Shift-Space) puts the insert marker at the play position: where the song is playing, or where it stopped. (S5, S6)
-- **R10.** Play From Insert Marker (Option-Space, Ctrl-Space, in the Arrangement) starts playback from the insert marker. Beatlayer has no time selections or song start time yet, so it does what Play does; it will differ from Play when Play starts from a selection (S4). (S4, S5, S6)
+- **R10.** Play From Insert Marker (Option-Space, Ctrl-Space, in the Arrangement) starts playback from the insert marker, as Play does while no song start time is set; with one set, it still starts from the insert marker (R21). (S4, S5, S6)
 - **R11.** Play, while playing, starts again from the insert marker.
 - **R12.** The insert marker and the play position never go before 1.1.1: a position before it is taken as 1.1.1. (S1, S8)
 - **R13.** With the loop on, playback that reaches the loop brace's end goes on from its start: the frame after the last one before the end is the start's frame, sample-exact at any block size. It loops until the loop is switched off or playback stops. (S3)
@@ -48,6 +53,9 @@ This spec covers the Arrangement's transport. It leaves to other specs and packa
 - **R18.** A new set's brace starts at 1.1.1 and is four 4/4 bars (16 quarter notes) long, with the loop off.
 - **R19.** Every transport action is a registered command, runnable by ID with JSON arguments (D17). Playback commands are in the `read` class, because they change nothing in the project or on disk; the loop commands are `edit`, because undo reverses them. Their default keys: Space runs Play/Stop, Shift-Space Continue Playback, Home sets the play position to 1.1.1, Option-Space (Ctrl-Space) Play From Insert Marker in the Arrangement, and Cmd-Shift-Space (Ctrl-Shift-Space) Move Insert Marker To Playhead there. Play, Stop, and the loop commands have no key of their own in Live's shortcut list. (S5, S6)
 - **R20.** After every audio block, the engine publishes for the UI, through a triple buffer and without a lock, whether it's playing, the playhead in frames and ticks, the insert marker, and the loop it plays, all from the same block, so the UI's playhead shows where the engine is. (WP-1.5's acceptance; the architecture's "Real-time rules")
+- **R21.** While the set has a song start time ([time-editing.md](time-editing.md) R10), Play, and Play/Stop while stopped, start playback from it instead of from the insert marker or the time selection, and leave the insert marker where it is (Beatlayer's own). Play From Insert Marker (R10), Continue Playback (R6), a locate (R7) and a second Stop (R4) are as they were. (S9, S10)
+- **R22.** A quantised locate (`transport.locate` with `quantized` set) moves the playback position as R7 does, except that while the song plays the jump waits for the next line of the global launch quantisation after the frame on which the engine receives it ([launch-quantisation.md](launch-quantisation.md) R13), with quantisation off or None at once, and lands on that line's exact frame at any block size. While stopped it locates at once. A second quantised locate before the line replaces the first (Beatlayer's own). The engine works out the line from its own playhead, as it does for a clip's launch, with nothing allocated or locked. Locator jumps and clicks in the scrub area use it ([time-editing.md](time-editing.md) R5, R6, R11). (S11, S12)
+- **R23.** A held scrub loop (`transport.scrub` with `held`, [time-editing.md](time-editing.md) R25) is a loop of its own beside the Arrangement loop: from the moment it's asked for, playback jumps, as R22's quantised locate does, to the span's start, and plays the span again and again, wrapping on its exact frames as R13 does, until it's released; then playback carries on from where it is, and the Arrangement loop applies again. While stopped, it starts playback at the span's start. The Arrangement loop's brace and switch don't change, and nothing is an undo step. (S13, S12)
 
 ## Tests
 
@@ -67,5 +75,8 @@ This spec covers the Arrangement's transport. It leaves to other specs and packa
 | R17 | `crates/model/tests/command_registry.rs`, `bad_requests_change_nothing`; `crates/model/src/document.rs`, `the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default` | unit |
 | R18 | `crates/model/src/document.rs`, `a_new_sets_loop_is_four_bars_from_the_start_and_off` | unit |
 | R20 | `crates/engine/tests/transport.rs`, `the_published_playhead_follows_every_block`; `crates/engine/tests/playhead.rs`, `the_ui_thread_sees_the_playhead_the_engine_played` (a real-time audio thread and a reader thread) | unit, real-time |
+| R21 | to be written in WP-6.24 | |
+| R22 | to be written in WP-6.24 | |
+| R23 | to be written in WP-6.59 | |
 
 Scheduled transport commands (D17's commands at a bar and beat) act on their song frames too: `crates/engine/tests/transport.rs`, `scheduled_transport_commands_act_on_their_song_frames`. Agents drive the same commands through the agent API (WP-1.15), on the engine's queue: `crates/cli/tests/agent.rs`, `an_agent_plays_locates_and_stops_the_transport_on_exact_samples` (play, locate, continue, and stop, with a scheduled jump and stop, every frame against a model of these rules at three block sizes). The real-time rules hold throughout: every engine test runs its blocks under the allocation trap, and `rtsan/tests/transport.rs` runs the transport under RealtimeSanitizer.

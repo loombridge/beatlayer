@@ -6,7 +6,7 @@ use std::any::Any;
 use std::sync::LazyLock;
 
 use bl_core::midi::MidiMessage;
-use bl_core::time::{Frames, SampleRate, TempoMap};
+use bl_core::time::{Frames, SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
@@ -514,6 +514,9 @@ pub struct Block<'a> {
     pub(crate) transport: TransportInfo,
     pub(crate) sample_rate: SampleRate,
     pub(crate) tempo: &'a TempoMap,
+    /// The song's time-signature map, which places bar lines on ticks
+    /// (WP-5.26b: a device that follows the launch quantisation needs it).
+    pub(crate) signatures: &'a TimeSignatureMap,
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
@@ -547,6 +550,9 @@ pub struct Block<'a> {
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
 static DEFAULT_TEMPO: LazyLock<TempoMap> = LazyLock::new(TempoMap::default);
+
+/// The time-signature map of a block made outside a program: 4/4 throughout.
+static DEFAULT_SIGNATURES: LazyLock<TimeSignatureMap> = LazyLock::new(TimeSignatureMap::default);
 
 impl<'a> Block<'a> {
     /// A block over planar audio: `channels` channels of `frames` frames,
@@ -589,6 +595,7 @@ impl<'a> Block<'a> {
             transport,
             sample_rate,
             tempo: &DEFAULT_TEMPO,
+            signatures: &DEFAULT_SIGNATURES,
             sidechain: None,
             external: None,
             outputs: None,
@@ -698,6 +705,12 @@ impl<'a> Block<'a> {
         Self { tempo, ..self }
     }
 
+    /// The same block under another time-signature map.
+    #[must_use]
+    pub fn with_signatures(self, signatures: &'a TimeSignatureMap) -> Self {
+        Self { signatures, ..self }
+    }
+
     /// Frames in the block.
     pub fn frames(&self) -> usize {
         self.frames
@@ -757,6 +770,14 @@ impl<'a> Block<'a> {
     /// Its conversions allocate nothing, so a node may call them.
     pub fn tempo(&self) -> &'a TempoMap {
         self.tempo
+    }
+
+    /// The song's time-signature map, which places bar lines on ticks: the
+    /// song position of a bar line is
+    /// `tempo().ticks_to_frames(signatures().bar_start(bar), sample_rate())`.
+    /// A device that follows the launch quantisation needs it.
+    pub fn signatures(&self) -> &'a TimeSignatureMap {
+        self.signatures
     }
 
     /// The parameter changes in this block, in the order they take effect.

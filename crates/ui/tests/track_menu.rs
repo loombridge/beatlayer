@@ -12,7 +12,7 @@ mod common;
 use bl_model::{TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands::TOGGLE;
-use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout};
+use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::main_window::{UiEvent, main_view_id};
 use bl_ui::mixer::column_id;
@@ -86,7 +86,13 @@ fn header_title(h: &mut Harness, name: &str) -> Pos2 {
 fn title_in(h: &Harness, row: Rect, track: TrackId) -> Pos2 {
     let columns = h.shell.mixer_columns();
     let returns = h.shell.editor().document().returns().count();
-    let layout = MixerLayout::compute(row, columns.len(), returns, Sections::DEFAULT, 0.0);
+    let layout = MixerLayout::compute(
+        row,
+        &vec![TrackColumn::track(); columns.len()],
+        returns,
+        Sections::DEFAULT,
+        0.0,
+    );
     let at = columns.iter().position(|t| *t == track).unwrap();
     pos2(layout.columns[at].rect.center().x, row.center().y)
 }

@@ -396,3 +396,85 @@ fn title_bar_keys_toggle_the_selected_tracks_as_one_step() {
         .unwrap();
     assert!(mixer(&shell, t[0]).solo);
 }
+
+// Spec: racks R27.
+#[test]
+fn a_racks_chains_fold_out_as_strips_and_the_state_reports_them() {
+    let mut shell = Shell::headless();
+    let track = tracks(&shell)[0];
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added = shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "instrument" } },
+                "name": "Rack",
+                "role": "instrument",
+            } }),
+        )
+        .unwrap();
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let mut chains = Vec::new();
+    for (index, name) in ["Keys", "Bass"].into_iter().enumerate() {
+        let id: bl_model::ChainId = shell.new_id();
+        shell
+            .run(
+                "chain.add",
+                json!({ "rack": rack, "index": index, "chain": { "id": id, "name": name, "devices": [] } }),
+            )
+            .unwrap();
+        chains.push(id);
+    }
+    // A new set has no rack folded out.
+    assert!(state(&mut shell).chains.is_empty());
+    let before = undo_steps(&shell);
+    shell
+        .invoke(ids::FOLD_CHAINS, json!({ "rack": rack }))
+        .unwrap();
+    // The chains are folded out as strips, and the state reports them.
+    let shown = state(&mut shell);
+    assert_eq!(shown.chains.len(), 2);
+    assert_eq!(shown.chains[0].chain, chains[0]);
+    assert_eq!(shown.chains[0].name, "Keys");
+    assert_eq!(shown.chains[0].rack, rack);
+    assert_eq!(shown.chains[0].track, track);
+    assert!(shown.racks.iter().any(|r| r.rack == rack && r.folded));
+    // View state, not an undo step.
+    assert_eq!(undo_steps(&shell), before);
+    // Folding them back in hides them again.
+    shell
+        .invoke(ids::FOLD_CHAINS, json!({ "rack": rack, "shown": false }))
+        .unwrap();
+    assert!(state(&mut shell).chains.is_empty());
+    // A rack with one chain has nothing to fold out.
+    let other = tracks(&shell)[1];
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [other] }))
+        .unwrap();
+    let added = shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": { "rack": { "kind": "instrument" } },
+                "name": "Rack",
+                "role": "instrument",
+            } }),
+        )
+        .unwrap();
+    let single: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let id: bl_model::ChainId = shell.new_id();
+    shell
+        .run(
+            "chain.add",
+            json!({ "rack": single, "index": 0, "chain": { "id": id, "name": "One", "devices": [] } }),
+        )
+        .unwrap();
+    assert!(
+        shell
+            .invoke(ids::FOLD_CHAINS, json!({ "rack": single }))
+            .is_err(),
+        "a rack of one chain has no chains to fold out"
+    );
+}

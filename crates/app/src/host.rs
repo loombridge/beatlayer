@@ -1344,6 +1344,7 @@ impl Host {
             Effect::RenameDevice(_)
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
+            | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);

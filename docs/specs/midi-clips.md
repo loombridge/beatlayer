@@ -1,7 +1,7 @@
 # MIDI clips in the Arrangement: placement, region, loop, notes, and playback
 
 - **Status:** implemented
-- **Work packages:** WP-2.1, WP-2.21
+- **Work packages:** WP-2.1, WP-2.21. Editing the notes' values and deactivating them in the Clip View are [note-editing.md](note-editing.md) R1 to R20's (WP-6.1); probability groups, which roll several notes' chance together, R21 to R32's (WP-6.2)
 - **Parity-matrix row:** MIDI clips and editing: Velocity, release velocity, probability, velocity deviation, note mute; Views and workflow: Arrangement View
 - **Checked against:** the Live 12 reference manual (online edition), read October 2026 (chapter 8 "Clip View", section 8.2.1 "Clip and Loop Region Settings", section 8.9 "Looping Clips", section 8.1.1.1 "Clip Activator Toggle", and section 42.12 "MIDI Note Probability and Velocity Range"); the Standard MIDI Files 1.0 specification (MIDI Manufacturers Association); Live 12.4.6 on macOS observed 11 October 2026 (S15, trimming and resizing a MIDI clip); and Live 12.4.3 on macOS observed 15 October 2026 (S8, MIDI file import).
 
@@ -9,11 +9,11 @@
 
 A MIDI clip sits on a MIDI track's lane in the Arrangement, at a musical position and for a musical length. While the song plays, the clip plays its notes from the clip's Start marker, with note-ons and note-offs dispatched sample-accurately through the track's device chain. With its Loop switch off, it plays until its End marker or until the clip ends in the Arrangement, whichever comes first. With the loop on, it starts at its Start marker, plays into the loop brace, and repeats the brace for as long as the clip lasts.
 
-Each note in a MIDI clip has a pitch (MIDI key 0 to 127), start position in ticks, length in ticks, velocity (1 to 127), release velocity (1 to 127, default 64), probability (0.0 to 1.0, default 1.0), velocity deviation (-127 to 127, default 0), mute switch, and its own pressure points ([midi-controller-data.md](midi-controller-data.md) R2). Playback rolls note probability and velocity deviation per play from an allocation-free PRNG on the audio thread. Muted notes and notes on muted clips never sound. When playback stops, when a loop wraps, or when a sounding clip is deleted or edited, note-offs are sent immediately for all sounding notes so no note is ever stuck.
+Each note in a MIDI clip has a pitch (MIDI key 0 to 127), start position in ticks, length in ticks, velocity (1 to 127), release velocity (1 to 127, default 64), probability (0.0 to 1.0, default 1.0), velocity deviation (-127 to 127, default 0), mute switch, and its Pitch, Slide and Pressure envelopes ([MPE](mpe.md) R1). Playback rolls note probability and velocity deviation per play from an allocation-free PRNG on the audio thread. Muted notes, which the Clip View calls deactivated, and notes on muted clips never sound. Notes in a probability group roll their chance together, as [note-editing.md](note-editing.md) R26 to R29 say. When playback stops, when a loop wraps, or when a sounding clip is deleted or edited, note-offs are sent immediately for all sounding notes so no note is ever stuck.
 
 The engine plays each MIDI track's clips with a MIDI clip player at the head of the track's device chain. The compiler sends the track's clips as node data, so creating, moving, or editing a clip never builds a new program.
 
-This spec covers Arrangement playback, data, and file import and export of MIDI clips. It leaves to other specs and packages: the Piano Roll and MIDI note editing UI (WP-2.3); MIDI clip groove and quantization (Phase 4).
+This spec covers Arrangement playback, data, and file import and export of MIDI clips. It leaves to other specs and packages: the Piano Roll and MIDI note editing UI (WP-2.3); a clip's groove ([grooves](grooves.md), WP-6.19).
 
 A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`): the time signature its End is measured in, `null` for the song's signature at the clip's position. `midi.import_file` sets it from the file and `midi.export_clip` writes it (R16, R19); the Clip View's Signature numerator and denominator controls (L-CLIP-004) aren't drawn yet.
 
@@ -37,10 +37,10 @@ A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`)
 - **R2.** Notes within a clip are triggered with sample accuracy: each note-on and note-off lands on the exact sample frame computed by converting its song tick position through the tempo map at the engine's sample rate. (S1, S6)
 - **R3.** With its loop off, a clip plays from its Start marker until its End marker or the clip's end, whichever comes first. Notes outside this region do not sound. (S1)
 - **R4.** With its loop on, a clip begins at its Start marker, plays into the loop brace, and repeats the loop brace for the duration of the clip. The Start marker must be before the loop brace's end. (S1, S4)
-- **R5.** Each note play evaluates note probability on the audio thread using an allocation-free PRNG: probability 0.0 never sounds, probability 1.0 always sounds, and probability 0.5 sounds approximately half the time over repeated iterations with a fixed seed. (S3, S7)
+- **R5.** Each note play evaluates note probability on the audio thread using an allocation-free PRNG: probability 0.0 never sounds, probability 1.0 always sounds, and probability 0.5 sounds approximately half the time over repeated iterations with a fixed seed. A note in a probability group rolls with its group instead ([note-editing.md](note-editing.md) R26 to R29). (S3, S7)
 - **R6.** When a note plays, its velocity is selected within its velocity deviation range: nominal velocity to nominal velocity plus deviation, clamped to 1..=127. (S3)
 - **R7.** When a note ends, its note-off event carries the note's release velocity (1..=127, default 64) normalized to 0.0..=1.0. (S3)
-- **R8.** Muted notes (`mute == true`) never sound. (S3)
+- **R8.** Muted notes (`mute == true`; deactivated notes in the Clip View, [note-editing.md](note-editing.md) R18) never sound. (S3)
 - **R9.** When the transport stops, when a loop wraps, or when a sounding clip is deleted or edited, note-off events are emitted immediately for all currently sounding notes. No note remains stuck. (S5, S7)
 - **R10.** Every clip edit is a registered command in the `edit` class: `clip.set_midi_region`, `clip.set_midi_loop`, `clip.set_loop_enabled`, `clip.set_data`. Edits reach the engine as node data without recompiling the program. (S5, S7)
 - **R11.** All audio-thread operations of the MIDI clip player are zero-allocation and lock-free, using preallocated note event buffers. (S7)

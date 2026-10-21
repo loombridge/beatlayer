@@ -14,15 +14,14 @@
 
 bl_rt::install_trap!();
 
-use std::time::{Duration, Instant};
-
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions};
+use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, Clip, EnvelopeKind, MixerParam, SceneId, TrackId};
 use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::testing;
 use serde_json::json;
 
 fn volume() -> AutomationTarget {
@@ -36,6 +35,7 @@ fn rig() -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             channels: 4,
+            pacing: Pacing::Manual,
             ..NullOptions::default()
         },
         &[("null", "Null")],
@@ -51,6 +51,7 @@ fn rig() -> (Shell, NullControl) {
         audio,
         Box::new(ProjectFiles::new()),
     );
+    shell.use_test_clock(control.clock().expect("manual pacing"));
     shell.start_audio();
     shell
         .run(
@@ -82,24 +83,21 @@ fn scenes(shell: &Shell) -> Vec<SceneId> {
         .collect()
 }
 
-fn poll_until(shell: &mut Shell, what: &str, done: impl Fn(&mut Shell) -> bool) {
-    let until = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < until {
-        shell.poll_engine();
-        if done(shell) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("timed out waiting for {what}");
+/// Advances the set until `done` holds, up to about ten seconds of test
+/// time. The null device is paced by hand (T199), so this lands on the same
+/// frames however busy the machine is.
+fn poll_until(
+    control: &NullControl,
+    shell: &mut Shell,
+    what: &str,
+    done: impl Fn(&mut Shell) -> bool,
+) {
+    testing::wait_for(control, shell, what, done);
 }
 
-fn pass_time(shell: &mut Shell, millis: u64) {
-    let until = Instant::now() + Duration::from_millis(millis);
-    while Instant::now() < until {
-        shell.poll_engine();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+/// Advances the set by `millis` of test time.
+fn pass_time(control: &NullControl, shell: &mut Shell, millis: u64) {
+    testing::advance(control, shell, millis);
 }
 
 fn slot_clip(shell: &Shell, track: TrackId, scene: SceneId) -> Option<Clip> {
@@ -134,23 +132,29 @@ fn points(clip: &Clip) -> Vec<(Ticks, f64)> {
 
 /// Records a clip over about 400 ms with the volume moved to `value` half
 /// way, and returns it.
-fn record_with_move(shell: &mut Shell, track: TrackId, scene: SceneId, value: f64) -> Clip {
+fn record_with_move(
+    control: &NullControl,
+    shell: &mut Shell,
+    track: TrackId,
+    scene: SceneId,
+    value: f64,
+) -> Clip {
     shell.run("session.record", json!({})).unwrap();
-    poll_until(shell, "the clip to appear", |shell| {
+    poll_until(control, shell, "the clip to appear", |shell| {
         slot_clip(shell, track, scene).is_some()
     });
-    pass_time(shell, 200);
+    pass_time(control, shell, 200);
     set_volume(shell, track, value);
-    pass_time(shell, 200);
+    pass_time(control, shell, 200);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(shell, "the recording to end", recorded);
+    poll_until(control, shell, "the recording to end", recorded);
     slot_clip(shell, track, scene).expect("the recorded clip")
 }
 
 // Spec: session-automation R1, R3, R11
 #[test]
 fn a_move_during_a_slot_recording_is_a_step_in_the_new_clips_envelope() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, true);
     let scene = scenes(&shell)[0];
     arm_automation(&mut shell);
@@ -163,7 +167,7 @@ fn a_move_during_a_slot_recording_is_a_step_in_the_new_clips_envelope() {
         .volume;
     let steps = shell.editor().undo_history().len();
 
-    let clip = record_with_move(&mut shell, keys, scene, 0.25);
+    let clip = record_with_move(&control, &mut shell, keys, scene, 0.25);
 
     // The envelope starts at the value the control had when the take began,
     // holds it until the move, and steps to the new value there.
@@ -216,17 +220,17 @@ fn playing(shell: &Shell, track: TrackId) -> bool {
 // Spec: session-automation R1
 #[test]
 fn with_automation_arm_off_nothing_is_recorded() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, true);
     let scene = scenes(&shell)[0];
-    let clip = record_with_move(&mut shell, keys, scene, 0.25);
+    let clip = record_with_move(&control, &mut shell, keys, scene, 0.25);
     assert!(points(&clip).is_empty());
 }
 
 // Spec: session-automation R2, R4, R11
 #[test]
 fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, true);
     let scene = scenes(&shell)[0];
     let map = bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(240.0).unwrap());
@@ -235,10 +239,12 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
         .unwrap();
     // A clip with no envelope that loops after its recording.
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 300);
+    pass_time(&control, &mut shell, 300);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the recording to end", recorded);
-    poll_until(&mut shell, "the clip to play", |shell| playing(shell, keys));
+    poll_until(&control, &mut shell, "the recording to end", recorded);
+    poll_until(&control, &mut shell, "the clip to play", |shell| {
+        playing(shell, keys)
+    });
     arm_automation(&mut shell);
     let clips = shell
         .editor()
@@ -252,11 +258,11 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
     // Session Record over the playing clip overdubs it: no new clip, and the
     // move goes into the clip that plays.
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 200);
+    pass_time(&control, &mut shell, 200);
     set_volume(&mut shell, keys, 0.25);
-    pass_time(&mut shell, 200);
+    pass_time(&control, &mut shell, 200);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the overdub to end", recorded);
+    poll_until(&control, &mut shell, "the overdub to end", recorded);
     let track = shell.editor().document().track(keys).unwrap();
     assert_eq!(track.slots().count(), clips, "no new clip");
     let clip = slot_clip(&shell, keys, scene).unwrap();
@@ -274,15 +280,15 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
 
     // A second take replaces the envelope from its move to the end of the
     // pass and leaves what came before.
-    poll_until(&mut shell, "the clip to play again", |shell| {
+    poll_until(&control, &mut shell, "the clip to play again", |shell| {
         playing(shell, keys)
     });
     shell.run("session.record", json!({})).unwrap();
-    pass_time(&mut shell, 300);
+    pass_time(&control, &mut shell, 300);
     set_volume(&mut shell, keys, 0.1);
-    pass_time(&mut shell, 100);
+    pass_time(&control, &mut shell, 100);
     shell.run("session.stop_recording", json!({})).unwrap();
-    poll_until(&mut shell, "the second take to end", recorded);
+    poll_until(&control, &mut shell, "the second take to end", recorded);
     let clip = slot_clip(&shell, keys, scene).unwrap();
     let second = points(&clip);
     assert_eq!(second[0], first[0], "the start stays");
@@ -293,7 +299,7 @@ fn a_move_during_an_overdub_goes_into_the_playing_clip_as_a_step_of_its_own() {
 #[test]
 fn record_session_automation_in_chooses_which_tracks_write() {
     for (setting, writes) in [("armed_tracks", false), ("all_tracks", true)] {
-        let (mut shell, _control) = rig();
+        let (mut shell, control) = rig();
         let armed = midi_track(&mut shell, true);
         let idle = midi_track(&mut shell, false);
         let scene = scenes(&shell)[0];
@@ -316,21 +322,21 @@ fn record_session_automation_in_chooses_which_tracks_write() {
         shell
             .run("session.launch", json!({ "track": idle, "scene": scene }))
             .unwrap();
-        poll_until(&mut shell, "the clip to play", |shell| {
+        poll_until(&control, &mut shell, "the clip to play", |shell| {
             shell
                 .session_states()
                 .iter()
                 .any(|s| s.track == idle && s.state == bl_engine::SlotState::Playing)
         });
-        record_with_move(&mut shell, armed, scene, 0.25);
+        record_with_move(&control, &mut shell, armed, scene, 0.25);
         // Moves of the idle track's volume were made after the armed one's;
         // make one in a second take.
         shell.run("session.record", json!({})).unwrap();
-        pass_time(&mut shell, 200);
+        pass_time(&control, &mut shell, 200);
         set_volume(&mut shell, idle, 0.4);
-        pass_time(&mut shell, 100);
+        pass_time(&control, &mut shell, 100);
         shell.run("session.stop_recording", json!({})).unwrap();
-        poll_until(&mut shell, "the take to end", recorded);
+        poll_until(&control, &mut shell, "the take to end", recorded);
         let clip = slot_clip(&shell, idle, scene).unwrap();
         assert_eq!(
             !points(&clip).is_empty(),
@@ -344,12 +350,14 @@ fn record_session_automation_in_chooses_which_tracks_write() {
 // Spec: session-automation R9
 #[test]
 fn a_hand_move_takes_the_parameter_back_until_the_clip_launches_again() {
-    let (mut shell, _control) = rig();
+    let (mut shell, control) = rig();
     let keys = midi_track(&mut shell, true);
     let scene = scenes(&shell)[0];
     arm_automation(&mut shell);
-    record_with_move(&mut shell, keys, scene, 0.25);
-    poll_until(&mut shell, "the clip to play", |shell| playing(shell, keys));
+    record_with_move(&control, &mut shell, keys, scene, 0.25);
+    poll_until(&control, &mut shell, "the clip to play", |shell| {
+        playing(shell, keys)
+    });
     let enabled = |shell: &Shell| {
         slot_clip(shell, keys, scene)
             .unwrap()

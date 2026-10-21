@@ -63,7 +63,7 @@ pub struct AutosampleArgs {
     /// How many times each note is sampled, from 1 to 8, for the round
     /// robins. 1 by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub round_roins: Option<u8>,
+    pub round_robins: Option<u8>,
     /// Whether a loop is found in each sample. Off by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detect_loops: Option<bool>,
@@ -151,7 +151,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  settings. The notes are the lowest one and every `step` above it up to the \
                  highest, which is always sampled; each is played at `velocity_layers` \
                  velocities, held for `note_length` seconds and followed by `release_tail` \
-                 seconds of render, and sampled `round_roins` times for the round robins. \
+                 seconds of render, and sampled `round_robins` times for the round robins. \
                  The samples are 32-bit floating-point WAVs in the project's \
                  `Samples/Processed/Autosample` folder, named for the instrument, the note and \
                  the velocity, and they join the set's media. With `detect_loops` on, each \

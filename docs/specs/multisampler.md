@@ -218,7 +218,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R64 | `crates/ui/tests/device_view.rs`, `an_instruments_menu_offers_autosample`; `crates/cli/tests/agent.rs`, `an_agent_autosamples_a_plugin_into_a_multisampler` | UI script; agent test |
 | R65 | `crates/ui/tests/autosampler.rs`, `the_dialog_holds_its_settings_and_counts_the_samples` | UI script |
 | R66 | `crates/shell/src/autosample.rs`, `the_plan_samples_each_step_and_spreads_the_zones` | unit |
-| R67 | `crates/shell/tests/autosample.rs`, `a_plugin_and_a_native_synth_render_offline_the_same_every_time` | shell test, blocks under the allocation trap |
+| R67 | `crates/shell/tests/autosample.rs`, `a_native_synth_and_a_plugin_render_offline_the_same_every_time` | shell test, blocks under the allocation trap |
 | R68 | | |
 | R69 | `crates/shell/tests/autosample.rs`, `samples_are_named_and_placed_in_the_project` | shell test |
 | R70 | `crates/shell/tests/autosample.rs`, `the_result_is_a_new_track_and_one_undo_step` | shell test |

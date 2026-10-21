@@ -208,7 +208,7 @@ impl Shell {
             velocity_layers: args.velocity_layers.unwrap_or(1),
             note_length: args.note_length.unwrap_or(2.0),
             release_tail: args.release_tail.unwrap_or(1.0),
-            round_roins: args.round_roins.unwrap_or(1),
+            round_robins: args.round_robins.unwrap_or(1),
             detect_loops: args.detect_loops.unwrap_or(false),
             name: args.name.unwrap_or_else(|| source.name.clone()),
         }
@@ -516,7 +516,7 @@ impl Shell {
                 // Spec: multisampler R70. Round Robin on in Forward mode
                 // where there are round robins, and the volume envelope's
                 // release as long as the release tail.
-                if job.settings.round_roins > 1 {
+                if job.settings.round_robins > 1 {
                     editor.apply(Command::SetDeviceParam {
                         device,
                         param: bl_devices::multisampler::ROUND_ROBIN,

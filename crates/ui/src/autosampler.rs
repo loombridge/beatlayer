@@ -20,7 +20,7 @@ struct Choices {
     velocity_layers: u8,
     note_length: f64,
     release_tail: f64,
-    round_roins: u8,
+    round_robins: u8,
     detect_loops: bool,
     name: String,
 }
@@ -35,7 +35,7 @@ impl Default for Choices {
             velocity_layers: settings.velocity_layers,
             note_length: settings.note_length,
             release_tail: settings.release_tail,
-            round_roins: settings.round_roins,
+            round_robins: settings.round_robins,
             detect_loops: settings.detect_loops,
             name: String::new(),
         }
@@ -52,7 +52,7 @@ impl Choices {
             velocity_layers: self.velocity_layers,
             note_length: self.note_length,
             release_tail: self.release_tail,
-            round_roins: self.round_roins,
+            round_robins: self.round_robins,
             detect_loops: self.detect_loops,
             name: self.name.clone(),
         }
@@ -166,7 +166,7 @@ fn settings(
     ui.horizontal(|ui| {
         ui.label("Round Robins");
         ui.add(
-            egui::DragValue::new(&mut choices.round_roins)
+            egui::DragValue::new(&mut choices.round_robins)
                 .range(1..=8)
                 .speed(1),
         );
@@ -212,7 +212,7 @@ fn settings(
                 velocity_layers: Some(settings.velocity_layers),
                 note_length: Some(settings.note_length),
                 release_tail: Some(settings.release_tail),
-                round_roins: Some(settings.round_roins),
+                round_robins: Some(settings.round_robins),
                 detect_loops: Some(settings.detect_loops),
                 name: Some(settings.name.clone()),
                 wait: Some(false),

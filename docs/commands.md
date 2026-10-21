@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-554 commands in 37 areas.
+557 commands in 37 areas.
 
 ## Permission classes
 
@@ -230,6 +230,9 @@ Each command has:
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
 | [`device.add_slice`](#deviceadd_slice) | Add Slice | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
+| [`device.autosample`](#deviceautosample) | Autosample | `external` |  |  |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | Stop Autosampling | `edit` |  |  |
+| [`device.autosample_open`](#deviceautosample_open) | Autosample… | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
 | [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
@@ -4214,6 +4217,60 @@ Arguments:
 | `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
 
 Result: [`Auditioned`](#auditioned).
+
+#### `device.autosample`
+
+**Autosample**. Permission: `external`. Contexts: `device-view`.
+
+Samples an instrument across a range of notes and velocities into a new multisampler on a new MIDI track: the native instrument, the plug-in instrument, or the external instrument, rendered alone with its current settings. The notes are the lowest one and every `step` above it up to the highest, which is always sampled; each is played at `velocity_layers` velocities, held for `note_length` seconds and followed by `release_tail` seconds of render, and sampled `round_robins` times for the round robins. The samples are 32-bit floating-point WAVs in the project's `Samples/Processed/Autosample` folder, named for the instrument, the note and the velocity, and they join the set's media. With `detect_loops` on, each sample gets a sustain loop so a sustained sound holds past the note. The result is a new MIDI track straight after the source's, holding a multisampler with one layer per sample, its zones spread between the sampled notes, Round Robin on in Forward mode where there are round robins, and the volume envelope's release as long as the release tail. One undo step; undoing it leaves the files on disk. It writes files, and plays hardware for the external instrument.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `detect_loops` | boolean or null | no | Whether a loop is found in each sample. Off by default. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample: a native instrument, a plug-in instrument, or the external instrument. The one selected in the Device View when it is left out. |
+| `highest` | integer or null | no | The highest note sampled, from 0 to 127 (C-2 to G8). C6 by default. |
+| `lowest` | integer or null | no | The lowest note sampled, from 0 to 127 (C-2 to G8). C1 by default. |
+| `name` | string or null | no | The name of the instrument the samples are named for, and of the new track. The instrument's own name by default. |
+| `note_length` | number or null | no | How long each note is held, in seconds, from 0.1 to 30. 2 by default. |
+| `release_tail` | number or null | no | How long the render goes on after the note is released, in seconds, from 0 to 30. 1 by default. |
+| `round_robins` | integer or null | no | How many times each note is sampled, from 1 to 8, for the round robins. 1 by default. |
+| `step` | integer or null | no | How many semitones between the sampled notes, from 1 to 12. 3 by default. |
+| `velocity_layers` | integer or null | no | How many velocity layers each note is sampled at, from 1 to 16. 1 by default. |
+| `wait` | boolean or null | no | Whether to wait for the samples to be made before returning. True by default; with it off the command starts the samples and returns at once, and the progress is read from the dialog. |
+
+Result: [`Autosampled`](#autosampled).
+
+#### `device.autosample_cancel`
+
+**Stop Autosampling**. Permission: `edit`. Contexts: `device-view`.
+
+Stops a running autosample: the files it wrote are deleted and the set is left as it was. It does nothing when no autosample is running.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`AutosampleCancelled`](#autosamplecancelled).
+
+#### `device.autosample_open`
+
+**Autosample…**. Permission: `read`. Contexts: `device-view`.
+
+Opens the autosampler's dialog for an instrument: the notes and velocities to sample, the note length and release tail, the round robins, whether a loop is found in each sample, and the name the samples are given. It changes nothing in the set; the dialog's Autosample button runs `device.autosample`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample. The one selected in the Device View when it is left out. |
+
+Result: [`AutosamplerOpened`](#autosampleropened).
 
 #### `device.clear_sample_edits`
 
@@ -10463,6 +10520,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
 | [`device.add_slice`](#deviceadd_slice) | the query tool's `device` | `slices` |
+| [`device.autosample`](#deviceautosample) | the query tool's `track` | `devices` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
@@ -10717,6 +10775,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
@@ -12197,6 +12256,214 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `AutosampleCancelled`
+
+What `device.autosample_cancel` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cancelled` | boolean | yes | Whether a sample was running and has been stopped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_cancel` returns.",
+  "properties": {
+    "cancelled": {
+      "description": "Whether a sample was running and has been stopped.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cancelled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosampleFile`
+
+One sample the autosampler made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the file is. |
+| `note` | integer from 0 to 255 | yes | The note it holds. |
+| `velocity` | integer from 0 to 255 | yes | The velocity it was played at. |
+| `round_robin` | integer from 0 to 255 | yes | Which round robin of them it is, from 1. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer it became. |
+| `loop_end` | integer or null | no | Where its loop ends, in frames, when it has one. |
+| `loop_start` | integer or null | no | Where its loop begins, in frames, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One sample the autosampler made.",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/LayerId",
+      "description": "The layer it became."
+    },
+    "loop_end": {
+      "description": "Where its loop ends, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "loop_start": {
+      "description": "Where its loop begins, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "The note it holds.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Where the file is.",
+      "type": "string"
+    },
+    "round_robin": {
+      "description": "Which round robin of them it is, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The velocity it was played at.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "note",
+    "velocity",
+    "round_robin",
+    "layer"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Autosampled`
+
+What `device.autosample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of [`AutosampleFile`](#autosamplefile) | yes | The samples made, in note, velocity and round robin order. |
+| `without_loops` | array of string | yes | The samples left without a loop, named. |
+| `took` | number | yes | How long it took, in seconds. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler, once the samples are made. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track the multisampler is on, once the samples are made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample` returns.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The multisampler, once the samples are made."
+    },
+    "files": {
+      "description": "The samples made, in note, velocity and round robin order.",
+      "items": {
+        "$ref": "#/$defs/AutosampleFile"
+      },
+      "type": "array"
+    },
+    "took": {
+      "description": "How long it took, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track the multisampler is on, once the samples are made."
+    },
+    "without_loops": {
+      "description": "The samples left without a loop, named.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "files",
+    "without_loops",
+    "took"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosamplerOpened`
+
+What `device.autosample_open` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The instrument the dialog is open for. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_open` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The instrument the dialog is open for."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
 }
 ```
 

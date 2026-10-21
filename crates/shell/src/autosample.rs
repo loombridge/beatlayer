@@ -26,7 +26,7 @@ pub struct Settings {
     /// How long the render goes on after the note is released, in seconds.
     pub release_tail: f64,
     /// How many times each note is sampled, for the round robins.
-    pub round_roins: u8,
+    pub round_robins: u8,
     /// Whether a loop is found in each sample.
     pub detect_loops: bool,
     /// The name of the instrument the samples are named for.
@@ -44,7 +44,7 @@ impl Default for Settings {
             velocity_layers: 1,
             note_length: 2.0,
             release_tail: 1.0,
-            round_roins: 1,
+            round_robins: 1,
             detect_loops: false,
             name: String::new(),
         }
@@ -61,7 +61,7 @@ impl Settings {
         self.velocity_layers = self.velocity_layers.clamp(1, 16);
         self.note_length = self.note_length.clamp(0.1, 30.0);
         self.release_tail = self.release_tail.clamp(0.0, 30.0);
-        self.round_roins = self.round_roins.clamp(1, 8);
+        self.round_robins = self.round_robins.clamp(1, 8);
         self
     }
 
@@ -109,7 +109,7 @@ pub fn plan(settings: &Settings) -> Plan {
         let key = key_zone(&notes, index);
         for layer in 1..=settings.velocity_layers {
             let (velocity, velocity_zone) = velocity_layer(settings.velocity_layers, layer);
-            for round_robin in 0..settings.round_roins {
+            for round_robin in 0..settings.round_robins {
                 samples.push(Planned {
                     note: notes[index],
                     velocity,
@@ -191,7 +191,7 @@ pub fn file_name(settings: &Settings, sample: &Planned) -> String {
         bl_model::note_name(sample.note),
         sample.velocity
     );
-    if settings.round_roins > 1 {
+    if settings.round_robins > 1 {
         name.push_str(&format!(" rr{}", sample.round_robin + 1));
     }
     name
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn the_round_robins_share_their_zones() {
         let mut settings = settings();
-        settings.round_roins = 3;
+        settings.round_robins = 3;
         let plan = plan(&settings);
         assert_eq!(plan.samples.len(), 102);
         let first = &plan.samples[0];
@@ -338,7 +338,7 @@ mod tests {
     fn the_files_are_named_for_the_instrument_the_note_and_the_velocity() {
         let mut settings = settings();
         settings.name = "Drift".to_owned();
-        settings.round_roins = 2;
+        settings.round_robins = 2;
         let plan = plan(&settings);
         assert_eq!(file_name(&settings, &plan.samples[0]), "Drift C1 v64 rr1");
         assert_eq!(file_name(&settings, &plan.samples[1]), "Drift C1 v64 rr2");

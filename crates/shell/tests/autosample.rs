@@ -147,7 +147,7 @@ fn short_settings() -> Settings {
         velocity_layers: 1,
         note_length: 0.3,
         release_tail: 0.1,
-        round_roins: 1,
+        round_robins: 1,
         detect_loops: false,
         name: "Drift".to_owned(),
     }
@@ -392,7 +392,7 @@ fn three_octaves_and_two_layers_match_the_synth() {
         velocity_layers: 2,
         note_length: 0.5,
         release_tail: 0.2,
-        round_roins: 1,
+        round_robins: 1,
         detect_loops: false,
         name: "Drift".to_owned(),
     };
@@ -470,7 +470,7 @@ fn a_looped_note_sustains_past_its_length() {
             velocity_layers: 1,
             note_length: 0.5,
             release_tail: 0.2,
-            round_roins: 1,
+            round_robins: 1,
             detect_loops: true,
             name: "Drift".to_owned(),
         };

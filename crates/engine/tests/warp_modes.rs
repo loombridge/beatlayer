@@ -452,3 +452,79 @@ fn a_mode_change_crossfades_over_20_ms() {
         "after the fade"
     );
 }
+
+// Spec: warp-modes R10. In Re-Pitch, Transpose and Detune don't act: the
+// clip plays exactly what it played before they were set, and their values
+// stay with the clip.
+#[test]
+fn re_pitch_ignores_the_clips_transpose_and_detune() {
+    let length = Ticks::WHOLE * 2;
+    let before = play(
+        &song(120.0, length, beats(), WarpMode::RePitch),
+        24_000,
+        512,
+    );
+    let mut editor = song(120.0, length, beats(), WarpMode::RePitch);
+    let clip = editor
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips())
+        .next()
+        .unwrap()
+        .id;
+    editor
+        .apply(Command::SetClipPitch {
+            clip,
+            transpose: Some(12),
+            detune: Some(25.0),
+        })
+        .unwrap();
+    let after = play(&editor, 24_000, 512);
+    assert_eq!(before, after, "Re-Pitch ignores the clip's pitch");
+    // The values stay with the clip (R10).
+    let ClipData::Audio(audio) = &editor.document().clip(clip).unwrap().data else {
+        panic!("an audio clip");
+    };
+    assert_eq!((audio.transpose, audio.detune), (12, 25.0));
+}
+
+// Spec: warp-modes R25. The pitch change is held to −48 to 48 semitones,
+// and a value outside the range is refused, changing nothing.
+#[test]
+fn transposition_stops_at_48_semitones() {
+    let mut editor = song(120.0, Ticks::WHOLE * 2, beats(), WarpMode::Beats);
+    let clip = editor
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips())
+        .next()
+        .unwrap()
+        .id;
+    editor
+        .apply(Command::SetClipPitch {
+            clip,
+            transpose: Some(48),
+            detune: None,
+        })
+        .unwrap();
+    let ClipData::Audio(audio) = &editor.document().clip(clip).unwrap().data else {
+        panic!("an audio clip");
+    };
+    assert_eq!(audio.transpose, 48);
+    assert_eq!(audio.pitch_change(), 48.0);
+    // Outside the range, the command refuses and changes nothing.
+    let before = editor.document().clone();
+    assert!(
+        editor
+            .apply(Command::SetClipPitch {
+                clip,
+                transpose: Some(49),
+                detune: None,
+            })
+            .is_err()
+    );
+    assert_eq!(
+        editor.document().clip(clip).unwrap().data,
+        before.clip(clip).unwrap().data
+    );
+}

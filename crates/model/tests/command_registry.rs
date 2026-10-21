@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        197,
+        199,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -78,7 +78,7 @@ WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 
          four for tempo leaders, stretching and sliding, and WP-5.4 ten \
          for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
          rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
-         set_macro_randomize_excluded and set_mapped_value"
+         set_macro_randomize_excluded and set_mapped_value, and WP-4.7 the two for a clip's pitch and its reversal"
     );
 
     for op in &ops {
@@ -740,6 +740,14 @@ fn every_command_runs_by_id() {
     agent.run(
         "clip.set_high_quality",
         json!({ "clip": loop_clip, "high_quality": false }),
+    );
+    agent.run(
+        "clip.set_pitch",
+        json!({ "clip": loop_clip, "transpose": 7, "detune": -25.0 }),
+    );
+    agent.run(
+        "clip.reverse_file",
+        json!({ "clip": loop_clip, "seconds": 4.0 }),
     );
     let audio = warped(&agent);
     assert_eq!(audio.warp_mode, WarpMode::RePitch);
@@ -2493,6 +2501,22 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipHighQuality {
                 clip,
                 high_quality: false,
+            },
+        ),
+        (
+            "clip.set_pitch",
+            Command::SetClipPitch {
+                clip,
+                transpose: Some(7),
+                detune: Some(-25.0),
+            },
+        ),
+        (
+            "clip.reverse_file",
+            Command::ReverseClip {
+                clip,
+                media: None,
+                seconds: 4.0,
             },
         ),
         (

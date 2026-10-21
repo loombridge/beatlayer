@@ -2271,6 +2271,29 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "clip.crop, from the Sample Editor's menu (audio-clip-editing R16)",
             )),
         ),
+        // The reversal's commands (WP-4.7): `clip.reverse` is the one a
+        // person and an agent run, from the Audio Utilities panel's Reverse
+        // button, and it applies `clip.reverse_file`.
+        (
+            "clip.reverse",
+            Exception(LaterView(
+                "the Audio Utilities panel's Reverse button (WP-4.10b)",
+            )),
+        ),
+        (
+            "clip.reverse_file",
+            Exception(Equivalent(
+                "clip.reverse, from the Audio Utilities panel's Reverse button (audio-clip-editing R7)",
+            )),
+        ),
+        // The clip's pitch (WP-4.7): the Audio Utilities panel's Transpose
+        // and Detune fields.
+        (
+            "clip.set_pitch",
+            Exception(LaterView(
+                "the Audio Utilities panel's Transpose and Detune fields (WP-4.10b)",
+            )),
+        ),
         ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.set_envelope_curve", Exception(clip_envelopes)),
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),

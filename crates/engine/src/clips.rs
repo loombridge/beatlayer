@@ -45,7 +45,7 @@ use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
-    BeatsMedia, CUE_BACK, Histories, History, Past, Playing, Positions, WarpScratch, Warped,
+    BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, Positions, WarpScratch, Warped,
     WindowBuf, window_of,
 };
 
@@ -547,6 +547,9 @@ pub(crate) struct Geometry {
     /// warping spec, R12): it plays the file positions of its table, not
     /// `region_start` and on, one file frame to a song frame.
     pub(crate) warped: Option<Arc<Warped>>,
+    /// The clip's pitch ratio (the warp modes spec, R25): 1 where it isn't
+    /// transposed. An unwarped clip reads its file at this ratio (R27).
+    pub(crate) pitch: f64,
 }
 
 impl Geometry {
@@ -588,6 +591,7 @@ impl Geometry {
                 loop_start: warped.loop_start_frame(),
                 loop_end: u64::MAX,
                 warped: Some(Arc::new(warped)),
+                pitch: audio.pitch_ratio(),
             };
         }
         let frames =
@@ -616,13 +620,36 @@ impl Geometry {
             loop_start: frames(audio.loop_start),
             loop_end: audio.loop_end.map_or(length, frames),
             warped: None,
+            pitch: audio.pitch_ratio(),
         }
     }
 
     /// How many frames before a point a jump lands on the clip may read, so
     /// the point is cued that far early.
     pub(crate) fn reach_back(&self) -> u64 {
-        if self.warped.is_some() { CUE_BACK } else { 0 }
+        if self.warped.is_some() || self.pitch != 1.0 {
+            CUE_BACK
+        } else {
+            0
+        }
+    }
+
+    /// Where an unwarped clip transposed reads (the warp modes spec, R27):
+    /// its file at the pitch ratio, from the song frame `origin` it starts
+    /// playing at. `None` where it isn't transposed, and then it plays the
+    /// file frame for frame.
+    pub(crate) fn transposed(&self, origin: i64) -> Option<Positions<'_>> {
+        (self.pitch != 1.0).then(|| {
+            Positions::Flat(Flat {
+                origin,
+                start: self.region_start as f64,
+                end: self.region_end as f64,
+                loop_brace: self
+                    .looping
+                    .then_some((self.loop_start as f64, self.loop_end as f64)),
+                ratio: self.pitch,
+            })
+        })
     }
 
     /// Where in the file the clip plays `elapsed` frames after its start,
@@ -769,6 +796,8 @@ fn past_of(
         tones: before.warp_settings.tones,
         texture: before.warp_settings.texture,
         clip_id: clip.id.0.get(),
+        pitch: before.pitch_ratio(),
+        warp: before.warp,
     };
     if before.warp_mode == audio.warp_mode || !before.warp {
         return None;
@@ -910,6 +939,8 @@ impl ClipList {
                         tones: audio.warp_settings.tones,
                         texture: audio.warp_settings.texture,
                         clip_id: clip.id.0.get(),
+                        pitch: audio.pitch_ratio(),
+                        warp: audio.warp,
                     },
                     past,
                 },
@@ -987,6 +1018,8 @@ impl ClipList {
                         tones: audio.warp_settings.tones,
                         texture: audio.warp_settings.texture,
                         clip_id: clip.id.0.get(),
+                        pitch: audio.pitch_ratio(),
+                        warp: audio.warp,
                     },
                     past,
                 },
@@ -1377,16 +1410,34 @@ impl Node for ClipPlayer {
                     PlacedClip::launch_level,
                 );
             } else if let Some(source) = bank[at].as_mut() {
-                render(
-                    clip,
-                    source.as_mut(),
-                    block,
-                    0..block.frames(),
-                    elapsed,
-                    &mut self.scratch,
-                    self.max_frames,
-                    PlacedClip::launch_level,
-                );
+                // Spec: warp-modes R27. An unwarped clip transposed reads
+                // its file at the pitch ratio, from its launch frame.
+                if let Some(positions) = clip.geometry.transposed(launch) {
+                    render_warped(
+                        clip,
+                        &positions,
+                        Some(launch),
+                        source.as_mut(),
+                        window,
+                        block,
+                        0..block.frames(),
+                        (elapsed, from),
+                        &mut self.warp,
+                        histories[at].as_deref_mut(),
+                        PlacedClip::launch_level,
+                    );
+                } else {
+                    render(
+                        clip,
+                        source.as_mut(),
+                        block,
+                        0..block.frames(),
+                        elapsed,
+                        &mut self.scratch,
+                        self.max_frames,
+                        PlacedClip::launch_level,
+                    );
+                }
             }
         }
         let Self {
@@ -1452,6 +1503,24 @@ impl Node for ClipPlayer {
                 render_warped(
                     clip,
                     &warped.positions(),
+                    None,
+                    source.as_mut(),
+                    window,
+                    block,
+                    range,
+                    (elapsed, start),
+                    warp,
+                    history.as_deref_mut(),
+                    PlacedClip::level,
+                );
+                continue;
+            }
+            // Spec: warp-modes R27. An unwarped clip transposed reads its
+            // file at the pitch ratio.
+            if let Some(positions) = clip.geometry.transposed(clip.geometry.start) {
+                render_warped(
+                    clip,
+                    &positions,
                     None,
                     source.as_mut(),
                     window,
@@ -1651,6 +1720,7 @@ mod tests {
                 loop_start: 100,
                 loop_end: 200,
                 warped: None,
+                pitch: 1.0,
             },
             carry: false,
             gain: 0.5,
@@ -1662,6 +1732,8 @@ mod tests {
                 tones: Default::default(),
                 texture: Default::default(),
                 clip_id: 1,
+                pitch: 1.0,
+                warp: true,
             },
             past: None,
         }

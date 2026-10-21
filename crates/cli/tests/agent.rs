@@ -3375,7 +3375,14 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
 
     // A new clip has the table's defaults, which are not saved.
     let new = audio(&mut client);
-    for key in ["warp_mode", "warp_settings", "ram", "high_quality"] {
+    for key in [
+        "warp_mode",
+        "warp_settings",
+        "ram",
+        "high_quality",
+        "transpose",
+        "detune",
+    ] {
         assert!(new.get(key).is_none(), "{key} in a new clip: {new}");
     }
     let mode = run(
@@ -3425,10 +3432,32 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
         json!({ "clip": clip, "high_quality": false }),
     );
     assert_eq!(hiq["high_quality"], false);
+    // Spec: warp-modes R3. The clip's pitch, in semitones and in cents.
+    let pitch = run(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "transpose": 7, "detune": -25.0 }),
+    );
+    assert_eq!(pitch["transpose"], 7);
+    assert_eq!(pitch["detune"], -25.0);
+    // A value out of range changes nothing, and so does naming neither.
+    refused(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "transpose": 49 }),
+    );
+    refused(
+        &mut client,
+        "clip.set_pitch",
+        json!({ "clip": clip, "detune": 50.5 }),
+    );
+    refused(&mut client, "clip.set_pitch", json!({ "clip": clip }));
     // Each reads back as it was set after the others.
     let all = audio(&mut client);
     assert_eq!(all["warp_mode"], "re_pitch");
     assert_eq!(all["ram"], true);
+    assert_eq!(all["transpose"], 7);
+    assert_eq!(all["detune"], -25.0);
 
     // Only a warped clip loops.
     refused(

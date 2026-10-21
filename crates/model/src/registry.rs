@@ -1601,6 +1601,36 @@ const ENTRIES: &[Entry] = &[
             changes nothing.",
     },
     Entry {
+        id: "clip.reverse_file",
+        action: Action::Apply("reverse_clip"),
+        label: "Reverse Clip",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Reverses an audio clip's file: the clip plays `media`, a reversed copy of \
+            its file, with its Start and End markers, loop brace and warp markers mirrored about \
+            the file, so it plays the same stretch of sound backwards. Its clip envelopes stay \
+            where they are, and its loop switch, gain, transpose, detune, warp mode and fades \
+            don't change. `seconds` is the length of the file the markers are mirrored about. \
+            `clip.reverse` is the command a person and an agent run: it writes the new file \
+            through the processed-file writer and applies this one.",
+    },
+    Entry {
+        id: "clip.set_pitch",
+        action: Action::Apply("set_clip_pitch"),
+        label: "Set Clip Pitch",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets an audio clip's pitch: `transpose`, in whole semitones from -48 to 48, \
+            and `detune`, in cents from -50 to 50 (`data.audio.transpose` and \
+            `data.audio.detune`; a new clip has neither). Give either of them, or both, in one \
+            undo step; a value out of range refuses the whole command. The clip's pitch moves \
+            by the sum, and its timing stays with its warp map. In Re-Pitch the two are drawn \
+            switched off and don't act, and their values stay with the clip. With Warp off the \
+            clip's speed changes with its pitch, as a tape running faster does.",
+    },
+    Entry {
         id: "clip.set_tempo_leader",
         action: Action::Apply("set_tempo_leader"),
         label: "Switch Lead/Follow",

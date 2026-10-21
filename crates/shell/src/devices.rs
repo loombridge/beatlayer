@@ -335,6 +335,13 @@ impl DeviceView {
             .map_or(&[], |t| &t.outputs)
     }
 
+    /// The device type of devices of `kind`, if the host has met it (IMP-24):
+    /// its role and whether it sends notes on from a note output.
+    #[must_use]
+    pub fn device_type(&self, kind: &DeviceKind) -> Option<&DeviceType> {
+        self.types.iter().find(|t| t.kind == *kind)
+    }
+
     /// The description of devices of `kind`, if their type has one.
     #[must_use]
     pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {
@@ -2151,6 +2158,12 @@ impl DeviceView {
                     }
                 };
                 rack_presets::save_device(current, media, &path)?;
+                // Spec: plugin-list R5. A plug-in device holds the preset it
+                // was saved as; a native device's preset is in its name.
+                if matches!(current.kind, DeviceKind::Plugin { .. }) {
+                    let _ =
+                        editor.amend_device_preset_name(device, Some(preset::preset_name(&path)));
+                }
                 outcome.message = Some(format!("Saved preset {}.", path.display()));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);

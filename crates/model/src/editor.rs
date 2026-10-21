@@ -279,6 +279,22 @@ impl Editor {
         Ok(())
     }
 
+    /// Records the name of the preset a device holds (the plug-in list spec,
+    /// R5) without an undo step: saving a preset names it, and the name is
+    /// a note for the set file, not a change to the sound.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::Command`] if there's no such device.
+    pub fn amend_device_preset_name(
+        &mut self,
+        device: crate::DeviceId,
+        name: Option<String>,
+    ) -> Result<(), EditError> {
+        self.document.set_device_preset_name(device, name)?;
+        Ok(())
+    }
+
     /// Replaces the whole document with another version of it, inside the
     /// open transaction or as an undo step of its own labelled `label`, and
     /// returns what that changed. The agent API restores a checkpoint this

@@ -120,6 +120,19 @@ pub struct ComplexProSettings {
     pub envelope: u32,
 }
 
+/// The lowest a clip's Transpose may be, in whole semitones (R2): the limit
+/// the manual gives for Transpose with its envelope.
+pub const TRANSPOSE_MIN: i32 = -48;
+
+/// The highest a clip's Transpose may be, in whole semitones (R2).
+pub const TRANSPOSE_MAX: i32 = 48;
+
+/// The lowest a clip's Detune may be, in cents (R2, Beatlayer's own range).
+pub const DETUNE_MIN: f64 = -50.0;
+
+/// The highest a clip's Detune may be, in cents (R2, Beatlayer's own range).
+pub const DETUNE_MAX: f64 = 50.0;
+
 /// Every mode's controls (R2). Re-Pitch and Complex have none.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WarpSettings {

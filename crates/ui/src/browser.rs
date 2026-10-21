@@ -726,7 +726,7 @@ impl BrowserUi {
             let badge = painter.text(
                 pos2(name_left + 2.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                format_badge(format),
+                format.short_name(),
                 theme.small_font(),
                 ink,
             );
@@ -1623,16 +1623,6 @@ enum Glyph {
     Preset,
     Plugin,
     Speaker,
-}
-
-/// The short name a plug-in row's badge shows for its format.
-fn format_badge(format: bl_model::PluginFormat) -> &'static str {
-    match format {
-        bl_model::PluginFormat::Clap => "CLAP",
-        bl_model::PluginFormat::Vst3 => "VST3",
-        bl_model::PluginFormat::AudioUnit => "AU",
-        bl_model::PluginFormat::Lv2 => "LV2",
-    }
 }
 
 fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {

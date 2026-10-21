@@ -17,6 +17,11 @@ use crate::editing::{Position, TargetArgs};
 
 /// `clip.crop`: crop a clip to what it plays, or to a time selection.
 pub const CROP: &str = "clip.crop";
+/// `clip.reverse`: give an audio clip a backwards copy of its file.
+pub const REVERSE: &str = "clip.reverse";
+/// `arrangement.reverse`: reverse the audio in a time selection, across
+/// several clips (R).
+pub const ARRANGEMENT_REVERSE: &str = "arrangement.reverse";
 /// `arrangement.consolidate`: join the material in a range into one clip per
 /// track (Cmd-J).
 pub const CONSOLIDATE: &str = "arrangement.consolidate";
@@ -26,7 +31,13 @@ pub const CONSOLIDATE_TO_SCENE: &str = "arrangement.consolidate_to_scene";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[CROP, CONSOLIDATE, CONSOLIDATE_TO_SCENE];
+pub const IDS: &[&str] = &[
+    CROP,
+    REVERSE,
+    ARRANGEMENT_REVERSE,
+    CONSOLIDATE,
+    CONSOLIDATE_TO_SCENE,
+];
 
 /// Whether `id` is one of the audio clip editing commands.
 #[must_use]
@@ -66,6 +77,57 @@ pub struct CropResult {
     pub path: Option<String>,
     /// Whether the crop removed anything: audio outside the region or notes.
     pub removed: bool,
+}
+
+/// Arguments of `clip.reverse`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReverseArgs {
+    /// The clip to reverse. Left out, the one clip the Arrangement or the
+    /// Session View has selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+}
+
+/// Arguments of `arrangement.reverse`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReverseRangeArgs {
+    /// The tracks a span of time covers. Left out, the selected tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// Where the span starts. Left out, the time selection's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where the span ends, after `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
+}
+
+/// What `clip.reverse` did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReverseResult {
+    /// The clip, reversed.
+    pub clip: ClipId,
+    /// The new file the clip plays, named by its content hash; `null` for a
+    /// MIDI clip, which isn't reversed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media: Option<ContentHash>,
+    /// Where the new file is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// What `arrangement.reverse` did.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReverseRangeResult {
+    /// The clips it reversed.
+    pub clips: Vec<ClipId>,
+    /// The tracks they sit on.
+    pub tracks: Vec<TrackId>,
+    /// The new files, one per reversed clip, and where each is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
 }
 
 /// What `arrangement.consolidate` did.
@@ -149,6 +211,35 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-SES-028")
             .args::<CropArgs>()
             .result::<CropResult>(),
+        CommandSpec::new(REVERSE, "Reverse Clip")
+            .description(
+                "Gives an audio clip a backwards copy of its file: the copy is written through \
+                 the processed-file writer, and the clip plays it, with its Start and End \
+                 markers, loop brace and warp markers mirrored about the file, so it plays the \
+                 same stretch of sound backwards. The clip's envelopes stay where they are, and \
+                 its loop switch, gain, transpose, detune, warp mode and fades don't change. \
+                 Reversing a clip whose file is already a reversed copy gives it back the file \
+                 it was made from, writing nothing. `clip` names the clip (left out, the \
+                 selected one). A MIDI clip isn't reversed, and nothing changes.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Arrangement, Session, ClipView])
+            .args::<ReverseArgs>()
+            .result::<ReverseResult>(),
+        CommandSpec::new(ARRANGEMENT_REVERSE, "Reverse Clip(s)")
+            .description(
+                "Reverses the audio in a span of the Arrangement, across several clips: the \
+                 time selection, or the span of the selected clips (`tracks`, with `start` and \
+                 `end`). The clips the span's edges cross are split there first, each part \
+                 inside is reversed, and the parts are mirrored within the span on their \
+                 tracks, so the span plays backwards as a whole. A span holding a MIDI clip \
+                 isn't reversed, and nothing changes. R (Ctrl-R) runs it on the selection.",
+            )
+            .permission(Permission::Edit)
+            .context(Arrangement)
+            .binding(Binding::new("S-ARR-029"))
+            .args::<ReverseRangeArgs>()
+            .result::<ReverseRangeResult>(),
         CommandSpec::new(CONSOLIDATE, "Consolidate")
             .description(
                 "Joins the material in a range on each selected track into one new clip per \

@@ -168,6 +168,14 @@ pub const AUDIO_CONFIGURE: &str = "audio.configure";
 pub const AUDIO_TOGGLE_ENGINE: &str = "audio.toggle_engine";
 /// `audio.set_test_tone`: switch the Audio settings' test tone.
 pub const AUDIO_SET_TEST_TONE: &str = "audio.set_test_tone";
+/// `keymap.bind`: give a command other keys.
+pub use crate::keymap::BIND as KEYMAP_BIND;
+/// `keymap.reset`: give a command Live's keys back.
+pub use crate::keymap::RESET as KEYMAP_RESET;
+/// `keymap.state`: the keymap in use.
+pub use crate::keymap::STATE as KEYMAP_STATE;
+/// `keymap.unbind`: take a shortcut's keys away.
+pub use crate::keymap::UNBIND as KEYMAP_UNBIND;
 
 /// Every command [`register`] adds apart from the agent server's and the
 /// built-in assistant's ([`crate::agent::IDS`], [`crate::assistant::IDS`]),
@@ -235,6 +243,10 @@ pub const IDS: &[&str] = &[
     AUDIO_CONFIGURE,
     AUDIO_TOGGLE_ENGINE,
     AUDIO_SET_TEST_TONE,
+    KEYMAP_STATE,
+    KEYMAP_BIND,
+    KEYMAP_UNBIND,
+    KEYMAP_RESET,
 ];
 
 /// Whether `id` is one of the shell's commands: those in [`IDS`], the agent
@@ -565,7 +577,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
         registry.register(spec)?;
     }
     crate::agent::register(registry)?;
-    crate::assistant::register(registry)
+    crate::assistant::register(registry)?;
+    crate::keymap::register(registry)
 }
 
 #[expect(

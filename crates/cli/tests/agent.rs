@@ -1526,6 +1526,59 @@ fn an_agent_sets_the_temporary_folder_by_command_id_and_reads_it_back() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// An agent gives a command other keys and reads them back from
+/// `keymap.state` (IMP-17).
+#[test]
+fn an_agent_binds_keys_and_reads_them_back() {
+    // Spec: custom-shortcuts R14, R15.
+    let (platform, keys) = if cfg!(target_os = "macos") {
+        ("mac", "Cmd+Option+D")
+    } else {
+        ("win", "Ctrl+Alt+D")
+    };
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let bind = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "keymap.bind",
+                               "args": { "command": "track.duplicate_without_clips",
+                                         "keys": [keys],
+                                         "platform": platform,
+                                         "context": "global" } }] }),
+    );
+    assert_eq!(bind["results"][0]["result"]["entries"], json!(1), "{bind}");
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "keymap.state", "args": {} }] }),
+    );
+    let shortcuts = state["results"][0]["result"]["shortcuts"]
+        .as_array()
+        .expect("the shortcuts");
+    let own = shortcuts
+        .iter()
+        .find(|shortcut| shortcut["mac"]["origin"] == json!("user"))
+        .expect("the person's own shortcut");
+    assert_eq!(
+        own["commands"],
+        json!(["track.duplicate_without_clips"]),
+        "{state}"
+    );
+    // A reset gives the command Live's keys back.
+    let reset = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "keymap.reset",
+                               "args": { "command": "track.duplicate_without_clips" } }] }),
+    );
+    assert_eq!(
+        reset["results"][0]["result"]["entries"],
+        json!(0),
+        "{reset}"
+    );
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
 #[test]
 fn an_autonomous_agent_can_quit_bl_cli_mcp() {
     let mut client = bl_cli_mcp(&["--autonomous"]);

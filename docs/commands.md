@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-558 commands in 37 areas.
+562 commands in 38 areas.
 
 ## Permission classes
 
@@ -327,6 +327,10 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`keymap.bind`](#keymapbind) | Bind Keys | `edit` |  |  |
+| [`keymap.reset`](#keymapreset) | Reset Keys | `edit` |  |  |
+| [`keymap.state`](#keymapstate) | Keymap State | `read` |  |  |
+| [`keymap.unbind`](#keymapunbind) | Unbind Keys | `edit` |  |  |
 | [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
@@ -5956,6 +5960,76 @@ Arguments: none (send `{}`).
 
 Result: [`SwitchResult`](#switchresult).
 
+### Area `keymap`
+
+#### `keymap.bind`
+
+**Bind Keys**. Permission: `edit`. Contexts: `global`.
+
+Gives a command the keys, which run it in the context (the command's default shortcut's, or `global` when it has none). The keys are written as the shortcut reference writes them, such as `Cmd+Option+D`. The keys are taken at once, and the file is written at once; nothing is part of the set and nothing is an undo step. Refuses the contexts that take no user shortcut, and the keys that run another command where the Shortcuts page would ask, unless `replace` is true.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `command` | string | yes | The command to bind, by its ID. |
+| `keys` | array of string | yes | The keys, as the shortcut reference writes them. |
+| `platform` | [`Platform`](#platform) | yes | The platform the keys are for. |
+| `args` | object | no | The arguments the binding fixes, as the default keymap's entries fix them. |
+| `context` | string or null | no | The context the keys run in; without one, the command's default shortcut's, or `global` when the command has none. |
+| `replace` | boolean | no | Whether to take the keys from the command they already run, which the page asks about (R9). |
+
+Result: [`KeymapResult`](#keymapresult).
+
+#### `keymap.reset`
+
+**Reset Keys**. Permission: `edit`. Contexts: `global`.
+
+Gives a command Live 12's own keys back, or every command's when no command is named, emptying the person's keymap file. The file is written at once; nothing is part of the set and nothing is an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `command` | string or null | no | The command to give Live's keys back; without one, every command. |
+
+Result: [`KeymapResult`](#keymapresult).
+
+#### `keymap.state`
+
+**Keymap State**. Permission: `read`. Contexts: `global`.
+
+Reports the keymap in use on each platform: every shortcut with its keys, context, trigger and commands, and whether its keys are Live's, the person's own, or a default their keymap file unbinds; and every entry the file holds that can't be used, with why. The person's own shortcuts are in `keymap.toml`, beside the preferences, layered over Live 12's. Changes nothing.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`KeymapState`](#keymapstate).
+
+#### `keymap.unbind`
+
+**Unbind Keys**. Permission: `edit`. Contexts: `global`.
+
+Takes a shortcut's keys away: the default shortcut by its ID, such as `S-EDIT-004`, or a command with the keys themselves. The keys go on one platform, or on both without a platform. The file is written at once; nothing is part of the set and nothing is an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `command` | string or null | no | The command whose keys go, with the keys themselves. |
+| `keys` | array of string | no | The keys, as the shortcut reference writes them. |
+| `platform` | [`Platform`](#platform) or null | no | The platform whose keys go; without one, both. |
+| `shortcut` | string or null | no | The default shortcut's ID, such as `S-EDIT-004`. |
+
+Result: [`KeymapResult`](#keymapresult).
+
 ### Area `midi`
 
 #### `midi.capture`
@@ -10604,6 +10678,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
+| [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
+| [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
 | [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
@@ -19442,6 +19519,84 @@ What `midi.computer_keyboard_key` returns.
 
 </details>
 
+### `KeymapResult`
+
+What `keymap.bind`, `keymap.unbind` and `keymap.reset` report.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entries` | integer, at least 0 | yes | The number of entries the person's keymap file holds. |
+| `skipped` | integer, at least 0 | yes | The number of entries the file holds that can't be used. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `keymap.bind`, `keymap.unbind` and `keymap.reset` report.",
+  "properties": {
+    "entries": {
+      "description": "The number of entries the person's keymap file holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped": {
+      "description": "The number of entries the file holds that can't be used.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "entries",
+    "skipped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `KeymapState`
+
+The keymap in use, as `keymap.state` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shortcuts` | array of [`ShortcutState`](#shortcutstate) | yes | Every shortcut in the keymap in use, with its keys on each platform. |
+| `skipped` | array of [`SkippedEntry`](#skippedentry) | yes | The entries the file holds but can't use, and why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The keymap in use, as `keymap.state` reports it.",
+  "properties": {
+    "shortcuts": {
+      "description": "Every shortcut in the keymap in use, with its keys on each platform.",
+      "items": {
+        "$ref": "#/$defs/ShortcutState"
+      },
+      "type": "array"
+    },
+    "skipped": {
+      "description": "The entries the file holds but can't use, and why.",
+      "items": {
+        "$ref": "#/$defs/SkippedEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "shortcuts",
+    "skipped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Label`
 
 A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`.
@@ -22841,6 +22996,43 @@ One of:
 
 </details>
 
+### `Origin`
+
+Where a shortcut's keys come from.
+
+One of:
+
+- `"live"`: Live's own keys, from the generated keymap.
+- `"user"`: The person's own keys, from `keymap.toml`.
+- `"unbound"`: A default the file unbinds: its keys are gone on this platform.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a shortcut's keys come from.",
+  "oneOf": [
+    {
+      "const": "live",
+      "description": "Live's own keys, from the generated keymap.",
+      "type": "string"
+    },
+    {
+      "const": "user",
+      "description": "The person's own keys, from `keymap.toml`.",
+      "type": "string"
+    },
+    {
+      "const": "unbound",
+      "description": "A default the file unbinds: its keys are gone on this platform.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Output`
 
 Where a track's audio goes: `default` (Main, or the group the track is in), `main` (Main, even from inside a group), `track` (another audio track's input, or the group the track is in), `sends_only` (only through its sends), or `external` (Ext. Out, the audio interface's outputs, with its `channel`: a single channel or a stereo pair, the first pair by default).
@@ -23835,6 +24027,74 @@ A clip a browser command placed.
     "length",
     "name",
     "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Platform`
+
+Which platform's bindings apply: macOS, or Windows and Linux.
+
+One of:
+
+- `"mac"`: macOS: Cmd, Option, Ctrl, Shift.
+- `"win"`: Windows and Linux: Ctrl, Alt, Shift.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which platform's bindings apply: macOS, or Windows and Linux.",
+  "oneOf": [
+    {
+      "const": "mac",
+      "description": "macOS: Cmd, Option, Ctrl, Shift.",
+      "type": "string"
+    },
+    {
+      "const": "win",
+      "description": "Windows and Linux: Ctrl, Alt, Shift.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PlatformKeys`
+
+The shortcut's keys on one platform, and where they come from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `keys` | array of string | yes | The keys, as the shortcut reference writes them. |
+| `origin` | [`Origin`](#origin) | yes | Whether they are Live's, the person's own, or a default the file unbinds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The shortcut's keys on one platform, and where they come from.",
+  "properties": {
+    "keys": {
+      "description": "The keys, as the shortcut reference writes them.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "origin": {
+      "$ref": "#/$defs/Origin",
+      "description": "Whether they are Live's, the person's own, or a default the file unbinds."
+    }
+  },
+  "required": [
+    "keys",
+    "origin"
   ],
   "type": "object"
 }
@@ -27090,6 +27350,7 @@ A page of the Settings window, in Live's order (L-SET-002).
 One of:
 
 - `"display-input"`: Display & Input (L-SET-010).
+- `"shortcuts"`: Shortcuts. Beatlayer's own page: the person's own keyboard shortcuts (IMP-17; the custom shortcuts spec). It follows Display & Input, the page Live keeps its keyboard settings in (L-SET-002).
 - `"theme-colors"`: Theme & Colors (L-SET-011).
 - `"audio"`: Audio (L-SET-012). The page the window first opens on.
 - `"link"`: Link (L-SET-013).
@@ -27110,6 +27371,11 @@ One of:
     {
       "const": "display-input",
       "description": "Display & Input (L-SET-010).",
+      "type": "string"
+    },
+    {
+      "const": "shortcuts",
+      "description": "Shortcuts. Beatlayer's own page: the person's own keyboard shortcuts (IMP-17; the custom shortcuts spec). It follows Display & Input, the page Live keeps its keyboard settings in (L-SET-002).",
       "type": "string"
     },
     {
@@ -27514,6 +27780,73 @@ One short-term loudness reading.
 
 </details>
 
+### `ShortcutState`
+
+One shortcut in the keymap in use, as `keymap.state` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | The shortcut's ID, such as `S-EDIT-004`; a person's own shortcut has one of its own. |
+| `action` | string | yes | What the shortcut does, in the reference's words. |
+| `context` | string | yes | The context it runs in. |
+| `trigger` | [`Trigger`](#trigger) | yes | How it acts. |
+| `commands` | array of string | yes | The commands it runs. |
+| `mac` | [`PlatformKeys`](#platformkeys) | yes | Its keys on macOS, and where they come from. |
+| `win` | [`PlatformKeys`](#platformkeys) | yes | Its keys on Windows and Linux, and where they come from. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One shortcut in the keymap in use, as `keymap.state` reports it.",
+  "properties": {
+    "action": {
+      "description": "What the shortcut does, in the reference's words.",
+      "type": "string"
+    },
+    "commands": {
+      "description": "The commands it runs.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "context": {
+      "description": "The context it runs in.",
+      "type": "string"
+    },
+    "id": {
+      "description": "The shortcut's ID, such as `S-EDIT-004`; a person's own shortcut has one of its own.",
+      "type": "string"
+    },
+    "mac": {
+      "$ref": "#/$defs/PlatformKeys",
+      "description": "Its keys on macOS, and where they come from."
+    },
+    "trigger": {
+      "$ref": "#/$defs/Trigger",
+      "description": "How it acts."
+    },
+    "win": {
+      "$ref": "#/$defs/PlatformKeys",
+      "description": "Its keys on Windows and Linux, and where they come from."
+    }
+  },
+  "required": [
+    "id",
+    "action",
+    "context",
+    "trigger",
+    "commands",
+    "mac",
+    "win"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Sidechain`
 
 A device's sidechain input: `enabled` (the External switch), `input` (Source: `none`, or `track` with a track and a `tap`), `gain` (SC Gain, linear, 1 is 0 dB), `mix` (0 the device's own input to 1 the sidechain alone), and `listen` (Sidechain Listen: hear what the detector hears).
@@ -27627,6 +27960,40 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SkippedEntry`
+
+An entry the file holds but can't use, and why (R6).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entry` | string | yes | The entry, as the file holds it. |
+| `reason` | string | yes | Why it can't be used. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An entry the file holds but can't use, and why (R6).",
+  "properties": {
+    "entry": {
+      "description": "The entry, as the file holds it.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why it can't be used.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "entry",
+    "reason"
   ],
   "type": "object"
 }
@@ -29495,6 +29862,43 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "capture_midi_ready"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Trigger`
+
+How a shortcut acts.
+
+One of:
+
+- `"press"`: Once, when pressed.
+- `"held"`: While held.
+- `"latch"`: Toggles when tapped; acts only while held if held for about half a second (Live 12's momentary shortcuts).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a shortcut acts.",
+  "oneOf": [
+    {
+      "const": "press",
+      "description": "Once, when pressed.",
+      "type": "string"
+    },
+    {
+      "const": "held",
+      "description": "While held.",
+      "type": "string"
+    },
+    {
+      "const": "latch",
+      "description": "Toggles when tapped; acts only while held if held for about half a second (Live 12's momentary shortcuts).",
+      "type": "string"
+    }
+  ]
 }
 ```
 

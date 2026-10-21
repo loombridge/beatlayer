@@ -138,6 +138,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::VIEW_CLIP_ENVELOPE,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
+        // The Shortcuts page's buttons (the custom shortcuts spec, R8 and
+        // R10), and the query for agents.
+        commands::KEYMAP_BIND,
+        commands::KEYMAP_UNBIND,
+        commands::KEYMAP_RESET,
+        commands::KEYMAP_STATE,
         // The File & Folder page's Sample Editor row (the sample editor
         // spec, R16), the Audio Utilities panel's Edit button (R16), and the
         // file dropped on the Clip View that replaces a clip's sample (R18).

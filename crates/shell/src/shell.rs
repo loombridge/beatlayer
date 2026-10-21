@@ -96,6 +96,7 @@ mod audio_panel;
 pub mod autosample;
 mod capture;
 mod freeze;
+mod keymap;
 mod multisampler;
 mod processed_files;
 mod sample_edits;
@@ -386,6 +387,14 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The keymap in use: Live 12's shortcuts with the person's own layered
+    /// over them (the custom-shortcuts spec, R3).
+    keymap: crate::keymap::Keymap,
+    /// The person's own shortcuts, as `keymap.toml` holds them.
+    user_keymap: crate::keymap::UserKeymap,
+    /// The number of times the keymap changed, so a host knows to rebuild
+    /// the keymap it matches keys against.
+    keymap_revision: u64,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -891,6 +900,9 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            keymap: crate::keymap::Keymap::live12(),
+            user_keymap: crate::keymap::UserKeymap::default(),
+            keymap_revision: 0,
             settings_open: false,
             prefs,
             config_dir,
@@ -970,6 +982,7 @@ impl Shell {
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
+        shell.load_user_keymap();
         shell
     }
 
@@ -8105,6 +8118,30 @@ impl Shell {
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::KEYMAP_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&self.keymap_state()))
+            }
+            ids::KEYMAP_BIND => {
+                let bind: crate::keymap::BindArgs = Self::args(id, args)?;
+                self.bind_keys(id, &bind)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_UNBIND => {
+                let crate::keymap::UnbindArgs {
+                    shortcut,
+                    command,
+                    keys,
+                    platform,
+                } = Self::args(id, args)?;
+                self.unbind_keys(id, shortcut.as_deref(), command.as_deref(), &keys, platform)?;
+                Ok(to_value(&self.keymap_result()))
+            }
+            ids::KEYMAP_RESET => {
+                let crate::keymap::ResetArgs { command } = Self::args(id, args)?;
+                self.reset_keys(command.as_deref());
+                Ok(to_value(&self.keymap_result()))
             }
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;

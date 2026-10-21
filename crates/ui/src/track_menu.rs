@@ -27,14 +27,12 @@ const PALETTE: (usize, usize) = (5, 14);
 /// The keymap the track menus' keys come from.
 #[derive(Debug)]
 pub struct TrackMenus {
-    keymap: Keymap,
     platform: Platform,
 }
 
 impl Default for TrackMenus {
     fn default() -> Self {
         Self {
-            keymap: Keymap::live12(),
             platform: Platform::current(),
         }
     }
@@ -79,6 +77,8 @@ impl TrackMenus {
         arrangement: bool,
         events: &mut Vec<UiEvent>,
     ) {
+        // The keymap in use, so the menu shows the keys in use (R10).
+        let keymap = Keymap::from_data(shell.keymap().clone());
         let view = shell.arrangement();
         let doc = shell.editor().document();
         let in_arrangement = arrangement && shell.main_view() == MainView::Arrangement;
@@ -118,15 +118,8 @@ impl TrackMenus {
                 palette(ui, theme, package.unwrap_or_default());
                 continue;
             }
-            let response = crate::menus::item_in(
-                ui,
-                item,
-                shell,
-                &self.keymap,
-                self.platform,
-                &contexts,
-                events,
-            );
+            let response =
+                crate::menus::item_in(ui, item, shell, &keymap, self.platform, &contexts, events);
             let response = match package {
                 Some(package) => {
                     let text = format!("Not built yet: arrives with {package}.");

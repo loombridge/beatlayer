@@ -975,6 +975,32 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// The Shortcuts page, narrowed to Duplicate Track Without Clips, with a
+/// key of the person's own on it (the custom shortcuts spec, R8).
+fn a_bound_shortcut(h: &mut Harness) {
+    let (platform, keys) = if cfg!(target_os = "macos") {
+        ("mac", "Cmd+Option+D")
+    } else {
+        ("win", "Ctrl+Alt+D")
+    };
+    h.shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": [keys],
+                "platform": platform,
+                "context": "global",
+            }),
+        )
+        .unwrap();
+    // The search field, narrowed to the command.
+    h.click(egui::Pos2::new(400.0, 20.0));
+    h.frame(vec![egui::Event::Text(
+        "Duplicate Track Without Clips".to_owned(),
+    )]);
+}
+
 /// A Session clip on the first MIDI track, selected, with the Clip View on
 /// its Envelopes tab showing Pan (WP-3.16).
 fn envelopes_tab(h: &mut Harness) {
@@ -1997,6 +2023,34 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "midi.set_port",
             settings("tempo-midi", a_midi_port, "In: Keys Track", Key::Enter),
         ),
+        // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
+        // Remove and Reset buttons.
+        (
+            "keymap.unbind",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Remove Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.reset",
+            settings(
+                "shortcuts",
+                a_bound_shortcut,
+                "Reset Duplicate Track Without Clips's keys",
+                Key::Enter,
+            ),
+        ),
+        (
+            "keymap.bind",
+            Exception(Equivalent(
+                "the Shortcuts page's keys cell takes the key press that becomes the shortcut, so \
+                 the command's keyboard path is the shortcut itself (the custom shortcuts spec, \
+                 R8)",
+            )),
+        ),
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
@@ -2009,6 +2063,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        ("keymap.state", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.
         (

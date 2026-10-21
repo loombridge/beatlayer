@@ -7,6 +7,8 @@
 //!   types.
 //! - [`menus`]: the menu bar in Live's order, each item tied to the command
 //!   it runs.
+//! - [`keymap`]: Live 12's shortcuts as data, and the person's own
+//!   shortcuts layered over them (IMP-17).
 //! - [`audio`] and [`settings`]: the data those commands take and return.
 //! - [`agent`]: the agent server's settings and commands (WP-1.15).
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
@@ -73,6 +75,7 @@ pub mod devices;
 pub mod editing;
 pub mod export;
 pub mod freeze;
+pub mod keymap;
 pub mod menus;
 pub mod midi_files;
 pub mod midi_io;

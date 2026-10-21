@@ -13,10 +13,10 @@ use bl_model::{
     Channel, Clip, ClipData, ClipEdge, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash,
     CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceRole, EditError, Editor,
     ExternalPort, FileBeats, FollowAction, FollowActions, FollowPatch, HardwareLatency, Input,
-    LaunchMode, LaunchQuantization, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
-    MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId, PluginFormat, Preserve,
-    RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackDelay, TrackId,
-    TrackKind, WarpFrom, WarpMode, WarpPoint,
+    LaunchMode, LaunchQuantization, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound,
+    MidiData, MidiTo, MixerParam, ModelError, Monitor, Note, Output, PanMode, ParamId,
+    PluginFormat, Preserve, RackKind, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate,
+    TrackDelay, TrackId, TrackKind, WarpFrom, WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -54,7 +54,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        207,
+        208,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -75,10 +75,10 @@ fn every_document_command_is_registered() {
 WP-3.18 the two for Cue mode and the Cue Volume, WP-5.3 set_chain_zone, WP-5.40 \
          set_configured_params, WP-4.13 the two for Crop Clip, WP-5.36 seven for track \
          delay, the pan mode, each split side, and the two latency switches, WP-4.11 \
-         four for tempo leaders, stretching and sliding, and WP-5.4 ten \
+         four for tempo leaders, stretching and sliding, and WP-5.4 eleven \
          for the macros: map_macro, unmap_macro, set_mapping_range, invert_mapping, \
          rename_macro, set_macro_colour, set_macro_info_text, randomize_macros, \
-         set_macro_randomize_excluded and set_mapped_value, WP-5.5 seven \
+         set_macro_randomize_excluded, set_macro_style and set_mapped_value, and WP-5.5 seven \
          for the macro variations: store_variation, launch_variation, \
          overwrite_variation, rename_variation, duplicate_variation, \
          delete_variation and set_macro_variation_excluded, and WP-5.33 set_device_role"
@@ -1906,6 +1906,10 @@ fn every_command_runs_by_id() {
         "rack.set_macro_randomize_excluded",
         json!({ "rack": rack, "macro_number": 1, "excluded": true }),
     );
+    agent.run(
+        "rack.set_macro_style",
+        json!({ "rack": rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+    );
     agent.run("rack.randomize_macros", json!({ "rack": rack, "seed": 3 }));
     agent.run(
         "rack.set_mapped_value",
@@ -3427,6 +3431,15 @@ fn schemas_match_what_commands_serialise() {
                 rack,
                 macro_number: 1,
                 excluded: true,
+            },
+        ),
+        (
+            "rack.set_macro_style",
+            Command::SetMacroStyle {
+                rack,
+                macro_number: 1,
+                style: MacroStyle::Stepped,
+                steps: Some(4),
             },
         ),
         (

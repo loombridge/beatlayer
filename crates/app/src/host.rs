@@ -1339,6 +1339,28 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickPluginListPath { default_name } => {
+                // Spec: plugin-list R7. The list's Export… button asks
+                // where to save the list.
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export the Set's Plug-In List")
+                    .add_filter("Text", &["txt"])
+                    .set_file_name(default_name);
+                // Spec: plugin-list R7. The list goes in the set's project
+                // folder, where the system suggests for a set never saved.
+                if let Some(folder) = self.shell.save_dialog_folder() {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::plugin_commands::EXPORT_LIST,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;

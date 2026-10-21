@@ -75,6 +75,20 @@ pub trait SetStore {
         let _ = (hash, path, size);
     }
 
+    /// Records a file the set's clips play that is a reversed copy of
+    /// another, and the file it was made from (the audio clip editing spec,
+    /// R10), so reversing the clip again gives it back that file. A store
+    /// that keeps no media table ignores it.
+    fn add_reversed_media(&mut self, hash: ContentHash, path: &Path, size: u64, from: ContentHash) {
+        let _ = (hash, path, size, from);
+    }
+
+    /// The file a reversed copy was made from, if the set's media table says
+    /// so (R10).
+    fn reversed_from(&self, _hash: &ContentHash) -> Option<ContentHash> {
+        None
+    }
+
     /// The open set's media files with their paths on disk, for the media
     /// store after the set is opened (WP-1.10).
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
@@ -197,7 +211,7 @@ pub struct ProjectFiles {
     media: Media,
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
-    added: BTreeMap<ContentHash, (PathBuf, u64)>,
+    added: BTreeMap<ContentHash, (PathBuf, u64, Option<ContentHash>)>,
     /// What each multisampler's views show (WP-5.13): the open set's, then
     /// the shell's for the next save.
     multisamplers: MultisamplerViews,
@@ -347,7 +361,19 @@ impl SetStore for ProjectFiles {
     }
 
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
-        self.added.insert(hash, (path.to_path_buf(), size));
+        self.added.insert(hash, (path.to_path_buf(), size, None));
+    }
+
+    fn add_reversed_media(&mut self, hash: ContentHash, path: &Path, size: u64, from: ContentHash) {
+        self.added
+            .insert(hash, (path.to_path_buf(), size, Some(from)));
+    }
+
+    fn reversed_from(&self, hash: &ContentHash) -> Option<ContentHash> {
+        self.added
+            .get(hash)
+            .and_then(|(_, _, from)| *from)
+            .or_else(|| self.media.reversed_from(hash))
     }
 
     fn set_temporary_folder(&mut self, folder: PathBuf) {
@@ -370,7 +396,7 @@ impl SetStore for ProjectFiles {
         files.extend(
             self.added
                 .iter()
-                .map(|(hash, (path, size))| (*hash, path.clone(), *size)),
+                .map(|(hash, (path, size, _))| (*hash, path.clone(), *size)),
         );
         files
     }
@@ -500,7 +526,7 @@ impl ProjectFiles {
         };
         let project = ProjectFolder::new(project);
         let mut moved = Vec::new();
-        for (hash, (path, size)) in self.added.clone() {
+        for (hash, (path, size, reversed_from)) in self.added.clone() {
             let Some(rest) = path.strip_prefix(&temporary).ok() else {
                 continue;
             };
@@ -540,7 +566,7 @@ impl ProjectFiles {
                 .and_then(|destination| move_file(&path, &destination).map(|()| destination));
             match placed {
                 Ok(destination) => {
-                    self.added.insert(hash, (destination, size));
+                    self.added.insert(hash, (destination, size, reversed_from));
                     moved.push((hash, path));
                 }
                 Err(error) => {
@@ -556,10 +582,10 @@ impl ProjectFiles {
     /// were, after a save that failed.
     fn move_back(&mut self, moved: Vec<(ContentHash, PathBuf)>) {
         for (hash, from) in moved {
-            if let Some((now, size)) = self.added.get(&hash).cloned()
+            if let Some((now, size, reversed_from)) = self.added.get(&hash).cloned()
                 && move_file(&now, &from).is_ok()
             {
-                self.added.insert(hash, (from, size));
+                self.added.insert(hash, (from, size, reversed_from));
             }
         }
     }
@@ -609,7 +635,7 @@ impl ProjectFiles {
         let folder = std::path::absolute(path)
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf));
-        for (hash, (file, size)) in &self.added {
+        for (hash, (file, size, reversed_from)) in &self.added {
             let relative = folder.as_deref().and_then(|folder| {
                 std::path::absolute(file)
                     .ok()
@@ -621,6 +647,7 @@ impl ProjectFiles {
                         hash: *hash,
                         path: relative,
                         size: *size,
+                        reversed_from: *reversed_from,
                     });
                 }
                 None => warnings.push(format!(

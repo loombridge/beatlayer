@@ -18,11 +18,13 @@
 //! scheduled parameter events (AUDelay's Dry/Wet Mix does), while their
 //! MIDI events land on the frames they're scheduled for.
 
+use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
 
+use bl_core::midi::MidiMessage;
 use bl_engine::{
     AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue,
 };
@@ -48,6 +50,55 @@ const EVENT_CAPACITY: usize = 1024;
 /// How many parameter changes made while the unit isn't running a node
 /// keeps for it; past that they're dropped and counted.
 const PENDING_CAPACITY: usize = 512;
+
+/// How many MIDI output events one render holds before more are dropped
+/// (real-time rule 4).
+const MIDI_OUT_EVENTS: usize = 512;
+
+/// The most bytes one MIDI output event carries; a longer one is truncated.
+const MIDI_OUT_BYTES: usize = 8;
+
+/// The unit's MIDI output block's signature, as [`AUMIDIOutputEventBlock`]
+/// has it: the event's frame within the render call, the cable, the byte
+/// count, and the bytes.
+///
+/// [`AUMIDIOutputEventBlock`]: objc2_audio_toolbox::AUMIDIOutputEventBlock
+type MidiOutFn = dyn Fn(i64, u8, isize, NonNull<u8>) -> i32;
+
+/// One MIDI event a unit sent out during a render.
+#[derive(Clone, Copy)]
+struct MidiOutEvent {
+    /// Its frame within the render call, as the unit gave it.
+    time: i64,
+    /// Its bytes, the first `length` of them.
+    bytes: [u8; MIDI_OUT_BYTES],
+    length: usize,
+}
+
+/// The MIDI events a unit sent out during a render: written by the block
+/// the unit calls on the audio thread, drained by the node after the render
+/// call. Neither allocates nor locks.
+struct MidiOut {
+    events: UnsafeCell<[MidiOutEvent; MIDI_OUT_EVENTS]>,
+    count: Cell<usize>,
+    dropped: Cell<u64>,
+}
+
+impl Default for MidiOut {
+    fn default() -> Self {
+        Self {
+            events: UnsafeCell::new(
+                [MidiOutEvent {
+                    time: 0,
+                    bytes: [0; MIDI_OUT_BYTES],
+                    length: 0,
+                }; MIDI_OUT_EVENTS],
+            ),
+            count: Cell::new(0),
+            dropped: Cell::new(0),
+        }
+    }
+}
 
 /// The host's end of a node's processor queue, the node's, and what they
 /// both see.
@@ -89,6 +140,14 @@ pub(crate) struct Processor {
     /// Its MIDI scheduling block, if it takes notes (a music device or
     /// effect); null otherwise.
     midi: AUScheduleMIDIEventBlock,
+    /// The block the unit calls with the MIDI it sends out (IMP-24), kept
+    /// here so it outlives the render calls and drops before `midi_out`,
+    /// which its closure points at; `None` while the unit names no MIDI
+    /// output.
+    _midi_out_block: Option<RcBlock<MidiOutFn>>,
+    /// The events that block wrote, drained by the node after each render
+    /// call.
+    midi_out: Box<MidiOut>,
     /// Every parameter of the unit's tree, in order, with the value it had
     /// when the unit was made: a parameter change is one `setValue` on its
     /// own frame, and a `ParamValue::Default` event sets its captured
@@ -189,12 +248,18 @@ pub struct AuNode {
     automation: Option<NodeData>,
     /// The block's events, in order, kept with the node's room.
     events: Vec<(u32, In)>,
+    /// The device sits in the MIDI-effect position (IMP-24): its notes go
+    /// on, its audio output is dropped, and the audio it receives passes
+    /// through.
+    midi_effect: bool,
     steady: u64,
 }
 
 impl AuNode {
-    /// A node for `config`, with the main thread's ends of its queues.
-    pub(crate) fn new(_config: &NodeConfig) -> (Self, HostEnds) {
+    /// A node for `config`, with the main thread's ends of its queues. With
+    /// `midi_effect` the device is placed as a MIDI effect (IMP-24), so its
+    /// audio output is dropped.
+    pub(crate) fn new(_config: &NodeConfig, midi_effect: bool) -> (Self, HostEnds) {
         let (to_node, from_host) = RingBuffer::new(1);
         let (to_host, from_node) = RingBuffer::new(2);
         let status = Arc::new(Status::default());
@@ -207,6 +272,7 @@ impl AuNode {
             pending: Vec::with_capacity(PENDING_CAPACITY),
             automation: None,
             events: Vec::with_capacity(EVENT_CAPACITY),
+            midi_effect,
             steady: 0,
         };
         let ends = HostEnds {
@@ -316,9 +382,13 @@ impl Node for AuNode {
         let mut failed = false;
         while index < self.events.len() {
             let offset = (self.events[index].0 as usize).min(frames - 1);
-            if offset > at && processor.render(block, base, at, offset) != 0 {
-                failed = true;
-                break;
+            if offset > at {
+                if processor.render(block, base, at, offset, self.midi_effect) != 0 {
+                    failed = true;
+                    break;
+                }
+                let dropped = processor.take_midi_out(block, at, offset);
+                self.status.dropped.fetch_add(dropped, Relaxed);
             }
             while index < self.events.len() && self.events[index].0 as usize <= offset {
                 match self.events[index].1 {
@@ -337,8 +407,13 @@ impl Node for AuNode {
             }
             at = offset;
         }
-        if !failed && at < frames && processor.render(block, base, at, frames) != 0 {
-            failed = true;
+        if !failed && at < frames {
+            if processor.render(block, base, at, frames, self.midi_effect) != 0 {
+                failed = true;
+            } else {
+                let dropped = processor.take_midi_out(block, at, frames);
+                self.status.dropped.fetch_add(dropped, Relaxed);
+            }
         }
         self.steady = self.steady.wrapping_add(frames as u64);
         if failed {
@@ -507,10 +582,57 @@ impl Processor {
                 0
             },
         );
+        // The unit's MIDI output (IMP-24): the block it calls with the MIDI
+        // it sends out, and the events it writes for the node to drain.
+        let midi_out: Box<MidiOut> = Box::default();
+        let state: *const MidiOut = &raw const *midi_out;
+        let block: RcBlock<MidiOutFn> = RcBlock::new(
+            move |time: i64, _cable: u8, length: isize, bytes: NonNull<u8>| -> i32 {
+                // SAFETY: the pointer is this processor's own output state,
+                // which outlives the block (both live in the processor, and
+                // the block is declared before it, so it drops first). The
+                // unit calls the block only during a render call, on the
+                // audio thread, and one processor runs for one node.
+                let state = unsafe { &*state };
+                let count = state.count.get();
+                if count >= MIDI_OUT_EVENTS {
+                    state.dropped.set(state.dropped.get() + 1);
+                    return 0;
+                }
+                let length = usize::try_from(length).unwrap_or(0).min(MIDI_OUT_BYTES);
+                let mut event = MidiOutEvent {
+                    time,
+                    bytes: [0; MIDI_OUT_BYTES],
+                    length,
+                };
+                if length > 0 {
+                    // SAFETY: the unit lends `length` bytes for the call.
+                    let source = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), length) };
+                    event.bytes[..length].copy_from_slice(source);
+                }
+                // SAFETY: one render call at a time writes the events, and
+                // the node drains them after it.
+                unsafe { (*state.events.get())[count] = event };
+                state.count.set(count + 1);
+                0
+            },
+        );
+        // SAFETY: reading the unit's own MIDI output names is a property
+        // read on the thread that made it.
+        let names_midi = unsafe { unit.MIDIOutputNames() }.count() > 0;
+        // Only a unit that names a MIDI output takes the block.
+        let midi_out_block = names_midi.then(|| {
+            // SAFETY: the block is kept in the processor, which lives as
+            // long as the unit is active; the unit copies it too.
+            unsafe { unit.setMIDIOutputEventBlock(RcBlock::as_ptr(&block)) };
+            block
+        });
         Self {
             unit,
             render,
             midi,
+            _midi_out_block: midi_out_block,
+            midi_out,
             params,
             drive,
             pull_block,
@@ -629,15 +751,44 @@ impl Processor {
         true
     }
 
+    /// Sends on the notes the unit sent out during its render call for
+    /// frames `start..end` of the block, each on the frame the unit gave,
+    /// clamped into the call (IMP-24; au-hosting R4), and returns how many
+    /// of its events were dropped for lack of room. Anything else the unit
+    /// sent is dropped.
+    pub(crate) fn take_midi_out(&mut self, block: &mut Block<'_>, start: usize, end: usize) -> u64 {
+        let count = self.midi_out.count.get();
+        for index in 0..count {
+            // SAFETY: one render call at a time wrote the events, and this
+            // drains them after it.
+            let event = unsafe { (*self.midi_out.events.get())[index] };
+            let bytes = &event.bytes[..event.length.min(MIDI_OUT_BYTES)];
+            let Some(message) = MidiMessage::from_bytes(bytes) else {
+                continue;
+            };
+            let at = start + usize::try_from(event.time.max(0)).unwrap_or(0);
+            let at = u32::try_from(at.min(end.saturating_sub(1))).unwrap_or(0);
+            if let Some(note) = NoteEvent::from_midi(at, &message) {
+                block.send_note(note);
+            }
+        }
+        self.midi_out.count.set(0);
+        let dropped = self.midi_out.dropped.get();
+        self.midi_out.dropped.set(0);
+        dropped
+    }
+
     /// Renders frames `start..end` of the block through the unit, writing
     /// its output back into the block. Returns the unit's status: 0 for
-    /// rendered audio.
+    /// rendered audio. With `midi_effect` the audio it receives passes
+    /// through and its own output is dropped (IMP-24).
     pub(crate) fn render(
         &mut self,
         block: &mut Block<'_>,
         base: u64,
         start: usize,
         end: usize,
+        midi_effect: bool,
     ) -> AUAudioUnitStatus {
         let frames = end - start;
         if frames == 0 {
@@ -692,6 +843,12 @@ impl Processor {
             return status;
         }
         let channels = block.channels();
+        if midi_effect {
+            // Spec: device-chains R3 (IMP-24). A unit placed as a MIDI
+            // effect passes the audio it receives on, and its own audio
+            // output is dropped.
+            return 0;
+        }
         if self.output_channels == 0 {
             silence(block);
             return 0;

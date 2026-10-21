@@ -464,7 +464,7 @@ fn arrangement_end(doc: &Document) -> Ticks {
 /// Main's devices are off at unity, and every send and return around the
 /// track is silenced), with the track's own mixer at rest, since its volume,
 /// pan, activator and sends act on the render afterwards (R2, R14, R15).
-fn prepared_track(doc: &Document, track: TrackId) -> Result<Document, String> {
+pub(super) fn prepared_track(doc: &Document, track: TrackId) -> Result<Document, String> {
     let mut doc = crate::export::prepare_document_for_track(doc, track, false)?;
     for command in [
         Command::SetVolume { track, volume: 1.0 },
@@ -477,7 +477,7 @@ fn prepared_track(doc: &Document, track: TrackId) -> Result<Document, String> {
 }
 
 /// Renders `doc` from `start` for `length` ticks, with its tail when asked.
-fn render_doc(
+pub(super) fn render_doc(
     shell: &Shell,
     id: &str,
     doc: &Document,
@@ -539,7 +539,7 @@ fn channels_of(frames: &[f32]) -> u16 {
 }
 
 /// The second `at` sits at, counting from `from` through the tempo map.
-fn seconds_between(doc: &Document, from: Ticks, at: Ticks) -> f64 {
+pub(super) fn seconds_between(doc: &Document, from: Ticks, at: Ticks) -> f64 {
     let rate = bl_core::time::SampleRate::new(48_000).expect("48 kHz is a rate");
     let frames = doc.settings().tempo.ticks_to_frames(at, rate).get()
         - doc.settings().tempo.ticks_to_frames(from, rate).get();
@@ -548,7 +548,7 @@ fn seconds_between(doc: &Document, from: Ticks, at: Ticks) -> f64 {
 
 /// Ticks covering `seconds` at the set's tempo at 1.1.1, near enough for a
 /// tail's drawn length.
-fn frames_to_ticks(doc: &Document, rate: u32, seconds: f64) -> Ticks {
+pub(super) fn frames_to_ticks(doc: &Document, rate: u32, seconds: f64) -> Ticks {
     let rate = bl_core::time::SampleRate::new(rate).expect("a known rate");
     let frames = (seconds * f64::from(rate.hz())).round() as i64;
     doc.settings()

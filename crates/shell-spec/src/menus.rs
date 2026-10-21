@@ -363,7 +363,11 @@ const EDIT: &[Row] = &[
     ("M-EDIT-027", "Arm Track", Key(&["S-TRACK-013"])),
     SEPARATOR,
     ("M-EDIT-028", "Freeze Track", Key(&["S-TRACK-017"])),
-    ("M-EDIT-029", "Bounce Track in Place", Pending(None)),
+    (
+        "M-EDIT-029",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
     ("M-EDIT-030", "Bounce to New Track", Key(&["S-BOUNCE-001"])),
     ("M-EDIT-031", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
     SEPARATOR,

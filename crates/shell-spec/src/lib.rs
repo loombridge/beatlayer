@@ -42,6 +42,8 @@
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
 //! - [`file_manager`]: the File Manager's commands (WP-6.63): showing it,
 //!   what it lists, replacing a file, and the set's backups and copies.
+//! - [`bounce`]: bouncing tracks and pasting bounced audio (`track.bounce_*`,
+//!   WP-4.15).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
@@ -69,6 +71,7 @@ pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
 pub mod autosampler;
+pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
 pub mod commands;
@@ -138,6 +141,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
     freeze::register(registry)?;
+    bounce::register(registry)?;
     slice::register(registry)?;
     warping::register(registry)
 }

@@ -71,6 +71,7 @@ pub mod scene_view;
 pub mod session_view;
 pub mod settings_window;
 pub mod sidechain;
+pub mod slice_dialog;
 pub mod stems_dialog;
 pub mod theme;
 pub mod track_menu;

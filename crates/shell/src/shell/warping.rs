@@ -578,7 +578,11 @@ impl Shell {
     }
 
     /// The clip's transients, once its file's analysis is ready.
-    fn ready_transients(&mut self, id: &str, clip: ClipId) -> Result<Vec<f64>, ShellError> {
+    pub(super) fn ready_transients(
+        &mut self,
+        id: &str,
+        clip: ClipId,
+    ) -> Result<Vec<f64>, ShellError> {
         let (_, shown) = self.shown_transients(id, clip)?;
         if shown.ready {
             return Ok(shown.transients);

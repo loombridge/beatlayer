@@ -83,6 +83,7 @@ use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
+use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
@@ -96,6 +97,7 @@ mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
 mod session_recording;
+mod slice;
 mod stems;
 mod warping;
 
@@ -446,6 +448,9 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Slice to New MIDI Track dialog (WP-4.16): its clip and the
+    /// slicing presets it offers. Never part of the set.
+    slice_dialog: Option<bl_shell_spec::slice::SliceDialogStatus>,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.
     auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
@@ -847,6 +852,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            slice_dialog: None,
             auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
@@ -5293,6 +5299,11 @@ impl Shell {
         if stems_ids::handles(id) {
             return self.can_stems(id, args);
         }
+        if slice_ids::handles(id) {
+            // Spec: slice-to-midi R1. The menus' enabled states: one audio
+            // clip selected, in either view.
+            return self.can_slice(id, args);
+        }
         if id == CUE_MODE {
             // Spec: mixer S10, R24. Solo Switches and Cue Switches, and the
             // Main strip's button, are dimmed while Cue Out and Main Out
@@ -6395,6 +6406,7 @@ impl Shell {
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
+                || slice_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
@@ -6882,6 +6894,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if slice_ids::handles(id) {
+            return self.run_slice(id, args);
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time

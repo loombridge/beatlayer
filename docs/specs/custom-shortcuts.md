@@ -1,6 +1,6 @@
 # Your own keyboard shortcuts
 
-- **Status:** draft
+- **Status:** implemented (R1 to R17 each have a passing test)
 - **Work packages:** WP-6.43 (R1 to R17: the user keymap, the Shortcuts page, and their commands)
 - **Parity-matrix row:** Interface: Keyboard shortcuts, macOS and Windows, including held (momentary) shortcuts; [the improvements](../05-improvements.md), IMP-17 (your own keyboard shortcuts)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 to 12.4.6; the UI parity reference's [shortcuts.toml](../ui-parity/shortcuts.toml) and [layout.md](../ui-parity/layout.md) L-SET-002, L-SET-003 and L-SET-010
@@ -20,7 +20,7 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 | S1 | Beatlayer | [The improvements](../05-improvements.md), IMP-17, and rules 1 to 4 | A user keymap file layered over `live12.toml`; a Shortcuts page in Settings to rebind any command, warn on conflicts within a context, and reset to Live's; Live's keymap stays the default |
 | S2 | Manual | Live 12 reference manual, chapter 42 "Live Keyboard Shortcuts", and chapter 34 "MIDI and Key Remote Control"; chapter 3, section 3.20 | The shortcuts are fixed; computer keys can be mapped to a set's controls in Key Map Mode, which is saved with the set. No chapter describes changing a shortcut |
 | S3 | Release notes | Live 12 release notes, 12.0 to 12.4.6, read 20 October 2026 | Shortcuts are added and changed by releases (Copy Time and S for Solo in 12.4, for example); none lets a person set one; the fixes to custom key mappings concern Key Map Mode |
-| S4 | Reference | [shortcuts.toml](../ui-parity/shortcuts.toml), its contexts and fields, and the keymap generated from it (`crates/ui/keymaps/live12.toml`) | Each shortcut has an ID, both platforms' keys, one context, a kind (key, mouse, modifier, sequence) and a trigger (press, held, latch); the keymap marks each bound to its commands, handled by the system or a focused control, or pending |
+| S4 | Reference | [shortcuts.toml](../ui-parity/shortcuts.toml), its contexts and fields, and the keymap generated from it (`crates/shell-spec/keymaps/live12.toml`) | Each shortcut has an ID, both platforms' keys, one context, a kind (key, mouse, modifier, sequence) and a trigger (press, held, latch); the keymap marks each bound to its commands, handled by the system or a focused control, or pending |
 | S5 | Reference | [layout.md](../ui-parity/layout.md) L-SET-002 (the Settings pages and their order, Agents a Beatlayer addition after Plug-Ins), L-SET-003 (a page's layout) and L-SET-010 (Display & Input, with its Navigation and Keyboard section) | Where Live keeps its keyboard settings, and how a Beatlayer page is added |
 | S6 | Beatlayer | [app-shell.md](app-shell.md) R5, R11 and R15; [command-bindings.md](command-bindings.md); [command-palette.md](command-palette.md) R5; [accessibility.md](accessibility.md) | The Settings window's pages; the order in which contexts resolve a key; the menus show their keys; every action reaches assistive technology |
 | S7 | Beatlayer | [The architecture](../02-architecture.md), "Layout, commands, and key bindings" and "Agent control"; decisions D16 and D17 | The default keymap is generated data and a check fails if it drifts; every action is a registered command with a permission class and a readback |
@@ -57,20 +57,20 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.43 | |
-| R2 | to be written in WP-6.43 | |
-| R3 | to be written in WP-6.43 | |
-| R4 | to be written in WP-6.43 | |
-| R5 | to be written in WP-6.43 | |
-| R6 | to be written in WP-6.43 | |
-| R7 | to be written in WP-6.43 | |
-| R8 | to be written in WP-6.43 | |
-| R9 | to be written in WP-6.43 | |
-| R10 | to be written in WP-6.43 | |
-| R11 | to be written in WP-6.43 | |
-| R12 | to be written in WP-6.43 | |
-| R13 | to be written in WP-6.43 | |
-| R14 | to be written in WP-6.43 | |
-| R15 | to be written in WP-6.43 | |
-| R16 | to be written in WP-6.43 | |
-| R17 | to be written in WP-6.43 | |
+| R1 | `crates/shell/tests/keymap.rs`, `with_no_file_the_keymap_is_lives`, `an_empty_file_leaves_the_keymap_alone` | unit |
+| R2 | `crates/shell/tests/keymap.rs`, `an_unbind_takes_the_keys_away_on_one_platform_only`, `a_bind_keeps_the_arguments_it_fixes` | unit |
+| R3 | `crates/shell/tests/keymap.rs`, `a_bind_gives_a_command_other_keys`, `a_bind_over_lives_own_key_takes_it`, `a_replace_keeps_the_other_keys_of_lives_own_shortcut` | unit |
+| R4 | `crates/shell/tests/keymap.rs`, `a_latching_command_keeps_its_latch_on_new_keys` | unit |
+| R5 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` (the refused context) | unit |
+| R6 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` | unit |
+| R7 | `crates/ui/tests/user_keymap.rs`, `the_shortcuts_page_sits_after_display_and_input` | UI script |
+| R8 | `crates/ui/tests/user_keymap.rs`, `recording_sets_a_key` | UI script |
+| R9 | `crates/ui/tests/user_keymap.rs`, `a_conflict_asks_and_replace_moves_the_key` | UI script |
+| R10 | `crates/ui/tests/user_keymap.rs`, `reset_and_reset_all_give_lives_keys_back` | UI script |
+| R11 | `crates/shell/tests/keymap.rs`, `undo_leaves_the_keymap_alone` | unit |
+| R12 | `crates/ui/tests/user_keymap.rs`, `every_row_reaches_accesskit` | UI script |
+| R13 | `crates/ui/tests/zoom.rs`, `the_settings_window_draws_its_rows_scaled_at_every_step` | UI script |
+| R14 | `crates/shell/tests/keymap.rs`, `the_commands_read_back_through_keymap_state`; `crates/cli/tests/agent.rs`, `an_agent_binds_keys_and_reads_them_back` | unit, through the agent API |
+| R15 | `crates/shell/tests/keymap.rs`, `the_commands_read_back_through_keymap_state`, `a_reset_gives_the_command_lives_keys_back`; `crates/cli/tests/agent.rs`, `an_agent_binds_keys_and_reads_them_back` | unit, through the agent API |
+| R16 | `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it` | unit |
+| R17 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` (the file holds no Key Map Mode mapping, and one it held would be skipped) | unit |

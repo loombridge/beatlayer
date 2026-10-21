@@ -10,6 +10,7 @@
 //! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
 //! the arrangement editing spec.
 
+pub mod automation;
 pub mod editing;
 pub mod grid;
 pub mod placing;
@@ -21,7 +22,7 @@ use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{AutomationTarget, ClipId, Document, MixerParam, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, AutomationLane, FoldArgs, FoldGroupsArgs, FollowArgs,
-    InsertMarkerArgs, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
+    InsertMarkerArgs, Lane, ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs,
     ShowAutomationArgs, ShowRangeArgs, ShowTrackArgs, SwitchArgs, TimeRange, TrackHeightArgs,
     ZoomArgs,
 };
@@ -173,6 +174,9 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     title_bars: bool,
     time_selection: Option<(Ticks, Ticks)>,
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1).
+    time_selection_lanes: Vec<Lane>,
     history: Vec<Saved>,
     /// The view `arrangement.zoom_to_selection` last left, so running it
     /// again straight away goes back.
@@ -188,6 +192,10 @@ pub struct ArrangementView {
     /// have picked one; `None` hides that track's lane. A track with no
     /// entry shows its volume.
     automation_lanes: BTreeMap<TrackId, Option<AutomationTarget>>,
+    /// The segment selected in each track's automation lane: the parameter
+    /// it shows and the breakpoint the segment starts at (the automation
+    /// editing spec, R4).
+    automation_segment: BTreeMap<TrackId, (AutomationTarget, Ticks)>,
 }
 
 impl Default for ArrangementView {
@@ -222,12 +230,14 @@ impl ArrangementView {
             selected_clips: Vec::new(),
             title_bars: false,
             time_selection: None,
+            time_selection_lanes: Vec::new(),
             history: Vec::new(),
             zoomed_to_selection: None,
             transport: TransportView::default(),
             automation_mode: false,
             automation_arm: false,
             automation_lanes: BTreeMap::new(),
+            automation_segment: BTreeMap::new(),
         }
     }
 
@@ -379,6 +389,32 @@ impl ArrangementView {
             }))
     }
 
+    /// The segment selected in a track's automation lane: the parameter it
+    /// shows and the breakpoint the segment starts at (the automation
+    /// editing spec, R4).
+    #[must_use]
+    pub fn selected_segment(&self, track: TrackId) -> Option<(AutomationTarget, Ticks)> {
+        self.automation_segment.get(&track).copied()
+    }
+
+    /// Selects a segment in a track's automation lane, or clears it with
+    /// `at` `None` (the automation editing spec, R4).
+    pub fn select_segment(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Option<Ticks>,
+    ) {
+        match at {
+            Some(at) => {
+                self.automation_segment.insert(track, (target, at));
+            }
+            None => {
+                self.automation_segment.remove(&track);
+            }
+        }
+    }
+
     /// How tall `track`'s automation lane is, in points: [`AUTOMATION_LANE_HEIGHT`]
     /// while Automation Mode is on and the track is unfolded, and 0 otherwise.
     /// The lane shows even with nothing chosen (None), so its choosers can
@@ -447,6 +483,13 @@ impl ArrangementView {
     #[must_use]
     pub fn time_selection(&self) -> Option<(Ticks, Ticks)> {
         self.time_selection
+    }
+
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1).
+    #[must_use]
+    pub fn time_selection_lanes(&self) -> &[Lane] {
+        &self.time_selection_lanes
     }
 
     /// Whether a track is folded.
@@ -916,6 +959,9 @@ impl ArrangementView {
                 }
                 self.insert_marker = at;
                 self.time_selection = None;
+                // Spec: automation-editing R1. A selection with no lanes
+                // names no lane.
+                self.time_selection_lanes.clear();
                 // Spec: arrangement-editing R2.
                 self.selected_clips.clear();
                 // Spec: arrangement-view R10.
@@ -944,14 +990,34 @@ impl ArrangementView {
                 }
             }
             ids::SELECT_TIME => {
-                let SelectTimeArgs { start, end, tracks } = parse(args)?;
-                if let Some(tracks) = tracks {
-                    self.selected = self.targets(doc, Some(tracks))?;
-                }
+                let SelectTimeArgs {
+                    start,
+                    end,
+                    tracks,
+                    lanes,
+                } = parse(args)?;
                 let (start, end) = if end < start {
                     (end, start)
                 } else {
                     (start, end)
+                };
+                if let Some(tracks) = tracks {
+                    self.selected = self.targets(doc, Some(tracks))?;
+                }
+                // Spec: automation-editing R1. The selection names the lanes
+                // it covers: each a track's own lane or its automation lane.
+                self.time_selection_lanes = match lanes {
+                    Some(lanes) => {
+                        let tracks: Vec<TrackId> = lanes.iter().map(Lane::track).collect();
+                        self.selected = self.targets(doc, Some(tracks))?;
+                        lanes
+                    }
+                    None => self
+                        .selected
+                        .iter()
+                        .copied()
+                        .map(|track| Lane::Track { track })
+                        .collect(),
                 };
                 self.time_selection = (end > start).then_some((start, end));
                 self.insert_marker = start;
@@ -1100,6 +1166,7 @@ impl ArrangementView {
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),
+            time_selection_lanes: self.time_selection_lanes.clone(),
             folded_tracks: self.folded.iter().copied().collect(),
             zoom_back_steps: self.history.len(),
             automation_mode: self.automation_mode,

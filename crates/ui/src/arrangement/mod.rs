@@ -33,7 +33,7 @@ use bl_media::PeakEvent;
 use bl_model::{Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
-use bl_shell::arrangement_commands as ids;
+use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::{Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
@@ -116,6 +116,12 @@ pub fn automation_mode_id() -> Id {
     Id::new("arrangement-automation-mode")
 }
 
+/// The ID of the Lock Envelopes switch above the track headers (the
+/// automation editing spec, R8).
+pub fn lock_envelopes_id() -> Id {
+    Id::new("arrangement-lock-envelopes")
+}
+
 /// What a frame's lanes were built from: when it's unchanged, the last
 /// frame's instances are drawn again without being rebuilt.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -141,7 +147,13 @@ struct OverviewKey {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Drag {
     /// Selecting time across tracks, from where it started.
-    Select { at: Ticks, row: Option<usize> },
+    Select {
+        at: Ticks,
+        row: Option<usize>,
+        /// Where the drag began, in points, so the lanes it crossed are
+        /// known.
+        y: f32,
+    },
     /// Panning with Cmd-Option (Ctrl-Alt) held.
     Pan,
     /// In the beat-time ruler or the Overview: sideways scrolls, up and
@@ -540,7 +552,7 @@ impl ArrangementUi {
 
         // The headers.
         self.headers(ui, shell, theme, &layout, scroll_y, &pinned, events);
-        self.header_controls(ui, view, theme, &layout, events);
+        self.header_controls(ui, view, doc, theme, &layout, events);
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
         self.accessibility(ui, view, doc, &layout);
@@ -638,11 +650,13 @@ impl ArrangementUi {
                 Drag::Select {
                     at,
                     row: row.or_else(|| self.row_at(lanes, scroll_y, press)),
+                    y: press.y,
                 }
             } else {
                 Drag::Select {
                     at: view.snap(doc, at(press)),
                     row: self.row_at(lanes, scroll_y, press),
+                    y: press.y,
                 }
             });
         }
@@ -669,22 +683,34 @@ impl ArrangementUi {
                         invoke(events, ids::SCROLL, json!({ "x": -delta.x, "y": -delta.y }));
                     }
                 }
-                Some(Drag::Select { at: from, row }) => {
+                Some(Drag::Select { at: from, row, y }) => {
                     if let Some(pos) = response.interact_pointer_pos() {
                         // I-DRAG-010: time across the tracks dragged over.
                         let to = view.snap(doc, at(pos));
                         let here = self.row_at(lanes, scroll_y, pos).or(row);
-                        let tracks: Vec<TrackId> = match (row, here) {
+                        let (tracks, lanes) = match (row, here) {
                             (Some(a), Some(b)) => {
                                 let (a, b) = (a.min(b), a.max(b));
-                                self.rows[a..=b].iter().map(|r| r.track).collect()
+                                (
+                                    self.rows[a..=b].iter().map(|r| r.track).collect(),
+                                    // Spec: automation-editing R1. The
+                                    // selection names the lanes it covers.
+                                    lanes_crossed(
+                                        &self.rows,
+                                        a,
+                                        b,
+                                        y - lanes.top() + scroll_y,
+                                        pos.y - lanes.top() + scroll_y,
+                                        view,
+                                    ),
+                                )
                             }
-                            _ => Vec::new(),
+                            _ => (Vec::new(), Vec::new()),
                         };
                         invoke(
                             events,
                             ids::SELECT_TIME,
-                            json!({ "start": from, "end": to, "tracks": tracks }),
+                            json!({ "start": from, "end": to, "tracks": tracks, "lanes": lanes }),
                         );
                     }
                 }
@@ -1275,6 +1301,7 @@ impl ArrangementUi {
         &self,
         ui: &mut Ui,
         view: &ArrangementView,
+        doc: &Document,
         theme: &Theme,
         layout: &ArrangementLayout,
         events: &mut Vec<UiEvent>,
@@ -1289,7 +1316,6 @@ impl ArrangementUi {
                 "milestone M6",
             ),
             (layout.next_locator, "Next Locator", "▶", "milestone M6"),
-            (layout.lock_envelopes, "Lock Envelopes", "L", "WP-2.12"),
             (layout.waveform_zoom, "Waveform Zoom", "", "milestone M2"),
             (
                 layout.waveform_zoom_level,
@@ -1380,6 +1406,43 @@ impl ArrangementUi {
                 crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
             }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
+        }
+        // L-ARR-010: Lock Envelopes, live (the automation editing spec, R8).
+        {
+            let rect = layout.lock_envelopes;
+            let id = lock_envelopes_id();
+            let on = doc.settings().lock_envelopes;
+            let response = ui.interact(rect, id, Sense::click());
+            let fill = if on {
+                theme.colors.accent.0
+            } else if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            };
+            let ink = if on {
+                theme.colors.accent_text.0
+            } else {
+                theme.colors.text.0
+            };
+            let painter = ui.painter_at(rect.expand(1.0));
+            painter.rect_filled(rect, theme.sizes.corner, fill);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "L",
+                theme.small_font(),
+                ink,
+            );
+            if response.clicked() {
+                invoke(events, "song.set_lock_envelopes", json!({ "enabled": !on }));
+            }
+            // Spec: accessibility R10. The switch is in the Tab order,
+            // after Automation Mode.
+            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::Checkbox, true, on, "Lock Envelopes")
+            });
         }
     }
 
@@ -1508,6 +1571,57 @@ impl ArrangementUi {
                 pressed(&[Key::Minus], true),
             )
         });
+        // Spec: automation-editing R6. Option (Alt on Windows) with an
+        // edit command applies it to the automation lanes under the tracks
+        // of the time selection (S-EDIT-016).
+        let (copy, cut, paste, duplicate, delete) = ui.input(|i| {
+            let pressed = |keys: &[Key], command: bool| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { key, pressed: true, modifiers, .. }
+                            if keys.contains(key)
+                                && modifiers.alt
+                                && modifiers.command == command
+                                && !modifiers.shift
+                    )
+                })
+            };
+            (
+                pressed(&[Key::C], true),
+                pressed(&[Key::X], true),
+                pressed(&[Key::V], true),
+                pressed(&[Key::D], true),
+                pressed(&[Key::Delete], false),
+            )
+        });
+        if copy || cut || paste || duplicate || delete {
+            let lanes: Vec<Lane> = view
+                .selected_tracks()
+                .iter()
+                .filter_map(|track| {
+                    view.automation_lane(*track).map(|target| Lane::Automation {
+                        track: *track,
+                        target,
+                    })
+                })
+                .collect();
+            if !lanes.is_empty() {
+                let args = json!({ "lanes": lanes });
+                let command = if copy {
+                    "automation.copy"
+                } else if cut {
+                    "automation.cut"
+                } else if paste {
+                    "automation.paste"
+                } else if duplicate {
+                    "automation.duplicate"
+                } else {
+                    "automation.delete_range"
+                };
+                invoke(events, command, args);
+            }
+        }
         if up || down {
             let current = view
                 .selected_tracks()
@@ -1582,4 +1696,36 @@ fn ruler_drag(events: &mut Vec<UiEvent>, delta: egui::Vec2, anchor: Ticks, scale
 #[must_use]
 pub fn colour_of(theme: &Theme, track: TrackId) -> Color32 {
     scene::track_colour(theme, track)
+}
+
+/// The lanes a drag across the rows passed through: each row's own lane,
+/// and its automation lane where the drag went into it (the automation
+/// editing spec, R1).
+fn lanes_crossed(
+    rows: &[Row],
+    from: usize,
+    to: usize,
+    press_y: f32,
+    now_y: f32,
+    view: &ArrangementView,
+) -> Vec<Lane> {
+    let (lo, hi) = (press_y.min(now_y), press_y.max(now_y));
+    let mut out = Vec::new();
+    for row in &rows[from..=to] {
+        let top = row.top;
+        let own = top + row.height;
+        let bottom = row.bottom();
+        if lo < own && hi > top {
+            out.push(Lane::Track { track: row.track });
+        }
+        if row.automation > 0.0 && hi > own && lo < bottom {
+            if let Some(target) = view.automation_lane(row.track) {
+                out.push(Lane::Automation {
+                    track: row.track,
+                    target,
+                });
+            }
+        }
+    }
+    out
 }

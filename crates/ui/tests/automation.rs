@@ -452,7 +452,9 @@ fn double_clicking_off_a_segment_adds_a_breakpoint_at_the_clicked_value() {
     );
 }
 
-// Spec: automation R13 (S3)
+// Spec: automation R13 (S3), automation-editing R3. The drag runs
+// `automation.move_breakpoints`, which moves a breakpoint past a neighbour
+// by removing it.
 #[test]
 fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
     let mut s = set();
@@ -462,7 +464,7 @@ fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
     drag(&mut s.h, from, to, Modifiers::NONE);
     let commands = s.commands();
     assert!(
-        commands.contains(&"automation.move_breakpoint".to_owned()),
+        commands.contains(&"automation.move_breakpoints".to_owned()),
         "{commands:?}"
     );
     let points = s.points();
@@ -473,6 +475,61 @@ fn dragging_a_breakpoint_moves_its_position_and_value_in_one_undo_step() {
         "{points:?}"
     );
     assert_eq!(s.steps(), before + 1, "the drag is one undo step");
+}
+
+// Spec: accessibility R10, automation-editing R8. The Lock Envelopes
+// switch above the track headers is live, and in the Tab order.
+#[test]
+fn the_lock_envelopes_switch_is_in_the_tab_order() {
+    let mut h = Harness::new(common::Window::Main);
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Lock Envelopes");
+    assert!(!node.disabled, "it can be pressed");
+    assert_eq!(node.toggled, Some(false), "it is off in a new set");
+    // Pressing it, as a screen reader does, switches the setting on.
+    h.accesskit(bl_ui::arrangement::lock_envelopes_id(), Action::Click);
+    h.settle();
+    assert!(h.shell.editor().document().settings().lock_envelopes);
+}
+
+// Spec: automation-editing R6. Option (Alt on Windows) with an edit
+// command applies it to the automation lanes under the tracks of the time
+// selection (S-EDIT-016).
+#[test]
+fn the_edit_keys_in_an_automation_lane_act_on_the_envelopes() {
+    let mut s = set();
+    // The time selection is in the track's automation lane.
+    s.h
+        .shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": BAR,
+                "lanes": [{
+                    "type": "automation",
+                    "track": s.track,
+                    "target": pan_json(),
+                }],
+            }),
+        )
+        .unwrap();
+    s.h.settle();
+    s.h.key(
+        Key::C,
+        Modifiers {
+            alt: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+    );
+    s.h.settle();
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.copy".to_owned()),
+        "{commands:?}"
+    );
 }
 
 // Spec: automation R13 (S-ENV-003)

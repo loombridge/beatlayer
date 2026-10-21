@@ -770,7 +770,7 @@ const OPTIONS: &[Row] = &[
     // `bl-model`'s switch, which the shell turns to the other state.
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
-    ("M-OPT-026", "Lock Envelopes", Pending(None)),
+    ("M-OPT-026", "Lock Envelopes", Cmd("song.set_lock_envelopes")),
     (
         "M-OPT-027",
         "MIDI Arrangement Overdub",

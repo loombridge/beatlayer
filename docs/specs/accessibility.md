@@ -112,7 +112,7 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 | R7 | `crates/ui/tests/accessibility.rs`, `outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off` | UI script (drawn shapes) |
 | R8 | `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` (prints the table with `--nocapture`), `the_reachability_test_fails_for_a_command_with_no_keyboard_path`, `the_keys_open_the_arrangement_s_context_menus`, `the_keys_open_a_sidebar_place_s_context_menu`; `crates/ui/tests/track_menu.rs`, `the_keys_open_the_selected_title_bar_s_menu`, `the_keys_open_a_session_column_s_title_menu`; `crates/shell/tests/menus.rs`, `every_shell_command_is_on_a_menu_or_a_control` | UI script, unit |
 | R9 | `crates/ui/tests/accessibility.rs`, `the_navigate_and_options_menus_reach_their_commands`; `crates/shell-spec/src/menus.rs`, `every_menu_row_and_separator_is_in_the_model_in_order` | UI script, unit |
-| R10 | to be written in WP-6.24 and WP-6.25 | |
+| R10 | `the_lock_envelopes_switch_is_in_the_tab_order` | `bl-ui` |
 
 ## Screen readers: the manual test
 

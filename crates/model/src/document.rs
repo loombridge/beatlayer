@@ -85,6 +85,11 @@ pub struct Settings {
     /// delay compensation is on.
     #[serde(default, skip_serializing_if = "is_off")]
     pub reduced_latency_monitoring: bool,
+    /// Lock Envelopes: whether the tracks' envelopes stay where they are in
+    /// the song when their clips are edited (the automation editing spec,
+    /// R8). Off in a new set, and in a set saved before it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub lock_envelopes: bool,
 }
 
 impl Default for Settings {
@@ -106,6 +111,7 @@ impl Default for Settings {
             midi_overdub: false,
             delay_compensation: true,
             reduced_latency_monitoring: false,
+            lock_envelopes: false,
         }
     }
 }

@@ -522,3 +522,39 @@ fn an_older_looped_clip_keeps_its_loop() {
         .unwrap();
     editor.apply(enabled(true)).unwrap();
 }
+
+// Spec: automation-editing R8. Lock Envelopes is saved with the set, and a
+// set saved before it has none and loads with it off.
+#[test]
+fn an_older_set_loads_with_lock_envelopes_off() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::default());
+    let saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    assert!(
+        saved["document"]["settings"].get("lock_envelopes").is_none(),
+        "a set saved before Lock Envelopes has no such field"
+    );
+
+    let (loaded, _) =
+        decode_json(&serde_json::to_vec(&saved).unwrap(), &LoadOptions::default()).unwrap();
+    assert!(!loaded.document.settings().lock_envelopes);
+
+    // A set saved with it on keeps it.
+    editor
+        .apply(Command::SetLockEnvelopes { enabled: true })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::default());
+    let (loaded, _) =
+        decode_json(&encode_json(&project, 1).unwrap(), &LoadOptions::default()).unwrap();
+    assert!(loaded.document.settings().lock_envelopes);
+}

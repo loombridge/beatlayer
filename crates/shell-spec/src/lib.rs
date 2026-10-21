@@ -16,6 +16,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`automation`]: the Arrangement's automation editing commands
+//!   (WP-6.25): moving the breakpoints of an envelope, the clipboard of
+//!   envelope shapes, and the edit commands that act on them.
 //! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
 //!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
 //!   them.
@@ -64,6 +67,7 @@ pub mod assistant;
 pub mod audio;
 pub mod audio_editing;
 pub mod audio_panel;
+pub mod automation;
 pub mod autosampler;
 pub mod browser;
 pub mod capture_midi;
@@ -107,6 +111,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    automation::register(registry)?;
     notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;

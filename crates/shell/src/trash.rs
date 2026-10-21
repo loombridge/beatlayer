@@ -97,4 +97,3 @@ fn move_to(path: &Path, trash: &Path) -> Result<(), String> {
         }
     }
 }
-

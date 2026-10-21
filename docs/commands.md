@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-546 commands in 37 areas.
+558 commands in 37 areas.
 
 ## Permission classes
 
@@ -164,6 +164,7 @@ Each command has:
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
 | [`clip.delete_transients`](#clipdelete_transients) | Delete Transients | `edit` | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` | `Delete` | `Delete` |
+| [`clip.edit_sample`](#clipedit_sample) | Edit Sample | `external` |  |  |
 | [`clip.insert_transient`](#clipinsert_transient) | Insert Transient | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` | `Cmd+I` | `Ctrl+I` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | Insert Warp Markers | `edit` |  |  |
@@ -176,6 +177,7 @@ Each command has:
 | [`clip.open_slice_dialog`](#clipopen_slice_dialog) | Slice to New MIDI Track | `read` |  |  |
 | [`clip.quantize_audio`](#clipquantize_audio) | Quantize | `edit` | `Cmd+U` | `Ctrl+U` |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.replace_sample`](#clipreplace_sample) | Replace Sample | `edit` |  |  |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
 | [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
@@ -228,6 +230,9 @@ Each command has:
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | Edit Sample | `edit` |  |  |
 | [`device.add_slice`](#deviceadd_slice) | Add Slice | `edit` |  |  |
 | [`device.audition_sample`](#deviceaudition_sample) | Audition Sample | `read` |  |  |
+| [`device.autosample`](#deviceautosample) | Autosample | `external` |  |  |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | Stop Autosampling | `edit` |  |  |
+| [`device.autosample_open`](#deviceautosample_open) | Autosample… | `read` |  |  |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | Revert Edits | `edit` |  |  |
 | [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
 | [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
@@ -506,6 +511,7 @@ Each command has:
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | Sample Editor | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
@@ -530,12 +536,17 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
+| [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
+| [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
+| [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
 | [`track.ungroup`](#trackungroup) | Ungroup Tracks | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`transport.continue`](#transportcontinue) | Continue Playback | `read` | `Shift+Space` | `Shift+Space` |
 | [`transport.insert_marker_to_playhead`](#transportinsert_marker_to_playhead) | Move Insert Marker To Playhead | `read` | `Cmd+Shift+Space` | `Ctrl+Shift+Space` |
@@ -560,6 +571,7 @@ Each command has:
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
 | [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
 | [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
+| [`view.close_plug_in_windows`](#viewclose_plug_in_windows) | Close All Plug-in Windows | `read` |  |  |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
@@ -2975,6 +2987,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.edit_sample`
+
+**Edit Sample**. Permission: `external`. Contexts: `clip-view`.
+
+Opens an audio clip's file in the external sample editor, as the Edit button in the Clip View's Audio Utilities panel does: the editor the File & Folder page's Sample Editor row names, or that page itself when it names none. The file's content is checked when Beatlayer comes to the front again: if it has changed, every clip of the set that played the old file plays the new one, in one undo step, each keeping its warp markers only if the file kept its length. Opens a program outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`EditedSample`](#editedsample).
+
 #### `clip.insert_transient`
 
 **Insert Transient**. Permission: `edit`. Contexts: `clip-view`, `sample-editor`.
@@ -3210,6 +3238,23 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `clip.replace_sample`
+
+**Replace Sample**. Permission: `edit`. Contexts: `clip-view`.
+
+Replaces an audio clip's file with the file at `path`, as dropping a file from the browser on the Clip View does: the clip keeps its gain and pitch, and its warp markers only if the new file is exactly as long as the old one. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file the clip plays instead. |
+| `clip` | [`ClipId`](#clipid) or null | no | The audio clip. Left out, the one the Clip View shows. |
+
+Result: [`ReplacedSample`](#replacedsample).
 
 #### `clip.reset_transients`
 
@@ -4173,6 +4218,60 @@ Arguments:
 | `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. |
 
 Result: [`Auditioned`](#auditioned).
+
+#### `device.autosample`
+
+**Autosample**. Permission: `external`. Contexts: `device-view`.
+
+Samples an instrument across a range of notes and velocities into a new multisampler on a new MIDI track: the native instrument, the plug-in instrument, or the external instrument, rendered alone with its current settings. The notes are the lowest one and every `step` above it up to the highest, which is always sampled; each is played at `velocity_layers` velocities, held for `note_length` seconds and followed by `release_tail` seconds of render, and sampled `round_robins` times for the round robins. The samples are 32-bit floating-point WAVs in the project's `Samples/Processed/Autosample` folder, named for the instrument, the note and the velocity, and they join the set's media. With `detect_loops` on, each sample gets a sustain loop so a sustained sound holds past the note. The result is a new MIDI track straight after the source's, holding a multisampler with one layer per sample, its zones spread between the sampled notes, Round Robin on in Forward mode where there are round robins, and the volume envelope's release as long as the release tail. One undo step; undoing it leaves the files on disk. It writes files, and plays hardware for the external instrument.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `detect_loops` | boolean or null | no | Whether a loop is found in each sample. Off by default. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample: a native instrument, a plug-in instrument, or the external instrument. The one selected in the Device View when it is left out. |
+| `highest` | integer or null | no | The highest note sampled, from 0 to 127 (C-2 to G8). C6 by default. |
+| `lowest` | integer or null | no | The lowest note sampled, from 0 to 127 (C-2 to G8). C1 by default. |
+| `name` | string or null | no | The name of the instrument the samples are named for, and of the new track. The instrument's own name by default. |
+| `note_length` | number or null | no | How long each note is held, in seconds, from 0.1 to 30. 2 by default. |
+| `release_tail` | number or null | no | How long the render goes on after the note is released, in seconds, from 0 to 30. 1 by default. |
+| `round_robins` | integer or null | no | How many times each note is sampled, from 1 to 8, for the round robins. 1 by default. |
+| `step` | integer or null | no | How many semitones between the sampled notes, from 1 to 12. 3 by default. |
+| `velocity_layers` | integer or null | no | How many velocity layers each note is sampled at, from 1 to 16. 1 by default. |
+| `wait` | boolean or null | no | Whether to wait for the samples to be made before returning. True by default; with it off the command starts the samples and returns at once, and the progress is read from the dialog. |
+
+Result: [`Autosampled`](#autosampled).
+
+#### `device.autosample_cancel`
+
+**Stop Autosampling**. Permission: `edit`. Contexts: `device-view`.
+
+Stops a running autosample: the files it wrote are deleted and the set is left as it was. It does nothing when no autosample is running.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`AutosampleCancelled`](#autosamplecancelled).
+
+#### `device.autosample_open`
+
+**Autosample…**. Permission: `read`. Contexts: `device-view`.
+
+Opens the autosampler's dialog for an instrument: the notes and velocities to sample, the note length and release tail, the round robins, whether a loop is found in each sample, and the name the samples are given. It changes nothing in the set; the dialog's Autosample button runs `device.autosample`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The instrument to sample. The one selected in the Device View when it is left out. |
+
+Result: [`AutosamplerOpened`](#autosampleropened).
 
 #### `device.clear_sample_edits`
 
@@ -9049,6 +9148,22 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `settings.set_sample_editor`
+
+**Sample Editor**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the sample editor on the Settings window's File & Folder page: the command the Edit button in the Clip View's Audio Utilities panel opens a clip's file in. `path` is the command: the program, its arguments, and the clip's file as the last one, or `null` for none, when Edit opens the File & Folder page instead. Run by a person from the Browse button without a `path`, it asks for a program. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the editor in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The editor's command: the program, its arguments, and the clip's file as the last one. `null` for none, when Edit opens the File & Folder page instead. |
+
+Result: [`SampleEditorResult`](#sampleeditorresult).
+
 #### `settings.set_select_next_scene_on_launch`
 
 **Select Next Scene on Launch**. Permission: `edit`. Contexts: `settings`.
@@ -9431,6 +9546,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.clear_frozen`
+
+**Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Plays tracks through their devices and clips again, dropping their frozen audio and restoring the clip data the freeze kept. `tracks` names them. `track.unfreeze` is the command a person and an agent run.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks to unfreeze. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `track.create`
 
 **Insert Track**. Permission: `edit`. Contexts: `global`.
@@ -9493,6 +9624,26 @@ Arguments:
 
 Result: [`TracksDuplicated`](#tracksduplicated).
 
+#### `track.freeze`
+
+**Freeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and plays that instead of their devices: an audio or MIDI track's Arrangement from 1.1.1 to the end of its last tail, and each Session clip on its own, taken after the devices and before the mixer. `tracks` names them (left out, the selected tracks). A group renders its tracks through their mixers and devices and, for each return they send to, the sum of those sends; a return renders from 1.1.1 to the end of the set. The track keeps its mixer, and its clips keep their places; its devices and clip settings are locked while frozen. The freeze runs offline through the processed-file writer, one undo step when every file is whole. It's an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-TRACK-017 | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` | `track-headers` | Freeze or unfreeze the selected tracks | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
+
 #### `track.group`
 
 **Group Tracks**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
@@ -9551,6 +9702,55 @@ Arguments:
 | `name` | string | yes | The new name. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `track.set_devices_enabled`
+
+**Deactivate All Devices**. Permission: `edit`. Contexts: `global`, `arrangement`, `session`, `track-headers`.
+
+Switches every top-level device on the tracks (`tracks`, or the selected tracks) off, or on with `enabled`: true, as the track context menu's Deactivate All Devices does. It reaches only the tracks' own devices, not the devices inside a rack. With `enabled` left out it switches: off, unless every top-level device on the tracks is already off and there is one, when it turns them on. One undo step either way, named Deactivate All Devices or Activate All Devices.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean or null | no | Switch the devices on (true) or off (false); when left out, off unless every top-level device on the tracks is already off, when on. |
+| `tracks` | array or null | no | The tracks; the selected tracks if left out. |
+
+Result: [`DevicesEnabled`](#devicesenabled).
+
+#### `track.set_frozen`
+
+**Set Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Marks tracks frozen with the files a freeze rendered, and makes their clips play those files instead of running the track's devices. `frozen` names each track and the audio its freeze rendered. `track.freeze` is the command a person and an agent run: it renders the files and applies this one. Used directly, it names files the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of pair of [`TrackId`](#trackid) and [`FrozenTrack`](#frozentrack) | yes | Each track and the audio its freeze rendered. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.unfreeze`
+
+**Unfreeze Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Plays the selected frozen tracks through their devices and clips again, from the set as it now is, so edits made while frozen stay. Their freeze files stay on disk, so undoing the unfreeze freezes them again without rendering. `tracks` names them (left out, the selected tracks). It's an edit.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array or null | no | The tracks to freeze or unfreeze. Left out, the selected tracks. |
+
+Result: [`FreezeResult`](#freezeresult).
 
 #### `track.ungroup`
 
@@ -9940,6 +10140,18 @@ Arguments:
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.close_plug_in_windows`
+
+**Close All Plug-in Windows**. Permission: `read`. Contexts: `global`.
+
+Closes every open plug-in editor window at once, as View ▸ Close All Plug-in Windows does. It closes editors only: floating native device windows stay as they are, so it changes nothing in the set, isn't an undo step, and is in the read class. It has no key. Returns how many editor windows it closed.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`ClosedPlugInWindows`](#closedpluginwindows).
+
 #### `view.draw_mode`
 
 **Draw Mode**. Permission: `read`. Contexts: `global`.
@@ -10273,6 +10485,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_transients`](#clipdelete_transients) | `clip.transients` | `transients` |
 | [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.edit_sample`](#clipedit_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.insert_transient`](#clipinsert_transient) | `clip.transients` | `transients` |
 | [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.insert_warp_markers`](#clipinsert_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
@@ -10284,6 +10497,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.quantize_audio`](#clipquantize_audio) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.replace_sample`](#clipreplace_sample) | the query tool's `clip` | `data.audio.media` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
 | [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
@@ -10326,6 +10540,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.add_preset`](#deviceadd_preset) | the query tool's `track` | `devices` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
 | [`device.add_slice`](#deviceadd_slice) | the query tool's `device` | `slices` |
+| [`device.autosample`](#deviceautosample) | the query tool's `track` | `devices` |
 | [`device.clear_sample_edits`](#deviceclear_sample_edits) | the query tool's `device` | `sample_edits` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
 | [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
@@ -10512,6 +10727,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
+| [`settings.set_sample_editor`](#settingsset_sample_editor) | `settings.state` | `file_folder.sample_editor` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
@@ -10532,12 +10748,17 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
+| [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
+| [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
+| [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
 | [`track.ungroup`](#trackungroup) | the query tool's `song` | `tracks` |
 | [`transport.set_loop`](#transportset_loop) | `transport.state` | `loop_start` |
 | [`transport.set_loop_enabled`](#transportset_loop_enabled) | `transport.state` | `loop_on` |
@@ -10575,6 +10796,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
+| [`device.autosample_cancel`](#deviceautosample_cancel) | it stops a running autosample |
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
@@ -12055,6 +12277,214 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `AutosampleCancelled`
+
+What `device.autosample_cancel` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cancelled` | boolean | yes | Whether a sample was running and has been stopped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_cancel` returns.",
+  "properties": {
+    "cancelled": {
+      "description": "Whether a sample was running and has been stopped.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cancelled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosampleFile`
+
+One sample the autosampler made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the file is. |
+| `note` | integer from 0 to 255 | yes | The note it holds. |
+| `velocity` | integer from 0 to 255 | yes | The velocity it was played at. |
+| `round_robin` | integer from 0 to 255 | yes | Which round robin of them it is, from 1. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer it became. |
+| `loop_end` | integer or null | no | Where its loop ends, in frames, when it has one. |
+| `loop_start` | integer or null | no | Where its loop begins, in frames, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One sample the autosampler made.",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/LayerId",
+      "description": "The layer it became."
+    },
+    "loop_end": {
+      "description": "Where its loop ends, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "loop_start": {
+      "description": "Where its loop begins, in frames, when it has one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "The note it holds.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Where the file is.",
+      "type": "string"
+    },
+    "round_robin": {
+      "description": "Which round robin of them it is, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "velocity": {
+      "description": "The velocity it was played at.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "note",
+    "velocity",
+    "round_robin",
+    "layer"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Autosampled`
+
+What `device.autosample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of [`AutosampleFile`](#autosamplefile) | yes | The samples made, in note, velocity and round robin order. |
+| `without_loops` | array of string | yes | The samples left without a loop, named. |
+| `took` | number | yes | How long it took, in seconds. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler, once the samples are made. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track the multisampler is on, once the samples are made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample` returns.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The multisampler, once the samples are made."
+    },
+    "files": {
+      "description": "The samples made, in note, velocity and round robin order.",
+      "items": {
+        "$ref": "#/$defs/AutosampleFile"
+      },
+      "type": "array"
+    },
+    "took": {
+      "description": "How long it took, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track the multisampler is on, once the samples are made."
+    },
+    "without_loops": {
+      "description": "The samples left without a loop, named.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "files",
+    "without_loops",
+    "took"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutosamplerOpened`
+
+What `device.autosample_open` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The instrument the dialog is open for. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.autosample_open` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The instrument the dialog is open for."
+    }
+  },
+  "required": [
+    "device"
+  ],
+  "type": "object"
 }
 ```
 
@@ -13992,6 +14422,36 @@ What `arrangement.copy` put on the clipboard.
     "clips",
     "tracks",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClosedPlugInWindows`
+
+What `view.close_plug_in_windows` returns: how many editor windows it closed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `closed` | integer, at least 0 | yes | The editor windows it closed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.close_plug_in_windows` returns: how many editor windows it closed.",
+  "properties": {
+    "closed": {
+      "description": "The editor windows it closed.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "closed"
   ],
   "type": "object"
 }
@@ -16017,6 +16477,43 @@ Warp settings for a device that plays media (WP-5.15b, Simpler).
 
 </details>
 
+### `DevicesEnabled`
+
+What `track.set_devices_enabled` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it reached, in the order given. |
+| `enabled` | boolean | yes | Whether their devices are on afterwards. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `track.set_devices_enabled` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether their devices are on afterwards.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "The tracks it reached, in the order given.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DialogStatus`
 
 The open dialog.
@@ -16787,6 +17284,52 @@ What an edit did, and what's selected afterwards.
 
 </details>
 
+### `EditedSample`
+
+What `clip.edit_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose file was opened. |
+| `file` | string | yes | The file that was opened. |
+| `editor` | string | yes | The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor. |
+| `opened` | boolean | yes | Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.edit_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose file was opened."
+    },
+    "editor": {
+      "description": "The editor the file was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor.",
+      "type": "string"
+    },
+    "file": {
+      "description": "The file that was opened.",
+      "type": "string"
+    },
+    "opened": {
+      "description": "Whether the editor was found and started. `false` when the File & Folder page names no editor, so the Settings page was opened instead.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "editor",
+    "opened"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EditorSize`
 
 How tall the zone editor's rows are (R10): a right-click offers Small, Medium and Large, which change only the view.
@@ -17299,6 +17842,7 @@ File & Folder's settings in `settings.state`.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
+| `sample_editor` | string | yes | The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17306,13 +17850,18 @@ File & Folder's settings in `settings.state`.
 {
   "description": "File & Folder's settings in `settings.state`.",
   "properties": {
+    "sample_editor": {
+      "description": "The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named.",
+      "type": "string"
+    },
     "temporary_folder": {
       "description": "The Temporary Folder in use: the setting, or the default.",
       "type": "string"
     }
   },
   "required": [
-    "temporary_folder"
+    "temporary_folder",
+    "sample_editor"
   ],
   "type": "object"
 }
@@ -17752,6 +18301,304 @@ On a scene, `linked` is the Longest button: the time is the multiplier times the
       "$ref": "#/$defs/Ticks",
       "default": 2822400,
       "description": "The Unlinked follow time in ticks (bars.beats.sixteenths), from a sixteenth; one 4/4 bar by default."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `FreezeResult`
+
+What a freeze did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frozen` | array of [`TrackId`](#trackid) | yes | The tracks that were frozen. |
+| `files` | array of string | no | The files the freeze wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a freeze did.",
+  "properties": {
+    "files": {
+      "description": "The files the freeze wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "frozen": {
+      "description": "The tracks that were frozen.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "frozen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenClip`
+
+One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip in the set. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `start` | number | yes | Where the clip starts in the file, in seconds. |
+| `end` | number | yes | Where it ends in the file, in seconds. |
+| `tempo` | number | yes | The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6). |
+| `length` | [`Ticks`](#ticks) | yes | The clip's length in ticks, for the warp map. |
+| `cycle` | number or null | no | For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop. |
+| `original` | [`ClipData`](#clipdata) | no | The clip's own data before the freeze, kept so unfreezing plays it again (R10). |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot it belongs to; `null` for an Arrangement clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip's stretch of a freeze file: the file it plays, the second it starts at, and the second it ends at.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip in the set."
+    },
+    "cycle": {
+      "description": "For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The clip's length in ticks, for the warp map."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "original": {
+      "$ref": "#/$defs/ClipData",
+      "default": {
+        "midi": {
+          "notes": []
+        }
+      },
+      "description": "The clip's own data before the freeze, kept so unfreezing plays it again (R10)."
+    },
+    "scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Session slot it belongs to; `null` for an Arrangement clip."
+    },
+    "start": {
+      "description": "Where the clip starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6).",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "media",
+    "start",
+    "end",
+    "tempo",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenOutput`
+
+A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`ClipId`](#clipid) | yes | The clip ID the frozen output plays under in the Arrangement. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `tempo` | number | yes | The tempo the render was taken at, in BPM. |
+| `start` | [`Ticks`](#ticks) | yes | The first song frame the file holds. |
+| `length` | [`Ticks`](#ticks) | yes | The song length the file covers. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen group or return track's output: its freeze file, the frame the render starts at, and how many frames it holds.",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip ID the frozen output plays under in the Arrangement."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The song length the file covers."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The first song frame the file holds."
+    },
+    "tempo": {
+      "description": "The tempo the render was taken at, in BPM.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "media",
+    "tempo",
+    "start",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTail`
+
+A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip the tail follows. |
+| `id` | [`ClipId`](#clipid) | yes | The ID the Arrangement gives the tail region. Tail regions aren't clips of the set. |
+| `start` | [`Ticks`](#ticks) | yes | Where it starts in the song. |
+| `length` | [`Ticks`](#ticks) | yes | How long it is. |
+| `media` | [`ContentHash`](#contenthash) | yes | The freeze file, by content hash. |
+| `file_start` | number | yes | Where it starts in the file, in seconds. |
+| `file_end` | number | yes | Where it ends in the file, in seconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen tail: the clip it follows, the clip ID the Arrangement draws it under, where it starts and how long it is, and the part of the freeze file it plays.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip the tail follows."
+    },
+    "file_end": {
+      "description": "Where it ends in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "file_start": {
+      "description": "Where it starts in the file, in seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "id": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The ID the Arrangement gives the tail region. Tail regions aren't clips of the set."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long it is."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The freeze file, by content hash."
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it starts in the song."
+    }
+  },
+  "required": [
+    "clip",
+    "id",
+    "start",
+    "length",
+    "media",
+    "file_start",
+    "file_end"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FrozenTrack`
+
+A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`FrozenClip`](#frozenclip) | no | The stretch of frozen audio each clip plays, in clip order. |
+| `output` | [`FrozenOutput`](#frozenoutput) or null | no | A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track. |
+| `tails` | array of [`FrozenTail`](#frozentail) | no | The tails that follow the Arrangement clips (R3). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A frozen track: the freeze file stretch of each clip, its tail regions, and the whole-Arrangement output of a frozen group or return track.",
+  "properties": {
+    "clips": {
+      "description": "The stretch of frozen audio each clip plays, in clip order.",
+      "items": {
+        "$ref": "#/$defs/FrozenClip"
+      },
+      "type": "array"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FrozenOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A frozen group or return track's output over the whole Arrangement (R14, R15); `None` for an audio or MIDI track."
+    },
+    "tails": {
+      "description": "The tails that follow the Arrangement clips (R3).",
+      "items": {
+        "$ref": "#/$defs/FrozenTail"
+      },
+      "type": "array"
     }
   },
   "type": "object"
@@ -21190,6 +22037,7 @@ What `mixer_view.state` and the other view commands return.
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
+| `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
 | `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
 
@@ -21213,6 +22061,14 @@ What `mixer_view.state` and the other view commands return.
     "crossfader": {
       "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
       "type": "boolean"
+    },
+    "gain_reduction": {
+      "default": [],
+      "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
     },
     "in_out": {
       "description": "Whether the In/Out section shows, in both mixers.",
@@ -21259,7 +22115,8 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
-    "track_options"
+    "track_options",
+    "gain_reduction"
   ],
   "type": "object"
 }
@@ -24980,6 +25837,46 @@ One of:
 
 </details>
 
+### `ReplacedSample`
+
+What `clip.replace_sample` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The file the clip plays now. |
+| `media` | [`ContentHash`](#contenthash) | yes | The media it plays, by its content hash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.replace_sample` returns.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "file": {
+      "description": "The file the clip plays now.",
+      "type": "string"
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The media it plays, by its content hash."
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReturnChoice`
 
 An entry of a return chain's Audio To chooser.
@@ -25250,6 +26147,34 @@ What `device.edit_sample` returns.
     "device",
     "edits",
     "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleEditorResult`
+
+What `settings.set_sample_editor` returns: the editor in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The sample editor's path, empty when none is named. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_sample_editor` returns: the editor in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The sample editor's path, empty when none is named.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
   ],
   "type": "object"
 }
@@ -28034,6 +28959,41 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `TrackGainReduction`
+
+One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `reduction` | number | yes | The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's gain reduction, as `mixer_view.state` reports it (IMP-25, the mixer view spec R40).",
+  "properties": {
+    "reduction": {
+      "description": "The most reduction any of the track's compressors or limiters reported for the last block, in dB, as a compressor's Gain Reduction reads it: zero when none of them reduced.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "reduction"
+  ],
+  "type": "object"
 }
 ```
 

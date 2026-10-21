@@ -433,6 +433,41 @@ fn a_stepped_macro_maps_randomises_and_stores_as_a_knob_does() {
     assert_eq!(back.macros.setting(1).steps, 4);
 }
 
+// Spec: macros R22, R24
+#[test]
+fn a_stepped_macro_keeps_its_steps_when_a_parameter_is_mapped_to_it() {
+    let mut set = set();
+    set.shell
+        .invoke(
+            "rack.set_macro_style",
+            json!({ "rack": set.rack, "macro_number": 1, "style": "stepped", "steps": 4 }),
+        )
+        .unwrap();
+    // The macro is mapped after it was stepped: the macro moves to the
+    // nearest step, and the parameter takes the value that step gives.
+    map(&mut set, 1, WIDTH);
+    let value = macro_value(&set, 1);
+    assert!(
+        (value - 2.0 / 3.0).abs() < 1e-9,
+        "the macro's nearest step: {value}"
+    );
+    let width = param(&set, set.utility, WIDTH).expect("the width");
+    assert!(
+        (width - 400.0 / 3.0).abs() < 1e-9,
+        "the parameter follows the step: {width}"
+    );
+    // The macro's value is read back as the step it took.
+    let state: Value = set
+        .shell
+        .invoke("rack.macros", json!({ "rack": set.rack }))
+        .unwrap();
+    assert!(
+        (state["macros"][0]["value"].as_f64().expect("a value") - 2.0 / 3.0).abs() < 1e-9,
+        "the macro reads back its step: {}",
+        state["macros"][0]["value"]
+    );
+}
+
 // Spec: macros R3
 #[test]
 fn map_mode_turns_on_and_off_as_view_state() {

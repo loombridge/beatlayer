@@ -6526,13 +6526,26 @@ impl Shell {
                         return Vec::new();
                     };
                     let position = info.travel.position(*value);
-                    vec![bl_model::Command::SetMappedValue {
+                    // Spec: macros R22. A stepped macro takes only its
+                    // steps, so the macro moves to the nearest step, and
+                    // the parameter takes the value that step gives.
+                    let step = device.macros.setting(*number).position_of(position);
+                    let mut commands = vec![bl_model::Command::SetMappedValue {
                         target: bl_model::MacroTarget::Device {
                             device: *rack,
                             param: bl_model::macro_param(*number),
                         },
-                        value: position,
-                    }]
+                        value: step,
+                    }];
+                    if step != position
+                        && let Some(mapping) = device.macros.mapping(*target)
+                    {
+                        commands.push(bl_model::Command::SetMappedValue {
+                            target: *target,
+                            value: info.travel.value(mapping.position(step)),
+                        });
+                    }
+                    commands
                 } else {
                     self.devices.target_commands(doc, device, *target)
                 }

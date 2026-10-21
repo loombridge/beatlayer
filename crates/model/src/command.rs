@@ -3931,8 +3931,11 @@ impl Document {
                 check_value("mapped value", *value, value.is_finite())?;
                 match target {
                     MacroTarget::Device { device, param } => {
-                        if self.device_ref(*device)?.params.get(param) != Some(value) {
-                            self.device_mut(*device)?.set_param(*param, *value);
+                        // Spec: macros R22. A stepped macro takes only its
+                        // steps.
+                        let stepped = self.stepped_macro_value(*device, *param, *value);
+                        if self.device_ref(*device)?.params.get(param) != Some(&stepped) {
+                            self.device_mut(*device)?.set_param(*param, stepped);
                         }
                     }
                     MacroTarget::Chain { chain, param } => {

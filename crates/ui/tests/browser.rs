@@ -795,9 +795,7 @@ fn the_tag_editor_ticks_and_unticks_with_two_items_selected() {
         .read_response(tag_editor_row_id("Mine|Favourite"))
         .expect("drawn")
         .rect;
-    eprintln!("the selection is {:?} and the row is at {rect:?}", selected(&h));
     h.click(rect.center());
-    eprintln!("after the click the selection is {:?}", selected(&h));
     h.settle();
     let tags: TagsState = serde_json::from_value(
         h.shell
@@ -843,6 +841,58 @@ fn the_tag_editor_ticks_and_unticks_with_two_items_selected() {
     assert_eq!(
         node_with(&nodes, Role::CheckBox, "Mine|Favourite").value,
         "empty"
+    );
+}
+
+// Spec: browser-tags R17.
+#[test]
+fn the_tag_editor_reads_the_keyboard() {
+    let scratch = Scratch::new("tag-editor-keys");
+    let (mut h, _) = harness(&scratch);
+    h.shell
+        .run(ids::ADD_TAG_GROUP, json!({ "name": "Mine" }))
+        .unwrap();
+    h.shell
+        .run(
+            ids::ADD_TAG,
+            json!({ "name": "Favourite", "group": "Mine" }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_TAG_EDITOR, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    // A click folds the group and puts the keyboard on its row.
+    let rect = h
+        .ctx
+        .read_response(tag_editor_row_id("Content"))
+        .expect("drawn")
+        .rect;
+    h.click(rect.center());
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        nodes
+            .iter()
+            .all(|n| !(n.role == Role::CheckBox && n.label == "Content|Sample")),
+        "the folded group hides its tags"
+    );
+    // Right unfolds it, and Left folds it again (R17).
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        node_with(&nodes, Role::CheckBox, "Content|Sample").value == "empty",
+        "Right showed the tags"
+    );
+    h.key(Key::ArrowLeft, Modifiers::NONE);
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(
+        nodes
+            .iter()
+            .all(|n| !(n.role == Role::CheckBox && n.label == "Content|Sample")),
+        "Left folded the tags away again"
     );
 }
 
@@ -902,6 +952,14 @@ fn quick_tags_adds_a_tag_with_create_new_tag() {
         .expect("drawn")
         .rect;
     assert!(rect.intersects(cross));
+    // The pointer over a tag shows its group in the Status Bar (R13).
+    h.frame(vec![Event::PointerMoved(rect.center())]);
+    h.settle();
+    assert_eq!(
+        h.shell.hint(),
+        Some("Content"),
+        "the Status Bar shows the tag's group"
+    );
     h.click(cross.center());
     h.settle();
     let tags: TagsState = serde_json::from_value(

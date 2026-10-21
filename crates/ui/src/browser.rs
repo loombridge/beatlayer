@@ -254,10 +254,15 @@ pub struct BrowserUi {
     tag_prompt: TagPrompt,
     /// The text in the Tag Editor's field.
     tag_text: String,
+    /// The Tag Editor's row the keyboard is on (spec: browser-tags R17).
+    tag_row: usize,
     /// Quick Tags' text in the Add field.
     quick_add: String,
     /// Whether Quick Tags is choosing where a new tag goes.
     quick_adding: bool,
+    /// The group the Status Bar shows for the Quick Tag under the pointer
+    /// (spec: browser-tags R13).
+    quick_tag_hint: Option<String>,
 }
 
 /// The text after the last `#` in the search field, when a `#` term is
@@ -905,6 +910,19 @@ impl BrowserUi {
             pos2(rect.right(), rect.bottom() - 24.0),
         );
         let visible = self.visible_tag_rows(&rows);
+        // The list's own background takes the context menu (Reset Order).
+        // Register it before the rows, so a row on top of it takes its own
+        // clicks (spec: browser-tags R11, R12).
+        let list_response = ui.interact(list, tag_editor_list_id(), Sense::click());
+        crate::focus::register(
+            ui.ctx(),
+            tag_editor_list_id(),
+            bl_shell::Area::Browser,
+            None,
+        );
+        if list_response.clicked() {
+            ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
+        }
         self.tag_scroll = scrolled(
             ui,
             list,
@@ -914,6 +932,57 @@ impl BrowserUi {
         let first = (self.tag_scroll / BROWSER_ROW).floor() as usize;
         let shown = ((list.height() / BROWSER_ROW).ceil() as usize + 1)
             .min(visible.len().saturating_sub(first));
+        // The keys the Tag Editor reads itself (spec: browser-tags R17):
+        // Up and Down move through its rows, and Left and Right fold and
+        // unfold them. (R17's Space, which ticks and unticks a tag, can't
+        // be reached: Space runs Play/Stop in every context.)
+        let tag_focused = ui.memory(|m| m.has_focus(tag_editor_list_id()));
+        if tag_focused && !visible.is_empty() {
+            self.tag_row = self.tag_row.min(visible.len() - 1);
+            let (up, down, left, right) = ui.input(|i| {
+                (
+                    i.key_pressed(Key::ArrowUp),
+                    i.key_pressed(Key::ArrowDown),
+                    i.key_pressed(Key::ArrowLeft),
+                    i.key_pressed(Key::ArrowRight),
+                )
+            });
+            if up {
+                self.tag_row = self.tag_row.saturating_sub(1);
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if down {
+                self.tag_row = (self.tag_row + 1).min(visible.len() - 1);
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if left || right {
+                // The arrows act here; egui mustn't move the focus with
+                // them.
+                ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+            }
+            if let Some(row) = visible.get(self.tag_row) {
+                let fold = |folded: &mut std::collections::BTreeSet<String>| {
+                    if left {
+                        folded.insert(row.name.clone());
+                    } else {
+                        folded.remove(&row.name);
+                    }
+                };
+                match row.kind {
+                    TagEditorRowKind::Group if left || right => fold(&mut self.folded_groups),
+                    TagEditorRowKind::Tag if (left || right) && row.has_subtags => {
+                        if let Some(name) = &row.full_name {
+                            if left {
+                                self.folded_tags.insert(name.clone());
+                            } else {
+                                self.folded_tags.remove(name);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         // A drag moves a tag or a group to a new place (spec: browser-tags
         // R12).
         let dragging =
@@ -938,7 +1007,17 @@ impl BrowserUi {
                     StrokeKind::Inside,
                 );
             }
-            self.tag_editor_row(
+            // The row the keyboard is on shows an outline (spec:
+            // browser-tags R17).
+            if tag_focused && index == self.tag_row {
+                ui.painter().rect_stroke(
+                    row_rect,
+                    0.0,
+                    Stroke::new(1.0, theme.colors.focus.0),
+                    StrokeKind::Inside,
+                );
+            }
+            let clicked = self.tag_editor_row(
                 ui,
                 shell,
                 theme,
@@ -948,6 +1027,11 @@ impl BrowserUi {
                 &mut menu_taken,
                 events,
             );
+            // A click puts the keyboard's row where the pointer is (spec:
+            // browser-tags R17).
+            if clicked {
+                self.tag_row = index;
+            }
             if over
                 && released
                 && let Some(drag) = &dragging
@@ -973,7 +1057,6 @@ impl BrowserUi {
             }
         }
         // Reset Order, in the list's context menu (C-TAG-004).
-        let list_response = ui.interact(list, tag_editor_list_id(), Sense::click());
         if list_response.secondary_clicked() && !menu_taken {
             egui::Popup::context_menu(&list_response).show(|ui| {
                 let response = ui.button("Reset Order");
@@ -1072,11 +1155,17 @@ impl BrowserUi {
         selected: &[String],
         menu_taken: &mut bool,
         events: &mut Vec<UiEvent>,
-    ) {
+    ) -> bool {
         let painter = ui.painter_at(rect);
         let indent = rect.left() + 4.0 + f32::from(row.depth) * 12.0;
         let id = tag_editor_row_id(row.full_name.as_deref().unwrap_or(&row.name));
         let response = ui.interact(rect, id, Sense::click() | Sense::drag());
+        let clicked = response.clicked();
+        // A click puts the keyboard on the Tag Editor's rows (spec:
+        // browser-tags R17).
+        if clicked {
+            ui.memory_mut(|m| m.request_focus(tag_editor_list_id()));
+        }
         if response.drag_started() {
             let payload = match row.kind {
                 TagEditorRowKind::Group => Some(TagDrag::Group(row.name.clone())),
@@ -1281,6 +1370,7 @@ impl BrowserUi {
             }
         }
         let _ = shell;
+        clicked
     }
 
     /// What the Tag Editor's field asks for, done.
@@ -1376,6 +1466,7 @@ impl BrowserUi {
         let tags = view.quick_tags();
         let rows = rect.height() - add_height;
         let shown = ((rows / BROWSER_ROW).floor() as usize).min(tags.len());
+        let mut hint: Option<String> = None;
         for (index, tag) in tags.iter().take(shown).enumerate() {
             let row = Rect::from_min_size(
                 pos2(rect.left(), rect.top() + index as f32 * BROWSER_ROW),
@@ -1383,6 +1474,11 @@ impl BrowserUi {
             );
             let id = quick_tag_id(&tag.full_name);
             let response = ui.interact(row, id, Sense::click());
+            // The pointer over a tag shows its group in the Status Bar
+            // (spec: browser-tags R13).
+            if response.hovered() {
+                hint = Some(tag.group.clone());
+            }
             // A tag not every selected item carries shows an asterisk.
             let text = if tag.all {
                 tag.name.clone()
@@ -1450,6 +1546,11 @@ impl BrowserUi {
                     "on some selected items".to_owned()
                 });
             });
+        }
+
+        if hint != self.quick_tag_hint {
+            self.quick_tag_hint.clone_from(&hint);
+            events.push(UiEvent::StatusHint(hint));
         }
 
         // The Add field, with the tags it suggests.

@@ -2095,6 +2095,12 @@ impl BrowserView {
                     self.label = label;
                 }
                 self.search = query;
+                // The tags a `#` term names come first among the next
+                // suggestions, most recent first (spec: browser-tags R15).
+                let (_, searched, _) = self.search_terms();
+                for tag in searched {
+                    self.tags.note_searched(tag);
+                }
                 self.rebuild();
                 // A `#` term that names no tag is searched as text, and
                 // the Status Bar says so (spec: browser-tags R15).

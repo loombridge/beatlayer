@@ -554,6 +554,14 @@ fn a_hash_search_finds_tagged_items() {
         json!({ "query": "#Mine|Favourite", "label": "all" }),
     );
     assert_eq!(found.rows.len(), 1);
+    // The tags searched come first among the next suggestions, most recent
+    // first (spec: browser-tags R15).
+    let suggestions = shell.browser_view().tag_suggestions("");
+    assert_eq!(
+        suggestions.first().map(String::as_str),
+        Some("Mine|Favourite"),
+        "{suggestions:?}"
+    );
     // A `#` that names no tag is searched as text, and the Status Bar says
     // so.
     let found: bl_shell::browser_commands::BrowserState = run(

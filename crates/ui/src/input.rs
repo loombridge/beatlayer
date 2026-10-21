@@ -7,9 +7,7 @@ use bl_shell::{Invocation, Shell};
 use egui::{Event, Key, RawInput};
 use serde_json::{Value, json};
 
-use crate::keymap::{
-    Hit, Keymap, LATCH_HOLD_SECONDS, Mods, Platform, Trigger, mods_from_egui,
-};
+use crate::keymap::{Hit, Keymap, LATCH_HOLD_SECONDS, Mods, Platform, Trigger, mods_from_egui};
 
 /// A key the dispatcher took, kept until it's released.
 #[derive(Clone, Debug)]
@@ -61,11 +59,7 @@ fn computer_key(key: Key) -> Option<ComputerKey> {
 /// The automation editing command an Arrangement edit command applies to,
 /// with the automation lanes shown under the selection's tracks, when Option
 /// (Alt on Windows) is held (the automation editing spec, R6).
-fn envelope_edit(
-    shell: &Shell,
-    hit: &Hit<'_>,
-    mods: Mods,
-) -> Option<(String, Value)> {
+fn envelope_edit(shell: &Shell, hit: &Hit<'_>, mods: Mods) -> Option<(String, Value)> {
     if !mods.alt {
         return None;
     }
@@ -82,11 +76,12 @@ fn envelope_edit(
         .selected_tracks()
         .iter()
         .filter_map(|track| {
-            view.automation_lane(*track)
-                .map(|target| bl_shell::arrangement_commands::Lane::Automation {
+            view.automation_lane(*track).map(|target| {
+                bl_shell::arrangement_commands::Lane::Automation {
                     track: *track,
                     target,
-                })
+                }
+            })
         })
         .collect();
     (!lanes.is_empty()).then(|| (id.to_owned(), json!({ "lanes": lanes })))
@@ -231,7 +226,8 @@ impl KeyDispatcher {
             // Spec: automation-editing R6. Option (Alt on Windows) with an
             // edit command applies it to the automation lanes shown under
             // the selection's tracks.
-            let (id, args) = envelope_edit(shell, &hit, mods).unwrap_or((hit.command.id.clone(), args));
+            let (id, args) =
+                envelope_edit(shell, &hit, mods).unwrap_or((hit.command.id.clone(), args));
             if !shell.can_invoke(&id, &args) {
                 return true;
             }

@@ -15,8 +15,7 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam,
-    TrackId,
+    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, TrackId,
 };
 use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
 use bl_shell::arrangement::rows::Row;
@@ -644,8 +643,8 @@ impl AutomationGestures {
                     - horizontal.at(f64::from(from.x - rect.left()));
                 // Spec: automation-editing R3. Shift keeps the drag to the
                 // axis it started along, and makes a vertical one finer.
-                let vertical = modifiers.shift
-                    && (pointer.y - from.y).abs() > (pointer.x - from.x).abs();
+                let vertical =
+                    modifiers.shift && (pointer.y - from.y).abs() > (pointer.x - from.x).abs();
                 let by = if vertical { Ticks::ZERO } else { by };
                 // S-ENV-006: Cmd (Alt on Windows) bypasses grid snapping.
                 let invert = if cfg!(target_os = "macos") {

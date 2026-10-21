@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 
 use bl_core::id::{Id, IdAllocator};
-use serde::{Deserialize, Serialize};
 
 use crate::changes::ChangeSet;
 use crate::command::Command;
@@ -78,8 +77,7 @@ struct Step {
 /// agent API knows it by, or the built-in assistant.
 ///
 /// Spec: undo-history R9.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Maker {
     /// The person, whose own gesture the step came from.
     Person,

@@ -311,3 +311,33 @@ fn the_layout_places_the_panel_where_the_reference_says() {
     assert_eq!(panel.right(), 1591.0);
     assert!(layout.rows().iter().any(|row| row.id == "L-OTH-001"));
 }
+
+#[test]
+fn the_panel_scales_with_the_zoom() {
+    // Spec: undo-history R11. The panel is laid out in layout points, which
+    // the zoom draws as that many window points times the zoom: at 150% the
+    // tree is scaled by 1.5 and the panel and its rows keep their layout
+    // size.
+    let mut h = Harness::new(Window::Main);
+    h.shell = shell();
+    h.shell
+        .run("view.set_zoom", json!({ "percent": 150 }))
+        .unwrap();
+    h.size = egui::vec2(2400.0, 1500.0);
+    h.shell
+        .invoke("view.toggle_undo_history", json!({}))
+        .unwrap();
+    let output = h.settle();
+    assert!((output.pixels_per_point - 1.5).abs() < 1e-6);
+
+    let nodes = Harness::nodes(&output);
+    let region = Harness::node(&nodes, "Undo History").bounds.unwrap();
+    assert_eq!(region.x1 - region.x0, 295.0);
+    let list = nodes
+        .iter()
+        .find(|n| n.role == Role::ListBox)
+        .expect("a list box");
+    let rows = panel_rows(&nodes, list.id);
+    let row = rows[0].bounds.unwrap();
+    assert_eq!(row.y1 - row.y0, 18.0);
+}

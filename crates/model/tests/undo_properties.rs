@@ -1181,7 +1181,8 @@ proptest! {
     fn transactions_are_steps(steps in prop::collection::vec(prop_oneof![
         8 => op().prop_map(Some),
         3 => Just(None),
-    ], 1..=200), closes in prop::collection::vec(any::<bool>(), 200)) {        let mut editor = starting_song();
+    ], 1..=200), closes in prop::collection::vec(any::<bool>(), 200)) {
+        let mut editor = starting_song();
         let mut versions = vec![editor.document().clone()];
         let mut open: Vec<Document> = Vec::new();
         let mut closes = closes.into_iter().cycle();

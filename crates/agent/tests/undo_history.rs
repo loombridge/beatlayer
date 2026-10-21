@@ -115,19 +115,19 @@ fn a_jump_cannot_share_a_batch_with_other_commands() {
     // Spec: undo-history R7. A jump is no step of its own, so it can't go
     // in a batch that records one.
     let mut client = app();
-    let failed = call(
-        &mut client,
-        "run",
-        json!({ "commands": [{ "command": "edit.go_to_step", "args": { "index": 0 } },
-                            { "command": "track.create",
-                              "args": { "id": { "$new": "keys" }, "kind": "midi",
-                                        "name": "Keys", "index": 0 } }] }),
-    );
+    let failed = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "edit.go_to_step", "args": { "index": 0 } },
+                                { "command": "track.create",
+                                  "args": { "id": { "$new": "keys" }, "kind": "midi",
+                                            "name": "Keys", "index": 0 } }] }),
+        )
+        .unwrap()
+        .ok()
+        .unwrap_err();
     assert!(
-        failed["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("`edit.go_to_step` runs on its own"),
+        failed.contains("run `edit.go_to_step` in a call of its own"),
         "{failed}"
     );
 }

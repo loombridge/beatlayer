@@ -5,7 +5,13 @@
       "count": 1,
       "did": "left out",
       "what": "a slot for a track that can't hold clips",
-      "where": "the Session View"
+      "where": "the scene \"One\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a second slot for one track in one scene",
+      "where": "the scene \"One\""
     }
   ]
 }

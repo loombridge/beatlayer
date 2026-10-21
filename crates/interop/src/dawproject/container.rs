@@ -128,6 +128,10 @@ pub fn read_container(bytes: &[u8]) -> Result<Container, Error> {
             .map(|name| name.into_owned())
             .unwrap_or_default();
         let path = normalise(&name);
+        if path.ends_with('/') {
+            // A folder entry holds nothing.
+            continue;
+        }
         if !safe(&path) {
             // An entry that could escape the folder it's written to is never
             // read (R5).

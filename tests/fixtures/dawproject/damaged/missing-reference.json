@@ -3,7 +3,7 @@
   "entries": [
     {
       "count": 1,
-      "did": "left out; the track plays to Main",
+      "did": "left out; the track plays to its default output",
       "what": "a destination the file doesn't hold",
       "where": "the track \"Bass\""
     }

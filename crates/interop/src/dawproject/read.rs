@@ -68,6 +68,8 @@ pub struct ReadReport {
     pub left_out: Vec<String>,
     /// Elements whose `id` was already used (R7).
     pub duplicate_ids: Vec<String>,
+    /// The `id`s read so far, to find a second use of one (R7).
+    ids: std::collections::HashSet<String>,
     /// Elements nested deeper than the limit (R6).
     pub too_deep: Vec<String>,
 }
@@ -371,6 +373,12 @@ fn node_of(element: &quick_xml::events::BytesStart<'_>, report: &mut ReadReport)
             Some(_) => {}
         }
         if allowed.is_some() {
+            // Every `id` names one element; a second use is read without it
+            // (R7).
+            if key == "id" && !report.ids.insert(value.clone()) {
+                report.duplicate_ids.push(value);
+                continue;
+            }
             node.attributes.push((key, value));
         }
     }
@@ -952,14 +960,16 @@ pub fn project(node: &Node, report: &mut ReadReport) -> Option<Project> {
                     info: timeline_info(scene, report),
                     // A scene holds several slots, so they all go in one set
                     // of lanes.
-                    content: Some(Box::new(Content::Timeline(Box::new(Timeline::Lanes(Lanes {
-                        info: timeline_info(scene, report),
-                        children: scene
-                            .children
-                            .iter()
-                            .filter_map(|child| timeline(child, report))
-                            .collect(),
-                    }))))),
+                    content: Some(Box::new(Content::Timeline(Box::new(Timeline::Lanes(
+                        Lanes {
+                            info: timeline_info(scene, report),
+                            children: scene
+                                .children
+                                .iter()
+                                .filter_map(|child| timeline(child, report))
+                                .collect(),
+                        },
+                    ))))),
                 })
                 .collect()
         })

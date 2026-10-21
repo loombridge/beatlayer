@@ -4,14 +4,44 @@
     {
       "count": 1,
       "did": "left out",
+      "what": "a video track",
+      "where": "the track \"Video\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a track of markers",
+      "where": "the track \"Markers\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "an Audio Unit plug-in",
+      "where": "the track \"Guitar\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a VST2 plug-in",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
       "what": "a send to a channel that isn't a return",
-      "where": "the track \"Inside\""
+      "where": "the track \"Synth\""
     },
     {
       "count": 1,
       "did": "read as a copy",
       "what": "an alias clip",
-      "where": "the clip"
+      "where": "the clip \"Riff 2\" at 2.1.1 on the track \"Guitar\""
+    },
+    {
+      "count": 1,
+      "did": "read as a copy",
+      "what": "an alias clip",
+      "where": "the clip \"Idea again\" at 2.1.1 on the track \"Synth\""
     }
   ]
 }

@@ -16,10 +16,7 @@ fn fixtures() -> PathBuf {
 
 /// The report a fixture gives, as JSON.
 fn actual(container: &dawproject::Container, folder: &Path) -> serde_json::Value {
-    let context = Context {
-        folder,
-        extract_to: folder,
-    };
+    let context = Context::new(folder, folder);
     let imported = dawproject::import(container, &context).expect("the file imports");
     let report = imported.report;
     serde_json::json!({
@@ -104,10 +101,8 @@ fn a_file_that_is_not_a_zip_is_refused() {
 fn a_version_beatlayer_does_not_read_is_refused() {
     let bytes = std::fs::read(fixtures().join("damaged/version-2.dawproject")).unwrap();
     let container = dawproject::read_container(&bytes).expect("the container is read");
-    let context = Context {
-        folder: &fixtures(),
-        extract_to: &fixtures(),
-    };
+    let folder = fixtures();
+    let context = Context::new(&folder, &folder);
     let error = dawproject::import(&container, &context).expect_err("the file is refused");
     assert!(
         matches!(error, dawproject::Error::Version { .. }),
@@ -134,10 +129,7 @@ fn a_damaged_file_is_refused_or_read_in_part() {
         // Reading it may be refused; reading it may find part of it. What
         // must not happen is a panic.
         if let Ok(container) = dawproject::read_container(&bytes) {
-            let context = Context {
-                folder: &folder,
-                extract_to: &folder,
-            };
+            let context = Context::new(&folder, &folder);
             let _ = dawproject::import(&container, &context);
         }
     }
@@ -151,6 +143,8 @@ fn the_damaged_fixtures_that_read_give_their_report() {
         "utf-16",
         "doctype",
         "escape",
+        "unsafe-entries",
+        "duplicate-id",
         "missing-reference",
         "unknown",
     ] {
@@ -205,10 +199,8 @@ fn an_imported_tempo_map_holds_the_ramp_the_file_asks_for() {
     let container =
         dawproject::read_container(&std::fs::read(fixtures().join("tempo.dawproject")).unwrap())
             .unwrap();
-    let context = Context {
-        folder: &fixtures(),
-        extract_to: &fixtures(),
-    };
+    let folder = fixtures();
+    let context = Context::new(&folder, &folder);
     let imported = dawproject::import(&container, &context).unwrap();
     let tempo = imported.project.document.settings().tempo.clone();
     let segments: Vec<_> = tempo.segments().collect();
@@ -261,4 +253,386 @@ fn the_report_counts_the_same_thing_once() {
     assert_eq!(report.entries.len(), 2);
     assert_eq!(report.entries[0].count, 2);
     assert_eq!(report.entries[1].count, 1);
+}
+
+/// What a fixture imports to.
+fn import_of(name: &str) -> dawproject::Imported {
+    let bytes = std::fs::read(fixtures().join(format!("{name}.dawproject"))).unwrap();
+    let container = dawproject::read_container(&bytes).unwrap();
+    let folder = fixtures();
+    dawproject::import(&container, &Context::new(&folder, &folder)).unwrap()
+}
+
+/// A track's clips in order of their start.
+fn clips_of<'a>(document: &'a bl_model::Document, name: &str) -> Vec<&'a bl_model::Clip> {
+    let mut clips: Vec<_> = track(document, name).clips().collect();
+    clips.sort_by_key(|clip| clip.start);
+    clips
+}
+
+/// The track called `name`.
+fn track<'a>(document: &'a bl_model::Document, name: &str) -> &'a bl_model::Track {
+    document
+        .tracks()
+        .find(|track| track.name() == name)
+        .unwrap_or_else(|| panic!("no track called {name}"))
+}
+
+/// The tracks, groups, returns, mixer and routing the file asks for (R15 to
+/// R22).
+#[test]
+fn tracks_mixer_and_routing_follow_the_file() {
+    use bl_model::{Input, Monitor, Output, SendTap, TrackKind};
+
+    let imported = import_of("bitwig-shaped");
+    let document = &imported.project.document;
+    let names = |ids: Vec<bl_model::TrackId>| -> Vec<String> {
+        ids.into_iter()
+            .map(|id| document.track(id).unwrap().name().to_owned())
+            .collect()
+    };
+    assert_eq!(
+        names(document.top_level().collect()),
+        ["Group", "Hybrid", "Hybrid Audio", "Drums", "Source", "Bus"]
+    );
+    assert_eq!(names(document.returns().collect()), ["Reverb"]);
+    let group = track(document, "Group");
+    assert_eq!(group.kind(), TrackKind::Group);
+    assert_eq!(names(group.children().collect()), ["Kick", "Snare"]);
+    assert_eq!(track(document, "Hybrid").kind(), TrackKind::Midi);
+    assert_eq!(track(document, "Hybrid Audio").kind(), TrackKind::Audio);
+    // R22: a send to a return, and the return's tap.
+    let reverb = track(document, "Reverb");
+    assert_eq!(track(document, "Drums").send(reverb.id()), 0.5);
+    assert_eq!(reverb.mixer().tap, SendTap::Post);
+    // R19: a track routed into another is its Track In.
+    let bus = track(document, "Bus");
+    assert_eq!(
+        track(document, "Source").routing().output,
+        Output::Track { track: bus.id() }
+    );
+    assert_eq!(bus.routing().monitor, Monitor::In);
+    assert_eq!(bus.routing().input, Input::None);
+    // R21: Bitwig's linear volume 1 and normalized pan 0.5.
+    assert_eq!(track(document, "Drums").mixer().volume, 1.0);
+    assert_eq!(track(document, "Drums").mixer().pan, 0.0);
+}
+
+/// Clips are placed, cut, looped and unrolled as the file says (R24 to R32).
+#[test]
+fn clips_follow_the_file() {
+    use bl_core::time::Ticks;
+    use bl_model::ClipData;
+
+    let q = Ticks::QUARTER;
+    let imported = import_of("clips");
+    let document = &imported.project.document;
+
+    // R26 and R27: the later clip replaces what it covers, a clip switched
+    // off is muted, and a play region without a duration is its length.
+    let lead = clips_of(document, "Lead");
+    let places: Vec<_> = lead
+        .iter()
+        .map(|clip| (clip.name.as_str(), clip.start, clip.length, clip.mute))
+        .collect();
+    assert_eq!(
+        places,
+        [
+            ("Loop", Ticks::ZERO, q * 2, false),
+            ("Over", q * 2, q * 4, false),
+            ("Off", q * 8, q * 2, true),
+            ("Window", q * 12, q * 2, false),
+        ]
+    );
+    let ClipData::Midi(window) = &lead[3].data else {
+        panic!("a MIDI clip");
+    };
+    assert_eq!((window.start, window.end), (q, Some(q * 3)));
+    // R28: three of the five notes can be played.
+    let ClipData::Midi(looped) = &lead[0].data else {
+        panic!("a MIDI clip");
+    };
+    assert_eq!(looped.notes.len(), 3);
+    assert!(looped.looping && looped.loop_end == Some(q * 2));
+
+    // R32: the unwarped loop is one clip per pass.
+    let pad = clips_of(document, "Pad");
+    assert_eq!(pad.len(), 6);
+    for (index, clip) in pad[..4].iter().enumerate() {
+        assert_eq!((clip.start, clip.length), (q * index as i64, q));
+        let ClipData::Audio(audio) = &clip.data else {
+            panic!("an audio clip");
+        };
+        assert!(!audio.looping);
+        assert_eq!((audio.start, audio.end), (0.0, Some(0.5)));
+    }
+    // R29: a play region in seconds is seconds in the file.
+    let ClipData::Audio(window) = &pad[5].data else {
+        panic!("an audio clip");
+    };
+    assert_eq!((window.start, window.end), (0.25, Some(0.75)));
+    // R25: a further timeline of clips is a take lane.
+    let takes: Vec<_> = track(document, "Pad").take_lanes().collect();
+    assert_eq!(takes.len(), 1);
+    assert_eq!(takes[0].name, "Take B");
+    assert_eq!(track(document, "Bass").clips().count(), 1);
+
+    // R24: a timeline outside any clip is one clip, as long as its notes
+    // rounded up to the next bar.
+    let loose = clips_of(document, "Loose");
+    assert_eq!((loose[0].start, loose[0].length), (Ticks::ZERO, q * 8));
+    // R9: a lane in seconds, at 120 BPM.
+    let seconds = clips_of(document, "Secs");
+    assert_eq!((seconds[0].start, seconds[0].length), (q * 2, q * 4));
+}
+
+/// Nested clips flatten over the passes of the outer clip's loop, a warped
+/// clip keeps its warp markers, and an alias plays a copy (R30, R34, R35).
+#[test]
+fn nested_warped_clips_flatten_over_the_loop() {
+    use bl_core::time::Ticks;
+    use bl_model::ClipData;
+
+    let q = Ticks::QUARTER;
+    let imported = import_of("bitwig-shaped");
+    let document = &imported.project.document;
+    let hybrid = clips_of(document, "Hybrid Audio");
+    let places: Vec<_> = hybrid
+        .iter()
+        .map(|clip| (clip.start, clip.length))
+        .collect();
+    assert_eq!(
+        places,
+        [
+            (Ticks::ZERO, q * 2),
+            (q * 2, q * 2),
+            (q * 4, q * 2),
+            (q * 6, q * 2)
+        ]
+    );
+    let ClipData::Audio(first) = &hybrid[0].data else {
+        panic!("an audio clip");
+    };
+    // Two beats of contents are one second of the file, at 120 BPM.
+    assert!(first.warp);
+    assert_eq!(first.tempo, Some(120.0));
+    assert_eq!(
+        first
+            .warp_markers
+            .iter()
+            .map(|m| (m.time, m.beat))
+            .collect::<Vec<_>>(),
+        [(0.0, Ticks::ZERO), (1.0, q * 2)]
+    );
+    let ClipData::Audio(second) = &hybrid[1].data else {
+        panic!("an audio clip");
+    };
+    assert_eq!(second.tempo, Some(240.0));
+
+    let imported = import_of("studio-one-shaped");
+    let synth = clips_of(&imported.project.document, "Synth");
+    assert_eq!(synth.len(), 2);
+    assert_eq!(synth[0].data, synth[1].data);
+    assert_ne!(synth[0].id, synth[1].id);
+}
+
+/// Scenes are the file's, with its names, slots and Stop buttons (R42).
+#[test]
+fn scenes_follow_the_file() {
+    let imported = import_of("session");
+    let document = &imported.project.document;
+    let scenes: Vec<_> = document.scenes().collect();
+    assert_eq!(
+        scenes
+            .iter()
+            .map(|scene| scene.name.as_str())
+            .collect::<Vec<_>>(),
+        ["One", "Two", ""]
+    );
+    let (lead, drums, inside) = (
+        track(document, "Lead"),
+        track(document, "Drums"),
+        track(document, "Inside"),
+    );
+    assert_eq!(lead.slot(scenes[0].id).unwrap().name, "Idea");
+    assert!(lead.slot(scenes[1].id).is_none());
+    assert!(!lead.has_stop_button(scenes[1].id));
+    // A Session clip keeps its loop.
+    let bl_model::ClipData::Audio(beat) = &drums.slot(scenes[0].id).unwrap().data else {
+        panic!("an audio clip");
+    };
+    assert!(beat.looping);
+    assert_eq!(inside.slot(scenes[1].id).unwrap().name, "Inner");
+    // A file with no scenes gets the eight a new set has (R42).
+    assert_eq!(imported_scene_count("minimal"), 8);
+}
+
+fn imported_scene_count(name: &str) -> usize {
+    import_of(name).project.document.scenes().count()
+}
+
+/// A container holding `project.xml` only.
+fn container_of(xml: &str) -> Vec<u8> {
+    use std::io::Write;
+
+    let mut bytes = Vec::new();
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+    writer
+        .start_file("project.xml", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    writer.write_all(xml.as_bytes()).unwrap();
+    writer.finish().unwrap();
+    bytes
+}
+
+/// A time in beats and the same time in seconds become one tick through the
+/// tempo map the file makes, ramps included (R9).
+#[test]
+fn a_clip_in_seconds_starts_where_the_same_clip_in_beats_does() {
+    let project = |seconds: &[f64], beats: &[f64]| {
+        let clip = |time: f64| {
+            format!(
+                r#"<Clip time="{time}" duration="0.01" name="c"><Notes id="n{}"><Note time="0" duration="1" key="60"/></Notes></Clip>"#,
+                time.to_bits()
+            )
+        };
+        let lane = |track: &str, unit: &str, times: &[f64]| {
+            let clips: String = times.iter().map(|time| clip(*time)).collect();
+            format!(
+                r#"<Lanes track="{track}" timeUnit="{unit}" id="l{track}"><Clips id="c{track}">{clips}</Clips></Lanes>"#
+            )
+        };
+        format!(
+            r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="notes" id="b" name="Beats"/><Track contentType="notes" id="s" name="Secs"/></Structure>
+<Arrangement id="a"><TempoAutomation unit="bpm" id="ta"><Target parameter="tempo"/>
+<RealPoint time="0" value="60" interpolation="linear"/><RealPoint time="3" value="240" interpolation="linear"/>
+<RealPoint time="7" value="90" interpolation="hold"/><RealPoint time="9" value="300" interpolation="linear"/>
+<RealPoint time="12" value="40" interpolation="hold"/></TempoAutomation>
+<Lanes id="all">{}{}</Lanes></Arrangement><Scenes/></Project>"#,
+            lane("b", "beats", beats),
+            lane("s", "seconds", seconds),
+        )
+    };
+    let folder = fixtures();
+    let import = |xml: String| {
+        let container = dawproject::read_container(&container_of(&xml)).unwrap();
+        dawproject::import(&container, &Context::new(&folder, &folder)).unwrap()
+    };
+    let beats: Vec<f64> = (0..40).map(|n| f64::from(n) * 0.5 + 0.25).collect();
+    let tempo = import(project(&[], &beats)).project.document.tempo_map();
+    let seconds: Vec<f64> = beats
+        .iter()
+        .map(|beat| {
+            tempo.ticks_to_seconds(
+                bl_core::time::Ticks::from_quarters(0)
+                    + bl_core::time::Ticks((beat * 705_600.0) as i64),
+            )
+        })
+        .collect();
+    let document = import(project(&seconds, &beats)).project.document;
+    let starts = |name: &str| -> Vec<i64> {
+        track(&document, name)
+            .clips()
+            .map(|clip| clip.start.get())
+            .collect()
+    };
+    assert_eq!(starts("Beats").len(), beats.len());
+    for (a, b) in starts("Beats").iter().zip(starts("Secs")) {
+        assert!((a - b).abs() <= 1, "{a} ticks in beats and {b} in seconds");
+    }
+}
+
+/// Damaging a fixture's bytes anywhere never panics, and whatever imports
+/// holds the document model's rules (R4 to R8): the fuzz target's invariant,
+/// run over a fixed set of mutations.
+#[test]
+fn damaged_bytes_never_panic_and_what_imports_is_valid() {
+    let folder = fixtures().join("nowhere");
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for name in [
+        "clips",
+        "bitwig-shaped",
+        "cubase-shaped",
+        "studio-one-shaped",
+        "session",
+        "tempo",
+    ] {
+        let bytes = std::fs::read(fixtures().join(format!("{name}.dawproject"))).unwrap();
+        // The project part, as text, cut short and with bytes changed.
+        let xml = {
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut archive.by_name("project.xml").unwrap(), &mut text)
+                .unwrap();
+            text
+        };
+        for round in 0..60 {
+            let mut text = xml.clone().into_bytes();
+            match round % 3 {
+                0 => text.truncate((next() as usize) % text.len()),
+                1 => {
+                    for _ in 0..8 {
+                        let at = (next() as usize) % text.len();
+                        text[at] = b"<>/\"= 0123456789-.e&;"[(next() as usize) % 21];
+                    }
+                }
+                _ => {
+                    // Drop a stretch.
+                    let at = (next() as usize) % text.len();
+                    let end = (at + (next() as usize) % 200).min(text.len());
+                    text.drain(at..end);
+                }
+            }
+            let Ok(text) = String::from_utf8(text) else {
+                continue;
+            };
+            let Ok(container) = dawproject::read_container(&container_of(&text)) else {
+                continue;
+            };
+            if let Ok(imported) = dawproject::import(&container, &Context::new(&folder, &folder)) {
+                imported
+                    .project
+                    .document
+                    .check_invariants()
+                    .unwrap_or_else(|error| panic!("{name} round {round}: {error}"));
+            }
+        }
+    }
+}
+
+/// Numbers at the edge of what a tick holds never panic (R8).
+#[test]
+fn extreme_numbers_never_panic() {
+    let folder = fixtures().join("nowhere");
+    for value in [
+        "1e300", "-1e300", "9.3e18", "-9.3e18", "4e15", "inf", "nan", "1e-300", "0",
+    ] {
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="{value}" id="tempo"/><TimeSignature numerator="4" denominator="4" id="sig"/></Transport>
+<Structure><Track contentType="notes" id="b" name="B"><Channel destination="cm" role="regular" id="cb"><Volume unit="linear" value="{value}" id="v"/><Pan unit="normalized" min="{value}" max="{value}" value="{value}" id="p"/></Channel></Track>
+<Track contentType="audio" id="a" name="A"><Channel role="regular" id="ca"/></Track></Structure>
+<Arrangement id="arr"><TempoAutomation unit="bpm" id="ta"><Target parameter="tempo"/><RealPoint time="{value}" value="{value}" interpolation="linear"/><RealPoint time="1" value="100" interpolation="linear"/></TempoAutomation>
+<Lanes id="all"><Lanes track="b" id="lb"><Clips id="cb1"><Clip time="{value}" duration="{value}" loopStart="{value}" loopEnd="{value}" playStart="{value}" playStop="{value}" name="x">
+<Notes id="n"><Note time="{value}" duration="{value}" key="60"/><Note time="0" duration="1" key="60"/></Notes></Clip>
+<Clip time="0" duration="{value}" name="y"><Notes id="n2"><Note time="0" duration="1" key="60"/></Notes></Clip></Clips></Lanes>
+<Lanes track="a" timeUnit="seconds" id="la"><Clips id="ca1"><Clip time="{value}" duration="{value}" contentTimeUnit="seconds" loopStart="0" loopEnd="{value}" name="z">
+<Audio channels="2" duration="{value}" sampleRate="44100" id="au"><File path="x.wav"/></Audio></Clip></Clips></Lanes></Lanes></Arrangement>
+<Scenes><Scene id="s"><ClipSlot track="b" id="slot"><Clip time="{value}" duration="{value}" name="q"><Notes id="n3"><Note time="0" duration="1" key="60"/></Notes></Clip></ClipSlot></Scene></Scenes></Project>"#
+        );
+        let container = dawproject::read_container(&container_of(&xml)).unwrap();
+        if let Ok(imported) = dawproject::import(&container, &Context::new(&folder, &folder)) {
+            imported.project.document.check_invariants().unwrap();
+        }
+    }
 }

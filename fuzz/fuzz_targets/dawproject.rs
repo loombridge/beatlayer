@@ -25,10 +25,8 @@ fn check(imported: &dawproject::Imported) {
 fuzz_target!(|data: &[u8]| {
     // The container.
     if let Ok(container) = dawproject::read_container(data) {
-        let context = dawproject::Context {
-            folder: Path::new("/"),
-            extract_to: Path::new("/"),
-        };
+        let context =
+            dawproject::Context::new(Path::new("/nonexistent"), Path::new("/nonexistent"));
         if let Ok(imported) = dawproject::import(&container, &context) {
             check(&imported);
         }
@@ -51,10 +49,7 @@ fuzz_target!(|data: &[u8]| {
         metadata: None,
         report,
     };
-    let context = dawproject::Context {
-        folder: Path::new("/"),
-        extract_to: Path::new("/"),
-    };
+    let context = dawproject::Context::new(Path::new("/nonexistent"), Path::new("/nonexistent"));
     if let Ok(imported) = dawproject::import(&container, &context) {
         check(&imported);
     }

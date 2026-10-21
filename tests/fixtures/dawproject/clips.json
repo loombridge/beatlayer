@@ -2,10 +2,16 @@
   "application": "Fixture DAW 1.0",
   "entries": [
     {
-      "count": 1,
+      "count": 2,
       "did": "left out",
       "what": "a note that can't be played",
-      "where": "the track \"Lead\""
+      "where": "the clip \"Loop\" at 1.1.1 on the track \"Lead\""
+    },
+    {
+      "count": 1,
+      "did": "shortened",
+      "what": "a clip another clip covers",
+      "where": "the clip \"Loop\" at 1.1.1 on the track \"Lead\""
     },
     {
       "count": 1,
@@ -15,9 +21,21 @@
     },
     {
       "count": 1,
-      "did": "shortened",
-      "what": "a clip another clip covers",
-      "where": "the track"
+      "did": "unrolled into 4 clips",
+      "what": "a loop in an unwarped clip",
+      "where": "the clip \"Looped\" at 1.1.1 on the track \"Pad\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a clip's fades",
+      "where": "the clip \"Faded\" at 2.1.1 on the track \"Pad\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a further lane of clips",
+      "where": "the track \"Bass\""
     }
   ]
 }

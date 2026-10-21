@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use bl_interop::dawproject;
-use bl_model::{ContentHash, Editor};
+use bl_model::{ContentHash, Editor, WarpMode};
 use bl_shell_spec::dawproject::{ImportReport, ImportReportEntry};
 
 /// Why a DAWproject command couldn't run.
@@ -67,14 +67,18 @@ impl Job {
     /// # Errors
     ///
     /// [`DawProjectError`] if the thread can't start.
-    pub fn start(path: &Path, folder: &Path) -> Result<Self, DawProjectError> {
+    pub fn start(
+        path: &Path,
+        folder: &Path,
+        default_warp_mode: WarpMode,
+    ) -> Result<Self, DawProjectError> {
         let (send, finished) = mpsc::channel();
         let percent = Arc::new(AtomicU32::new(0));
         let (path, folder, counter) = (path.to_path_buf(), folder.to_path_buf(), percent.clone());
         std::thread::Builder::new()
             .name("bl-shell-dawproject".into())
             .spawn(move || {
-                let _ = send.send(build(&path, &folder, &counter));
+                let _ = send.send(build(&path, &folder, default_warp_mode, &counter));
             })
             .map_err(|error| {
                 DawProjectError::Failed(format!("couldn't start reading the file: {error}"))
@@ -104,6 +108,7 @@ impl Job {
 fn build(
     path: &Path,
     folder: &Path,
+    default_warp_mode: WarpMode,
     percent: &AtomicU32,
 ) -> Result<Imported, DawProjectError> {
     let failed = |reason: String| DawProjectError::Failed(reason);
@@ -114,6 +119,7 @@ fn build(
     let context = dawproject::Context {
         folder: path.parent().unwrap_or(Path::new("")),
         extract_to: folder,
+        default_warp_mode,
     };
     percent.store(20, Ordering::Relaxed);
     let imported =
@@ -138,26 +144,40 @@ fn build(
     }
 
     // The files the container holds are written into the Temporary Folder
-    // (R39).
+    // (R39); a failure takes back what was written.
     let mut media = Vec::new();
-    for (index, file) in imported.files.iter().enumerate() {
-        percent.store(40 + (60 * index / imported.files.len()) as u32, Ordering::Relaxed);
-        let at = match (&file.bytes, &file.on_disk) {
-            (Some(bytes), _) => {
-                let at = folder.join(&file.path);
-                if let Some(parent) = at.parent() {
-                    std::fs::create_dir_all(parent).map_err(|error| {
-                        failed(format!("couldn't make {}: {error}", parent.display()))
-                    })?;
+    let mut written: Vec<PathBuf> = Vec::new();
+    let extracted = (|| {
+        for (index, file) in imported.files.iter().enumerate() {
+            percent.store(
+                40 + (60 * index / imported.files.len()) as u32,
+                Ordering::Relaxed,
+            );
+            let at = match (&file.bytes, &file.on_disk) {
+                (Some(bytes), _) => {
+                    let at = folder.join(&file.path);
+                    if let Some(parent) = at.parent() {
+                        std::fs::create_dir_all(parent).map_err(|error| {
+                            failed(format!("couldn't make {}: {error}", parent.display()))
+                        })?;
+                    }
+                    std::fs::write(&at, bytes)
+                        .map_err(|error| failed(format!("{}: {error}", at.display())))?;
+                    written.push(at.clone());
+                    at
                 }
-                std::fs::write(&at, bytes)
-                    .map_err(|error| failed(format!("{}: {error}", at.display())))?;
-                at
-            }
-            (None, Some(on_disk)) => on_disk.clone(),
-            _ => continue,
-        };
-        media.push((file.hash, at, file.size));
+                (None, Some(on_disk)) => on_disk.clone(),
+                _ => continue,
+            };
+            media.push((file.hash, at, file.size));
+        }
+        Ok(())
+    })();
+    if let Err(error) = extracted {
+        for at in written {
+            let _ = std::fs::remove_file(at);
+        }
+        return Err(error);
     }
     Ok(Imported {
         editor: imported.project.editor(),

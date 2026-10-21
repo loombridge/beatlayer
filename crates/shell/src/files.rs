@@ -530,36 +530,21 @@ impl ProjectFiles {
             let Some(rest) = path.strip_prefix(&temporary).ok() else {
                 continue;
             };
-            // `<kind>/<name>`, as the shell writes them, or
-            // `Imported/<...>/<name>`, as a DAWproject import writes them.
+            // `Imported/<...>/<name>`, as a DAWproject import writes them, or
+            // `<kind>/<name>`, as the shell writes the rest.
             let mut parts = rest.components();
-            let (Some(Component::Normal(kind)), Some(Component::Normal(name)), None) =
+            let folder = if rest.starts_with("Imported") {
+                project.imported()
+            } else if let (Some(Component::Normal(kind)), Some(Component::Normal(_)), None) =
                 (parts.next(), parts.next(), parts.next())
-            else {
-                let Some(name) = rest.file_name() else {
-                    continue;
-                };
-                if !rest.starts_with("Imported") {
-                    continue;
-                }
-                let folder = project.imported();
-                let placed = std::fs::create_dir_all(&folder)
-                    .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
-                    .and_then(|()| free_import(&folder, &name.to_string_lossy()))
-                    .and_then(|destination| move_file(&path, &destination).map(|()| destination));
-                match placed {
-                    Ok(destination) => {
-                        self.added.insert(hash, (destination, size));
-                        moved.push((hash, path));
-                    }
-                    Err(error) => {
-                        self.move_back(moved);
-                        return Err(error);
-                    }
-                }
+            {
+                project.processed(&kind.to_string_lossy())
+            } else {
                 continue;
             };
-            let folder = project.processed(&kind.to_string_lossy());
+            let Some(name) = rest.file_name() else {
+                continue;
+            };
             let placed = std::fs::create_dir_all(&folder)
                 .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
                 .and_then(|()| free_import(&folder, &name.to_string_lossy()))

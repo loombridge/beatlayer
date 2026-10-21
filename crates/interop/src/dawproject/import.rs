@@ -6,7 +6,7 @@
 //! The import is pure: it reads the file's model and makes a set, with no
 //! shell and no window. What the file's media holds is the shell's business.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use bl_core::time::{
@@ -25,6 +25,10 @@ use super::model::{
 };
 use super::report::Report;
 
+mod clips;
+
+use clips::Lane;
+
 /// What an import needs beyond the file itself.
 pub struct Context<'a> {
     /// The folder that holds the `.dawproject` file, where the files it
@@ -32,6 +36,21 @@ pub struct Context<'a> {
     pub folder: &'a Path,
     /// The folder the container's files are written into (R39).
     pub extract_to: &'a Path,
+    /// The warp mode a clip takes when the file names none Beatlayer has
+    /// (R31): the Default Warp Mode setting.
+    pub default_warp_mode: WarpMode,
+}
+
+impl<'a> Context<'a> {
+    /// A context that takes Beats for a clip's warp mode by default.
+    #[must_use]
+    pub fn new(folder: &'a Path, extract_to: &'a Path) -> Self {
+        Self {
+            folder,
+            extract_to,
+            default_warp_mode: WarpMode::default(),
+        }
+    }
 }
 
 /// What an import made.
@@ -87,6 +106,11 @@ pub fn import(container: &Container, context: &Context<'_>) -> Result<Imported, 
         tempo: TempoMap::default(),
         signatures: TimeSignatureMap::default(),
         failed: None,
+        default_warp_mode: context.default_warp_mode,
+        scene: None,
+        channels_seen: Vec::new(),
+        received: Vec::new(),
+        left_out: Vec::new(),
     };
     importer.run()
 }
@@ -128,7 +152,7 @@ struct Importer<'a, 'c> {
     /// The container's files the set uses, to write out.
     files: Vec<Extracted>,
     /// The DAWproject file path → the media it names.
-    resolved: HashMap<String, Option<ContentHash>>,
+    resolved: HashMap<String, Result<ContentHash, String>>,
     /// The tracks the import made, in the order it made them.
     made: Vec<Made>,
     /// The MIDI track and the audio track beside it, for a hybrid track
@@ -146,6 +170,17 @@ struct Importer<'a, 'c> {
     signatures: TimeSignatureMap,
     /// The first thing that went wrong.
     failed: Option<Error>,
+    /// The warp mode a clip takes by default (R31).
+    default_warp_mode: WarpMode,
+    /// The scene whose clips are being read, from 1, when it's a scene's.
+    scene: Option<usize>,
+    /// The channels the notes of the track being read use (R28).
+    channels_seen: Vec<i64>,
+    /// The tracks other tracks are routed into (R19).
+    received: Vec<TrackId>,
+    /// The ids of tracks the import left out and listed, whose lanes it
+    /// leaves out without listing them again.
+    left_out: Vec<String>,
 }
 
 impl Importer<'_, '_> {
@@ -167,6 +202,13 @@ impl Importer<'_, '_> {
         self.build_tracks(&project);
         self.build_clips(&project);
         self.build_scenes(&project);
+        self.report_received();
+        self.report_automation(&project);
+        if self.container.metadata.is_some() {
+            // The metadata waits for WP-6.36b (R64).
+            self.report
+                .add("the file's metadata", "in the container", "left out");
+        }
         if let Some(error) = self.failed.take() {
             return Err(error);
         }
@@ -185,6 +227,38 @@ impl Importer<'_, '_> {
             files: std::mem::take(&mut self.files),
             report: std::mem::take(&mut self.report),
         })
+    }
+
+    /// The automation of the Arrangement, which waits for WP-6.36b (R56 to
+    /// R62), except the tempo and the time signature (R13, R14).
+    fn report_automation(&mut self, project: &DawProject) {
+        let Some(arrangement) = &project.arrangement else {
+            return;
+        };
+        let transport = project.transport.as_ref();
+        let own = [
+            transport
+                .and_then(|transport| transport.tempo.as_ref())
+                .and_then(|tempo| tempo.id.clone()),
+            transport
+                .and_then(|transport| transport.time_signature.as_ref())
+                .and_then(|signature| signature.id.clone()),
+        ];
+        let mut found: Vec<(Option<String>, usize)> = Vec::new();
+        for lane in &arrangement.lanes {
+            count_automation(lane, None, &own, &mut found);
+        }
+        for (scope, count) in found {
+            let place = scope
+                .and_then(|id| self.tracks.get(&id).copied())
+                .and_then(|id| self.editor.document().track(id))
+                .map_or_else(
+                    || "the Arrangement".to_owned(),
+                    |track| format!("the track \"{}\"", track.name()),
+                );
+            self.report
+                .add_count("a timeline of automation", &place, "left out", count);
+        }
     }
 
     /// What the reader found it couldn't use, in the report (R4, R6, R7).
@@ -325,7 +399,6 @@ impl Importer<'_, '_> {
         };
         if let Some(automation) = &arrangement.tempo_automation {
             let unit = automation.info.time_unit.unwrap_or(TimeUnit::Beats);
-            let value_unit = automation.unit.unwrap_or(Unit::Bpm);
             for point in &automation.points {
                 if let PointValue::Real {
                     time,
@@ -339,7 +412,6 @@ impl Importer<'_, '_> {
                         interpolation.unwrap_or(Interpolation::Hold),
                         unit,
                     ));
-                    let _ = value_unit;
                 }
             }
         }
@@ -349,7 +421,6 @@ impl Importer<'_, '_> {
                 collect_points(lane, transport_id, TimeUnit::Beats, &mut lanes);
             }
             for (points_timeline, unit) in lanes {
-                let value_unit = points_timeline.unit.unwrap_or(Unit::Bpm);
                 for point in &points_timeline.points {
                     if let PointValue::Real {
                         time,
@@ -357,7 +428,6 @@ impl Importer<'_, '_> {
                         interpolation,
                     } = point
                     {
-                        let _ = value_unit;
                         points.push((
                             *time,
                             value.unwrap_or(Bpm::DEFAULT.get()),
@@ -503,6 +573,25 @@ impl Importer<'_, '_> {
             .or_else(|| channel.as_ref().and_then(|c| c.info.name.clone()));
         let place = self.track_place(track, &name);
 
+        // A track of video or markers is no Beatlayer track (R36; the
+        // markers wait for WP-6.36b, R63).
+        let types = &track.content_types;
+        if !types.is_empty()
+            && track.children.is_empty()
+            && types
+                .iter()
+                .all(|kind| matches!(kind, ContentKind::Video | ContentKind::Markers))
+        {
+            let what = if types.contains(&ContentKind::Video) {
+                "a video track"
+            } else {
+                "a track of markers"
+            };
+            self.report.add(what, &place, "left out");
+            self.left_out.extend(track.info.id.clone());
+            return;
+        }
+
         if role == MixerRole::Master {
             if self.master_seen {
                 // A second master channel is read as a submix one (R18).
@@ -525,6 +614,7 @@ impl Importer<'_, '_> {
         if role == MixerRole::Vca {
             // Beatlayer has no VCA (R16).
             self.report.add("a VCA channel", &place, "left out");
+            self.left_out.extend(track.info.id.clone());
             for child in &track.children {
                 let child_place = self.track_place(child, &child.info.name);
                 self.report
@@ -576,9 +666,6 @@ impl Importer<'_, '_> {
                 }
             }
         };
-        if kind == TrackKind::Group && role != Some(MixerRole::Submix) && !has_children {
-            // A group with no tracks holds nothing; it stays an audio track.
-        }
         let name = name.unwrap_or_else(|| self.default_name(kind));
         let id = self.create_track(kind, name.clone(), parent);
         let made = Made {
@@ -589,6 +676,10 @@ impl Importer<'_, '_> {
         };
         self.made.push(made.clone());
         self.register(track, channel.as_ref(), &made);
+        if track.info.color.is_some() {
+            // Colours wait for WP-6.36b (R23).
+            self.report.add("a colour", place, "left out");
+        }
         if track.loaded == Some(false) {
             // A track that isn't loaded has its Track Activator off (R20).
             self.apply(bl_model::Command::SetMute {
@@ -761,7 +852,6 @@ impl Importer<'_, '_> {
 
     /// Makes a track in the set.
     fn create_track(&mut self, kind: TrackKind, name: String, parent: Option<TrackId>) -> TrackId {
-        let id: TrackId = self.editor.new_id();
         let index = match kind {
             TrackKind::Return => self.editor.document().returns().len(),
             _ => match parent {
@@ -773,6 +863,19 @@ impl Importer<'_, '_> {
                 None => self.editor.document().top_level().len(),
             },
         };
+        self.create_track_at(kind, name, parent, index)
+    }
+
+    /// Makes a track at `index` among its group's tracks, the top level's
+    /// or the returns'.
+    fn create_track_at(
+        &mut self,
+        kind: TrackKind,
+        name: String,
+        parent: Option<TrackId>,
+        index: usize,
+    ) -> TrackId {
+        let id: TrackId = self.editor.new_id();
         if let Err(error) = self.editor.apply(bl_model::Command::CreateTrack {
             id,
             kind,
@@ -911,13 +1014,17 @@ impl Importer<'_, '_> {
             }
             Some(_) => return 0.0,
         };
-        pan.clamp(-1.0, 1.0)
+        if pan.is_finite() {
+            pan.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
     }
 
     /// The sends of every track (R22).
     fn apply_sends(&mut self, made: &[Made]) {
         // The sends to each return, and whether they are pre or post.
-        let mut taps: HashMap<TrackId, (usize, usize)> = HashMap::new();
+        let mut taps: BTreeMap<TrackId, (usize, usize)> = BTreeMap::new();
         for track in made {
             let Some(channel) = &track.channel else {
                 continue;
@@ -1003,7 +1110,11 @@ impl Importer<'_, '_> {
                 self.report.add(
                     "sends that disagree about pre or post",
                     &format!("the return \"{name}\""),
-                    "the return takes them post",
+                    if tap == bl_model::SendTap::Pre {
+                        "the return takes them pre"
+                    } else {
+                        "the return takes them post"
+                    },
                 );
             }
             self.apply(bl_model::Command::SetSendTap {
@@ -1028,818 +1139,123 @@ impl Importer<'_, '_> {
                 self.report.add(
                     "a destination the file doesn't hold",
                     &place,
-                    "left out; the track plays to Main",
+                    "left out; the track plays to its default output",
                 );
                 continue;
             };
-            if target == main {
-                // Main is the default output for a track at the top, and a
-                // MIDI track has no other output (R19).
-                if track.kind != TrackKind::Midi {
-                    self.apply(bl_model::Command::SetOutput {
-                        track: track.id,
-                        output: Output::Main,
-                    });
-                }
-                continue;
+            // A track holding audio and notes sends its audio track to the
+            // same place (R17).
+            let mut sources = vec![(track.id, track.kind)];
+            if let Some(sibling) = self.audio_sibling(track.id) {
+                sources.push((sibling, TrackKind::Audio));
             }
-            if self.editor.document().parent(track.id) == Some(target) {
-                // The track's own group's channel is the default output (R19).
-                continue;
-            }
-            let Some(target_track) = self.editor.document().track(target) else {
-                continue;
-            };
-            let target_kind = target_track.kind();
-            let target_clips = target_track.clips().count();
-            match target_kind {
-                TrackKind::Audio if track.kind == TrackKind::Midi => {
-                    // A MIDI track has no output but its default (R19).
-                    self.report.add(
-                        "a destination that isn't a track's input",
-                        &place,
-                        "left out; the track plays to Main",
-                    );
-                }
-                TrackKind::Audio => {
-                    self.apply(bl_model::Command::SetOutput {
-                        track: track.id,
-                        output: Output::Track { track: target },
-                    });
-                    // The receiving track hears what is routed to it (R19).
-                    self.apply(bl_model::Command::SetMonitor {
-                        track: target,
-                        monitor: Monitor::In,
-                    });
-                    self.apply(bl_model::Command::SetInput {
-                        track: target,
-                        input: bl_model::Input::None,
-                        channel: None,
-                    });
-                    if target_clips > 0 {
-                        self.report.add(
-                            "a track that holds clips and monitors an input",
-                            &place,
-                            "the clips are silent while it monitors",
-                        );
-                    }
-                }
-                _ => {
-                    self.report.add(
-                        "a destination that isn't a track's input",
-                        &place,
-                        "left out; the track plays to Main",
-                    );
-                }
+            for (source, kind) in sources {
+                self.route(source, kind, target, main, &place);
             }
         }
     }
 
-    /// The clips of every track (R24 to R37).
-    fn build_clips(&mut self, project: &DawProject) {
-        let Some(arrangement) = &project.arrangement else {
-            return;
-        };
-        // The lanes of each track, in the file's order.
-        let mut lanes: HashMap<String, Vec<(model::Clips, TimeUnit)>> = HashMap::new();
-        let mut loose: HashMap<String, Vec<(Timeline, TimeUnit)>> = HashMap::new();
-        for lane in &arrangement.lanes {
-            collect_lanes(lane, None, TimeUnit::Beats, &mut lanes, &mut loose);
-        }
-        for (track_id, track_lanes) in lanes {
-            let Some(track) = self.tracks.get(&track_id).copied() else {
-                continue;
-            };
-            let kind = self
-                .editor
-                .document()
-                .track(track)
-                .map_or(TrackKind::Audio, |track| track.kind());
-            let name = self
-                .editor
-                .document()
-                .track(track)
-                .map_or_else(String::new, |track| track.name().to_owned());
-            let place = format!("the track \"{name}\"");
-            let mut clips: Vec<Clip> = Vec::new();
-            // The clips that belong on another track: an audio clip on a
-            // MIDI track goes to the audio track beside it (R37).
-            let mut elsewhere: HashMap<TrackId, Vec<Clip>> = HashMap::new();
-            let mut take_lanes: Vec<(String, Vec<Clip>)> = Vec::new();
-            for (index, (timeline, unit)) in track_lanes.iter().enumerate() {
-                if index == 0 {
-                    for clip in &timeline.clips {
-                        let (target, target_kind, target_place) =
-                            self.clip_target(clip, track, kind, &place);
-                        let made = self.build_clip(clip, *unit, target, target_kind, &target_place);
-                        if target == track {
-                            clips.extend(made);
-                        } else {
-                            elsewhere.entry(target).or_default().extend(made);
-                        }
-                    }
-                } else if kind == TrackKind::Audio {
-                    let lane_name = timeline
-                        .info
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("Take {}", take_lanes.len() + 1));
-                    let mut lane_clips = Vec::new();
-                    for clip in &timeline.clips {
-                        lane_clips.extend(self.build_clip(clip, *unit, track, kind, &place));
-                    }
-                    take_lanes.push((lane_name, lane_clips));
-                } else {
-                    for _clip in &timeline.clips {
-                        self.report
-                            .add("a lane of clips on a MIDI track", &place, "left out");
-                    }
-                }
-            }
-            for (timeline, unit) in loose.get(&track_id).cloned().unwrap_or_default() {
-                // A timeline outside any clip becomes one clip (R24).
-                let made = self.build_loose_clip(&timeline, unit, track, kind, &place);
-                clips.extend(made);
-            }
-            self.place_clips(track, clips);
-            for (target, made) in elsewhere {
-                self.place_clips(target, made);
-            }
-            for (name, lane_clips) in take_lanes {
-                if lane_clips.is_empty() {
-                    continue;
-                }
-                let lane = bl_model::TakeLane {
-                    name,
-                    clips: lane_clips
-                        .into_iter()
-                        .map(|clip| bl_model::TakeClip {
-                            name: clip.name.clone(),
-                            start: clip.start,
-                            length: clip.length,
-                            data: match clip.data {
-                                ClipData::Audio(data) => data,
-                                ClipData::Midi(_) => AudioData::new(ContentHash([0; 32])),
-                            },
-                        })
-                        .collect(),
-                };
-                self.apply(bl_model::Command::AddTakeLane { track, lane });
-            }
-        }
-    }
-
-    /// Places the clips of a track, each replacing what it covers of the
-    /// clips before it (R26).
-    fn place_clips(&mut self, track: TrackId, clips: Vec<Clip>) {
-        let mut placed: Vec<Clip> = Vec::new();
-        for clip in clips {
-            let start = clip.start;
-            let end = clip.end();
-            let mut kept: Vec<Clip> = Vec::new();
-            for earlier in placed {
-                if earlier.end() <= start || earlier.start >= end {
-                    kept.push(earlier);
-                    continue;
-                }
-                if earlier.start >= start && earlier.end() <= end {
-                    self.report
-                        .add("a clip that another clip covers", "the track", "removed");
-                    continue;
-                }
-                if earlier.start < start {
-                    if earlier.end() > end {
-                        // The new clip splits it.
-                        let left = earlier.part(earlier.start, start, &self.tempo);
-                        let right = earlier.part(end, earlier.end(), &self.tempo);
-                        kept.push(left);
-                        kept.push(right);
-                        self.report
-                            .add("a clip another clip covers", "the track", "split");
-                    } else {
-                        kept.push(earlier.part(earlier.start, start, &self.tempo));
-                        self.report
-                            .add("a clip another clip covers", "the track", "shortened");
-                    }
-                } else {
-                    kept.push(earlier.part(end, earlier.end(), &self.tempo));
-                    self.report
-                        .add("a clip another clip covers", "the track", "shortened");
-                }
-            }
-            kept.push(clip);
-            placed = kept;
-        }
-        for clip in placed {
-            let id = clip.id;
-            self.apply(bl_model::Command::CreateClip { track, clip });
-            let _ = id;
-        }
-    }
-
-    /// A timeline outside any clip becomes one clip (R24).
-    fn build_loose_clip(
+    /// Sends one track to a channel's track, or leaves it at its default
+    /// output (R19).
+    fn route(
         &mut self,
-        timeline: &Timeline,
-        unit: TimeUnit,
-        track: TrackId,
+        source: TrackId,
         kind: TrackKind,
+        target: TrackId,
+        main: TrackId,
         place: &str,
-    ) -> Vec<Clip> {
-        let mut clip = model::Clip {
-            info: model::TimelineInfo {
-                id: None,
-                name: timeline.info().name.clone(),
-                color: None,
-                comment: None,
-                time_unit: Some(unit),
-                track: None,
-            },
-            time: Some(0.0),
-            duration: None,
-            content_time_unit: Some(unit),
-            play_start: None,
-            play_stop: None,
-            loop_start: None,
-            loop_end: None,
-            fade_time_unit: None,
-            fade_in: None,
-            fade_out: None,
-            enable: None,
-            reference: None,
-            content: Some(Box::new(Content::Timeline(Box::new(timeline.clone())))),
-        };
-        match timeline {
-            Timeline::Notes(notes) => {
-                // A MIDI clip lasts as long as its notes, rounded up to the
-                // next bar (R24, the MIDI clips spec R17).
-                let length = notes
-                    .notes
-                    .iter()
-                    .filter_map(|note| note.time.zip(note.duration))
-                    .filter(|(_time, duration)| *duration > 0.0)
-                    .map(|(time, duration)| time + duration)
-                    .fold(0.0f64, f64::max);
-                let bar = self.signatures.signature_at(Ticks::ZERO).bar_length();
-                let length =
-                    beats_to_ticks(round_up(length, bar.as_quarters())).max(Ticks::QUARTER);
-                clip.duration = Some(length.as_quarters());
-            }
-            Timeline::Audio(file) | Timeline::Video(file) => {
-                let duration = file.duration.unwrap_or(0.0);
-                clip.duration = Some(duration);
-            }
-            Timeline::Warps(warps) => {
-                let duration = warps
-                    .audio
-                    .as_ref()
-                    .and_then(|audio| audio.duration)
-                    .unwrap_or(0.0);
-                clip.duration = Some(duration);
-            }
-            _ => {
-                self.report
-                    .add("a timeline that holds no clip", place, "left out");
-                return Vec::new();
-            }
-        }
-        self.build_clip(&clip, unit, track, kind, place)
-    }
-
-    /// The track a clip belongs on: an audio clip on a MIDI track goes to
-    /// the audio track beside it (R37).
-    fn clip_target(
-        &self,
-        source: &model::Clip,
-        track: TrackId,
-        kind: TrackKind,
-        place: &str,
-    ) -> (TrackId, TrackKind, String) {
-        if kind == TrackKind::Midi
-            && self.content_is_audio(source)
-            && let Some(sibling) = self.audio_sibling(track)
-        {
-            let name = self
-                .editor
-                .document()
-                .track(sibling)
-                .map_or_else(String::new, |track| track.name().to_owned());
-            return (sibling, TrackKind::Audio, format!("the track \"{name}\""));
-        }
-        (track, kind, place.to_owned())
-    }
-
-    /// The clips a DAWproject clip becomes (R27 to R37).
-    fn build_clip(
-        &mut self,
-        source: &model::Clip,
-        parent_unit: TimeUnit,
-        track: TrackId,
-        kind: TrackKind,
-        place: &str,
-    ) -> Vec<Clip> {
-        let Some(time) = source.time else {
-            // A clip without its time is left out (R4).
-            self.report
-                .add("a clip without its time", place, "left out");
-            return Vec::new();
-        };
-        let content_unit = source.content_time_unit.unwrap_or(parent_unit);
-        let start = match parent_unit {
-            TimeUnit::Beats => beats_to_ticks(time),
-            TimeUnit::Seconds => self.seconds_to_ticks(self.tempo.clone(), time),
-        };
-        let content = self.resolve_content(source);
-        let Some(content) = content else {
-            return Vec::new();
-        };
-        self.clip_from_content(source, &content, content_unit, start, track, kind, place, 0)
-    }
-
-    /// What a clip plays: its own content, or a copy of the timeline it
-    /// names (R35).
-    fn resolve_content(&mut self, source: &model::Clip) -> Option<Timeline> {
-        if let Some(reference) = &source.reference {
-            let Some(timeline) = self.timelines.get(reference) else {
-                // A reference to something that isn't a timeline leaves the
-                // clip out (R7, R35).
-                self.report.add(
-                    "a clip that names a timeline the file doesn't hold",
-                    "the clip",
-                    "left out",
-                );
-                return None;
-            };
-            self.report
-                .add("an alias clip", "the clip", "read as a copy");
-            return Some(timeline.clone());
-        }
-        source
-            .content
-            .as_ref()
-            .and_then(|content| content.timeline())
-            .cloned()
-    }
-
-    /// The clips a clip's content makes (R27 to R37).
-    #[allow(clippy::too_many_arguments)]
-    fn clip_from_content(
-        &mut self,
-        source: &model::Clip,
-        content: &Timeline,
-        content_unit: TimeUnit,
-        start: Ticks,
-        track: TrackId,
-        kind: TrackKind,
-        place: &str,
-        depth: usize,
-    ) -> Vec<Clip> {
-        match content {
-            Timeline::Notes(notes) => {
-                self.midi_clip(source, notes, content_unit, start, kind, place)
-            }
-            Timeline::Audio(file) => {
-                self.audio_clip(source, file, content_unit, start, kind, place, false)
-            }
-            Timeline::Video(_) => {
-                // Video isn't carried (R36).
-                self.report.add("a video clip", place, "left out");
-                Vec::new()
-            }
-            Timeline::Warps(warps) => {
-                self.warped_clip(source, warps, content_unit, start, kind, place)
-            }
-            Timeline::Clips(clips) => {
-                if depth > 8 {
-                    self.report
-                        .add("a clip nested too deeply", place, "left out");
-                    return Vec::new();
-                }
-                // A clip whose content is a timeline of clips is flattened
-                // (R34).
-                let mut made = Vec::new();
-                for inner in &clips.clips {
-                    let inner_content = self.resolve_content(inner);
-                    let Some(inner_content) = inner_content else {
-                        continue;
-                    };
-                    let inner_unit = inner.content_time_unit.unwrap_or(content_unit);
-                    made.extend(self.clip_from_content(
-                        inner,
-                        &inner_content,
-                        inner_unit,
-                        start,
-                        track,
-                        kind,
-                        place,
-                        depth + 1,
-                    ));
-                }
-                for _clip in &made {
-                    self.report.add("a nested clip", place, "flattened");
-                }
-                made
-            }
-            Timeline::Lanes(lanes) => {
-                // A clip whose content is a set of lanes takes its notes or
-                // audio from the first of them (R36).
-                let mut found = false;
-                let mut made = Vec::new();
-                for child in &lanes.children {
-                    match child {
-                        Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Warps(_) => {
-                            if found {
-                                self.report.add(
-                                    "a further timeline in a clip's lanes",
-                                    place,
-                                    "left out",
-                                );
-                                continue;
-                            }
-                            found = true;
-                            made.extend(self.clip_from_content(
-                                source,
-                                child,
-                                content_unit,
-                                start,
-                                track,
-                                kind,
-                                place,
-                                depth + 1,
-                            ));
-                        }
-                        Timeline::Video(_) => {
-                            self.report.add("a video timeline", place, "left out");
-                        }
-                        Timeline::Points(_) => {
-                            self.report
-                                .add("automation in a clip's lanes", place, "left out");
-                        }
-                        _ => {}
-                    }
-                }
-                made
-            }
-            Timeline::ClipSlot(slot) => {
-                let Some(clip) = &slot.clip else {
-                    return Vec::new();
-                };
-                self.build_clip(clip, content_unit, track, kind, place)
-            }
-            Timeline::Points(_) => {
-                self.report.add("automation", place, "left out");
-                Vec::new()
-            }
-            Timeline::Markers(_) => {
-                self.report.add("a timeline of markers", place, "left out");
-                Vec::new()
-            }
-        }
-    }
-
-    /// A MIDI clip (R28).
-    fn midi_clip(
-        &mut self,
-        source: &model::Clip,
-        notes: &model::Notes,
-        unit: TimeUnit,
-        start: Ticks,
-        kind: TrackKind,
-        place: &str,
-    ) -> Vec<Clip> {
-        if kind != TrackKind::Midi {
-            // Notes on an audio track are left out (R37).
-            self.report
-                .add("notes on an audio track", place, "left out");
-            return Vec::new();
-        }
-        let mut made_notes: Vec<Note> = Vec::new();
-        let mut channels: Vec<i64> = Vec::new();
-        let mut left_out = 0usize;
-        for note in &notes.notes {
-            let Some(key) = note.key else {
-                self.report.add("a note without its key", place, "left out");
-                left_out += 1;
-                continue;
-            };
-            if !(0..=127).contains(&key) {
-                left_out += 1;
-                continue;
-            }
-            let Some(time) = note.time else {
-                left_out += 1;
-                continue;
-            };
-            let Some(duration) = note.duration else {
-                left_out += 1;
-                continue;
-            };
-            if duration <= 0.0 {
-                left_out += 1;
-                continue;
-            }
-            let start_ticks = match unit {
-                TimeUnit::Beats => beats_to_ticks(time),
-                TimeUnit::Seconds => self.seconds_to_ticks(self.tempo.clone(), time),
-            };
-            let length_ticks = match unit {
-                TimeUnit::Beats => beats_to_ticks(duration),
-                TimeUnit::Seconds => self.seconds_to_ticks(self.tempo.clone(), duration),
-            };
-            let velocity = note
-                .vel
-                .map(|vel| (vel * 127.0).round().clamp(1.0, 127.0) as u8)
-                .unwrap_or(100);
-            let release = note
-                .rel
-                .map(|rel| (rel * 127.0).round().clamp(1.0, 127.0) as u8)
-                .unwrap_or(64);
-            let mut built = Note::new(key as u8, start_ticks, length_ticks.max(Ticks(1)), velocity);
-            built.release_velocity = release;
-            made_notes.push(built);
-            if let Some(channel) = note.channel {
-                channels.push(channel);
-            }
-        }
-        if left_out > 0 {
-            self.report
-                .add_count("a note that can't be played", place, "left out", left_out);
-        }
-        channels.sort_unstable();
-        channels.dedup();
-        if channels.len() > 1 {
-            // A note's channel isn't kept (R28).
-            self.report.add(
-                "notes on more than one channel",
-                place,
-                "left out; the notes play on one channel",
-            );
-        }
-        let length = self.clip_length(source, start, unit, Some(notes_length(&made_notes)));
-        let mut data = MidiData::new(made_notes);
-        data.start = source
-            .play_start
-            .map(|value| self.markers_to_ticks(value, unit))
-            .unwrap_or(Ticks::ZERO);
-        data.end = source
-            .play_stop
-            .map(|value| self.markers_to_ticks(value, unit));
-        let looping = source
-            .loop_start
-            .zip(source.loop_end)
-            .is_some_and(|(start, end)| end > start);
-        data.looping = looping;
-        if looping {
-            data.loop_start = source
-                .loop_start
-                .map(|value| self.markers_to_ticks(value, unit))
-                .unwrap_or(Ticks::ZERO);
-            data.loop_end = source
-                .loop_end
-                .map(|value| self.markers_to_ticks(value, unit));
-        }
-        let mut clip = Clip::new(self.editor.new_id(), start, length, ClipData::Midi(data));
-        self.finish_clip(&mut clip, source);
-        vec![clip]
-    }
-
-    /// An audio clip that isn't warped (R29).
-    #[allow(clippy::too_many_arguments)]
-    fn audio_clip(
-        &mut self,
-        source: &model::Clip,
-        file: &MediaFile,
-        unit: TimeUnit,
-        start: Ticks,
-        kind: TrackKind,
-        place: &str,
-        warped: bool,
-    ) -> Vec<Clip> {
-        let _ = warped;
-        if kind != TrackKind::Audio {
-            self.report
-                .add("an audio clip on a MIDI track", place, "left out");
-            return Vec::new();
-        }
-        let Some(hash) = self.media_for(file, place) else {
-            return Vec::new();
-        };
-        let mut data = AudioData::new(hash);
-        data.start = source.play_start.unwrap_or(0.0);
-        data.end = source.play_stop;
-        let looping = source
-            .loop_start
-            .zip(source.loop_end)
-            .is_some_and(|(start, end)| end > start);
-        data.looping = looping;
-        data.loop_start = source.loop_start.unwrap_or(0.0);
-        data.loop_end = source.loop_end;
-        let length = self.clip_length(source, start, unit, file.duration);
-        let mut clip = Clip::new(self.editor.new_id(), start, length, ClipData::Audio(data));
-        self.finish_clip(&mut clip, source);
-        vec![clip]
-    }
-
-    /// An audio clip whose content is a set of warps (R30, R31).
-    #[allow(clippy::too_many_arguments)]
-    fn warped_clip(
-        &mut self,
-        source: &model::Clip,
-        warps: &model::Warps,
-        unit: TimeUnit,
-        start: Ticks,
-        kind: TrackKind,
-        place: &str,
-    ) -> Vec<Clip> {
-        if kind != TrackKind::Audio {
-            self.report
-                .add("an audio clip on a MIDI track", place, "left out");
-            return Vec::new();
-        }
-        let Some(file) = &warps.audio else {
-            self.report
-                .add("a warped clip with no file", place, "left out");
-            return Vec::new();
-        };
-        let rising = warps.warps.len() >= 2
-            && warps
-                .warps
-                .windows(2)
-                .all(|pair| match (pair[0].time, pair[1].time) {
-                    (Some(first), Some(second)) => second > first,
-                    _ => false,
+    ) {
+        if target == main {
+            // Main is the default output for a track at the top, and a MIDI
+            // track has no other output.
+            if kind != TrackKind::Midi {
+                self.apply(bl_model::Command::SetOutput {
+                    track: source,
+                    output: Output::Main,
                 });
-        if !rising {
-            // A set of warps that doesn't rise is read as an unwarped clip
-            // (R30).
-            self.report.add(
-                "a warped clip whose warps don't rise",
-                place,
-                "read as an unwarped clip",
-            );
-            return self.audio_clip(source, file, unit, start, kind, place, false);
+            }
+            return;
         }
-        let Some(hash) = self.media_for(file, place) else {
-            return Vec::new();
-        };
-        let mut data = AudioData::new(hash);
-        data.warp = true;
-        let mut markers = Vec::new();
-        for warp in &warps.warps {
-            let (Some(time), Some(content_time)) = (warp.time, warp.content_time) else {
+        if self.editor.document().parent(source) == Some(target) {
+            // The track's own group's channel is the default output.
+            return;
+        }
+        let target_kind = self
+            .editor
+            .document()
+            .track(target)
+            .map(|track| track.kind());
+        if target_kind != Some(TrackKind::Audio) || kind == TrackKind::Midi {
+            // A MIDI track has no output but its default.
+            if kind != TrackKind::Midi || target_kind != Some(TrackKind::Audio) {
+                self.report.add(
+                    "a destination that isn't a track's input",
+                    place,
+                    "left out; the track plays to its default output",
+                );
+            }
+            return;
+        }
+        self.apply(bl_model::Command::SetOutput {
+            track: source,
+            output: Output::Track { track: target },
+        });
+        // The receiving track hears what is routed to it.
+        self.apply(bl_model::Command::SetMonitor {
+            track: target,
+            monitor: Monitor::In,
+        });
+        self.apply(bl_model::Command::SetInput {
+            track: target,
+            input: bl_model::Input::None,
+            channel: None,
+        });
+        if !self.received.contains(&target) {
+            self.received.push(target);
+        }
+    }
+
+    /// The clips of a track that monitors what is routed to it are silent
+    /// (R19).
+    fn report_received(&mut self) {
+        for track in std::mem::take(&mut self.received) {
+            let Some(track) = self.editor.document().track(track) else {
                 continue;
             };
-            markers.push(WarpMarker {
-                time: content_time,
-                beat: self.markers_to_ticks(time, unit),
-            });
-        }
-        markers.sort_by(|a, b| a.beat.cmp(&b.beat).then(a.time.total_cmp(&b.time)));
-        let tempo = markers
-            .windows(2)
-            .last()
-            .map(|pair| {
-                let beats = (pair[1].beat - pair[0].beat).as_quarters();
-                let seconds = pair[1].time - pair[0].time;
-                if seconds > 0.0 {
-                    (beats / seconds * 60.0).clamp(Bpm::MIN.get(), Bpm::MAX.get())
-                } else {
-                    Bpm::DEFAULT.get()
-                }
-            })
-            .unwrap_or(Bpm::DEFAULT.get());
-        data.tempo = Some(tempo);
-        data.warp_mode = self.warp_mode(file.algorithm.as_deref(), place);
-        data.warp_markers = markers;
-        // A warped clip's markers are beats of its contents (R30).
-        data.start = source
-            .play_start
-            .map(|value| self.markers_to_ticks(value, unit).as_quarters())
-            .unwrap_or(0.0);
-        data.end = source
-            .play_stop
-            .map(|value| self.markers_to_ticks(value, unit).as_quarters());
-        let looping = source
-            .loop_start
-            .zip(source.loop_end)
-            .is_some_and(|(start, end)| end > start);
-        data.looping = looping;
-        if looping {
-            data.loop_start = source
-                .loop_start
-                .map(|value| self.markers_to_ticks(value, unit).as_quarters())
-                .unwrap_or(0.0);
-            data.loop_end = source
-                .loop_end
-                .map(|value| self.markers_to_ticks(value, unit).as_quarters());
-        }
-        let length = self.clip_length(source, start, unit, None);
-        let mut clip = Clip::new(self.editor.new_id(), start, length, ClipData::Audio(data));
-        self.finish_clip(&mut clip, source);
-        vec![clip]
-    }
-
-    /// A warped clip's mode (R31).
-    fn warp_mode(&mut self, algorithm: Option<&str>, place: &str) -> WarpMode {
-        let Some(algorithm) = algorithm else {
-            return WarpMode::default();
-        };
-        let name: String = algorithm
-            .chars()
-            .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
-            .flat_map(char::to_lowercase)
-            .collect();
-        let mode = match name.as_str() {
-            "repitch" => Some(WarpMode::RePitch),
-            "beats" => Some(WarpMode::Beats),
-            "tones" => Some(WarpMode::Tones),
-            "texture" => Some(WarpMode::Texture),
-            "complex" => Some(WarpMode::Complex),
-            "complexpro" => Some(WarpMode::ComplexPro),
-            _ => None,
-        };
-        match mode {
-            Some(mode) => mode,
-            None => {
-                // Any other name takes the Default Warp Mode (R31).
+            if track.clips().next().is_some() {
+                let place = format!("the track \"{}\"", track.name());
                 self.report.add(
-                    &format!("the warp mode `{algorithm}`"),
-                    place,
-                    "changed to the default warp mode",
+                    "a track that holds clips and monitors an input",
+                    &place,
+                    "the clips are silent while it monitors",
                 );
-                WarpMode::default()
             }
-        }
-    }
-
-    /// A clip's name and switch (R27).
-    fn finish_clip(&mut self, clip: &mut Clip, source: &model::Clip) {
-        if let Some(name) = &source.info.name {
-            clip.name = name.clone();
-        }
-        if source.enable == Some(false) {
-            clip.mute = true;
-        }
-    }
-
-    /// How long a clip is (R27).
-    fn clip_length(
-        &mut self,
-        source: &model::Clip,
-        start: Ticks,
-        unit: TimeUnit,
-        content_length: Option<f64>,
-    ) -> Ticks {
-        if let Some(duration) = source.duration {
-            return match unit {
-                TimeUnit::Beats => beats_to_ticks(duration),
-                TimeUnit::Seconds => {
-                    let end = self.seconds_to_ticks(self.tempo.clone(), duration);
-                    end.saturating_sub(start).max(Ticks(1))
-                }
-            };
-        }
-        if let (Some(play_start), Some(play_stop)) = (source.play_start, source.play_stop) {
-            let length = play_stop - play_start;
-            return match unit {
-                TimeUnit::Beats => beats_to_ticks(length).max(Ticks(1)),
-                TimeUnit::Seconds => {
-                    let end = self.seconds_to_ticks(self.tempo.clone(), play_stop);
-                    let from = self.seconds_to_ticks(self.tempo.clone(), play_start);
-                    end.saturating_sub(from).max(Ticks(1))
-                }
-            };
-        }
-        match content_length {
-            Some(length) if length > 0.0 => match unit {
-                TimeUnit::Beats => beats_to_ticks(length).max(Ticks(1)),
-                TimeUnit::Seconds => {
-                    let end = self.seconds_to_ticks(self.tempo.clone(), length);
-                    end.saturating_sub(start).max(Ticks(1))
-                }
-            },
-            _ => Ticks::QUARTER,
-        }
-    }
-
-    /// A clip's play or loop marker, in ticks (R9).
-    fn markers_to_ticks(&self, value: f64, unit: TimeUnit) -> Ticks {
-        match unit {
-            TimeUnit::Beats => beats_to_ticks(value),
-            TimeUnit::Seconds => self.seconds_to_ticks(self.tempo.clone(), value),
         }
     }
 
     /// The media a file names, or `None` when it isn't there (R38 to R41).
-    fn media_for(&mut self, file: &MediaFile, place: &str) -> Option<ContentHash> {
-        let reference = file.file.as_ref()?;
+    pub(super) fn media_for(&mut self, file: &MediaFile, place: &str) -> Option<ContentHash> {
+        let Some(reference) = file.file.as_ref() else {
+            self.report
+                .add("an audio element with no file", place, "left out");
+            return None;
+        };
         let path = reference.path.replace('\\', "/");
-        if let Some(hash) = self.resolved.get(&path) {
-            return *hash;
-        }
-        let resolved = self.resolve_media(&path, reference.external, file, place);
-        self.resolved.insert(path, resolved);
+        let resolved = match self.resolved.get(&path) {
+            Some(resolved) => resolved.clone(),
+            None => {
+                let resolved = self.resolve_media(&path, reference.external, file, place);
+                self.resolved.insert(path.clone(), resolved.clone());
+                resolved
+            }
+        };
+        // Every clip that plays a file nobody has is listed (R40).
         resolved
+            .map_err(|reason| {
+                self.report
+                    .add(&format!("the file `{path}`"), place, &reason);
+            })
+            .ok()
     }
 
     /// The media a file names, read from the container or from the disk
@@ -1850,50 +1266,36 @@ impl Importer<'_, '_> {
         external: bool,
         file: &MediaFile,
         place: &str,
-    ) -> Option<ContentHash> {
+    ) -> Result<ContentHash, String> {
         let mut found = PathBuf::new();
         let bytes = if external {
             match self.find_external(path) {
                 Some((at, moved)) => {
                     found = at.clone();
                     if moved {
+                        let shown = at.strip_prefix(self.context.folder).unwrap_or(&at);
                         self.report.add(
                             &format!("the file `{path}`"),
                             place,
-                            &format!("found at {}", at.display()),
+                            &format!("found at {}", shown.to_string_lossy().replace('\\', "/")),
                         );
                     }
                     match std::fs::read(&at) {
                         Ok(bytes) => bytes,
                         Err(_) => {
-                            self.report.add(
-                                &format!("the file `{path}`"),
-                                place,
-                                "left out; it couldn't be read",
-                            );
-                            return None;
+                            return Err("left out; it couldn't be read".to_owned());
                         }
                     }
                 }
                 None => {
-                    self.report.add(
-                        &format!("the file `{path}`"),
-                        place,
-                        "left out; it wasn't found",
-                    );
-                    return None;
+                    return Err("left out; it wasn't found".to_owned());
                 }
             }
         } else {
             match self.container.files.get(path) {
                 Some(bytes) => bytes.clone(),
                 None => {
-                    self.report.add(
-                        &format!("the file `{path}`"),
-                        place,
-                        "left out; the container doesn't hold it",
-                    );
-                    return None;
+                    return Err("left out; the container doesn't hold it".to_owned());
                 }
             }
         };
@@ -1905,31 +1307,28 @@ impl Importer<'_, '_> {
             .and_then(|extension| extension.to_str())
             .unwrap_or("");
         let Some((sample_rate, channels, frames)) = probe(&bytes, extension) else {
-            self.report.add(
-                &format!("the file `{path}`"),
-                place,
-                "left out; it isn't a file Beatlayer can play",
-            );
-            return None;
+            return Err("left out; it isn't a file Beatlayer can play".to_owned());
         };
         self.check_media_agreement(file, sample_rate, channels, frames, path, place);
-        self.files.push(Extracted {
-            path: path.to_owned(),
-            bytes: if external { None } else { Some(bytes) },
-            on_disk: if external { Some(found) } else { None },
-            hash,
-            size,
-        });
-        let mut media = self.media.clone();
-        if let Ok(relative) = MediaPath::new(path) {
-            media.insert(MediaRef {
+        // Files with the same bytes are one medium (R39).
+        if !self.files.iter().any(|file| file.hash == hash) {
+            self.files.push(Extracted {
+                path: path.to_owned(),
+                bytes: if external { None } else { Some(bytes) },
+                on_disk: if external { Some(found) } else { None },
                 hash,
-                path: relative,
-                size: 0,
+                size,
             });
+            if let Ok(relative) = MediaPath::new(path) {
+                self.media.insert(MediaRef {
+                    hash,
+                    path: relative,
+                    size: 0,
+                    reversed_from: None,
+                });
+            }
         }
-        self.media = media;
-        Some(hash)
+        Ok(hash)
     }
 
     /// Whether the file's own rate, channels and length agree with the
@@ -1969,7 +1368,8 @@ impl Importer<'_, '_> {
     }
 
     /// The file a path names on disk, looked for by name when it isn't there
-    /// (R40).
+    /// (R40): in the `.dawproject` file's folder and the folders inside it,
+    /// the first match by name in path order being used.
     fn find_external(&self, path: &str) -> Option<(PathBuf, bool)> {
         let direct = if is_absolute(path) {
             PathBuf::from(path)
@@ -1979,19 +1379,18 @@ impl Importer<'_, '_> {
         if direct.is_file() {
             return Some((direct, false));
         }
-        let name = Path::new(path)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())?;
-        for found in walk(self.context.folder, 0) {
-            if found.is_file()
-                && found
-                    .file_name()
-                    .is_some_and(|found| found.to_string_lossy() == name)
-            {
-                return Some((found, true));
-            }
-        }
-        None
+        let name = path
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())?;
+        let mut folders = vec![self.context.folder.to_path_buf()];
+        folders.extend(walk(self.context.folder, 0, &mut 10_000));
+        folders.sort();
+        folders
+            .into_iter()
+            .map(|folder| folder.join(name))
+            .find(|found| found.is_file())
+            .map(|found| (found, true))
     }
 
     /// The scenes of the Session View (R42, R43).
@@ -2000,21 +1399,33 @@ impl Importer<'_, '_> {
             // A file with no scenes gets the eight a new set has (R42).
             return;
         }
-        let scenes = self.editor.document().scene_count();
-        for (index, scene) in project.scenes.iter().enumerate() {
-            if index >= scenes {
-                self.report.add("a scene", "the Session View", "left out");
+        // The set holds the file's scenes, no more and no fewer.
+        while self.editor.document().scene_count() > project.scenes.len() {
+            let Some(last) = self.editor.document().scenes().next_back().map(|s| s.id) else {
                 break;
-            }
+            };
+            self.apply(bl_model::Command::DeleteScene { scene: last });
+        }
+        while self.editor.document().scene_count() < project.scenes.len() {
+            let id = self.editor.new_id();
+            let index = self.editor.document().scene_count();
+            self.apply(bl_model::Command::CreateScene { id, index });
+        }
+        for (index, scene) in project.scenes.iter().enumerate() {
             let Some(scene_id) = self.editor.document().scenes().nth(index).map(|s| s.id) else {
                 break;
             };
+            if scene.info.color.is_some() {
+                self.report
+                    .add("a colour", &scene_place_of(scene, index), "left out");
+            }
             if let Some(name) = &scene.info.name {
                 self.apply(bl_model::Command::RenameScene {
                     scene: scene_id,
                     name: name.clone(),
                 });
             }
+            let scene_place = scene_place_of(scene, index);
             let mut slots: Vec<model::ClipSlot> = Vec::new();
             if let Some(content) = &scene.content
                 && let Some(timeline) = content.timeline()
@@ -2029,7 +1440,7 @@ impl Importer<'_, '_> {
                 let Some(track) = self.tracks.get(track_id).copied() else {
                     self.report.add(
                         "a slot for a track the file doesn't hold",
-                        "the Session View",
+                        &scene_place,
                         "left out",
                     );
                     continue;
@@ -2042,7 +1453,7 @@ impl Importer<'_, '_> {
                 if !kind.holds_clips() {
                     self.report.add(
                         "a slot for a track that can't hold clips",
-                        "the Session View",
+                        &scene_place,
                         "left out",
                     );
                     continue;
@@ -2050,7 +1461,7 @@ impl Importer<'_, '_> {
                 if seen.contains(track_id) {
                     self.report.add(
                         "a second slot for one track in one scene",
-                        "the Session View",
+                        &scene_place,
                         "left out",
                     );
                     continue;
@@ -2071,17 +1482,41 @@ impl Importer<'_, '_> {
                     .document()
                     .track(track)
                     .map_or_else(String::new, |track| track.name().to_owned());
-                let place = format!("the track \"{name}\"");
-                let clips = self.build_clip(clip, TimeUnit::Beats, track, kind, &place);
-                let Some(mut clip) = clips.into_iter().next() else {
-                    continue;
+                let lane = Lane {
+                    id: track,
+                    kind,
+                    place: format!("the track \"{name}\""),
                 };
+                let lane = self.lane_for(clip, &lane);
+                self.scene = Some(index + 1);
+                let mut pieces = self.clips_in(clip, TimeUnit::Beats, Ticks::ZERO, &lane, 0);
+                self.scene = None;
+                if pieces.len() > 1 {
+                    self.report.add_count(
+                        "a clip beyond the first a slot's clip flattens to",
+                        &scene_place,
+                        "left out",
+                        pieces.len() - 1,
+                    );
+                }
+                if pieces.is_empty() {
+                    continue;
+                }
+                let piece = pieces.swap_remove(0);
+                let mut clip = piece.clip;
                 clip.start = Ticks::ZERO;
-                self.apply(bl_model::Command::CreateSlotClip {
-                    track,
+                let command = bl_model::Command::CreateSlotClip {
+                    track: lane.id,
                     scene: scene_id,
                     clip,
-                });
+                };
+                if let Err(error) = self.editor.apply(command) {
+                    self.report.add(
+                        "a clip Beatlayer can't hold",
+                        &piece.place,
+                        &format!("left out; {error}"),
+                    );
+                }
                 if slot.has_stop == Some(false) {
                     self.apply(bl_model::Command::SetSlotStopButton {
                         track,
@@ -2140,24 +1575,8 @@ fn beats_to_ticks(beats: f64) -> Ticks {
     if !beats.is_finite() {
         return Ticks::ZERO;
     }
-    // A beat is a quarter note (R9).
-    Ticks::from_quarters(beats.round() as i64)
-}
-
-/// A length rounded up to a whole bar.
-fn round_up(length: f64, bar: f64) -> f64 {
-    if bar <= 0.0 {
-        return length.max(0.0);
-    }
-    (length / bar).ceil() * bar
-}
-
-/// How long a set of notes runs.
-fn notes_length(notes: &[Note]) -> f64 {
-    notes
-        .iter()
-        .map(|note| note.start.get() as f64 + note.length.get() as f64)
-        .fold(0.0f64, f64::max)
+    // A beat is a quarter note (R9), and a time becomes the nearest tick.
+    Ticks((beats * Ticks::QUARTER.get() as f64).round() as i64)
 }
 
 /// What a file holds, when it decodes: its rate, its channels and its
@@ -2200,8 +1619,9 @@ fn is_absolute(path: &str) -> bool {
     bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
 }
 
-/// The folders inside a folder, a few levels deep.
-fn walk(folder: &Path, depth: usize) -> Vec<PathBuf> {
+/// The folders inside a folder, a few levels deep and at most `budget` of
+/// them, so a file opened from a huge folder doesn't search for long.
+fn walk(folder: &Path, depth: usize, budget: &mut usize) -> Vec<PathBuf> {
     let mut found = Vec::new();
     if depth > 4 {
         return found;
@@ -2209,11 +1629,16 @@ fn walk(folder: &Path, depth: usize) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return found;
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    for path in paths {
+        if *budget == 0 {
+            break;
+        }
         if path.is_dir() {
+            *budget -= 1;
             found.push(path.clone());
-            found.extend(walk(&path, depth + 1));
+            found.extend(walk(&path, depth + 1, budget));
         }
     }
     found
@@ -2295,13 +1720,14 @@ fn collect_points(
     }
 }
 
-/// The lanes of each track, and the timelines outside any clip.
+/// The lanes of each track in the order the file gives them, and the
+/// timelines outside any clip.
 fn collect_lanes(
     timeline: &Timeline,
     scope: Option<String>,
     unit: TimeUnit,
-    lanes: &mut HashMap<String, Vec<(model::Clips, TimeUnit)>>,
-    loose: &mut HashMap<String, Vec<(Timeline, TimeUnit)>>,
+    lanes: &mut Vec<(String, Vec<(model::Clips, TimeUnit)>)>,
+    loose: &mut Vec<(String, Timeline, TimeUnit)>,
 ) {
     let unit = timeline.info().time_unit.unwrap_or(unit);
     let scope = timeline.info().track.clone().or(scope);
@@ -2312,19 +1738,56 @@ fn collect_lanes(
             }
         }
         Timeline::Clips(clips) => {
-            if let Some(scope) = &scope {
-                lanes
-                    .entry(scope.clone())
-                    .or_default()
-                    .push((clips.clone(), unit));
+            if let Some(scope) = scope {
+                match lanes.iter_mut().find(|(known, _)| *known == scope) {
+                    Some((_, found)) => found.push((clips.clone(), unit)),
+                    None => lanes.push((scope, vec![(clips.clone(), unit)])),
+                }
             }
         }
         Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Warps(_) => {
-            if let Some(scope) = &scope {
-                loose
-                    .entry(scope.clone())
-                    .or_default()
-                    .push((timeline.clone(), unit));
+            if let Some(scope) = scope {
+                loose.push((scope, timeline.clone(), unit));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Where a scene is, for the report.
+fn scene_place_of(scene: &model::Scene, index: usize) -> String {
+    match scene.info.name.as_deref() {
+        Some(name) => format!("the scene \"{name}\""),
+        None => format!("scene {}", index + 1),
+    }
+}
+
+/// Counts the automation timelines in a timeline, by the track they are
+/// local to, leaving out the ones that drive `own` parameters.
+fn count_automation(
+    timeline: &Timeline,
+    scope: Option<String>,
+    own: &[Option<String>],
+    found: &mut Vec<(Option<String>, usize)>,
+) {
+    let scope = timeline.info().track.clone().or(scope);
+    match timeline {
+        Timeline::Points(points) => {
+            let target = points.target.parameter.as_deref();
+            if own
+                .iter()
+                .any(|id| id.as_deref() == target && target.is_some())
+            {
+                return;
+            }
+            match found.iter_mut().find(|(known, _)| *known == scope) {
+                Some((_, count)) => *count += 1,
+                None => found.push((scope, 1)),
+            }
+        }
+        Timeline::Lanes(lanes) => {
+            for child in &lanes.children {
+                count_automation(child, scope.clone(), own, found);
             }
         }
         _ => {}

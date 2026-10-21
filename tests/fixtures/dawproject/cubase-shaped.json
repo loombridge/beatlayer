@@ -3,6 +3,12 @@
   "entries": [
     {
       "count": 1,
+      "did": "left out",
+      "what": "a colour",
+      "where": "the track \"Pad\""
+    },
+    {
+      "count": 1,
       "did": "its Track Activator is off",
       "what": "a track that isn't loaded",
       "where": "the track \"Disabled\""
@@ -10,8 +16,44 @@
     {
       "count": 1,
       "did": "left out",
+      "what": "a track of markers",
+      "where": "the track \"Markers\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
       "what": "a VST3 plug-in",
       "where": "the track \"Instrument\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a generic equaliser",
+      "where": "the track \"Vocals\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a generic compressor",
+      "where": "the track \"Vocals\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a generic gate",
+      "where": "the track \"Vocals\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a generic limiter",
+      "where": "the track \"Vocals\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a VST3 plug-in",
+      "where": "the track \"Vocals\""
     },
     {
       "count": 1,
@@ -29,7 +71,19 @@
       "count": 1,
       "did": "the file's own rate, channels and length were used",
       "what": "the file `audio/sound.wav`",
-      "where": "the track \"Disabled\""
+      "where": "the clip \"Sound\" at 1.1.1 on the track \"Strings\""
+    },
+    {
+      "count": 1,
+      "did": "the clips are silent while it monitors",
+      "what": "a track that holds clips and monitors an input",
+      "where": "the track \"Strings\""
+    },
+    {
+      "count": 2,
+      "did": "left out",
+      "what": "a timeline of automation",
+      "where": "the track \"Vocals\""
     }
   ]
 }

@@ -84,7 +84,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 - **R33.** A clip's `fadeInTime` and `fadeOutTime`, in its `fadeTimeUnit` (else its content's unit), become its fades in seconds, each limited to the clip's length. A negative `fadeInTime` makes a crossfade with the clip before it on the lane: the clip still starts at its `time`, the clip before it ends there, and the two meet in a crossfade as long as the negative value is large, as the Arrangement's crossfades between adjacent clips are ([audio-clips.md](audio-clips.md), WP-6.51). A MIDI clip's fades are ignored. (S2, S4, S13)
 - **R34.** A clip whose content is a `Clips` timeline is flattened. On a MIDI track the inner clips' notes are merged into one MIDI clip with the outer clip's place, markers and loop, each inner clip's notes placed where it starts and cut to its region. On an audio track each inner clip becomes an audio clip of its own, at the place the outer clip plays it, cut to the outer clip's region, and repeated for each pass of the outer clip's loop. Deeper nesting flattens level by level. Each flattened clip is listed. (S1, S4; Beatlayer's own)
 - **R35.** A clip with a `reference` plays a copy of the timeline it names, as if that timeline were its own content; the copy is independent of the original, and the report counts the alias clips made copies. A `reference` to something that isn't a timeline leaves the clip out (R7). (S2, S4)
-- **R36.** A clip whose content is a `Lanes` takes its notes or its audio from the first `Notes`, `Audio` or `Warps` timeline in it, and its `Points` as automation (R59 to R62); further note or audio timelines in it are left out and listed. `Video` timelines, and tracks whose only content is video, are left out and listed. (S2, S4; Beatlayer's own)
+- **R36.** A clip whose content is a `Lanes` takes its notes or its audio from the first `Notes`, `Audio` or `Warps` timeline in it, and its `Points` as automation (R59 to R62); further note or audio timelines in it are left out and listed. `Video` timelines, and tracks whose only content is video or markers (which WP-6.36b reads, R63), are left out and listed. (S2, S4; Beatlayer's own)
 - **R37.** A clip on a track that can't hold clips (a group, a return or Main) is left out. An audio clip on a MIDI track goes to the audio track R17 makes beside it, made for it when there's none; notes on an audio track are left out. Each is listed. (S13; Beatlayer's own)
 
 **Media (WP-6.36)**
@@ -161,7 +161,7 @@ This spec covers reading and writing the file and what each element becomes. Wha
 
 ## Tests
 
-The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/fixtures/dawproject/`, from the script's own XML, its own generated audio and the test plug-ins' own states; none is a file another application exported. Each fixture has the report it should give beside it.
+The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/fixtures/dawproject/`, from the script's own XML, its own generated audio and the test plug-ins' own states; none is a file another application exported. Each fixture has the report it should give beside it, and the golden render test in `crates/cli/tests/dawproject_goldens.rs` plays `bitwig-shaped`'s imported set against the same set built by commands.
 
 | Rule | Test | Kind |
 |---|---|---|
@@ -169,45 +169,45 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R2 | the_damaged_fixtures_that_read_give_their_report | unit |
 | R3 | a_version_beatlayer_does_not_read_is_refused | unit |
 | R4 | every_fixture_gives_the_report_it_should | unit, fuzz |
-| R5 | a_damaged_file_is_refused_or_read_in_part | unit, fuzz |
+| R5 | the_damaged_fixtures_that_read_give_their_report | unit, fuzz |
 | R6 | a_damaged_file_is_refused_or_read_in_part | unit, fuzz |
 | R7 | the_damaged_fixtures_that_read_give_their_report | unit |
-| R8 | every_fixture_gives_the_report_it_should | unit |
-| R9 | beats_and_seconds_reach_the_same_tick_through_a_ramp | unit, property |
+| R8 | extreme_numbers_never_panic | unit, fuzz |
+| R9 | a_clip_in_seconds_starts_where_the_same_clip_in_beats_does | unit, property |
 | R10 | an_import_opens_the_file_as_a_new_set | unit, agent test |
 | R11 | an_import_opens_the_file_as_a_new_set | unit |
 | R12 | the_report_is_read_back_while_the_imported_set_is_open | unit, agent test |
 | R13 | an_imported_tempo_map_holds_the_ramp_the_file_asks_for | unit |
 | R14 | every_fixture_gives_the_report_it_should | unit |
-| R15 | every_fixture_gives_the_report_it_should | unit |
-| R16 | every_fixture_gives_the_report_it_should | unit |
-| R17 | every_fixture_gives_the_report_it_should | unit |
+| R15 | tracks_mixer_and_routing_follow_the_file | unit |
+| R16 | tracks_mixer_and_routing_follow_the_file | unit |
+| R17 | tracks_mixer_and_routing_follow_the_file | unit |
 | R18 | every_fixture_gives_the_report_it_should | unit |
-| R19 | every_fixture_gives_the_report_it_should | unit |
+| R19 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
 | R20 | every_fixture_gives_the_report_it_should | unit |
-| R21 | every_fixture_gives_the_report_it_should | unit |
-| R22 | every_fixture_gives_the_report_it_should | unit |
+| R21 | tracks_mixer_and_routing_follow_the_file | unit |
+| R22 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
 | R23 | to be written in WP-6.36b (reading) and WP-6.37 (writing) | unit |
-| R24 | every_fixture_gives_the_report_it_should | unit |
-| R25 | every_fixture_gives_the_report_it_should | unit |
-| R26 | every_fixture_gives_the_report_it_should | unit |
-| R27 | every_fixture_gives_the_report_it_should | unit |
-| R28 | every_fixture_gives_the_report_it_should | unit |
-| R29 | every_fixture_gives_the_report_it_should | unit |
-| R30 | every_fixture_gives_the_report_it_should | unit |
+| R24 | clips_follow_the_file | unit |
+| R25 | clips_follow_the_file | unit |
+| R26 | clips_follow_the_file | unit |
+| R27 | clips_follow_the_file | unit |
+| R28 | clips_follow_the_file | unit |
+| R29 | clips_follow_the_file | unit, golden render |
+| R30 | nested_warped_clips_flatten_over_the_loop | unit, golden render |
 | R31 | every_fixture_gives_the_report_it_should | unit |
-| R32 | every_fixture_gives_the_report_it_should | unit |
+| R32 | the_imported_set_renders_the_same_samples_as_the_set_built_by_commands | unit, golden render |
 | R33 | to be written in WP-6.36b | unit |
-| R34 | every_fixture_gives_the_report_it_should | unit |
-| R35 | every_fixture_gives_the_report_it_should | unit |
+| R34 | nested_warped_clips_flatten_over_the_loop | unit, golden render |
+| R35 | nested_warped_clips_flatten_over_the_loop | unit |
 | R36 | every_fixture_gives_the_report_it_should | unit |
 | R37 | every_fixture_gives_the_report_it_should | unit |
 | R38 | every_fixture_gives_the_report_it_should | unit |
 | R39 | the_files_the_file_holds_are_written_and_moved_on_the_first_save | unit |
 | R40 | every_fixture_gives_the_report_it_should | unit |
 | R41 | every_fixture_gives_the_report_it_should | unit |
-| R42 | every_fixture_gives_the_report_it_should | unit |
-| R43 | every_fixture_gives_the_report_it_should | unit |
+| R42 | scenes_follow_the_file | unit |
+| R43 | scenes_follow_the_file | unit |
 | R44 | to be written in WP-6.36b | unit |
 | R45 | to be written in WP-6.36b | unit |
 | R46 | to be written in WP-6.36b | unit |
@@ -252,4 +252,4 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R85 | to be written in WP-6.37b | UI script |
 | R86 | to be written in WP-6.37b | UI script |
 | R87 | to be written in WP-6.37b | UI script |
-| R88 | the_arguments_are_the_path_of_the_file | unit, agent test |
+| R88 | an_agent_imports_a_dawproject_file_and_reads_its_report | unit, agent test |

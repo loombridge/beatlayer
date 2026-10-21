@@ -2343,6 +2343,9 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        // What a DAWproject import said about the set that's gone (R11, R12).
+        self.pending_name = None;
+        self.import_report = None;
         // A file still being written was for the set that's gone: its worker
         // deletes it when it finds nobody waiting (WP-4.20).
         self.processed.clear();
@@ -7494,7 +7497,8 @@ impl Shell {
                 }
                 let path = PathBuf::from(&args.path);
                 let folder = crate::dawproject::import_folder(&self.temporary_folder(), &path);
-                let mut job = crate::dawproject::Job::start(&path, &folder)
+                let warp_mode = crate::auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
+                let mut job = crate::dawproject::Job::start(&path, &folder, warp_mode)
                     .map_err(|error| failed(error.to_string()))?;
                 // An agent's call returns when the new set is open (R10).
                 let imported = loop {

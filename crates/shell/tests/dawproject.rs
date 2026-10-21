@@ -43,8 +43,6 @@ fn temporary(folder: &TempDir) -> PathBuf {
 #[test]
 fn an_import_opens_the_file_as_a_new_set() {
     let (mut shell, _control) = rig();
-    let folder = TempDir::new("open");
-    let temporary = temporary(&folder);
     let path = fixtures().join("minimal.dawproject");
     let result = shell
         .run(
@@ -128,6 +126,18 @@ fn the_report_is_read_back_while_the_imported_set_is_open() {
     let report: ImportReport = serde_json::from_value(report).expect("the report");
     assert_eq!(report, imported.report);
     assert!(!report.entries.is_empty());
+
+    // Another set opening takes the report and the file's name away (R11,
+    // R12).
+    shell
+        .run("set.new", serde_json::json!({}))
+        .expect("a new set opens");
+    assert_eq!(shell.set_name(), "Untitled");
+    let report = shell
+        .run(IMPORT_REPORT, serde_json::json!({}))
+        .expect("the report is read");
+    let report: ImportReport = serde_json::from_value(report).expect("the report");
+    assert!(report.entries.is_empty());
 }
 
 /// The files the file holds are written into the Temporary Folder, and the

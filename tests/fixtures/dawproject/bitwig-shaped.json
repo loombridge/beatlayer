@@ -17,13 +17,31 @@
       "count": 1,
       "did": "changed to the default warp mode",
       "what": "the warp mode `stretch`",
-      "where": "the track \"Hybrid Audio\""
+      "where": "a clip at 1.1.1 on the track \"Hybrid Audio\""
     },
     {
       "count": 1,
+      "did": "changed to the default warp mode",
+      "what": "the warp mode `stretch`",
+      "where": "a clip at 1.3.1 on the track \"Hybrid Audio\""
+    },
+    {
+      "count": 2,
       "did": "flattened",
       "what": "a nested clip",
-      "where": "the track \"Hybrid Audio\""
+      "where": "the clip \"Loop\" at 1.1.1 on the track \"Hybrid Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a clip's fades",
+      "where": "the clip \"Loop\" at 1.1.1 on the track \"Hybrid Audio\""
+    },
+    {
+      "count": 1,
+      "did": "unrolled into 4 clips",
+      "what": "a loop in an unwarped clip",
+      "where": "the clip \"Beat\" at 1.1.1 on the track \"Drums\""
     }
   ]
 }

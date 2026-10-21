@@ -783,6 +783,15 @@ fn the_keyboard_selects_the_notes_the_spec_says() {
     assert_eq!(state.selected, [1]);
     let state = song.view(ids::SELECT_NOTES, json!({ "select": "previous" }));
     assert_eq!(state.selected, [0]);
+    // With Shift too the note is added to the selection; with nothing
+    // selected that note is the nearest one (S-NOTE-043, S-A11Y-007).
+    let state = song.view(ids::SELECT_NOTES, json!({ "notes": [] }));
+    assert!(state.selected.is_empty());
+    let state = song.view(
+        ids::SELECT_NOTES,
+        json!({ "select": "nearest", "add": true }),
+    );
+    assert_eq!(state.selected, [0], "the nearest note is added");
     // The previous and next note at the same pitch.
     let state = song.view(ids::SELECT_NOTES, json!({ "notes": [0] }));
     assert_eq!(state.selected, [0]);

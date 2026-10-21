@@ -1261,6 +1261,19 @@ fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
               "args": { "clip": clip, "beat": 600 } },
         ] }),
     );
+    // `view.state` reads the insert marker and the time selection back:
+    // placing the marker clears the selection.
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "view.state" } ] }),
+    );
+    let view = &state["results"][0]["result"]["clip_view"];
+    assert_eq!(view["insert_marker"], 600);
+    assert!(
+        view["time_selection"].is_null(),
+        "placing the marker clears the time selection"
+    );
     let pasted = call(
         &mut client,
         "run",
@@ -1269,6 +1282,16 @@ fn an_agent_copies_pastes_and_duplicates_notes_by_command() {
         ] }),
     );
     assert_eq!(pasted["undo_step"], "test-agent: Paste the notes");
+    // The pasted notes become the time selection, as selecting notes does.
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [ { "command": "view.state" } ] }),
+    );
+    assert_eq!(
+        state["results"][0]["result"]["clip_view"]["time_selection"],
+        json!([600, 1580])
+    );
     // The query tool reads the notes back: the copies keep their pitches and
     // their spacing.
     let queried = call(

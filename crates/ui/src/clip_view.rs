@@ -36,7 +36,7 @@ use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
 use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
 use bl_shell::commands::VIEW_LANE;
 use bl_shell::context_menus;
-use bl_shell::menus::{MenuItem, shown};
+use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
 use bl_shell::note_commands::{ClipTab, NoteField};
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
@@ -664,6 +664,14 @@ impl NoteMenus {
         for item in shown(menu) {
             if item.is_separator() {
                 ui.separator();
+                continue;
+            }
+            // Spec: piano-roll R30, menus.md C-NOTE-014. Clip Markers is a
+            // submenu of the clip markers' commands, as M-EDIT-013 is.
+            if matches!(item.action, Action::Submenu) {
+                ui.menu_button(item.label, |ui| {
+                    self.show(ui, shell, &item.items, events);
+                });
                 continue;
             }
             let package = context_menus::pending_package(item.row);
@@ -1406,13 +1414,69 @@ impl ClipViewUi {
             );
             painter.rect_filled(band, 0.0, colours.time_selection.0.gamma_multiply(0.2));
         }
+        // Spec: piano-roll R23. The insert marker is a flashing line: on for
+        // half of each second, off for the next. The frame after the next
+        // turn of the phase is asked for, so it costs two frames a second.
+        if let Some(at) = insert {
+            let phase = ui.input(|i| i.time).rem_euclid(1.0);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(
+                    0.5 - phase.rem_euclid(0.5),
+                ));
+            if phase < 0.5 {
+                let x = x_of_tick(grid, start, length, at);
+                painter.rect_filled(
+                    Rect::from_min_max(pos2(x - 0.5, grid.top()), pos2(x + 0.5, lane.bottom())),
+                    0.0,
+                    colours.insert_marker.0,
+                );
+            }
+        }
+        // Spec: piano-roll R23, R24. The insert marker's place and the time
+        // selection reach assistive technology, as the Sample Editor's
+        // markers do: an item with its name and the ticks of the clip's
+        // contents.
+        let describe = |tick: Ticks| format!("tick {}", tick.get());
         if let Some(at) = insert {
             let x = x_of_tick(grid, start, length, at);
-            painter.rect_filled(
-                Rect::from_min_max(pos2(x - 0.5, grid.top()), pos2(x + 0.5, lane.bottom())),
-                0.0,
-                colours.insert_marker.0,
+            let rect = Rect::from_min_max(pos2(x - 0.5, grid.top()), pos2(x + 0.5, lane.bottom()));
+            let response = ui.interact(
+                rect,
+                Id::new(("clip-view-insert-marker", clip)),
+                Sense::hover(),
             );
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::ListItem);
+                node.set_label("Insert Marker".to_owned());
+                node.set_value(describe(at));
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: rect.min.x.into(),
+                    y0: rect.min.y.into(),
+                    x1: rect.max.x.into(),
+                    y1: rect.max.y.into(),
+                });
+            });
+        }
+        if let Some((from, to)) = time {
+            let x0 = x_of_tick(grid, start, length, from);
+            let x1 = x_of_tick(grid, start, length, to);
+            let rect = Rect::from_min_max(pos2(x0, grid.top()), pos2(x1, lane.bottom()));
+            let response = ui.interact(
+                rect,
+                Id::new(("clip-view-time-selection", clip)),
+                Sense::hover(),
+            );
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::ListItem);
+                node.set_label("Time Selection".to_owned());
+                node.set_value(format!("{} to {}", describe(from), describe(to)));
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: rect.min.x.into(),
+                    y0: rect.min.y.into(),
+                    x1: rect.max.x.into(),
+                    y1: rect.max.y.into(),
+                });
+            });
         }
     }
 
@@ -2085,7 +2149,18 @@ impl ClipViewUi {
                     // or next note after that.
                     let forward = key == Key::ArrowUp;
                     if adding {
-                        select(events, if forward { "next" } else { "previous" }, true);
+                        // Spec: piano-roll R25. Shift with the note-jump keys
+                        // adds the note they reach: the nearest one when
+                        // nothing is selected, and the next or previous one
+                        // after that.
+                        let what = if selected.is_empty() {
+                            "nearest"
+                        } else if forward {
+                            "next"
+                        } else {
+                            "previous"
+                        };
+                        select(events, what, true);
                     } else if jump {
                         if selected.is_empty() {
                             select(events, "nearest", false);

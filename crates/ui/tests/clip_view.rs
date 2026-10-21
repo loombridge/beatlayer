@@ -909,6 +909,12 @@ fn the_keyboard_selects_the_notes() {
     assert_eq!(n.selected(), [2], "the next note at that pitch");
     n.h.key(egui::Key::ArrowLeft, Modifiers::ALT);
     assert_eq!(n.selected(), [0], "and the previous one");
+    // Esc deselects; with nothing selected, Option-Shift-Down adds the note
+    // nearest the insert marker (S-NOTE-043, S-A11Y-007).
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    assert!(n.selected().is_empty());
+    n.h.key(egui::Key::ArrowDown, add_key());
+    assert_eq!(n.selected(), [0], "the nearest note is added");
 }
 
 #[test]
@@ -1065,4 +1071,59 @@ fn the_clipboard_keys_act_on_the_notes() {
     n.click(at, Modifiers::NONE);
     n.h.key(egui::Key::X, command());
     assert_eq!(n.notes().len(), 1, "the cut note is gone");
+}
+
+#[test]
+fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
+    // Spec: piano-roll R30. Right-clicking a key in the piano ruler opens
+    // C-KEYS: Deactivate Note(s) and the note spelling, both waiting for
+    // their packages, drawn disabled and naming them.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let at = n.key_at(60);
+    let nodes = right_click(&mut n, at);
+    for (label, package) in [
+        ("Deactivate Note(s)", "WP-6.1"),
+        ("Note spelling", "WP-6.7b"),
+    ] {
+        let node = menu_item(&nodes, label);
+        assert!(node.disabled, "{label} waits");
+        assert!(
+            node.description.contains(package),
+            "{label} names {package}: {:?}",
+            node.description
+        );
+    }
+}
+
+#[test]
+fn the_insert_marker_and_the_time_selection_reach_assistive_technology() {
+    // Spec: piano-roll R23, R24. The insert marker's place and the time
+    // selection reach assistive technology, as the Sample Editor's markers
+    // do: an item naming it, with its place in the clip's contents.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    // A click on empty grid places the insert marker, and Shift with the
+    // arrows makes the time selection.
+    let empty = n.at(62, 2 * step);
+    n.click(empty, Modifiers::NONE);
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    n.h.key(egui::Key::ArrowRight, Modifiers::SHIFT);
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    let marker = Harness::node(&nodes, "Insert Marker");
+    assert_eq!(marker.role, egui::accesskit::Role::ListItem);
+    assert_eq!(marker.value, format!("tick {}", (2 * step).get()));
+    let time = Harness::node(&nodes, "Time Selection");
+    assert_eq!(time.role, egui::accesskit::Role::ListItem);
+    assert_eq!(
+        time.value,
+        format!("tick {} to tick {}", (2 * step).get(), (4 * step).get())
+    );
+    // Esc takes the time selection away and leaves the insert marker.
+    n.h.key(egui::Key::Escape, Modifiers::NONE);
+    let output = n.h.settle();
+    let nodes = Harness::nodes(&output);
+    assert!(nodes.iter().all(|node| node.label != "Time Selection"));
+    assert!(nodes.iter().any(|node| node.label == "Insert Marker"));
 }

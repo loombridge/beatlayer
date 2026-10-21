@@ -5187,6 +5187,23 @@ impl Shell {
                     .to_owned(),
                 )
             }
+            // IMP-24: the item follows the selected device's position.
+            device_ids::SET_ROLE => {
+                let selected = self
+                    .devices
+                    .selected()
+                    .and_then(|device| self.editor.document().device(device));
+                Some(match selected {
+                    Some(device) if device.role == bl_model::DeviceRole::MidiEffect => {
+                        let role = self
+                            .devices
+                            .device_type(&device.kind)
+                            .map_or(bl_model::DeviceRole::AudioEffect, |kind| kind.role);
+                        format!("Use as {}", role.label())
+                    }
+                    _ => "Use as MIDI Effect".to_owned(),
+                })
+            }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -6255,7 +6272,64 @@ impl Shell {
 
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
+        let args = self.prepare_device_role(id, args)?;
         self.prepare_warping(id, args)
+    }
+
+    /// Spec: device-chains R2, R3, and IMP-24. A device may take the
+    /// MIDI-effect position only if its type sends notes on from a note
+    /// output; otherwise its role is its type's role. The document can't
+    /// check this: only the host knows whether a plug-in has a note output.
+    fn prepare_device_role(&self, id: &str, mut args: Value) -> Result<Value, ShellError> {
+        let Ok(bl_model::Command::SetDeviceRole { device, role }) =
+            model::command_from_args(id, args.clone())
+        else {
+            return Ok(args);
+        };
+        // An unknown device is the document's to refuse.
+        let Some(current) = self.editor.document().device(device) else {
+            return Ok(args);
+        };
+        // A type the host hasn't met can't be checked; the chain's order
+        // still is.
+        let Some(kind) = self.devices.device_type(&current.kind) else {
+            return Ok(args);
+        };
+        // Left out, the role is the other position: into the MIDI-effect
+        // position when the type sends notes on and isn't there already,
+        // and back where the type goes otherwise.
+        let role = role.unwrap_or(
+            if current.role != bl_model::DeviceRole::MidiEffect && kind.note_output {
+                bl_model::DeviceRole::MidiEffect
+            } else {
+                kind.role
+            },
+        );
+        if kind.role != role && !(role == bl_model::DeviceRole::MidiEffect && kind.note_output) {
+            let message = if role == bl_model::DeviceRole::MidiEffect {
+                format!(
+                    "{} has no note output, so it can't go in the MIDI-effect position",
+                    current.title()
+                )
+            } else {
+                format!(
+                    "{} goes in the chain as {}",
+                    current.title(),
+                    kind.role.label()
+                )
+            };
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message,
+            });
+        }
+        if let Some(object) = args.as_object_mut() {
+            object.insert(
+                "role".to_owned(),
+                serde_json::to_value(role).unwrap_or_default(),
+            );
+        }
+        Ok(args)
     }
 
     /// Spec: warping R7, R11. A warp marker edit on several clips needs

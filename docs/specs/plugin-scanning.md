@@ -28,7 +28,7 @@ CLAP and VST3 are scanned, each in its format's own folders, and Audio Units on 
 
 ## Rules
 
-- **R1.** `plugin.scan` finds the plug-in files in the paths it's given (a file, a folder searched below it, or each format's own system plug-in folders when no path is given; for VST3, the format's user, system and network folders) and describes each one: its format, file, identifier, name, vendor and version when it gives them, and its role in a chain from its features. (S2, S3)
+- **R1.** `plugin.scan` finds the plug-in files in the paths it's given (a file, a folder searched below it, or each format's own system plug-in folders when no path is given; for VST3, the format's user, system and network folders) and describes each one: its format, file, identifier, name, vendor and version when it gives them, its role in a chain from its features, and whether it sends notes on from a note output, which lets it sit in the MIDI-effect position of a MIDI track's chain (IMP-24). (S2, S3)
 - **R2.** The scanner caches each plug-in file by its path, size, and modification time; a scan of a file whose size and time are unchanged answers from the cache without loading it. The cache is kept in the config directory and read again at the next start. (S1)
 - **R3.** The scanner loads each plug-in in the `beatlayer-scan` child process, never in the main process, and waits at most a timeout for it. (S1)
 - **R4.** A plug-in whose scan crashes, hangs past the timeout, or refuses to load doesn't stop the scan: the child is stopped and the plug-in is put on the blocklist with the reason. The blocklist is kept with the cache. (S1)

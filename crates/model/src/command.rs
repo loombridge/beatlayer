@@ -1387,6 +1387,17 @@ pub enum Command {
         /// Float (true) or dock (false).
         floating: bool,
     },
+    /// Places a device in another position of its chain (IMP-24): a plug-in
+    /// that sends notes on can sit in the MIDI-effect position, before the
+    /// instrument, and go back where its type goes. The placement is saved
+    /// with the set.
+    SetDeviceRole {
+        /// The device.
+        device: DeviceId,
+        /// Where it goes in the chain; the other position if left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<DeviceRole>,
+    },
     /// Switches a device on or off.
     SetDeviceEnabled {
         /// The device.
@@ -2212,6 +2223,8 @@ impl Command {
             Self::SetDeviceFloating {
                 floating: false, ..
             } => "Dock Device",
+            // IMP-24: Beatlayer's own, so Live has no name for it.
+            Self::SetDeviceRole { .. } => "Change Device Role",
             // Spec: device-compare R3, R4; `label_in` names the direction.
             Self::CompareSwitch { .. } => "Compare: Switch",
             Self::CompareCopy { .. } => "Compare: Copy",
@@ -3204,6 +3217,7 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetDeviceRole { device, role } => self.set_device_role(*device, *role),
             Command::SetDeviceEnabled { device, enabled } => {
                 if self.device_ref(*device)?.enabled != *enabled {
                     self.device_mut(*device)?.enabled = *enabled;
@@ -5177,6 +5191,49 @@ impl Document {
             self.forget_in(from, &Gone::device(moved))?;
         }
         Ok(())
+    }
+
+    /// Places `device` where its new `role` goes in the chain it sits in
+    /// (IMP-24): after the devices of the same role or a smaller one,
+    /// before those of a greater one. The chain keeps its order (R3), so a
+    /// role that can't fit the track or its chain is refused.
+    fn set_device_role(
+        &mut self,
+        device: DeviceId,
+        role: Option<DeviceRole>,
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(device)?.role;
+        // Left out, the other position is taken: back where the type goes
+        // from the MIDI-effect position, and into it from anywhere else.
+        let role = role.unwrap_or(if current == DeviceRole::MidiEffect {
+            DeviceRole::AudioEffect
+        } else {
+            DeviceRole::MidiEffect
+        });
+        if current == role {
+            return Ok(());
+        }
+        let place = self
+            .device_place(device)
+            .ok_or(ModelError::NoSuchDevice(device))?;
+        let mut taken = self.take_device(device)?;
+        taken.role = role;
+        let index = match place.chain {
+            None => self
+                .track_ref(place.track)?
+                .devices
+                .iter()
+                .take_while(|d| d.role <= role)
+                .count(),
+            Some(chain) => self
+                .chain_ref(chain)?
+                .devices
+                .iter()
+                .take_while(|d| d.role <= role)
+                .count(),
+        };
+        self.put_device(place.track, place.chain, index, taken)?;
+        check_chain(self.track_ref(place.track)?)
     }
 
     fn move_device(

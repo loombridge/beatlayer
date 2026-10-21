@@ -1316,3 +1316,154 @@ fn a_parameter_moved_outside_configure_mode_joins_the_panel_when_used() {
         "used once, so permanent"
     );
 }
+
+/// A MIDI track named `name` with the native instrument Cascade on it, and
+/// the test plug-in loaded after it as an audio effect. Returns the track
+/// and the plug-in's device.
+fn midi_track_with_a_plugin(shell: &mut Shell, name: &str) -> (bl_model::TrackId, DeviceId) {
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": name }))
+        .unwrap();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.name() == name)
+        .map(bl_model::Track::id)
+        .expect("the new MIDI track");
+    shell
+        .run(
+            "device.add",
+            json!({ "track": track,
+                    "device": { "kind": { "native": { "device_type": "beatlayer.cascade" } },
+                                "name": "Cascade" } }),
+        )
+        .unwrap();
+    let device = load(shell, track);
+    (track, device)
+}
+
+/// Where `device` sits in `track`'s chain, and what role it has.
+fn placed(
+    shell: &Shell,
+    track: bl_model::TrackId,
+    device: DeviceId,
+) -> (usize, bl_model::DeviceRole) {
+    let document = shell.editor().document();
+    let index = document
+        .track(track)
+        .expect("the track")
+        .devices()
+        .position(|d| d.id == device)
+        .expect("the device is in the chain");
+    let role = document.device(device).expect("the device").role;
+    (index, role)
+}
+
+// Spec: device-chains R2, R3, R14; clap-hosting R1; IMP-24
+#[test]
+fn a_plugin_can_be_placed_as_a_midi_effect_and_the_placement_saves_and_undoes() {
+    let scratch = std::env::temp_dir().join(format!("bl-shell-midi-effect-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let (track, device) = midi_track_with_a_plugin(&mut shell, "Lead");
+    // It loaded after the instrument, as its type goes.
+    assert_eq!(
+        placed(&shell, track, device),
+        (1, bl_model::DeviceRole::AudioEffect)
+    );
+
+    let steps = shell.editor().undo_history().len();
+    shell
+        .run(
+            "device.set_role",
+            json!({ "device": device, "role": "midi_effect" }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    assert_eq!(
+        placed(&shell, track, device),
+        (0, bl_model::DeviceRole::MidiEffect),
+        "before the instrument, as a MIDI effect"
+    );
+
+    // The menu item names no role: the other position is taken.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        placed(&shell, track, device),
+        (1, bl_model::DeviceRole::AudioEffect)
+    );
+    shell
+        .invoke("device.set_role", json!({ "device": device }))
+        .unwrap();
+    assert_eq!(
+        placed(&shell, track, device),
+        (0, bl_model::DeviceRole::MidiEffect),
+        "the menu item takes the other position"
+    );
+
+    // Undo and redo are one step each.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        placed(&shell, track, device),
+        (1, bl_model::DeviceRole::AudioEffect)
+    );
+    shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(
+        placed(&shell, track, device),
+        (0, bl_model::DeviceRole::MidiEffect)
+    );
+
+    // Saved and opened again, it is still a MIDI effect before the
+    // instrument.
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Midi.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    assert_eq!(
+        placed(&shell, track, device),
+        (0, bl_model::DeviceRole::MidiEffect)
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: device-chains R2, R3; clap-hosting R1; IMP-24
+#[test]
+fn a_plugin_without_a_note_output_cannot_be_a_midi_effect() {
+    // SAFETY: the plug-in reads this when it is asked for its note ports,
+    // and this test runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_clap::NOTE_PORTS_VAR, "none") };
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let (track, device) = midi_track_with_a_plugin(&mut shell, "Lead");
+    let error = shell
+        .run(
+            "device.set_role",
+            json!({ "device": device, "role": "midi_effect" }),
+        )
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("note output"),
+        "refused: {error}"
+    );
+    assert_eq!(
+        placed(&shell, track, device),
+        (1, bl_model::DeviceRole::AudioEffect),
+        "it stays where it was"
+    );
+}

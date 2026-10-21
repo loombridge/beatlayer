@@ -13,7 +13,9 @@
 
 use crate::arrangement::SET_GRID;
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
-use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, UNGROUP};
+use crate::devices::{
+    COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
+};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::stems::OPEN as SEPARATE_STEMS;
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
@@ -116,6 +118,13 @@ const TIME: &[Row] = &[
 /// ticked while the selected device floats, and choosing it again docks it.
 pub const IMP_14: &str = "IMP-14";
 
+/// The row of Beatlayer's own Use as MIDI Effect (IMP-24), after Float: an
+/// improvement, so not a row of menus.md. It places a plug-in that sends
+/// notes on in the MIDI-effect position of a MIDI track's chain, before the
+/// instrument, and puts one already there back where its type goes; its
+/// label follows the selected device (`Shell::dynamic_label`).
+pub const IMP_24: &str = "IMP-24";
+
 /// Whether a context menu's row is one of Live's, in menus.md, rather than
 /// one of Beatlayer's improvements.
 #[must_use]
@@ -149,6 +158,7 @@ const DEVICE: &[Row] = &[
         "Save as Default Preset",
         Cmd(SAVE_DEFAULT_PRESET),
     ),
+    (IMP_24, "Use as MIDI Effect", Cmd(SET_ROLE)),
 ];
 
 /// The menu a device's title bar opens, by a right-click or its Show

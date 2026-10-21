@@ -3,6 +3,7 @@
 
 use bl_model::{DeviceRole, ParamDescriptor, ParamId, ParamKind, ParamUnit, param::Taper};
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
+use clack_extensions::note_ports::PluginNotePorts;
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
 use clack_host::prelude::*;
 
@@ -19,6 +20,15 @@ pub(crate) fn role<'a>(features: impl Iterator<Item = &'a std::ffi::CStr>) -> De
     } else {
         DeviceRole::AudioEffect
     }
+}
+
+/// Whether the plug-in sends notes on from a note output: it declares a
+/// note output port (IMP-24). Such a plug-in can sit in the MIDI-effect
+/// position of a MIDI track's chain, before the instrument.
+pub(crate) fn note_output(plugin: &mut PluginMainThreadHandle<'_>) -> bool {
+    plugin
+        .get_extension::<PluginNotePorts>()
+        .is_some_and(|ports| ports.count(plugin, false) > 0)
 }
 
 /// The plug-in's audio output ports past its main one (WP-5.45): the names

@@ -330,6 +330,13 @@ impl DeviceView {
             .map_or(&[], |t| &t.outputs)
     }
 
+    /// The device type of devices of `kind`, if the host has met it (IMP-24):
+    /// its role and whether it sends notes on from a note output.
+    #[must_use]
+    pub fn device_type(&self, kind: &DeviceKind) -> Option<&DeviceType> {
+        self.types.iter().find(|t| t.kind == *kind)
+    }
+
     /// The description of devices of `kind`, if their type has one.
     #[must_use]
     pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {

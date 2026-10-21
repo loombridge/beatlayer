@@ -73,6 +73,10 @@ pub struct ScannedPlugin {
     pub version: Option<String>,
     /// What it is in a chain, from its features.
     pub role: DeviceRole,
+    /// Whether it sends notes on from a note output (IMP-24): such a
+    /// plug-in can sit in the MIDI-effect position of a MIDI track's chain.
+    #[serde(default)]
+    pub note_output: bool,
 }
 
 impl ScannedPlugin {
@@ -240,6 +244,7 @@ impl ScannedPlugin {
             vendor,
             version,
             role: device_type.role,
+            note_output: device_type.note_output,
         }
     }
 }
@@ -747,6 +752,7 @@ mod tests {
             vendor: None,
             version: None,
             role: DeviceRole::AudioEffect,
+            note_output: false,
         };
         let mut plugins = vec![
             plugin(PluginFormat::Clap, "org.synth.clap", "Synth"),

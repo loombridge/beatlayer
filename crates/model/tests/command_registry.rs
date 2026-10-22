@@ -674,10 +674,17 @@ fn every_command_runs_by_id() {
             audio.fade_out_curve,
         )
     };
-    assert_eq!((fades(&agent, loop_clip).3, fades(&agent, loop_clip).4), (0.01, 0.02));
+    assert_eq!(
+        (fades(&agent, loop_clip).3, fades(&agent, loop_clip).4),
+        (0.01, 0.02)
+    );
     assert_eq!(fades(&agent, loop_clip).5, 0.25);
     assert_eq!(
-        (fades(&agent, next_clip).0, fades(&agent, next_clip).1, fades(&agent, next_clip).2),
+        (
+            fades(&agent, next_clip).0,
+            fades(&agent, next_clip).1,
+            fades(&agent, next_clip).2
+        ),
         (0.02, 0.01, 0.25)
     );
     registry::run(

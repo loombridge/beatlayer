@@ -14,6 +14,8 @@ use bl_commands::Context::{Arrangement, Global, SampleEditor, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId, LocatorId, TrackId};
+
+use crate::editing::Edge;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +60,8 @@ pub const SET_INSERT_MARKER: &str = "arrangement.set_insert_marker";
 pub const SELECT_TRACKS: &str = "arrangement.select_tracks";
 /// `arrangement.select_time`: select a span of time on tracks.
 pub const SELECT_TIME: &str = "arrangement.select_time";
+/// `arrangement.select_fade_handle`: select an audio clip's fade handle.
+pub const SELECT_FADE_HANDLE: &str = "arrangement.select_fade_handle";
 /// `arrangement.fold_tracks`: fold or unfold tracks.
 pub const FOLD_TRACKS: &str = "arrangement.fold_tracks";
 /// `arrangement.unfold_all`: unfold every track (Option-U).
@@ -110,6 +114,7 @@ pub const IDS: &[&str] = &[
     SET_INSERT_MARKER,
     SELECT_TRACKS,
     SELECT_TIME,
+    SELECT_FADE_HANDLE,
     FOLD_TRACKS,
     UNFOLD_ALL,
     FOLD_GROUPS,
@@ -360,6 +365,9 @@ pub struct ArrangementState {
     /// The locator commands act on these.
     #[serde(default)]
     pub selected_locators: Vec<LocatorId>,
+    /// The selected fade handle (WP-6.51), if any: Delete deletes its fade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_fade: Option<FadeHandleState>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
     /// The folded tracks.
@@ -524,6 +532,49 @@ pub struct SelectTimeArgs {
     /// The tracks it covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+}
+
+/// Which of a fade's handles (the audio clips spec, R27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "A fade's handle: `peak`, where it reaches full level; `outer`, where it \
+                   reaches silence, at the clip's edge or a crossfade's far end; or `curve`, \
+                   between them."
+)]
+pub enum FadeHandle {
+    /// Where the fade reaches full level.
+    Peak,
+    /// Where it reaches silence.
+    Outer,
+    /// The handle that shapes it.
+    Curve,
+}
+
+/// A selected fade handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FadeHandleState {
+    /// The audio clip.
+    pub clip: ClipId,
+    /// Which edge's fade: the fade-in at `start`, the fade-out at `end`.
+    pub edge: Edge,
+    /// Which of its handles.
+    pub handle: FadeHandle,
+}
+
+/// Arguments of `arrangement.select_fade_handle`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectFadeHandleArgs {
+    /// The audio clip. Left out, no handle is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// Which edge's fade: the fade-in at `start`, the fade-out at `end`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<Edge>,
+    /// Which of the fade's handles; `peak` if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<FadeHandle>,
 }
 
 /// Arguments of `arrangement.fold_tracks`.
@@ -808,6 +859,18 @@ fn specs() -> Vec<CommandSpec> {
         )
         .context(Arrangement)
         .args::<SelectTimeArgs>(),
+        view(
+            SELECT_FADE_HANDLE,
+            "Select Fade Handle",
+            "Selects one of an audio clip's fade handles, as clicking it does: the `peak` \
+             handle where the fade reaches full level, the `outer` handle where it reaches \
+             silence, or the `curve` handle, of the fade-in at the clip's `start` or the \
+             fade-out at its `end`. A selected handle shows how far it can go, and Delete \
+             deletes its fade (`arrangement.delete_fades`). Left without `clip`, it clears the \
+             selection. Changes only the view.",
+        )
+        .context(Arrangement)
+        .args::<SelectFadeHandleArgs>(),
         view(
             FOLD_TRACKS,
             "Fold Track",

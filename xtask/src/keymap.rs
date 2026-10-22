@@ -172,6 +172,16 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: Shift-Option-dragging (Shift-Alt) a clip's title bar selects \
          time inside the clip (`arrangement.select_time`)",
     ),
+    // WP-6.51: F held shows the fade handles, which the view reads as it goes.
+    (
+        "S-ARR-010",
+        "the Arrangement View: F held shows every clip's fade handles (audio clips R27)",
+    ),
+    (
+        "S-ENV-004",
+        "the Arrangement View: as S-ARR-010, F held shows every clip's fade handles, over an \
+         automation lane in Automation Mode too (audio clips R27)",
+    ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
     // (the control bar transport spec).
@@ -364,10 +374,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
     ("S-FILE-007", "WP-6.71"),
     ("S-EDIT-012", "WP-1.8b"),
-    ("S-ENV-004", "WP-6.51"),
-    ("S-ARR-008", "WP-6.51"),
-    ("S-ARR-009", "WP-6.51"),
-    ("S-ARR-010", "WP-6.51"),
     ("S-ZOOM-003", "WP-1.8a"),
     ("S-ZOOM-004", "WP-1.8a"),
     ("S-ZOOM-005", "WP-1.8a"),

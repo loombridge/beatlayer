@@ -5853,9 +5853,8 @@ impl Document {
         let at_start = existing.iter().find(|c| c.later == clip);
         let at_end = existing.iter().find(|c| c.earlier == clip);
         // The crossfade at an edge keeps the clip's length there as its own
-        // and the other clip follows.
-        // An edge without one is a plain fade, whatever an earlier crossfade
-        // left.
+        // and the other clip follows. An edge without one is a plain fade,
+        // whatever an earlier crossfade left.
         let mut partners = Vec::new();
         next.fade_in_before = at_start.map_or(0.0, |c| c.before);
         next.fade_out_after = at_end.map_or(0.0, |c| c.after);
@@ -5865,8 +5864,6 @@ impl Document {
         if let Some(c) = at_end {
             partners.push((c.later, false));
         }
-        check_audio(&next)?;
-        self.check_fades_of(clip, &next)?;
         let mut others = Vec::with_capacity(partners.len());
         for (id, is_earlier) in partners {
             let ClipData::Audio(data) = &self.clip_ref(id)?.data else {
@@ -5880,10 +5877,26 @@ impl Document {
                 other.fade_in_before = next.fade_out;
                 other.fade_in_curve = next.fade_out_curve;
             }
-            check_audio(&other)?;
-            self.check_fades_of(id, &other)?;
+            if check_audio(&other)
+                .and_then(|()| self.check_fades_of(id, &other))
+                .is_err()
+            {
+                // The other clip can't follow (its file doesn't reach back
+                // that far, say): the crossfade ends here, and each clip keeps
+                // its own fade.
+                other = data.clone();
+                if is_earlier {
+                    other.fade_out_after = 0.0;
+                    next.fade_in_before = 0.0;
+                } else {
+                    other.fade_in_before = 0.0;
+                    next.fade_out_after = 0.0;
+                }
+            }
             others.push((id, other));
         }
+        check_audio(&next)?;
+        self.check_fades_of(clip, &next)?;
         self.edit_audio(clip, |audio| *audio = next)?;
         for (id, other) in others {
             self.edit_audio(id, |audio| *audio = other)?;
@@ -5905,7 +5918,9 @@ impl Document {
         let (ClipData::Audio(first), ClipData::Audio(second)) =
             (&self.clip_ref(earlier)?.data, &self.clip_ref(later)?.data)
         else {
-            return Err(ModelError::InvalidInput("a crossfade is between audio clips"));
+            return Err(ModelError::InvalidInput(
+                "a crossfade is between audio clips",
+            ));
         };
         let (mut first, mut second) = (first.clone(), second.clone());
         first.crossfade_into(&mut second, before, after, curve);
@@ -7610,7 +7625,11 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         at_least_zero(audio.fade_out_after),
     )?;
     let curve = |value: f64| value.is_finite() && (-1.0..=1.0).contains(&value);
-    check_value("fade-in curve", audio.fade_in_curve, curve(audio.fade_in_curve))?;
+    check_value(
+        "fade-in curve",
+        audio.fade_in_curve,
+        curve(audio.fade_in_curve),
+    )?;
     check_value(
         "fade-out curve",
         audio.fade_out_curve,
@@ -8478,10 +8497,7 @@ mod tests {
             fades(0.25, 0.5, Some(1.5), None),
             fades(0.25, 0.5, None, Some(f64::NAN)),
         ] {
-            assert!(matches!(
-                song.reject(bad),
-                ModelError::InvalidValue { .. }
-            ));
+            assert!(matches!(song.reject(bad), ModelError::InvalidValue { .. }));
         }
         // The fade-in must end no later than the fade-out begins.
         assert!(matches!(
@@ -8676,13 +8692,56 @@ mod tests {
         assert!(found(&song).is_empty());
         let (first, second) = (audio(&song, earlier), audio(&song, later));
         assert_eq!(
-            (first.fade_out, first.fade_out_after, second.fade_in, second.fade_in_before),
+            (
+                first.fade_out,
+                first.fade_out_after,
+                second.fade_in,
+                second.fade_in_before
+            ),
             (0.0, 0.0, 0.0, 0.0)
         );
         assert!(matches!(
             song.reject(Command::DeleteCrossfade { track, boundary }),
             ModelError::InvalidInput(_)
         ));
+    }
+
+    // Spec: audio-clips R25, R30
+    #[test]
+    fn a_fade_the_other_clip_cant_follow_ends_the_crossfade() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let earlier = song.clip(track, 0);
+        let later = song.clip(track, 4);
+        let audio = |song: &Song, clip| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        // The later clip starts at the start of its file: a crossfade can only
+        // run past the boundary.
+        song.apply(Command::SetCrossfade {
+            track,
+            boundary: Ticks::WHOLE,
+            before: 0.0,
+            after: 0.004,
+            curve: 0.0,
+        })
+        .unwrap();
+        // A longer fade-out for the earlier clip would need the later clip
+        // to play before its start, so the crossfade ends, and each clip
+        // keeps its own fade.
+        song.apply(Command::SetClipFades {
+            clip: earlier,
+            fade_in: 0.0,
+            fade_out: 0.01,
+            fade_in_curve: None,
+            fade_out_curve: None,
+        })
+        .unwrap();
+        let (first, second) = (audio(&song, earlier), audio(&song, later));
+        assert_eq!((first.fade_out, first.fade_out_after), (0.01, 0.0));
+        assert_eq!((second.fade_in, second.fade_in_before), (0.004, 0.0));
+        assert!(crate::clip::crossfades(song.doc.track(track).unwrap().clips()).is_empty());
     }
 
     // Spec: audio-clips R3, R4, R5, R6, R15

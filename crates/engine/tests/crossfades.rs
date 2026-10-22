@@ -114,7 +114,8 @@ fn a_crossfade_blends_the_two_clips_across_its_span_by_the_curve_law() {
                 curve,
             })
             .unwrap();
-        for (id, fade_in, fade_out) in [(first, 0.0, seconds(before)), (second, seconds(after), 0.0)]
+        for (id, fade_in, fade_out) in
+            [(first, 0.0, seconds(before)), (second, seconds(after), 0.0)]
         {
             let audio = match &editor.document().clip(id).unwrap().data {
                 ClipData::Audio(audio) => audio.clone(),
@@ -144,7 +145,11 @@ fn a_crossfade_blends_the_two_clips_across_its_span_by_the_curve_law() {
                 } else {
                     0.5 * (1.0 - x).powf(power)
                 };
-                let later = if frame < to - before { 0.0 } else { 0.25 * x.powf(power) };
+                let later = if frame < to - before {
+                    0.0
+                } else {
+                    0.25 * x.powf(power)
+                };
                 f64::from((earlier) as f32) + f64::from((later) as f32)
             };
             assert!(
@@ -325,7 +330,11 @@ fn a_clip_is_silent_across_the_span_where_it_has_no_audio() {
     // those and nothing after; the later clip fades in over 480.
     for e in 0..480 {
         let frame = to + e;
-        let earlier = if e < 48 { 0.5 * (1.0 - e as f64 / 480.0) } else { 0.0 };
+        let earlier = if e < 48 {
+            0.5 * (1.0 - e as f64 / 480.0)
+        } else {
+            0.0
+        };
         let later = 0.25 * (e as f64 / 480.0);
         assert!(
             (f64::from(left[frame]) - (earlier + later)).abs() < 1e-6,

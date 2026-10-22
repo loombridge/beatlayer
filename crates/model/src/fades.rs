@@ -9,8 +9,6 @@
 //! the same arithmetic.
 
 use bl_core::time::{TempoMap, Ticks};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
 use crate::clip::{AudioData, Clip, ClipData, crossfades};
 use crate::document::Document;
@@ -22,7 +20,7 @@ use crate::ids::ClipId;
 const SLACK: f64 = 1e-9;
 
 /// How far one edge's fade may go, in seconds.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EdgeRoom {
     /// The longest the fade may be inside its clip, measured from the edge.
     pub inside: f64,
@@ -33,7 +31,7 @@ pub struct EdgeRoom {
 
 /// How far a clip's two fades may go (R25), with the clip's own other fade
 /// and the clip that meets each edge taken into account.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FadeLimits {
     /// The fade-in's room, at the clip's start.
     pub start: EdgeRoom,
@@ -97,7 +95,7 @@ fn wraps(clip: &Clip, audio: &AudioData, tempo: &TempoMap) -> Wraps {
         }
     };
     let count = ((clip_length - first) / length).ceil();
-    let before_end = (count >= 1.0).then(|| first + (count - 1.0) * length);
+    let before_end = (count >= 1.0).then_some(first + (count - 1.0) * length);
     let from_end = first + count.max(0.0) * length;
     Wraps {
         first: Some(to_seconds(first)),
@@ -136,7 +134,10 @@ pub(crate) fn check_fades(
     let wraps = wraps(clip, audio, tempo);
     let past = |wrap: Option<f64>, edge: f64| wrap.is_some_and(|wrap| wrap + SLACK < edge);
     if past(wraps.first, audio.fade_in)
-        || past(wraps.from_end.map(|wrap| wrap - longest), audio.fade_out_after)
+        || past(
+            wraps.from_end.map(|wrap| wrap - longest),
+            audio.fade_out_after,
+        )
         || wraps
             .before_end
             .is_some_and(|wrap| wrap + SLACK < longest && longest - wrap + SLACK < audio.fade_out)
@@ -210,10 +211,7 @@ impl Document {
         }
         let mut end = EdgeRoom {
             inside: (length - audio.fade_in)
-                .min(
-                    own.before_end
-                        .map_or(f64::INFINITY, |wrap| length - wrap),
-                )
+                .min(own.before_end.map_or(f64::INFINITY, |wrap| length - wrap))
                 .max(0.0),
             outside: 0.0,
         };
@@ -222,10 +220,7 @@ impl Document {
             let reach = wraps(other, data, tempo);
             end.outside = (other_length - data.fade_out)
                 .min(reach.first.unwrap_or(f64::INFINITY))
-                .min(
-                    own.from_end
-                        .map_or(f64::INFINITY, |wrap| wrap - length),
-                )
+                .min(own.from_end.map_or(f64::INFINITY, |wrap| wrap - length))
                 .max(0.0);
             if crossfaded(false) {
                 // The crossfade's far end is in the later clip, which plays

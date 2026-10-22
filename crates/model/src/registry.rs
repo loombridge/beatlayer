@@ -1416,7 +1416,8 @@ const ENTRIES: &[Entry] = &[
             no later than the fade-out begins, and a fade takes in no point where the clip \
             goes round its loop brace. Where a crossfade begins or ends at the clip, \
             this sets the crossfade's part inside the clip and its curve, and the clip it \
-            meets follows. Read the result back with the query tool's `clip` field `data` \
+            meets follows; if it can't (its file doesn't reach back that far), the crossfade \
+            ends and each clip keeps its own fade. Read the result back with the query tool's `clip` field `data` \
             and the clip's `fade_in_before` and `fade_out_after`.",
     },
     Entry {

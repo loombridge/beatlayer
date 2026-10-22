@@ -1065,7 +1065,7 @@ milestone = "M1"
 mac = ["F"]
 win = ["F"]
 status = "widget"
-handler = "the Arrangement View: F held shows the fade handles of every clip, and over an automation lane in Automation Mode (audio clips R27)"
+handler = "the Arrangement View: as S-ARR-010, F held shows every clip's fade handles, over an automation lane in Automation Mode too (audio clips R27)"
 
 [[shortcut]]
 id = "S-ENV-005"
@@ -2634,7 +2634,7 @@ milestone = "M1"
 mac = ["F"]
 win = ["F"]
 status = "widget"
-handler = "the Arrangement View: as S-ENV-004, F held shows the fade handles of every clip (audio clips R27)"
+handler = "the Arrangement View: F held shows every clip's fade handles (audio clips R27)"
 
 [[shortcut]]
 id = "S-ARR-011"

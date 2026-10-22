@@ -8,7 +8,7 @@
 //! ([`settle`]); Create Fade and Delete Fades make and delete fades from a
 //! selection ([`plan`], [`delete_fades`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::Ticks;
 use bl_model::{
@@ -150,27 +150,36 @@ pub(crate) fn settle(
         if !edge_fades {
             continue;
         }
-        // Clips the edit left meeting with no crossfade.
+        // Clips the edit left meeting with no crossfade: look up each
+        // changed clip's neighbours, not every pair on the track.
         let clips: Vec<Clip> = editor
             .document()
             .track(track)
             .map(|t| t.clips().filter(|c| c.data.is_audio()).cloned().collect())
             .unwrap_or_default();
+        let starts: BTreeMap<Ticks, ClipId> = clips.iter().map(|c| (c.start, c.id)).collect();
+        let ends: BTreeMap<Ticks, ClipId> = clips.iter().map(|c| (c.end(), c.id)).collect();
         let now = editor
             .document()
             .track(track)
             .map(|t| crossfades(t.clips()))
             .unwrap_or_default();
-        for earlier in &clips {
-            let Some(later) = clips
-                .iter()
-                .find(|c| c.start == earlier.end() && c.id != earlier.id)
-            else {
-                continue;
-            };
-            let touched = [earlier.id, later.id].iter().any(|id| changed.contains(id));
-            if touched && !now.iter().any(|c| c.earlier == earlier.id && c.later == later.id) {
-                edge_crossfade(editor, track, later.start);
+        let mut boundaries = BTreeSet::new();
+        for clip in clips.iter().filter(|c| changed.contains(&c.id)) {
+            // Its end meets a clip's start, and its start a clip's end.
+            if starts
+                .get(&clip.end())
+                .is_some_and(|other| *other != clip.id)
+            {
+                boundaries.insert(clip.end());
+            }
+            if ends.get(&clip.start).is_some_and(|other| *other != clip.id) {
+                boundaries.insert(clip.start);
+            }
+        }
+        for boundary in boundaries {
+            if !now.iter().any(|c| c.boundary == boundary) {
+                edge_crossfade(editor, track, boundary);
             }
         }
     }
@@ -214,19 +223,21 @@ fn audio_clips(doc: &Document, track: TrackId) -> Vec<&Clip> {
 /// What Create Fade would make from `target` (R28).
 pub(crate) fn plan(doc: &Document, target: &Target) -> Plan {
     let tempo = &doc.settings().tempo;
-    let seconds = |from: Ticks, to: Ticks| tempo.ticks_to_seconds(to) - tempo.ticks_to_seconds(from);
+    let seconds =
+        |from: Ticks, to: Ticks| tempo.ticks_to_seconds(to) - tempo.ticks_to_seconds(from);
     let mut plan = Plan::default();
     match target {
         Target::Clips(ids) => {
-            let mut tracks: Vec<TrackId> = ids.iter().filter_map(|id| doc.clip_track(*id)).collect();
+            let mut tracks: Vec<TrackId> =
+                ids.iter().filter_map(|id| doc.clip_track(*id)).collect();
             tracks.sort_unstable();
             tracks.dedup();
             for track in tracks {
                 let clips = audio_clips(doc, track);
                 for earlier in clips.iter().filter(|c| ids.contains(&c.id)) {
-                    let meets = clips
-                        .iter()
-                        .any(|c| c.start == earlier.end() && c.id != earlier.id && ids.contains(&c.id));
+                    let meets = clips.iter().any(|c| {
+                        c.start == earlier.end() && c.id != earlier.id && ids.contains(&c.id)
+                    });
                     if meets {
                         plan.edge_crossfades.push((track, earlier.end()));
                     }
@@ -312,8 +323,12 @@ pub(crate) fn create(editor: &mut Editor, plan: &Plan) -> Result<(), EditFailure
     for &(track, boundary, before, after) in &plan.crossfades {
         let doc = editor.document();
         let (Some(earlier), Some(later)) = (
-            audio_clips(doc, track).into_iter().find(|c| c.end() == boundary),
-            audio_clips(doc, track).into_iter().find(|c| c.start == boundary),
+            audio_clips(doc, track)
+                .into_iter()
+                .find(|c| c.end() == boundary),
+            audio_clips(doc, track)
+                .into_iter()
+                .find(|c| c.start == boundary),
         ) else {
             continue;
         };

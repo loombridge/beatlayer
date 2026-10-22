@@ -49,7 +49,9 @@ fn wav(name: &str) -> PathBuf {
     bytes.extend_from_slice(b"data");
     bytes.extend_from_slice(&(frames * 2).to_le_bytes());
     for i in 0..frames {
-        bytes.extend_from_slice(&(((i % 48) as i16 - 24) * 2 + i16::from(name == "b")).to_le_bytes());
+        bytes.extend_from_slice(
+            &(((i % 48) as i16 - 24) * 2 + i16::from(name == "b")).to_le_bytes(),
+        );
     }
     std::fs::write(&path, bytes).unwrap();
     path
@@ -76,7 +78,11 @@ fn an_agent_makes_changes_and_deletes_fades_and_crossfades_and_reads_them_back()
         ("arrangement.delete_fades", "edit"),
         ("clip.set_fades", "edit"),
     ] {
-        let described = call(&mut client, "describe_command", json!({ "command": command }));
+        let described = call(
+            &mut client,
+            "describe_command",
+            json!({ "command": command }),
+        );
         assert_eq!(described["permission"], permission, "{command}");
         assert_eq!(described["access"], "runs", "{command}");
     }
@@ -129,8 +135,14 @@ fn an_agent_makes_changes_and_deletes_fades_and_crossfades_and_reads_them_back()
         json!({ "track": track, "boundary": end, "before": 0.0, "after": 0.1, "curve": 0.5 }),
     );
     let (a, b) = (audio(&mut client, one), audio(&mut client, two));
-    assert_eq!((&a["fade_out_after"], &a["fade_out_curve"]), (&json!(0.1), &json!(0.5)));
-    assert_eq!((&b["fade_in"], &b["fade_in_curve"]), (&json!(0.1), &json!(0.5)));
+    assert_eq!(
+        (&a["fade_out_after"], &a["fade_out_curve"]),
+        (&json!(0.1), &json!(0.5))
+    );
+    assert_eq!(
+        (&b["fade_in"], &b["fade_in_curve"]),
+        (&json!(0.1), &json!(0.5))
+    );
     // Past the later clip's file, it is refused and changes nothing.
     let refused = client
         .call(
@@ -151,11 +163,18 @@ fn an_agent_makes_changes_and_deletes_fades_and_crossfades_and_reads_them_back()
         json!({ "clip": one, "fade_in": 0.05, "fade_out": 0.0, "fade_in_curve": -0.5 }),
     );
     let a = audio(&mut client, one);
-    assert_eq!((&a["fade_in"], &a["fade_in_curve"]), (&json!(0.05), &json!(-0.5)));
+    assert_eq!(
+        (&a["fade_in"], &a["fade_in_curve"]),
+        (&json!(0.05), &json!(-0.5))
+    );
 
     // Delete Fades puts the edges back and the crossfade to 4 ms; ending a
     // crossfade by ID leaves none.
-    run(&mut client, "arrangement.delete_fades", json!({ "clips": [one, two] }));
+    run(
+        &mut client,
+        "arrangement.delete_fades",
+        json!({ "clips": [one, two] }),
+    );
     assert_eq!(audio(&mut client, one)["fade_in"], 0.004);
     assert_eq!(audio(&mut client, two)["fade_in"], 0.004);
     run(
@@ -164,10 +183,20 @@ fn an_agent_makes_changes_and_deletes_fades_and_crossfades_and_reads_them_back()
         json!({ "track": track, "boundary": end }),
     );
     let (a, b) = (audio(&mut client, one), audio(&mut client, two));
-    assert_eq!((&a["fade_out"], &a["fade_out_after"]), (&Value::Null, &Value::Null));
-    assert_eq!((&b["fade_in"], &b["fade_in_before"]), (&Value::Null, &Value::Null));
+    assert_eq!(
+        (&a["fade_out"], &a["fade_out_after"]),
+        (&Value::Null, &Value::Null)
+    );
+    assert_eq!(
+        (&b["fade_in"], &b["fade_in_before"]),
+        (&Value::Null, &Value::Null)
+    );
     // Create Fade on the two clips crossfades them again.
-    run(&mut client, "arrangement.create_fade", json!({ "clips": [one, two] }));
+    run(
+        &mut client,
+        "arrangement.create_fade",
+        json!({ "clips": [one, two] }),
+    );
     assert_eq!(audio(&mut client, one)["fade_out_after"], 0.004);
     let _ = std::fs::remove_file(&first);
     let _ = std::fs::remove_file(&second);

@@ -478,6 +478,7 @@ impl ArrangementView {
     /// leaves the rest.
     pub(crate) fn select_clips(&mut self, doc: &Document, clips: Vec<ClipId>) {
         self.selected_clips = clips;
+        self.selected_fade = None;
         if let Some((start, end, tracks)) = span_of(doc, &self.selected_clips) {
             self.time_selection = Some((start, end));
             self.insert_marker = start;
@@ -511,6 +512,12 @@ impl ArrangementView {
     /// Drops selected clips the document no longer has.
     pub(crate) fn forget_missing_clips(&mut self, doc: &Document) {
         self.selected_clips.retain(|id| doc.clip(*id).is_some());
+        if self
+            .selected_fade
+            .is_some_and(|fade| doc.clip(fade.clip).is_none())
+        {
+            self.selected_fade = None;
+        }
     }
 
     /// The editing grid's spacing at the current zoom, in ticks: how far
@@ -1022,21 +1029,22 @@ pub fn run(
                     clips_on(doc, &view.selected)
                 }
             };
-            let (created, recorded) = settled(editor, "Split clips", (doc, edge_fades), |editor| {
-                let mut created = Vec::new();
-                for clip in &targets {
-                    // Right to left, so the clip keeps its first part.
-                    for at in positions.iter().rev() {
-                        let Some(value) = editor.document().clip(*clip) else {
-                            continue;
-                        };
-                        if value.start < *at && *at < value.end() {
-                            created.push(split_off(editor, *clip, *at)?);
+            let (created, recorded) =
+                settled(editor, "Split clips", (doc, edge_fades), |editor| {
+                    let mut created = Vec::new();
+                    for clip in &targets {
+                        // Right to left, so the clip keeps its first part.
+                        for at in positions.iter().rev() {
+                            let Some(value) = editor.document().clip(*clip) else {
+                                continue;
+                            };
+                            if value.start < *at && *at < value.end() {
+                                created.push(split_off(editor, *clip, *at)?);
+                            }
                         }
                     }
-                }
-                Ok(created)
-            })?;
+                    Ok(created)
+                })?;
             // With time selected, the parts inside it become the selection.
             if let (Some((start, end)), true) =
                 (view.time_selection, view.selected_clips.is_empty())
@@ -1059,10 +1067,9 @@ pub fn run(
         }
         ids::DELETE => {
             let target = target(doc, view, parse(args)?)?;
-            let (_, recorded) =
-                settled(editor, "Delete", (doc, edge_fades), |editor| {
-                    delete_target(editor, &target)
-                })?;
+            let (_, recorded) = settled(editor, "Delete", (doc, edge_fades), |editor| {
+                delete_target(editor, &target)
+            })?;
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
@@ -1083,10 +1090,9 @@ pub fn run(
                     (track, clips)
                 })
                 .collect();
-            let (created, recorded) =
-                settled(editor, "Duplicate", (doc, edge_fades), |editor| {
-                    place(editor, placements)
-                })?;
+            let (created, recorded) = settled(editor, "Duplicate", (doc, edge_fades), |editor| {
+                place(editor, placements)
+            })?;
             match target {
                 Target::Clips(_) => view.select_clips(editor.document(), created),
                 Target::Time { tracks, .. } => view.select_span(tracks, end, end + length),
@@ -1103,10 +1109,9 @@ pub fn run(
         ids::CUT => {
             let target = target(doc, view, parse(args)?)?;
             let copied = clipboard_of(doc, &target);
-            let (_, recorded) =
-                settled(editor, "Cut", (doc, edge_fades), |editor| {
-                    delete_target(editor, &target)
-                })?;
+            let (_, recorded) = settled(editor, "Cut", (doc, edge_fades), |editor| {
+                delete_target(editor, &target)
+            })?;
             *clipboard = Some(copied);
             view.selected_clips.clear();
             Ok(to_value(&result(doc, editor, view, recorded)))
@@ -1165,10 +1170,9 @@ pub fn run(
                 placements.push((track, clips));
             }
             let length = copied.length;
-            let (created, recorded) =
-                settled(editor, "Paste", (doc, edge_fades), |editor| {
-                    place(editor, placements)
-                })?;
+            let (created, recorded) = settled(editor, "Paste", (doc, edge_fades), |editor| {
+                place(editor, placements)
+            })?;
             view.select_span(destinations, at, at + length);
             if !created.is_empty() {
                 view.selected_clips = created;
@@ -1222,6 +1226,7 @@ pub fn run(
             let (_, recorded) = transaction(editor, label, |editor| {
                 fades::delete_fades(editor, &clips, edge, edge_fades)
             })?;
+            view.selected_fade = None;
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         ids::LOOP_SELECTION => {

@@ -1324,13 +1324,13 @@ fn clip_fades() -> Scene {
     song.finish(seconds)
 }
 
-/// Tempo for the crossfade fixtures: 120 BPM for two beats, a ramp to 90 BPM
-/// over four, then 90 BPM, so the first boundary falls in the ramp.
+/// Tempo for the crossfade fixtures: 120 BPM for a beat, a ramp to 90 BPM
+/// over two, then 90 BPM, so the first boundary (on beat 3) falls in the ramp.
 fn crossfade_tempo() -> Command {
     let tempo = TempoMap::from_breakpoints([
         (Ticks::ZERO, bpm(120.0)),
-        (Ticks::QUARTER * 2, bpm(120.0)),
-        (Ticks::QUARTER * 6, bpm(90.0)),
+        (Ticks::QUARTER, bpm(120.0)),
+        (Ticks::QUARTER * 3, bpm(90.0)),
     ])
     .expect("the tempo map is valid");
     Command::SetTempo { tempo }
@@ -1346,15 +1346,15 @@ fn clip_crossfade() -> Scene {
     let high = song.sine(660.0);
     let track = song.track(TrackKind::Audio, "Sines", None);
     let beat = Ticks::QUARTER;
-    song.audio_clip(track, Ticks::ZERO, beat * 3, AudioData::new(low));
+    song.audio_clip(track, Ticks::ZERO, beat * 2, AudioData::new(low));
     let later = |media| AudioData {
         start: 1.0,
         ..AudioData::new(media)
     };
-    song.audio_clip(track, beat * 3, beat * 4, later(high));
-    song.audio_clip(track, beat * 7, beat * 3, later(low));
+    song.audio_clip(track, beat * 2, beat * 3, later(high));
+    song.audio_clip(track, beat * 5, beat * 2, later(low));
     for (boundary, before, after, curve) in
-        [(beat * 3, 0.08, 0.12, 0.25), (beat * 7, 0.05, 0.05, -0.5)]
+        [(beat * 2, 0.08, 0.12, 0.25), (beat * 5, 0.05, 0.05, -0.5)]
     {
         song.apply(Command::SetCrossfade {
             track,
@@ -1396,11 +1396,11 @@ fn warped_clip_crossfade() -> Scene {
         start: start.get() as f64,
         ..AudioData::new(media)
     };
-    song.audio_clip(track, Ticks::ZERO, beat * 3, warped(low, Ticks::ZERO));
-    song.audio_clip(track, beat * 3, beat * 4, warped(high, beat * 2));
+    song.audio_clip(track, Ticks::ZERO, beat * 2, warped(low, Ticks::ZERO));
+    song.audio_clip(track, beat * 2, beat * 3, warped(high, beat * 2));
     song.apply(Command::SetCrossfade {
         track,
-        boundary: beat * 3,
+        boundary: beat * 2,
         before: 0.08,
         after: 0.12,
         curve: 0.25,
@@ -1417,7 +1417,7 @@ fn clip_split_crossfade() -> Scene {
     let chirp = song.chirp();
     let track = song.track(TrackKind::Audio, "Parts", None);
     let start = song.at("1.1.3");
-    let length = Ticks::QUARTER * 10;
+    let length = Ticks::QUARTER * 4;
     let whole = song.audio_clip(
         track,
         start,
@@ -1427,9 +1427,14 @@ fn clip_split_crossfade() -> Scene {
             ..AudioData::new(chirp)
         },
     );
-    let at = start + Ticks::QUARTER * 3 + Ticks(1_234);
+    let at = start + Ticks::QUARTER + Ticks(1_234);
     let tempo = song.editor.document().settings().tempo.clone();
-    let whole = song.editor.document().clip(whole).expect("the clip").clone();
+    let whole = song
+        .editor
+        .document()
+        .clip(whole)
+        .expect("the clip")
+        .clone();
     let right = Clip {
         id: song.editor.new_id(),
         ..whole.part(at, whole.end(), &tempo)

@@ -17,12 +17,14 @@ use bl_shell::arrangement::editing::{earliest_move, resize_limits};
 use bl_shell::arrangement::rows::{Row, first_row_at};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
+use bl_shell::arrangement_commands::{FadeHandle, FadeHandleState};
 use bl_shell::editing_commands::{self as ids, Edge};
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, Invocation};
 use egui::{CursorIcon, Key, Modifiers, Pos2, Rect};
 use serde_json::{Value, json};
 
+use super::fades::{self, FadeDrag};
 use super::scene::{ShownClip, title_height};
 use crate::main_window::UiEvent;
 
@@ -221,6 +223,8 @@ enum ClipDrag {
         /// The tick under the pointer when the drag began.
         from: Ticks,
     },
+    /// Dragging one of a fade's handles (the audio clips spec, R27).
+    Fade(FadeDrag),
 }
 
 /// A resize from the keyboard (S-ARR-004): Enter, then Left and Right, then
@@ -237,6 +241,8 @@ struct KeyResize {
 pub(super) struct ClipGestures {
     drag: Option<ClipDrag>,
     key_resize: Option<KeyResize>,
+    /// Whether F is held, which shows every clip's fade handles (S-ARR-010).
+    handles_held: bool,
 }
 
 fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value) {
@@ -250,7 +256,28 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
+/// Selects a fade handle (`arrangement.select_fade_handle`).
+fn select_handle(events: &mut Vec<UiEvent>, handle: FadeHandleState) {
+    invoke(
+        events,
+        view_ids::SELECT_FADE_HANDLE,
+        json!({ "clip": handle.clip, "edge": handle.edge, "handle": handle.handle }),
+    );
+}
+
 impl ClipGestures {
+    /// Whether F is held, which shows every clip's fade handles
+    /// (S-ARR-010, S-ENV-004).
+    pub fn hold_handles(&mut self, held: bool) {
+        self.handles_held = held;
+    }
+
+    /// Whether F is held.
+    #[must_use]
+    pub fn handles_held(&self) -> bool {
+        self.handles_held
+    }
+
     /// Whether a drag or a keyboard resize is under way.
     #[must_use]
     pub fn active(&self) -> bool {
@@ -267,6 +294,15 @@ impl ClipGestures {
         keys: EditKeys,
         events: &mut Vec<UiEvent>,
     ) -> bool {
+        // Spec: audio-clips R27. A fade's handle, where one shows, is
+        // dragged before the clip is.
+        if let Some(spot) = fades::spot_at(lanes, press, self.handles_held)
+            && let Some(drag) = FadeDrag::begin(lanes, spot)
+        {
+            select_handle(events, drag.state());
+            self.drag = Some(ClipDrag::Fade(drag));
+            return true;
+        }
         let Some(hit) = lanes.hit(press) else {
             return false;
         };
@@ -418,6 +454,11 @@ impl ClipGestures {
                 let from = lanes.view.snap_drag(lanes.doc, *from, keys.slide_bypass);
                 Some((SLIDE_CONTENTS, json!({ "clip": clip, "by": to - from })))
             }
+            // Spec: audio-clips R27. Handles snap to the grid while snapping
+            // is on, Cmd (Alt) doing the opposite.
+            ClipDrag::Fade(drag) => drag.frame(lanes, pointer, |at| {
+                lanes.view.snap_drag(lanes.doc, at, keys.bypass)
+            }),
         }
     }
 
@@ -472,6 +513,18 @@ impl ClipGestures {
         keys: EditKeys,
         events: &mut Vec<UiEvent>,
     ) -> bool {
+        // Spec: audio-clips R27. Clicking a handle selects it.
+        if let Some(spot) = fades::spot_at(lanes, pos, self.handles_held) {
+            select_handle(
+                events,
+                FadeHandleState {
+                    clip: spot.clip,
+                    edge: spot.edge,
+                    handle: spot.handle,
+                },
+            );
+            return true;
+        }
         if let Some(hit) = lanes.hit(pos)
             && hit.zone != Zone::Body
             && !keys.time_in_clip
@@ -516,7 +569,14 @@ impl ClipGestures {
             Some(ClipDrag::Resize { .. }) => return Some(CursorIcon::ResizeHorizontal),
             Some(ClipDrag::Stretch { .. }) => return Some(CursorIcon::ResizeHorizontal),
             Some(ClipDrag::Slide { .. }) => return Some(CursorIcon::Grabbing),
+            Some(ClipDrag::Fade(_)) => return Some(CursorIcon::Grabbing),
             None => {}
+        }
+        if let Some(spot) = fades::spot_at(lanes, hover, self.handles_held) {
+            return Some(match spot.handle {
+                FadeHandle::Curve => CursorIcon::ResizeVertical,
+                _ => CursorIcon::ResizeHorizontal,
+            });
         }
         match lanes.hit(hover)?.zone {
             Zone::Start | Zone::End => Some(CursorIcon::ResizeHorizontal),
@@ -564,6 +624,19 @@ impl ClipGestures {
         let view = lanes.view;
         let doc = lanes.doc;
         let step = view.grid_ticks(doc);
+
+        // Spec: audio-clips R29. Delete with a fade handle selected deletes
+        // that fade.
+        if let Some(handle) = view.selected_fade()
+            && (pressed(Key::Delete, false, false) || pressed(Key::Backspace, false, false))
+        {
+            invoke(
+                events,
+                ids::DELETE_FADES,
+                json!({ "clips": [handle.clip], "edge": handle.edge }),
+            );
+            return;
+        }
 
         // A keyboard resize under way: arrows move the ends, Enter keeps it.
         if let Some(mut resize) = self.key_resize.take() {

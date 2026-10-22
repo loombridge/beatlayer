@@ -201,7 +201,9 @@ fn a_set_saved_before_crossfades_opens_with_the_same_fades_and_none_between_clip
         &LoadOptions::default(),
     )
     .unwrap();
-    for (id, (fade_in, fade_out)) in ids.iter().zip([(0.004, 0.004), (0.004, 0.004), (0.25, 0.5)])
+    for (id, (fade_in, fade_out)) in ids
+        .iter()
+        .zip([(0.004, 0.004), (0.004, 0.004), (0.25, 0.5)])
     {
         let ClipData::Audio(audio) = &loaded.document.clip(*id).unwrap().data else {
             unreachable!("an audio clip");

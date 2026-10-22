@@ -745,10 +745,7 @@ fn clip_marker_command(id: &str) -> bool {
 fn arrangement_clip_command(id: &str) -> bool {
     matches!(
         id,
-        "clip.stretch"
-            | "clip.slide_contents"
-            | "clip.set_fades"
-            | "arrangement.set_crossfade"
+        "clip.stretch" | "clip.slide_contents" | "clip.set_fades" | "arrangement.set_crossfade"
     )
 }
 
@@ -6064,7 +6061,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 // Spec: time-editing R4. The Delete key deletes the
                 // selected locators while there are any.
-                && !(id == edit_ids::DELETE && !self.arrangement.selected_locators().is_empty())
+                && !(id == edit_ids::DELETE
+                    && (!self.arrangement.selected_locators().is_empty()
+                        // Spec: audio-clips R29. Delete deletes the selected
+                        // fade handle's fade instead.
+                        || self.arrangement.selected_fade().is_some()))
                 && editing::can_run(
                     id,
                     &args,

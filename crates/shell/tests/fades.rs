@@ -167,7 +167,9 @@ fn a_split_crossfades_its_parts_and_parting_them_ends_it() {
         json!({ "clips": [whole], "at": [3 * BAR] }),
         "Split clips",
     );
-    let [right] = result.created[..] else { panic!() };
+    let [right] = result.created[..] else {
+        panic!()
+    };
     assert_eq!(s.fades(whole), (0.0, 0.0, HALF, HALF));
     assert_eq!(s.fades(right), (HALF, HALF, 0.0, 0.0));
     let found = s.crossfades();
@@ -176,7 +178,10 @@ fn a_split_crossfades_its_parts_and_parting_them_ends_it() {
         (found[0].earlier, found[0].later, found[0].boundary),
         (whole, right, Ticks(3 * BAR))
     );
-    assert_eq!((found[0].before, found[0].after, found[0].curve), (HALF, HALF, 0.0));
+    assert_eq!(
+        (found[0].before, found[0].after, found[0].curve),
+        (HALF, HALF, 0.0)
+    );
 
     // Moving the right part away parts them: each edge takes back a fade of
     // 4 ms.
@@ -229,7 +234,9 @@ fn a_crossfade_stays_while_its_clips_meet_wherever_the_boundary_moves() {
     let mut parts = vec![whole];
     parts.extend(result.created.iter().copied());
     parts.sort_by_key(|id| s.doc().clip(*id).unwrap().start);
-    let [first, second, third] = parts[..] else { panic!() };
+    let [first, second, third] = parts[..] else {
+        panic!()
+    };
     // A longer crossfade with a curve, made by hand.
     s.run(
         "arrangement.set_crossfade",
@@ -276,7 +283,9 @@ fn with_the_setting_off_meeting_clips_get_no_crossfade() {
         json!({ "clips": [whole], "at": [3 * BAR] }),
         "Split clips",
     );
-    let [right] = result.created[..] else { panic!() };
+    let [right] = result.created[..] else {
+        panic!()
+    };
     assert!(s.crossfades().is_empty());
     // Made by hand, a crossfade ends when the clips part, leaving no fade.
     s.run(
@@ -301,7 +310,9 @@ fn with_the_setting_off_meeting_clips_get_no_crossfade() {
 fn create_fade_makes_what_the_time_selection_gives() {
     let mut s = song(&[(0, 4, 0.0), (5, 2, 5.0), (7, 2, 5.0)]);
     s.set_edge_fades(false);
-    let [long, left, right] = s.clips[..] else { panic!() };
+    let [long, left, right] = s.clips[..] else {
+        panic!()
+    };
     let track = s.track;
     let select = |s: &mut Song, start: i64, end: i64| {
         s.shell

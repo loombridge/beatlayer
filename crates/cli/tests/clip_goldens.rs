@@ -84,7 +84,11 @@ fn model(scene: &Scene) -> Vec<f32> {
                 let left = end + after as i64 - song;
                 if falling > 0 && left < falling as i64 {
                     let x = left.max(0) as f64 / falling as f64;
-                    fade = fade.min(if out_power == 1.0 { x } else { x.powf(out_power) });
+                    fade = fade.min(if out_power == 1.0 {
+                        x
+                    } else {
+                        x.powf(out_power)
+                    });
                 }
                 for c in 0..2 {
                     let channel = file.channel(c.min(file.channel_count() - 1)).unwrap();
@@ -288,7 +292,7 @@ fn a_crossfade_plays_both_clips_across_its_span_by_the_curve_law() {
     let (scene, render) = matches_the_model("clip-crossfade");
     let tempo = &scene.document().settings().tempo;
     let beat = bl_core::time::Ticks::QUARTER;
-    let boundary = tempo.ticks_to_frames(beat * 3, SAMPLE_RATE).get() as usize;
+    let boundary = tempo.ticks_to_frames(beat * 2, SAMPLE_RATE).get() as usize;
     let sine = |hz: &str| {
         let file = scene
             .files
@@ -309,7 +313,8 @@ fn a_crossfade_plays_both_clips_across_its_span_by_the_curve_law() {
     // from before its start, which neither's own edges would give.
     for frame in [from + 1, boundary - 1, boundary, boundary + 1, to - 1] {
         let sum = |gain_low: f64, gain_high: f64| {
-            (f64::from(low[frame]) * gain_low) as f32 + (f64::from(high[48_000 + frame - boundary]) * gain_high) as f32
+            (f64::from(low[frame]) * gain_low) as f32
+                + (f64::from(high[48_000 + frame - boundary]) * gain_high) as f32
         };
         let x = (frame - from) as f64 / (to - from) as f64;
         let p = 4f64.powf(-0.25);
@@ -319,7 +324,11 @@ fn a_crossfade_plays_both_clips_across_its_span_by_the_curve_law() {
             "frame {frame}"
         );
     }
-    assert_ne!(left(&render, boundary - 1), low[boundary - 1], "the second clip is heard");
+    assert_ne!(
+        left(&render, boundary - 1),
+        low[boundary - 1],
+        "the second clip is heard"
+    );
     assert_ne!(
         left(&render, boundary + 1),
         high[48_000 + 1],
@@ -338,7 +347,13 @@ fn the_crossfaded_parts_of_a_split_clip_null_against_the_whole() {
     assert!(parts.problems().is_empty(), "{:?}", parts.problems());
     let mut editor = fixture.scene().editor;
     let track = editor.document().top_level().next().unwrap();
-    let mut clips: Vec<_> = editor.document().track(track).unwrap().clips().cloned().collect();
+    let mut clips: Vec<_> = editor
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .cloned()
+        .collect();
     clips.sort_by_key(|c| c.start);
     let [left_part, right_part] = &clips[..] else {
         panic!("the clip is in two parts");

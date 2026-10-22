@@ -69,7 +69,7 @@ fn run(shell: &mut Shell, frames: usize, accesskit: bool, scene: bool) -> (Vec<f
     if accesskit {
         ctx.enable_accesskit();
     }
-    let theme = Theme::builtin(shell.theme());
+    let theme = Theme::of(shell);
     theme.apply(&ctx);
     let mut main = MainWindowUi::new();
     if scene {

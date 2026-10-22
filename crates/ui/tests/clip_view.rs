@@ -1881,3 +1881,95 @@ fn assistive_technology_reads_each_lane_marker_and_footer_control() {
     assert_eq!(amount.value, "0");
     assert_eq!(amount.numeric, Some(0.0));
 }
+
+// Spec: view-options R1, piano-roll R44.
+#[test]
+fn the_middle_button_pans_the_note_area() {
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let grid = n.grid();
+    let over = grid.center();
+    let note = n.notes()[0].clone();
+    // The note's rectangle as the editor draws it, from the key at the
+    // grid's top edge.
+    let before = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
+    // A middle-button drag of 100 points right and 50 down pans the note
+    // area with the pointer: the note follows it 50 points down the grid.
+    n.h.middle_drag(over, over + vec2(100.0, 50.0));
+    let after = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
+    assert!(
+        (after.top() - before.top() - 50.0).abs() < 0.01,
+        "the note moved 50 points down with the pointer: {} to {}",
+        before.top(),
+        after.top()
+    );
+    // Nothing else changed: no selection, no note, no undo step.
+    assert!(n.selected().is_empty(), "no note is selected");
+    assert_eq!(n.notes().len(), 1, "the note is where it was");
+    assert_eq!(n.steps(), 0, "not an undo step");
+}
+
+// Spec: piano-roll R43.
+#[test]
+fn the_notes_are_paler_the_softer_their_velocity() {
+    let step = n_step();
+    let mut muted = Note::new(67, Ticks::ZERO, step, 127);
+    muted.mute = true;
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 127),
+        Note::new(62, Ticks::ZERO, step, 64),
+        Note::new(64, Ticks::ZERO, step, 1),
+        muted,
+    ]);
+    let grid = n.grid();
+    let start = n.marker();
+    let length = n.length();
+    let track = n.doc().clip_track(n.clip).expect("the clip's track");
+    let full = bl_ui::arrangement::scene::track_colour(&n.h.theme, track);
+    let palest = bl_ui::theme::note_colour(full, 1);
+    let middle = bl_ui::theme::note_colour(full, 64);
+    let output = n.h.settle();
+    let top = n.h.main.clip_view().top();
+    let rects = common::painted_rects(&output);
+    let fill_of = |note: &Note| {
+        let rect = note_rect(grid, start, length, top, note);
+        rects
+            .iter()
+            .find(|(r, _)| *r == rect)
+            .map(|(_, colour)| *colour)
+            .unwrap_or_else(|| panic!("the note at key {} is painted", note.key))
+    };
+    let notes = n.notes();
+    assert_eq!(
+        fill_of(&notes[0]),
+        full,
+        "velocity 127 is the clip's colour"
+    );
+    assert_eq!(fill_of(&notes[1]), middle, "velocity 64 is between");
+    assert_eq!(fill_of(&notes[2]), palest, "velocity 1 is the palest");
+    assert_eq!(
+        fill_of(&notes[3]),
+        n.h.theme.colors.clip_muted.0,
+        "a deactivated note is grey"
+    );
+    // The middle is between the two ends, in every channel.
+    let (p, m, f) = (palest.to_array(), middle.to_array(), full.to_array());
+    for channel in 0..4 {
+        assert!(
+            f[channel] <= m[channel] && m[channel] <= p[channel],
+            "velocity 64 is between the palest and the full colour"
+        );
+    }
+}

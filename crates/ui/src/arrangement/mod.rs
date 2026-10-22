@@ -833,6 +833,11 @@ impl ArrangementUi {
                 _ => {}
             }
         }
+        // Spec: view-options R1, arrangement-view R19. A middle-button drag
+        // pans the lanes, as Cmd-Option dragging does.
+        if let Some(delta) = crate::middle::pan(ui, lanes) {
+            invoke(events, ids::SCROLL, json!({ "x": -delta.x, "y": -delta.y }));
+        }
         // Esc abandons a clip drag; egui ends the drag on it too.
         if self.drag == Some(Drag::Clips) && ui.input(|i| i.key_pressed(Key::Escape)) {
             self.clips.cancel(events);

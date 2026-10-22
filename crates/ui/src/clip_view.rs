@@ -1385,11 +1385,16 @@ impl ClipViewUi {
                 continue;
             }
             let corner = theme.sizes.corner.min(2.0);
-            // Spec: note-editing R4, R18. A deactivated note is grey; a note
-            // that doesn't always play wears a corner triangle; the note the
-            // pointer marks is outlined.
-            let note_face = if note.mute { colours.pending.0 } else { face };
-            painter.rect_filled(rect, corner, note_face);
+            // Spec: piano-roll R43. The note is drawn in its clip's colour,
+            // paler the softer its velocity; a deactivated note is grey.
+            let colour = if note.mute {
+                colours.clip_muted.0
+            } else {
+                crate::theme::note_colour(face, note.velocity)
+            };
+            painter.rect_filled(rect, corner, colour);
+            // Spec: note-editing R4. A note that doesn't always play wears a
+            // corner triangle; the note the pointer marks is outlined.
             if note_lanes::shows_corner(note, KEY_HEIGHT) {
                 note_lanes::paint_corner(painter, rect, colours.text.0);
             }
@@ -1909,6 +1914,17 @@ impl ClipViewUi {
                 } else {
                     self.top = (self.top + scroll / KEY_HEIGHT).clamp(0.0, 127.0);
                 }
+            }
+        }
+        // Spec: view-options R1, piano-roll R44. A middle-button drag pans
+        // the note area, the key track following the pointer: the rows move
+        // down the view as `top` grows (`y_of_key`), as the wheel moves
+        // them.
+        if let Some(delta) = crate::middle::pan(ui, grid) {
+            if rows.folded {
+                self.first = (self.first + delta.y / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
+            } else {
+                self.top = (self.top + delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
             }
         }
         // Spec: piano-roll. S-A11Y-008 and S-A11Y-009, the note-selection

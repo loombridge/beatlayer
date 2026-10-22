@@ -543,3 +543,34 @@ fn a_clip_file_dragged_onto_a_lane_of_its_kind_is_placed_there() {
     assert_eq!(placed.start, Ticks(8 * BAR));
     assert_eq!(placed.name, "Idea");
 }
+
+// Spec: clip files R3. Several Arrangement clips dragged onto the browser
+// save nothing, and the clips stay where they were.
+#[test]
+fn several_arrangement_clips_dragged_onto_a_folder_save_nothing() {
+    let scratch = Scratch::new("several");
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.set_user_library(Some(root.clone()));
+    h.settle();
+    let midi = tracks(&h, TrackKind::Midi)[0];
+    let a = midi_clip(&mut h, midi, "A", 2, 2);
+    let b = midi_clip(&mut h, midi, "B", 6, 2);
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [a, b] }))
+        .unwrap();
+    h.settle();
+    let clips = open_library(&mut h, &root, "Clips");
+    let before = h.shell.editor().document().clone();
+
+    drag(&mut h, pos2(410.0, 124.0), row(clips));
+    assert!(
+        std::fs::read_dir(root.join("Clips"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "nothing is saved"
+    );
+    assert_eq!(*h.shell.editor().document(), before, "the clips stayed");
+}

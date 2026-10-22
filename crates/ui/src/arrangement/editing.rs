@@ -251,12 +251,13 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
 }
 
 impl ClipGestures {
-    /// The clip a move drag is carrying, if one is under way: released over
-    /// the browser it is saved as a clip file (clip files R3).
+    /// The clips a move drag is carrying, with the one grabbed first, if
+    /// one is under way: released over the browser, one clip is saved as a
+    /// clip file and several save nothing (clip files R3).
     #[must_use]
-    pub fn move_anchor(&self) -> Option<ClipId> {
+    pub fn moving(&self) -> Option<(ClipId, usize)> {
         match &self.drag {
-            Some(ClipDrag::Move { anchor, .. }) => Some(*anchor),
+            Some(ClipDrag::Move { anchor, clips, .. }) => Some((*anchor, clips.len())),
             _ => None,
         }
     }

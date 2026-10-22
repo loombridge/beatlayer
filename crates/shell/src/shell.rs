@@ -4079,6 +4079,13 @@ impl Shell {
         self.touch();
     }
 
+    /// Waits for the browser's index to finish, up to `timeout`, for tests
+    /// and tools. Returns whether it finished.
+    #[doc(hidden)]
+    pub fn wait_for_browser_index(&mut self, timeout: std::time::Duration) -> bool {
+        self.browser_view.wait_for_index(timeout)
+    }
+
     /// What Collect Files on Export is set to (Settings ▸ Library).
     #[must_use]
     pub fn collect_files_on_export(&self) -> bl_shell_spec::settings::CollectFiles {

@@ -1302,6 +1302,15 @@ impl BrowserView {
         labels
     }
 
+    /// Files were written or renamed in the places: index them again and
+    /// list the label afresh.
+    fn files_changed(&mut self) {
+        self.index.refresh();
+        self.indexing = self.index.indexing();
+        self.listings.clear();
+        self.rebuild();
+    }
+
     /// The places changed: index them again and list the label afresh.
     fn places_changed(&mut self) {
         let roots = self.roots().into_iter().map(|(_, path)| path).collect();
@@ -2648,7 +2657,7 @@ impl BrowserView {
                     library.as_deref(),
                 )
                 .map_err(BrowserError::Failed)?;
-                self.places_changed();
+                self.files_changed();
                 // Its row is selected with the name open for editing, if the
                 // folder is in a place the browser shows (clip files R4).
                 let shown = self.reveal(&saved.path, ctx.audio).is_ok();
@@ -2678,7 +2687,7 @@ impl BrowserView {
                 }
                 if let Some(name) = name {
                     let new = self.renamed(&target, &name)?;
-                    self.places_changed();
+                    self.files_changed();
                     let _ = self.reveal(&new, ctx.audio);
                 }
                 outcome.value = state(self, ctx.audio);

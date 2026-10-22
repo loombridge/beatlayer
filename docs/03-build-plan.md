@@ -638,7 +638,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.4 | todo |  |  |
 | 6.5 | todo |  |  |
 | 6.6 | todo |  |  |
-| 6.7 | todo |  |  |
+| 6.7 | done | 22 October 2026 | [#299](https://github.com/loombridge/beatlayer/pull/299); each clip carries a scale and the set has a current scale, with the scale list, the `clip.set_scale`, `song.set_scale` and `song.scales` commands, and the Control Bar's scale controls ([the spec](specs/scales.md) R1 to R14) |
 | 6.7b | todo |  |  |
 | 6.8 | todo |  |  |
 | 6.9 | todo |  |  |

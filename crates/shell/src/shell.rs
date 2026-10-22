@@ -87,6 +87,7 @@ use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
+use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -116,6 +117,7 @@ mod processed_files;
 mod sample_edits;
 mod sample_keys;
 pub use sample_keys::TransientList;
+mod search;
 mod session_recording;
 mod slice;
 mod stems;
@@ -518,6 +520,8 @@ pub struct Shell {
     /// and the Automatic Search's switches. View state, never part of the
     /// set, like the browser's.
     file_manager: FileManager,
+    /// The search field (WP-6.42): view state, never saved.
+    search: crate::search::Field,
     /// The list of the set's plug-ins (IMP-29, WP-6.41): whether it shows
     /// in the detail area's place, and whether Show Only Missing is on.
     plugin_list: plugin_list::PluginList,
@@ -1059,6 +1063,7 @@ impl Shell {
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             file_manager: FileManager::default(),
+            search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
@@ -6895,6 +6900,11 @@ impl Shell {
         let slot = self.selected_slot_clip();
         let shown = self.shown_clip();
         let result = self.run_command(id, args);
+        if self.search.open && !search_ids::handles(id) {
+            // Spec: command-palette R7, R10. The rows' availability and the
+            // outlines follow the set as it changes.
+            self.refresh_search();
+        }
         if result.is_ok() {
             self.follow_clip_selection(id, &arranged, slot);
             // Spec: scales R10. Selecting a clip makes its scale the
@@ -8031,6 +8041,10 @@ impl Shell {
             let result = self.run_file_manager(id, args);
             self.touch();
             return result;
+        }
+        if search_ids::handles(id) {
+            // Spec: command-palette R15, R16. The search field's commands.
+            return self.run_search(id, args);
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));

@@ -51,6 +51,8 @@
 //!   and the changes plug-ins make themselves as undo steps. The CLAP host
 //!   itself is `bl-plugin-host`'s; [`Shell::poll`] runs its main-thread
 //!   work.
+//! - [`search`]: the search field (WP-6.42, IMP-16 and IMP-18): command search
+//!   and track search, which the `search.*` commands drive.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12), which
 //!   `track.duplicate_without_clips` runs.
 //! - [`transport`]: the Control Bar's transport section: what its fields
@@ -94,6 +96,7 @@ pub mod routing;
 pub mod sample_editor;
 pub mod scales;
 pub mod scene_fields;
+pub mod search;
 mod session_capture;
 pub mod session_view;
 pub mod settings;
@@ -158,6 +161,9 @@ pub use bl_shell_spec::plugins as plugin_commands;
 pub use bl_shell_spec::sample_editor as sample_editor_commands;
 /// The scale commands' IDs and the scale list's result (WP-6.7).
 pub use bl_shell_spec::scales as scales_commands;
+/// The search field's command IDs and their argument and result types
+/// (WP-6.42).
+pub use bl_shell_spec::search as search_commands;
 /// The Session View's launch quantisation command IDs and their argument and
 /// result types (WP-3.2).
 pub use bl_shell_spec::session_launch as session_launch_commands;

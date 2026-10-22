@@ -74,6 +74,8 @@ inactive = "#6a717a"
 automation = "#f0a35c"
 modulation = "#b78cf0"
 mapping = "#4fd6c4"
+# The outline of the tracks the search field finds (WP-6.42).
+search = "#f5d142"
 # Beatlayer's own track colours, given to new tracks in turn.
 track_palette = [
   "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",

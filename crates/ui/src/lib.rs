@@ -54,6 +54,7 @@ pub mod device_panel;
 pub mod device_view;
 pub mod drum_view;
 pub mod external;
+pub mod file_manager;
 pub mod focus;
 pub mod follow_controls;
 pub mod in_out;

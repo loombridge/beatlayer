@@ -116,6 +116,10 @@ use Object::{Clip, Device, Scene, Song, Track};
 /// Why the Browser's commands read back through nothing a read command gives.
 const BROWSER: &str = "the Browser's state is read with `browser.state`, which is `external` \
                        because it lists files outside the project";
+/// Why the File Manager's commands read back through nothing a read command
+/// gives.
+const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
+                             is `external` because it lists files outside the project";
 /// Why Save Continuously has nothing to read.
 const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
                           reports Save Continuously; the command's own result does";
@@ -357,6 +361,20 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("edit.redo", query(Song, "undo.next_redo")),
     ("edit.undo", query(Song, "undo.next_undo")),
     ("export.audio", nothing(FILE)),
+    (
+        "file_manager.delete_unused",
+        nothing("moves files outside the set to the trash; the set doesn't change"),
+    ),
+    ("file_manager.edit_file", query(Clip, "data.audio.media")),
+    ("file_manager.hot_swap", nothing(FILE_MANAGER)),
+    ("file_manager.replace_file", query(Clip, "data.audio.media")),
+    (
+        "file_manager.state",
+        nothing(
+            "a query of its own: it reads the File Manager, and is `external` for the files it \
+             lists",
+        ),
+    ),
     ("export.realtime.auto_restart", read("export.realtime.status", "auto_restart")),
     ("export.realtime.cancel", read("export.realtime.status", "phase")),
     ("export.realtime.restart", read("export.realtime.status", "phase")),
@@ -482,11 +500,13 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
     ("set.new", query(Song, "set.name")),
     ("set.open", query(Song, "set.path")),
+    ("set.open_backup", query(Song, "set.unsaved_changes")),
     ("set.recover", query(Song, "set.path")),
     ("set.relink_missing", nothing("finds files outside the set; the clips that use them read their media")),
     ("set.save", query(Song, "set.unsaved_changes")),
     ("set.save_as", query(Song, "set.path")),
     ("set.save_as_default", nothing(FILE)),
+    ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
     ("settings.set_continuous_save", nothing(CONTINUOUS)),

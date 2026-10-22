@@ -70,4 +70,7 @@ pub use format::{
 };
 pub use media::{Media, MediaPath, MediaPathError, MediaRef};
 pub use migrate::{Migration, SCHEMA_VERSION};
-pub use save::{SaveOptions, SaveReport, SetFile, load, load_with, utc_stamp};
+pub use save::{
+    Backup, SaveOptions, SaveReport, SetFile, backups, load, load_with, local_stamp, stamp_time,
+    utc_stamp,
+};

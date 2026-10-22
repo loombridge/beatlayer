@@ -32,6 +32,7 @@ use crate::commands::{
     VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::devices::COMPARE_COPY;
+use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
@@ -291,7 +292,7 @@ const FILE: &[Row] = &[
     (
         "M-FILE-015",
         "Export Audio/Video...",
-        Pending(Some("S-FILE-007")),
+        Cmd(EXPORT_OPEN_DIALOG),
     ),
     (
         "M-FILE-016",

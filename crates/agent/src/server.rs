@@ -194,6 +194,17 @@ impl RenderRequest {
 pub(crate) enum Deferred {
     Capture(Capture),
     Render(std::cell::RefCell<Option<Box<Render>>>),
+    /// An `export.audio` the shell started on its thread (the export spec,
+    /// R44): the call waits until the export ends.
+    Export(ExportCall),
+}
+
+/// What a waiting `export.audio` call replies with besides the export's
+/// result.
+#[derive(Debug)]
+pub(crate) struct ExportCall {
+    pub(crate) asked_first: bool,
+    pub(crate) ids: Value,
 }
 
 impl Deferred {
@@ -219,6 +230,9 @@ pub(crate) struct Beatlayer {
     capture_requests: Vec<CaptureRequest>,
     /// Audio renders the host hasn't started yet (WP-2.28).
     render_requests: Vec<RenderRequest>,
+    /// The call waiting for the export the shell runs (the export spec,
+    /// R44): the shell runs one at a time.
+    export_ticket: Option<u64>,
 }
 
 impl Program for Beatlayer {
@@ -327,6 +341,7 @@ impl Program for Beatlayer {
                     });
                 }
             }
+            Deferred::Export(_) => self.export_ticket = Some(ticket),
         }
     }
 
@@ -417,8 +432,14 @@ impl Agent {
                         Deferred::Render(_) => {
                             Err("the window closed before the render finished".to_owned())
                         }
+                        Deferred::Export(_) => {
+                            Err("the window closed before the export ended; it goes on and \
+                             `export.status` reads it"
+                                .to_owned())
+                        }
                     });
             }
+            self.program().export_ticket = None;
             self.program().capture_requests.clear();
             self.program().render_requests.clear();
         }
@@ -450,7 +471,9 @@ impl Agent {
         self.server.finish_deferred(ticket, |deferred| {
             let Capture { view, .. } = match deferred {
                 Deferred::Capture(capture) => capture,
-                Deferred::Render(_) => return Err("expected a view capture".to_owned()),
+                Deferred::Render(_) | Deferred::Export(_) => {
+                    return Err("expected a view capture".to_owned());
+                }
             };
             let image = result?;
             let summary = CaptureResult {
@@ -509,7 +532,46 @@ impl Agent {
                     )),
                     Err(err) => Err(err),
                 },
-                Deferred::Capture(_) => Err("expected a render".to_owned()),
+                Deferred::Capture(_) | Deferred::Export(_) => Err("expected a render".to_owned()),
+            });
+    }
+
+    /// Answers the call waiting for an export once it has ended (the export
+    /// spec, R44): the host calls it as it polls the shell. The waiting
+    /// call's reply comes from [`Agent::resume`], with the ticket.
+    pub fn sync_export(&mut self, shell: &mut Shell) {
+        let Some(ticket) = self.program().export_ticket else {
+            return;
+        };
+        let Some(result) = shell.take_export_result() else {
+            return;
+        };
+        self.program().export_ticket = None;
+        self.server
+            .finish_deferred(ticket, |deferred| match deferred {
+                Deferred::Export(call) => result
+                    .map(|result| {
+                        (
+                            serde_json::json!({
+                                "ran": 1,
+                                "undo_step": null,
+                                "asked_first": call.asked_first,
+                                "results": [{
+                                    "command": bl_shell::export_commands::AUDIO,
+                                    "result": result,
+                                }],
+                                "ids": call.ids,
+                            }),
+                            Vec::new(),
+                        )
+                    })
+                    .map_err(|error| {
+                        format!(
+                            "command 1 (`{}`): {error}. Nothing changed.",
+                            bl_shell::export_commands::AUDIO
+                        )
+                    }),
+                _ => Err("expected an export".to_owned()),
             });
     }
 

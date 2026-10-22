@@ -389,6 +389,8 @@ fn a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes() {
             replace: false,
             render_as_loop: false,
             block: export::BLOCK,
+            mono: false,
+            mp3: false,
         },
         &AtomicBool::new(false),
         &mut |_| {
@@ -451,6 +453,8 @@ fn a_cancelled_export_gives_every_plugin_back() {
             replace: false,
             render_as_loop: false,
             block: export::BLOCK,
+            mono: false,
+            mp3: false,
         },
         &cancel,
         &mut |_| cancel.store(true, Relaxed),

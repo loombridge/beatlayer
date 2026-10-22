@@ -1013,3 +1013,54 @@ fn every_part_of_the_tags_reaches_assistive_technology() {
     let field = Harness::node(&nodes, "Quick Tags Add Field");
     assert_eq!(field.role, Role::TextInput);
 }
+
+/// The name of the list's row at `at`.
+fn row_name_at(h: &mut Harness, at: Pos2) -> Option<String> {
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    nodes
+        .iter()
+        .find(|n| {
+            n.role == Role::ListItem
+                && n.bounds.is_some_and(|b| {
+                    let (x, y) = (at.x as f64, at.y as f64);
+                    b.x0 <= x && x <= b.x1 && b.y0 <= y && y <= b.y1
+                })
+        })
+        .map(|n| n.label.clone())
+}
+
+// Spec: view-options R1.
+#[test]
+fn the_middle_button_pans_the_browsers_lists() {
+    let scratch = Scratch::new("middle-pan");
+    let (mut h, root) = harness(&scratch);
+    let many = root.join("Samples").join("Many");
+    std::fs::create_dir_all(&many).unwrap();
+    for i in 0..200 {
+        std::fs::write(many.join(format!("Hit {i}.wav")), b"").unwrap();
+    }
+    h.shell
+        .run(
+            ids::OPEN_FOLDER,
+            json!({ "path": root.join("Samples").to_string_lossy() }),
+        )
+        .unwrap();
+    h.shell
+        .run(ids::OPEN_FOLDER, json!({ "path": many.to_string_lossy() }))
+        .unwrap();
+    h.settle();
+    let at = row(0);
+    let name = row_name_at(&mut h, at).expect("a row in the list");
+    // The row 50 points below: the one the list's first row moves to.
+    let below = row_name_at(&mut h, at + egui::vec2(0.0, 50.0)).expect("a row in the list");
+    assert_ne!(name, below, "the list has rows to move");
+    // A middle-button drag of 50 points up pans the list with the pointer.
+    let over = pos2(160.0, 300.0);
+    h.middle_drag(over, over - egui::vec2(0.0, 50.0));
+    assert_eq!(
+        row_name_at(&mut h, at).as_deref(),
+        Some(below.as_str()),
+        "the list moved up 50 points"
+    );
+}

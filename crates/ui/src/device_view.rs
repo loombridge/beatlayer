@@ -291,6 +291,12 @@ impl DeviceViewUi {
             || self.renaming_variation.is_some()
     }
 
+    /// How far the chain is scrolled sideways, in points.
+    #[must_use]
+    pub fn scroll(&self) -> f32 {
+        self.scroll
+    }
+
     /// Starts typing a new name for macro `number` of `rack` in its slot
     /// (Rename, S-EDIT-008), from the name it has now.
     pub fn start_macro_rename(&mut self, rack: DeviceId, number: u8) {
@@ -371,6 +377,11 @@ impl DeviceViewUi {
         if (background.hovered() || ui.rect_contains_pointer(rect)) && !over_chain_list {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             self.scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
+        }
+        // Spec: view-options R1. A middle-button drag pans the chain, the
+        // content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, rect) {
+            self.scroll -= delta.x;
         }
         // Spec: racks R25. A device chosen from the list scrolls into view,
         // wherever in its racks it is.

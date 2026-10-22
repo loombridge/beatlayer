@@ -65,6 +65,7 @@ pub mod layout;
 pub mod main_window;
 pub mod mapping;
 pub mod menus;
+pub mod middle;
 pub mod mixer;
 pub mod multisampler;
 pub mod plugin_list;

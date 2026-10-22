@@ -1043,6 +1043,10 @@ impl Host {
         }
         egui_winit::update_viewport_info(&mut surface.info, &surface.ctx, &surface.window, false);
         let mut input = surface.state.take_egui_input(&surface.window);
+        // Spec: view-options R1. The middle button pans the area under the
+        // pointer, so egui never sees it: it clicks nothing and selects
+        // nothing.
+        bl_ui::middle::take(&mut input, &surface.ctx);
         input
             .viewports
             .insert(ViewportId::ROOT, surface.info.clone());

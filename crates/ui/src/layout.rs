@@ -781,10 +781,11 @@ impl ShellLayout {
         ] {
             move_rect(rect);
         }
-        for rect in [&mut self.clip_view, &mut self.device_view] {
-            if let Some(rect) = rect {
-                move_rect(rect);
-            }
+        for rect in [&mut self.clip_view, &mut self.device_view]
+            .into_iter()
+            .flatten()
+        {
+            move_rect(rect);
         }
         if let Some(browser) = &mut self.browser {
             move_rect(browser);
@@ -818,10 +819,11 @@ impl ShellLayout {
         ] {
             scale(rect);
         }
-        for rect in [&mut self.clip_view, &mut self.device_view] {
-            if let Some(rect) = rect {
-                scale(rect);
-            }
+        for rect in [&mut self.clip_view, &mut self.device_view]
+            .into_iter()
+            .flatten()
+        {
+            scale(rect);
         }
         self.largest_clip_view *= factor;
         if let Some(browser) = &mut self.browser {

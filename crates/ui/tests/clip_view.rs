@@ -832,6 +832,37 @@ fn a_click_places_the_insert_marker_and_the_arrows_move_it() {
 }
 
 #[test]
+fn the_note_editors_home_leaves_the_transport_alone() {
+    // Spec: piano-roll R23. The note editor reads Home itself, so the
+    // transport's Home, which moves the song's insert marker, doesn't run
+    // there as well.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    n.h.shell.start_audio();
+    assert!(n.h.shell.audio().engine_running(), "the engine runs");
+    // The song's insert marker is somewhere else.
+    n.h.shell
+        .run("transport.locate", json!({ "position": 4 * step }))
+        .unwrap();
+    n.h.wait("the song's insert marker to move", |h| {
+        h.shell.arrangement().insert_marker() == 4 * step
+    });
+    // A click on empty grid places the editor's insert marker.
+    let empty = n.at(62, 2 * step);
+    n.click(empty, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(2 * step));
+    // Home moves the editor's insert marker, and leaves the song's alone.
+    n.h.key(egui::Key::Home, Modifiers::NONE);
+    assert_eq!(n.insert(), Some(Ticks::ZERO), "the editor's insert marker");
+    n.h.settle();
+    assert_eq!(
+        n.h.shell.arrangement().insert_marker(),
+        4 * step,
+        "the song's insert marker stays"
+    );
+}
+
+#[test]
 fn the_marquee_and_the_keys_make_the_time_selection() {
     // Spec: piano-roll R24. A marquee's time span is the time selection,
     // Shift with the arrows selects time from the insert marker, and Enter

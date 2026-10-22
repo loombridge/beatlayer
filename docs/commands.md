@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-672 commands in 42 areas.
+673 commands in 42 areas.
 
 ## Permission classes
 
@@ -574,6 +574,7 @@ Each command has:
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
 | [`set.import_dawproject`](#setimport_dawproject) | Import DAWproject File | `external` |  |  |
 | [`set.import_report`](#setimport_report) | DAWproject Import Report | `read` |  |  |
+| [`set.later_recovery`](#setlater_recovery) | Later Recovery | `read` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
@@ -10335,6 +10336,18 @@ Arguments: none (send `{}`).
 
 Result: [`ImportReport`](#importreport).
 
+#### `set.later_recovery`
+
+**Later Recovery**. Permission: `read`. Contexts: `global`.
+
+Closes the recovery prompt the app shows at launch, leaving every set it listed to be offered again at the next launch: nothing is recovered and nothing is thrown away. The prompt's Later button runs it, and Esc does the same. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`RecoveryPrompt`](#recoveryprompt).
+
 #### `set.list_recoverable`
 
 **List Recoverable Sets**. Permission: `read`. Contexts: `global`.
@@ -10956,7 +10969,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the automation recording mode (`settings.set_automation_record_mode`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the automation recording mode (`settings.set_automation_record_mode`), the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -12796,6 +12809,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
 | [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
+| [`settings.set_continuous_save`](#settingsset_continuous_save) | `settings.state` | `file_folder.save_continuously` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
@@ -12914,7 +12928,6 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
 | [`set.save_as_template`](#setsave_as_template) | writes a file outside the set; the set doesn't change |
 | [`set.save_copy`](#setsave_copy) | writes a file outside the set; the set doesn't change |
-| [`settings.set_continuous_save`](#settingsset_continuous_save) | the app doesn't host the autosave service yet, so no read command reports Save Continuously; the command's own result does |
 
 ## Types
 
@@ -21519,6 +21532,7 @@ File & Folder's settings in `settings.state`.
 |---|---|---|---|
 | `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
 | `sample_editor` | string | yes | The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named. |
+| `save_continuously` | boolean | yes | Save Continuously: whether every finished edit of a set that has a file is saved within a second, as `settings.set_continuous_save` sets it. |
 
 <details><summary>JSON Schema</summary>
 
@@ -21530,6 +21544,10 @@ File & Folder's settings in `settings.state`.
       "description": "The sample editor the Edit button in the Clip View's Audio Utilities panel opens a clip's file in: its path, empty when none is named.",
       "type": "string"
     },
+    "save_continuously": {
+      "description": "Save Continuously: whether every finished edit of a set that has a file is saved within a second, as `settings.set_continuous_save` sets it.",
+      "type": "boolean"
+    },
     "temporary_folder": {
       "description": "The Temporary Folder in use: the setting, or the default.",
       "type": "string"
@@ -21537,7 +21555,8 @@ File & Folder's settings in `settings.state`.
   },
   "required": [
     "temporary_folder",
-    "sample_editor"
+    "sample_editor",
+    "save_continuously"
   ],
   "type": "object"
 }
@@ -30382,6 +30401,34 @@ What `set.recover` returns.
     "path",
     "name",
     "edits"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RecoveryPrompt`
+
+What `set.later_recovery` returns: the recovery prompt's state.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the prompt is still open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.later_recovery` returns: the recovery prompt's state.",
+  "properties": {
+    "open": {
+      "description": "Whether the prompt is still open.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "open"
   ],
   "type": "object"
 }

@@ -287,6 +287,9 @@ pub struct Autosave {
     continuous: bool,
     offers: Vec<Offer>,
     session: Option<Session>,
+    /// The set the last session began with, so a session that couldn't
+    /// start can be started again (the crash-recovery spec, R27).
+    set: Option<SetFile>,
 }
 
 impl Autosave {
@@ -307,6 +310,7 @@ impl Autosave {
             continuous: false,
             offers: Vec::new(),
             session: None,
+            set: None,
         };
         autosave.scan()?;
         Ok(autosave)
@@ -541,6 +545,9 @@ impl Autosave {
             session.park();
             self.scan()?;
         }
+        // Kept even when the session can't start, so a later edit can try
+        // again (the crash-recovery spec, R27).
+        self.set = set.cloned();
         let id = new_session_id();
         let target = Target::of(set);
         let shared = Arc::new(Shared::default());
@@ -586,6 +593,22 @@ impl Autosave {
             sent: 0,
         });
         Ok(())
+    }
+
+    /// Starts the session again when it couldn't start, so that a later
+    /// edit tries once more: the recovery folder may be writable now (the
+    /// crash-recovery spec, R27). Does nothing when a session is running.
+    ///
+    /// # Errors
+    ///
+    /// [`AutosaveError::Io`] if the session can't register in the recovery
+    /// folder, as [`Autosave::begin`] says.
+    pub fn retry(&mut self) -> Result<(), AutosaveError> {
+        if self.session.is_some() {
+            return Ok(());
+        }
+        let set = self.set.clone();
+        self.begin(set.as_ref())
     }
 
     /// Journals the open set after a finished edit: a command, a gesture's
@@ -651,7 +674,6 @@ impl Autosave {
         let session = self.session.as_ref().ok_or(AutosaveError::NoSession)?;
         session.call(Msg::Flush)
     }
-
     /// Closes the open set's session: after the set was saved, or when the
     /// user chose not to save it. Its unsaved edits are discarded (save
     /// points stay), and its files leave the recovery folder, so nothing is

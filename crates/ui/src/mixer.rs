@@ -746,6 +746,10 @@ fn title_bars(
         if let Some((rack, folded, rect)) = fold {
             crate::chain_strips::fold_button(ui, theme, rect, rack, folded, events);
         }
+        if response.double_clicked() {
+            // Spec: detail-views R4 (I-CLICK-006).
+            crate::track_menu::open_device_view(shell, track, events);
+        }
         crate::rack_view::focus_track_under_drag(ui, shell, track, bar, events);
         let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
         menus.title(

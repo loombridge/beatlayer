@@ -147,6 +147,20 @@ fn select(shell: &Shell, track: TrackId, events: &mut Vec<UiEvent>) {
     }
 }
 
+/// Double-clicking a track's title bar (detail-views R4): selects the track
+/// and shows the Device View, as a click on its selector does.
+pub fn open_device_view(shell: &Shell, track: TrackId, events: &mut Vec<UiEvent>) {
+    events.push(UiEvent::Invoke(Invocation::new(
+        SELECT_TRACKS,
+        json!({ "tracks": [track], "title_bars": true }),
+    )));
+    events.extend(
+        crate::main_window::show_only(shell, bl_shell::commands::DetailView::Device)
+            .into_iter()
+            .map(UiEvent::Invoke),
+    );
+}
+
 /// The colour palette (C-TRACK-015), drawn in place and disabled until
 /// tracks have colours: its swatches dimmed, as one control that names the
 /// package.

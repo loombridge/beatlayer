@@ -143,6 +143,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The list of the set's plug-ins' Show Only Missing switch (the
         // plug-in list spec, R3), which the list's own switch reaches.
         commands::VIEW_SET_PLUGIN_LIST_ONLY_MISSING,
+        // The detail area's commands that no View menu item holds (the
+        // detail views spec): Option-click on a view's toggle shows both
+        // views (R2, S-VIEW-005), and the top edge's drag sets the Clip
+        // View's height (R10).
+        commands::VIEW_SHOW_DETAIL_VIEWS,
+        commands::VIEW_SET_DETAIL_HEIGHT,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
         // The Shortcuts page's buttons (the custom shortcuts spec, R8 and

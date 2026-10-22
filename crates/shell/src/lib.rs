@@ -100,6 +100,8 @@ pub mod stems;
 pub mod testing;
 pub mod tracks;
 pub mod transport;
+/// Moving a file to the system's trash (WP-6.63).
+pub mod trash;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
@@ -121,6 +123,9 @@ pub use bl_shell_spec::devices as device_commands;
 pub use bl_shell_spec::editing as editing_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
+/// The File Manager's command IDs and their argument and result types
+/// (WP-6.63).
+pub use bl_shell_spec::file_manager as file_manager_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;
@@ -158,7 +163,9 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::{audio_editing, commands, context_menus, freeze, keymap, menus, register};
+pub use bl_shell_spec::{
+    audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register,
+};
 /// The autosampler's progress (WP-5.16).
 pub use shell::autosample::Status as AutosampleStatus;
 pub use shell::{

@@ -581,6 +581,32 @@ const ENTRIES: &[Entry] = &[
             `track.unfreeze` is the command a person and an agent run.",
     },
     Entry {
+        id: "track.set_bounced",
+        action: Action::Apply("bounce_track_in_place"),
+        label: "Set Track Bounced",
+        permission: Permission::Destructive,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Replaces a track with the audio track a bounce made: no devices, the \
+            track's name with \" (Bounce)\" after it, its mixer settings, and its clips playing \
+            the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is \
+            the command a person and an agent run: it renders the file and applies this one. \
+            Used directly, it names a file the caller has already written.",
+    },
+    Entry {
+        id: "track.create_bounced_track",
+        action: Action::Apply("bounce_to_new_track"),
+        label: "Create Bounced Track",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders, Arrangement, Session],
+        keys: &[],
+        description: "Makes a new audio track directly after the track that was bounced, \
+            holding the bounced audio. `bounced` is what the new track holds. \
+            `track.bounce_to_new_track` is the command a person and an agent run: it renders \
+            the file and applies this one. Used directly, it names a file the caller has \
+            already written.",
+    },
+    Entry {
         id: "mixer.set_volume",
         action: Action::Apply("set_volume"),
         label: "Set Track Volume",
@@ -2225,6 +2251,56 @@ const ENTRIES: &[Entry] = &[
             output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 \
             straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in \
             a shape). An empty list outputs 0. One undo step (Edit Shape).",
+    },
+    Entry {
+        id: "articulation.add",
+        action: Action::Apply("add_articulation"),
+        label: "Add Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds an articulation to an Articulation Map's list, at `index` (or at the \
+            end when it isn't given), with the name `name`. The list holds up to 32 \
+            articulations and keeps one at least. One undo step (Add Articulation).",
+    },
+    Entry {
+        id: "articulation.delete",
+        action: Action::Apply("delete_articulation"),
+        label: "Delete Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the articulation at `index` (counted from 0) from an Articulation \
+            Map's list. The list keeps one articulation at least. One undo step (Delete \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.move",
+        action: Action::Apply("move_articulation"),
+        label: "Move Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves the articulation at `index` (counted from 0) in an Articulation Map's \
+            list to `to`, or to the end of the list when `to` isn't given. One undo step (Move \
+            Articulation).",
+    },
+    Entry {
+        id: "articulation.set",
+        action: Action::Apply("set_articulation"),
+        label: "Change Articulation",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Changes the articulation at `index` (counted from 0) in an Articulation \
+            Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't \
+            given stays as it is. A trigger is `{\"kind\":\"none\"}`, `{\"kind\":\"key\", \
+            \"key\":36}` or `{\"kind\":\"controller\",\"controller\":1,\"lowest\":0,\"highest\":63}`; \
+            an output is `{\"kind\":\"key\",\"key\":36,\"velocity\":100}` or \
+            `{\"kind\":\"controller\",\"controller\":1,\"value\":64}`; a channel is a number from \
+            1 to 16, or null for none, so the articulation's notes keep the channel they come \
+            in on. Two articulations of a device never trigger on the same key or on \
+            overlapping ranges of the same controller. One undo step (Change Articulation).",
     },
     Entry {
         id: "device.compare_switch",

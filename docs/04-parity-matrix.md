@@ -222,6 +222,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live device | Milestone | Notes |
 |---|---|---|
 | Arpeggiator, CC Control, Chord, MIDI Monitor, MPE Control, Note Echo, Note Length, Pitch, Random, Rotating Rhythm Generator, Scale, Velocity | M5 (the devices), M6 (the Arpeggiator's Groove) | Rotating Rhythm Generator has no package yet: the manual doesn't describe it. The Arpeggiator's Groove chooser: WP-6.68 ([spec](specs/arpeggiator.md)). Built in WP-5.30, WP-5.31, WP-5.32, WP-6.68 |
+| Articulation Map (Beatlayer's own device, not in Live) | M6 | A list of up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends. Built in WP-6.47 ([spec](specs/articulation-map.md)) |
 | Melodic Steps, Bouncy Notes, Step Arp, SQ Sequencer, Rhythmic Steps (the Sequencer Pack) | M9 | Built with the extension SDK |
 | MIDI Tools Pack (extra rhythmic and melodic generators and transformations) | M9 | Built with the extension SDK as MIDI Tools; list its tools from the pack's product page when the package is planned |
 | Performance Pack (Performer, Variations, Arrangement Looper, Prearranger) | M9 | Built with the extension SDK |

@@ -573,7 +573,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 4.12 | done | 19 October 2026 | [#221](https://github.com/loombridge/beatlayer/pull/221); audio quantise: `clip.quantize_audio` moves each grid line's nearest transient's warp marker `amount` percent of the way to the line, one undo step, refusing unwarped clips, run by Cmd+U, the Sample Editor's context menu and Edit ▸ Quantize, with the quantise settings shared with the note editor (Cmd+Shift+U); [the spec](specs/warping.md) |
 | 4.13 | done | 19 October 2026 | [#233](https://github.com/loombridge/beatlayer/pull/233); Crop Clip writes an audio clip's region as a new file, rounded to whole frames so the clip plays to the bit, moving its markers, loop and warp map back, while a MIDI clip loses the notes outside its region and writes no file; Consolidate renders one clip per track before the track's devices and mixer, normalised with the clip gain making up for it, mono when its channels are equal, and warped to the beats it was rendered at; Consolidate Time to New Scene fills a new scene after the selected one, leaving the Arrangement as it was; [the spec](specs/audio-clip-editing.md) |
 | 4.14 | done | 21 October 2026 | [#268](https://github.com/loombridge/beatlayer/pull/268); Freeze Track renders the selected audio and MIDI tracks into `Samples/Processed/Freeze` and plays those files warped in Beats mode in place of their devices, Unfreeze Track restores the clips from the record the freeze kept, and the Freeze Track menu item and S-TRACK-017 run `track.freeze`; a group or return track freezes to one whole-Arrangement file, whose playback is still to come; [the spec](specs/freeze-and-bounce.md) |
-| 4.15 | todo |  |  |
+| 4.15 | done | 21 October 2026 | [#287](https://github.com/loombridge/beatlayer/pull/287); `track.bounce_in_place` replaces a track with an audio track holding its render, with no devices and its mixer kept, `track.bounce_to_new_track` makes that audio a new track after the source and switches the source material off, and `track.paste_bounced_audio` renders what Copy last put on the clipboard as it is at the moment of pasting and places it as Paste places clips; a group bounces as one track, after the group's mixer, with the returns its tracks feed; all three take a `channels` argument, so a mono source bounces to a mono file; the Edit menu's items and Cmd-B and Cmd+Option-V run them; [the spec](specs/freeze-and-bounce.md) |
 | 4.16 | done | 21 October 2026 | [#266](https://github.com/loombridge/beatlayer/pull/266); Slice to New MIDI Track: `clip.slice_to_midi_track` cuts an audio clip's region at a beat division, at its transients or at its warp markers into a new MIDI track after the clip's, holding a Drum Rack of one One-Shot sampler per slice or one sampler in Slice mode and a MIDI clip with one note per slice; the slicing dialog sits in the Create menu and the clip's menu, with the factory and the user's `Defaults/Slicing/` presets, and Preserve warped timing renders the clip's warped audio as Consolidate renders it; [the spec](specs/slice-to-midi.md) |
 | 4.17 | done | 17 October 2026 | [#112](https://github.com/loombridge/beatlayer/pull/112); `render_as_loop` on `export.audio` and `bl-cli export` renders the tail past the range's end and adds it onto the file's start, after conversion and before Normalize and dither; [the spec](specs/export.md) |
 | 4.18 | done | 19 October 2026 | [#222](https://github.com/loombridge/beatlayer/pull/222); tempo-synced browser preview: Raw-off previews warped through the map a new clip would get, looping on the song's beats and starting on the next bar while the transport runs, the kept Raw switch (`browser.set_raw`), scrubbing on launch quantisation (`browser.scrub_preview`), a heap-free warped preview voice; [the spec](specs/browser.md) |
@@ -694,7 +694,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
 | 6.46 | todo |  | Waits on IMP-23's acceptance |
-| 6.47 | todo |  | Waits on IMP-32's acceptance |
+| 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
 | 6.49b | todo |  |  |
@@ -711,7 +711,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.60 | todo |  |  |
 | 6.61 | todo |  |  |
 | 6.62 | todo |  |  |
-| 6.63 | todo |  |  |
+| 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
 | 6.64 | todo |  |  |
 | 6.65 | todo |  |  |
 | 6.66 | todo |  |  |

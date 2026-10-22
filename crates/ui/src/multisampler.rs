@@ -518,7 +518,9 @@ impl MultisamplerUi {
             | SamplerTab::FilterGlobal
             | SamplerTab::Modulation
             | SamplerTab::Midi => {
-                crate::device_panel::show(ui, theme, frame, display, body, played, events);
+                crate::device_panel::show(
+                    ui, theme, frame, display, body, played, &mut None, events,
+                );
             }
         }
     }

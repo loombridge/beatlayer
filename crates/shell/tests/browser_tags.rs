@@ -679,3 +679,87 @@ fn every_tag_command_runs_by_id_and_reads_back() {
         group_tags(&tags, "Mine")
     );
 }
+
+// Spec: browser-tags R15. Several `#` terms must all match.
+#[test]
+fn several_hash_terms_must_all_match() {
+    let scratch = Scratch::new("hash-terms");
+    let config = scratch.path("config");
+    let library = scratch.path("Library");
+    wav(&library.join("Kick.wav"), 100);
+    wav(&library.join("Snare.wav"), 100);
+    let mut shell = shell_on(&config);
+    shell.set_user_library(Some(library.clone()));
+    wait_for_index(&mut shell);
+    run::<TagsState>(&mut shell, ids::ADD_TAG_GROUP, json!({ "name": "Mine" }));
+    run::<TagsState>(
+        &mut shell,
+        ids::ADD_TAG,
+        json!({ "name": "One", "group": "Mine" }),
+    );
+    run::<TagsState>(
+        &mut shell,
+        ids::ADD_TAG,
+        json!({ "name": "Two", "group": "Mine" }),
+    );
+    // One file carries both tags, the other only one.
+    run::<TagsState>(
+        &mut shell,
+        ids::TAG_ITEMS,
+        json!({
+            "items": [text(&library.join("Kick.wav"))],
+            "tags": ["Mine|One", "Mine|Two"],
+            "attach": true,
+        }),
+    );
+    run::<TagsState>(
+        &mut shell,
+        ids::TAG_ITEMS,
+        json!({
+            "items": [text(&library.join("Snare.wav"))],
+            "tags": ["Mine|One"],
+            "attach": true,
+        }),
+    );
+    // Both terms must match, so only the file carrying both is listed.
+    let found: bl_shell::browser_commands::BrowserState = run(
+        &mut shell,
+        ids::SEARCH,
+        json!({ "query": "#One #Two", "label": "all" }),
+    );
+    let names: Vec<&str> = found.rows.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, ["Kick.wav"]);
+}
+
+// Spec: browser-tags R12 and R1. The order the person made is kept.
+#[test]
+fn the_order_of_the_groups_survives_a_restart() {
+    let scratch = Scratch::new("order");
+    let config = scratch.path("config");
+    let mut shell = shell_on(&config);
+    run::<TagsState>(&mut shell, ids::ADD_TAG_GROUP, json!({ "name": "Mine" }));
+    run::<TagsState>(
+        &mut shell,
+        ids::ADD_TAG,
+        json!({ "name": "Favourite", "group": "Mine" }),
+    );
+    // The person's group goes to the front of the list.
+    let tags: TagsState = run(
+        &mut shell,
+        ids::MOVE_TAG,
+        json!({ "group": "Mine", "position": 0 }),
+    );
+    assert_eq!(
+        groups(&tags),
+        ["Mine", "Content", "Format", "Creator", "Devices"]
+    );
+    shell.browser_view().flush_database();
+    // A new shell keeps that order.
+    let mut again = shell_on(&config);
+    let tags: TagsState = run(&mut again, ids::TAGS, json!({}));
+    assert_eq!(
+        groups(&tags),
+        ["Mine", "Content", "Format", "Creator", "Devices"],
+        "the order is kept between launches"
+    );
+}

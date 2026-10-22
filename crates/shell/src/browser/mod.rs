@@ -518,6 +518,8 @@ impl BrowserView {
         if let Some(damaged) = db.damaged() {
             self.message = Some(damaged.to_owned());
         }
+        // The file is open before anything is written to it.
+        self.db = Some(db);
         // The tags the file holds, and the ones Beatlayer gives.
         let ops = self.tags.load(loaded.groups, loaded.tags, loaded.item_tags);
         // The files the file holds, so search finds them from the first
@@ -543,7 +545,6 @@ impl BrowserView {
             .collect();
         self.adopt_index();
         self.save_tags(ops);
-        self.db = Some(db);
     }
 
     /// Takes the index the database holds as the browser's, so search finds
@@ -1062,16 +1063,24 @@ impl BrowserView {
 
     /// The keys of the items that carry every one of these tags, folders'
     /// tags reaching what's inside them (spec: browser-tags R9 and R15).
+    /// Several tags must all be carried: the sets are intersected.
     fn items_with_tags(&self, tags: &[i64]) -> HashSet<String> {
-        let mut keys: HashSet<String> = HashSet::new();
-        let mut folders: HashSet<String> = HashSet::new();
+        let mut all: Option<HashSet<String>> = None;
         for tag in tags {
-            for key in self.tags.items_with_tag(*tag) {
-                keys.insert(key.clone());
-                folders.insert(key);
-            }
+            let carried = self.items_with_tag(*tag);
+            all = Some(match all {
+                Some(previous) => previous.intersection(&carried).cloned().collect(),
+                None => carried,
+            });
         }
-        if folders.is_empty() {
+        all.unwrap_or_default()
+    }
+
+    /// The keys of the items that carry a tag, a folder's tag reaching
+    /// what's inside it, at any depth (spec: browser-tags R9).
+    fn items_with_tag(&self, tag: i64) -> HashSet<String> {
+        let mut keys: HashSet<String> = self.tags.items_with_tag(tag).into_iter().collect();
+        if keys.is_empty() {
             return keys;
         }
         let snapshot = self.index.snapshot();
@@ -1079,7 +1088,7 @@ impl BrowserView {
             let path = snapshot.path(index);
             let mut folder = path.parent();
             while let Some(dir) = folder {
-                if folders.contains(&dir.to_string_lossy().into_owned()) {
+                if keys.contains(&dir.to_string_lossy().into_owned()) {
                     keys.insert(path.to_string_lossy().into_owned());
                     break;
                 }
@@ -2449,18 +2458,13 @@ impl BrowserView {
                     }
                     wanted.extend(found);
                 }
-                let mut ops = Vec::new();
-                for item in &items {
-                    let key = self.tag_key(item);
-                    let mut carried = self.tags.item_tags(&key);
-                    for &tag in &wanted {
-                        if attach {
-                            if !carried.contains(&tag) {
-                                carried.push(tag);
-                            }
-                        } else {
-                            // Beatlayer's own tags and a folder's can't be
-                            // taken off (spec: browser-tags R11).
+                // Beatlayer's own tags and a folder's can't be taken off
+                // (spec: browser-tags R11). Every item is checked before
+                // any is changed, so a refused command changes nothing.
+                if !attach {
+                    for item in &items {
+                        let key = self.tag_key(item);
+                        for &tag in &wanted {
                             let fixed = self
                                 .carried_tags(&key)
                                 .iter()
@@ -2473,6 +2477,19 @@ impl BrowserView {
                                     key
                                 )));
                             }
+                        }
+                    }
+                }
+                let mut ops = Vec::new();
+                for item in &items {
+                    let key = self.tag_key(item);
+                    let mut carried = self.tags.item_tags(&key);
+                    for &tag in &wanted {
+                        if attach {
+                            if !carried.contains(&tag) {
+                                carried.push(tag);
+                            }
+                        } else {
                             carried.retain(|&id| id != tag);
                         }
                     }

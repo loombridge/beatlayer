@@ -625,18 +625,22 @@ impl TagStore {
             }
             ops.push(TagOp::MoveGroup { id: *id, position });
         }
-        let mut tags: Vec<(i64, i64, i32)> = self
+        let mut tags: Vec<(i64, i64, Option<i64>, i32)> = self
             .tags
             .iter()
-            .map(|tag| (tag.id, tag.group, tag.first))
+            .map(|tag| (tag.id, tag.group, tag.parent, tag.first))
             .collect();
-        tags.sort_by_key(|(_, group, first)| (*group, *first));
-        for (index, (id, _, _)) in tags.iter().enumerate() {
-            let position = i32::try_from(index).unwrap_or(i32::MAX);
-            if let Some(tag) = self.tags.iter_mut().find(|t| t.id == *id) {
+        tags.sort_by_key(|(_, group, parent, first)| (*group, *parent, *first));
+        // Each tag's place is among the tags of its own group and parent.
+        let mut places: BTreeMap<(i64, Option<i64>), i32> = BTreeMap::new();
+        for (id, group, parent, _) in tags {
+            let place = places.entry((group, parent)).or_insert(0);
+            let position = *place;
+            *place += 1;
+            if let Some(tag) = self.tags.iter_mut().find(|t| t.id == id) {
                 tag.position = position;
             }
-            ops.push(TagOp::MoveTag { id: *id, position });
+            ops.push(TagOp::MoveTag { id, position });
         }
         ops
     }
@@ -667,6 +671,12 @@ impl TagStore {
 
     /// Fills the store from what the database holds, and says what to write
     /// to it: the groups and tags it doesn't have yet.
+    ///
+    /// The order the database holds wins: the person may have moved a
+    /// group or a tag, and that order is kept between launches (spec:
+    /// browser-tags R1 and R12). The order they were first made in is
+    /// taken from their IDs, which grow as they are made, so Reset Order
+    /// still knows it.
     pub fn load(
         &mut self,
         groups: Vec<TagGroup>,
@@ -674,47 +684,56 @@ impl TagStore {
         items: Vec<(String, Vec<i64>)>,
     ) -> Vec<TagOp> {
         let mut ops = Vec::new();
+        let mut held: Vec<i64> = Vec::new();
         for group in groups {
-            if self.groups.iter().any(|g| g.id == group.id) {
+            held.push(group.id);
+            if let Some(existing) = self.groups.iter_mut().find(|g| g.id == group.id) {
+                existing.position = group.position;
                 continue;
             }
             self.groups.push(group.clone());
-            ops.push(TagOp::AddGroup {
-                id: group.id,
-                name: group.name,
-                position: group.position,
-                builtin: group.builtin,
-            });
         }
+        let mut held_tags: Vec<i64> = Vec::new();
         for tag in tags {
-            if self.tags.iter().any(|t| t.id == tag.id) {
+            held_tags.push(tag.id);
+            if let Some(existing) = self.tags.iter_mut().find(|t| t.id == tag.id) {
+                existing.position = tag.position;
                 continue;
             }
             self.tags.push(tag.clone());
-            ops.push(TagOp::AddTag {
-                id: tag.id,
-                group: tag.group,
-                name: tag.name,
-                parent: tag.parent,
-                position: tag.position,
-                builtin: tag.builtin,
-            });
+        }
+        // The groups and tags the file doesn't hold yet are written to it,
+        // so it holds Beatlayer's own four groups and the tags it gives
+        // too (spec: browser-tags R1).
+        for group in &self.groups {
+            if !held.contains(&group.id) {
+                ops.push(TagOp::AddGroup {
+                    id: group.id,
+                    name: group.name.clone(),
+                    position: group.position,
+                    builtin: group.builtin,
+                });
+            }
+        }
+        for tag in &self.tags {
+            if !held_tags.contains(&tag.id) {
+                ops.push(TagOp::AddTag {
+                    id: tag.id,
+                    group: tag.group,
+                    name: tag.name.clone(),
+                    parent: tag.parent,
+                    position: tag.position,
+                    builtin: tag.builtin,
+                });
+            }
         }
         for (key, tags) in items {
-            let before = self.items.get(&key).cloned().unwrap_or_default();
             let after: BTreeSet<i64> = tags.into_iter().collect();
-            if before == after {
-                continue;
-            }
             if after.is_empty() {
                 self.items.remove(&key);
             } else {
-                self.items.insert(key.clone(), after.clone());
+                self.items.insert(key, after);
             }
-            ops.push(TagOp::SetItemTags {
-                key,
-                tags: after.into_iter().collect(),
-            });
         }
         self.next_id = self
             .groups
@@ -724,6 +743,35 @@ impl TagStore {
             .max()
             .unwrap_or(0)
             + 1;
+        self.first_orders();
         ops
+    }
+
+    /// Puts each group and tag back in the order it was first made in: the
+    /// order of its ID, which grows as it is made (spec: browser-tags R12).
+    fn first_orders(&mut self) {
+        let mut groups: Vec<i64> = self.groups.iter().map(|group| group.id).collect();
+        groups.sort_unstable();
+        for (index, id) in groups.into_iter().enumerate() {
+            if let Some(group) = self.groups.iter_mut().find(|g| g.id == id) {
+                group.first = i32::try_from(index).unwrap_or(i32::MAX);
+            }
+        }
+        // Each tag's place is among the tags of its own group and parent.
+        let mut tags: Vec<(i64, i64, Option<i64>)> = self
+            .tags
+            .iter()
+            .map(|tag| (tag.id, tag.group, tag.parent))
+            .collect();
+        tags.sort_unstable();
+        let mut places: BTreeMap<(i64, Option<i64>), i32> = BTreeMap::new();
+        for (id, group, parent) in tags {
+            let place = places.entry((group, parent)).or_insert(0);
+            let first = *place;
+            *place += 1;
+            if let Some(tag) = self.tags.iter_mut().find(|t| t.id == id) {
+                tag.first = first;
+            }
+        }
     }
 }

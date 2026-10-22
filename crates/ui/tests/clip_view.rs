@@ -1166,14 +1166,31 @@ fn the_middle_button_pans_the_note_area() {
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let grid = n.grid();
     let over = grid.center();
-    let before = n.h.main.clip_view().top();
+    let note = n.notes()[0].clone();
+    // The note's rectangle as the editor draws it, from the key at the
+    // grid's top edge.
+    let before = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
     // A middle-button drag of 100 points right and 50 down pans the note
-    // area with the pointer: the key track follows it down.
+    // area with the pointer: the note follows it 50 points down the grid.
     n.h.middle_drag(over, over + vec2(100.0, 50.0));
-    let after = n.h.main.clip_view().top();
+    let after = note_rect(
+        grid,
+        n.marker(),
+        n.length(),
+        n.h.main.clip_view().top(),
+        &note,
+    );
     assert!(
-        (before - after - 50.0 / KEY_HEIGHT).abs() < 0.01,
-        "the key track moved 50 points down: {before} to {after}"
+        (after.top() - before.top() - 50.0).abs() < 0.01,
+        "the note moved 50 points down with the pointer: {} to {}",
+        before.top(),
+        after.top()
     );
     // Nothing else changed: no selection, no note, no undo step.
     assert!(n.selected().is_empty(), "no note is selected");

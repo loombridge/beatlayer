@@ -1969,12 +1969,14 @@ impl ClipViewUi {
             }
         }
         // Spec: view-options R1, piano-roll R44. A middle-button drag pans
-        // the note area, the key track following the pointer.
+        // the note area, the key track following the pointer: the rows move
+        // down the view as `top` grows (`y_of_key`), as the wheel moves
+        // them.
         if let Some(delta) = crate::middle::pan(ui, grid) {
             if rows.folded {
-                self.first = (self.first - delta.y / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
+                self.first = (self.first + delta.y / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
             } else {
-                self.top = (self.top - delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
+                self.top = (self.top + delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
             }
         }
         // Spec: piano-roll. S-A11Y-008 and S-A11Y-009, the note-selection

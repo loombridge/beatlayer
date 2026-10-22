@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-580 commands in 38 areas.
+601 commands in 40 areas.
 
 ## Permission classes
 
@@ -84,6 +84,12 @@ Each command has:
 | [`arrangement.zoom`](#arrangementzoom) | Zoom Arrangement | `read` | `Plus`; `Minus` | `Plus`; `Minus` |
 | [`arrangement.zoom_back`](#arrangementzoom_back) | Zoom Back from Time Selection | `read` | `X` | `X` |
 | [`arrangement.zoom_to_selection`](#arrangementzoom_to_selection) | Zoom to Time Selection | `read` | `Z` | `Z` |
+| [`articulation.add`](#articulationadd) | Add Articulation | `edit` |  |  |
+| [`articulation.delete`](#articulationdelete) | Delete Articulation | `edit` |  |  |
+| [`articulation.learn`](#articulationlearn) | Learn Articulation | `read` |  |  |
+| [`articulation.list`](#articulationlist) | List Articulations | `read` |  |  |
+| [`articulation.move`](#articulationmove) | Move Articulation | `edit` |  |  |
+| [`articulation.set`](#articulationset) | Change Articulation | `edit` |  |  |
 | [`assistant.forget_key`](#assistantforget_key) | Forget Assistant API Key | `external` |  |  |
 | [`assistant.send`](#assistantsend) | Send to Assistant | `read` |  |  |
 | [`assistant.set_base_url`](#assistantset_base_url) | Assistant Base URL | `edit` |  |  |
@@ -328,6 +334,12 @@ Each command has:
 | [`export.realtime.restart`](#exportrealtimerestart) | Restart Real-time Rendering | `edit` |  |  |
 | [`export.realtime.skip`](#exportrealtimeskip) | Skip Real-time Rendering Wait | `edit` |  |  |
 | [`export.realtime.status`](#exportrealtimestatus) | Real-time Rendering Status | `read` |  |  |
+| [`file_manager.delete_unused`](#file_managerdelete_unused) | Delete Unused Files | `destructive` |  |  |
+| [`file_manager.edit_file`](#file_manageredit_file) | Edit File | `external` |  |  |
+| [`file_manager.hot_swap`](#file_managerhot_swap) | Hot-Swap File | `edit` |  |  |
+| [`file_manager.replace_file`](#file_managerreplace_file) | Replace File | `edit` |  |  |
+| [`file_manager.set_search_folder`](#file_managerset_search_folder) | Search Folder | `read` |  |  |
+| [`file_manager.state`](#file_managerstate) | File Manager State | `external` |  |  |
 | [`focus.arrangement`](#focusarrangement) | Arrangement View | `read` | `Option+2` | `Alt+2` |
 | [`focus.browser`](#focusbrowser) | Browser | `read` | `Option+5` | `Alt+5` |
 | [`focus.control_bar`](#focuscontrol_bar) | Control Bar | `read` | `Option+0` | `Alt+0` |
@@ -507,18 +519,21 @@ Each command has:
 | [`session.stop_track`](#sessionstop_track) | Stop Track | `read` |  |  |
 | [`session.toggle_follow_actions`](#sessiontoggle_follow_actions) | Toggle Follow Actions | `edit` | `Shift+Enter` | `Shift+Enter` |
 | [`session.triplet_quantization`](#sessiontriplet_quantization) | Triplet Launch Quantization | `read` | `Cmd+3` | `Ctrl+3` |
+| [`set.backups`](#setbackups) | Beatlayer Set Backups | `read` |  |  |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | Collect All and Save | `external` |  |  |
 | [`set.discard_changes`](#setdiscard_changes) | Don't Save | `destructive` |  |  |
 | [`set.discard_recovery`](#setdiscard_recovery) | Discard Recovery | `destructive` |  |  |
 | [`set.list_recoverable`](#setlist_recoverable) | List Recoverable Sets | `read` |  |  |
 | [`set.new`](#setnew) | New Beatlayer Set | `destructive` | `Cmd+N` | `Ctrl+N` |
 | [`set.open`](#setopen) | Open Beatlayer Set... | `external` | `Cmd+O` | `Ctrl+O` |
+| [`set.open_backup`](#setopen_backup) | Open Beatlayer Set Backup | `external` |  |  |
 | [`set.recover`](#setrecover) | Recover Set | `destructive` |  |  |
 | [`set.relink_missing`](#setrelink_missing) | Relink Missing Files | `external` |  |  |
 | [`set.save`](#setsave) | Save Beatlayer Set | `destructive` | `Cmd+S` | `Ctrl+S` |
 | [`set.save_as`](#setsave_as) | Save Beatlayer Set As... | `external` | `Cmd+Shift+S` | `Ctrl+Shift+S` |
 | [`set.save_as_default`](#setsave_as_default) | Save Beatlayer Set As Default Set... | `destructive` |  |  |
 | [`set.save_as_template`](#setsave_as_template) | Save Beatlayer Set As Template... | `destructive` |  |  |
+| [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
@@ -556,14 +571,19 @@ Each command has:
 | [`stems.separate`](#stemsseparate) | Separate Stems | `edit` |  |  |
 | [`stems.status`](#stemsstatus) | Stem Separation Status | `read` |  |  |
 | [`track.add_take_lane`](#trackadd_take_lane) | Add Take Lane | `edit` |  |  |
+| [`track.bounce_in_place`](#trackbounce_in_place) | Bounce Track in Place | `destructive` |  |  |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | Bounce to New Track | `edit` | `Cmd+B` | `Ctrl+B` |
 | [`track.clear_frozen`](#trackclear_frozen) | Clear Tracks Frozen | `edit` |  |  |
 | [`track.create`](#trackcreate) | Insert Track | `edit` | `Cmd+T`; `Cmd+Shift+T`; `Cmd+Option+T` | `Ctrl+T`; `Ctrl+Shift+T`; `Ctrl+Alt+T` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | Create Bounced Track | `edit` |  |  |
 | [`track.delete`](#trackdelete) | Delete Track | `destructive` | `Delete` | `Delete` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | Duplicate Track Without Clips | `edit` |  |  |
 | [`track.freeze`](#trackfreeze) | Freeze Track | `edit` | `Cmd+Option+Shift+F` | `Ctrl+Alt+Shift+F` |
 | [`track.group`](#trackgroup) | Group Tracks | `edit` | `Cmd+G` | `Ctrl+G` |
 | [`track.move`](#trackmove) | Move Track | `edit` |  |  |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | Paste Bounced Audio | `edit` | `Cmd+Option+V` | `Ctrl+Alt+V` |
 | [`track.rename`](#trackrename) | Rename Track | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`track.set_bounced`](#trackset_bounced) | Set Track Bounced | `destructive` |  |  |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | Deactivate All Devices | `edit` |  |  |
 | [`track.set_frozen`](#trackset_frozen) | Set Tracks Frozen | `edit` |  |  |
 | [`track.unfreeze`](#trackunfreeze) | Unfreeze Track | `edit` |  |  |
@@ -602,6 +622,7 @@ Each command has:
 | [`view.toggle_assistant`](#viewtoggle_assistant) | Assistant | `read` |  |  |
 | [`view.toggle_browser`](#viewtoggle_browser) | Browser | `read` | `Cmd+Option+B`, `Cmd+Option+5`; `Cmd+Option+B` | `Ctrl+Alt+B`, `Ctrl+Alt+5`; `Ctrl+Alt+B` |
 | [`view.toggle_clip_view`](#viewtoggle_clip_view) | Clip View | `read` | `Cmd+Option+3` | `Ctrl+Alt+3` |
+| [`view.toggle_file_manager`](#viewtoggle_file_manager) | File Manager | `read` |  |  |
 | [`view.toggle_info_view`](#viewtoggle_info_view) | Info | `read` | `Shift+Slash` | `Shift+Slash` |
 | [`view.toggle_plug_in_windows`](#viewtoggle_plug_in_windows) | Plug-In Windows | `read` | `Cmd+Option+P` | `Ctrl+Alt+P` |
 | [`view.toggle_plugin_list`](#viewtoggle_plugin_list) | Plug-In List | `read` |  |  |
@@ -1630,6 +1651,115 @@ Default keys:
 Arguments: none (send `{}`).
 
 Result: [`ArrangementState`](#arrangementstate).
+
+### Area `articulation`
+
+#### `articulation.add`
+
+**Add Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Adds an articulation to an Articulation Map's list, at `index` (or at the end when it isn't given), with the name `name`. The list holds up to 32 articulations and keeps one at least. One undo step (Add Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. An empty name is the numbered one a new articulation gets. |
+| `index` | integer or null | no | Where in the list it goes, or `null` for the end. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.delete`
+
+**Delete Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the articulation at `index` (counted from 0) from an Articulation Map's list. The list keeps one articulation at least. One undo step (Delete Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.learn`
+
+**Learn Articulation**. Permission: `read`. Contexts: `device-view`.
+
+Lights a row's Learn button, as clicking it does, so the next note-on or control change the device hears becomes that articulation's trigger: a key, or the controller with that one value as its range. Learning it is one undo step (Change Articulation); the button goes out afterwards. Clicking a lit button again, or leaving `index` out, puts it out without a change. It changes only the panel: it isn't an undo step, and it isn't saved with the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `index` | integer or null | no | The articulation's place in the list, from 0; without it, the row that is learning stops. |
+
+Result: [`ArticulationLearn`](#articulationlearn).
+
+#### `articulation.list`
+
+**List Articulations**. Permission: `read`. Contexts: `device-view`.
+
+Reports the articulations an Articulation Map holds, in order: each with its name, its trigger (`{"kind":"none"}`, `{"kind":"key","key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`), its outputs (a key with a velocity, or a controller with a value) and its channel (a number from 1 to 16, or null for none). Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`ArticulationList`](#articulationlist).
+
+#### `articulation.move`
+
+**Move Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Moves the articulation at `index` (counted from 0) in an Articulation Map's list to `to`, or to the end of the list when `to` isn't given. One undo step (Move Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+| `to` | integer or null | no | Where it goes: the articulation there takes its place, or it goes last when `null`. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `articulation.set`
+
+**Change Articulation**. Permission: `edit`. Contexts: `device-view`.
+
+Changes the articulation at `index` (counted from 0) in an Articulation Map's list: its `name`, its `trigger`, its `outputs` or its `channel`. What isn't given stays as it is. A trigger is `{"kind":"none"}`, `{"kind":"key", "key":36}` or `{"kind":"controller","controller":1,"lowest":0,"highest":63}`; an output is `{"kind":"key","key":36,"velocity":100}` or `{"kind":"controller","controller":1,"value":64}`; a channel is a number from 1 to 16, or null for none, so the articulation's notes keep the channel they come in on. Two articulations of a device never trigger on the same key or on overlapping ranges of the same controller. One undo step (Change Articulation).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer from 0 to 255 | yes | Its place in the list, from 0. |
+| `channel` | integer or null | no | Its new channel: a channel from 1 to 16, or `null` for none, so its notes keep the channel they come in on. |
+| `name` | string or null | no | Its new name. |
+| `outputs` | array or null | no | Its new outputs, in order. |
+| `trigger` | [`ArticulationTrigger`](#articulationtrigger) or null | no | Its new trigger. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `assistant`
 
@@ -5629,6 +5759,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
+| `articulations` | array or null | no | An Articulation Map's articulations (the articulation map spec, R16), which a preset of one holds; `null` to keep the ones the device has. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
@@ -5999,6 +6130,101 @@ Default keys: none.
 Arguments: none (send `{}`).
 
 Result: [`RealtimeStatus`](#realtimestatus).
+
+### Area `file_manager`
+
+#### `file_manager.delete_unused`
+
+**Delete Unused Files**. Permission: `destructive`. Contexts: `global`.
+
+Moves the files at `paths`, which the Unused Files section lists, to the system's trash. Nothing is erased outright, but a file another project uses breaks that project, so the files are collected first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `paths` | array of string | yes | The files to move to the trash, by their paths. |
+
+Result: [`DeletedFiles`](#deletedfiles).
+
+#### `file_manager.edit_file`
+
+**Edit File**. Permission: `external`. Contexts: `global`.
+
+Opens the file the row with `hash` names in the external sample editor, as the row's Edit button does: the editor the File & Folder page's Sample Editor row names, or that page itself when it names none. The file's content is checked when Beatlayer comes to the front again: if it has changed, every clip of the set that played the old file plays the new one, in one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to edit, by its content hash, as the row shows it. |
+
+Result: [`EditedFile`](#editedfile).
+
+#### `file_manager.hot_swap`
+
+**Hot-Swap File**. Permission: `edit`. Contexts: `global`.
+
+Arms the browser to replace the file the row with `hash` names, as the row's Hot-Swap button does: the browser opens at the file's folder, and choosing a file there replaces the armed one, as `file_manager.replace_file` does. The browser stays armed, so another file can be chosen.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to replace, by its content hash, as the row shows it. |
+
+Result: [`ReplacedFile`](#replacedfile).
+
+#### `file_manager.replace_file`
+
+**Replace File**. Permission: `edit`. Contexts: `global`.
+
+Replaces the file the row with `hash` names with the file at `path`, as dropping a file from the browser on the row does: every clip and device that used the file uses the new one, in one undo step, each keeping its warp markers only if the new file is exactly as long as the old one. A missing file is relinked to the file given, whatever its content.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file to replace, by its content hash, as the row shows it. |
+| `path` | string | yes | The file to use instead. |
+
+Result: [`ReplacedFile`](#replacedfile).
+
+#### `file_manager.set_search_folder`
+
+**Search Folder**. Permission: `read`. Contexts: `global`.
+
+The folder the Automatic Search's Search Folder names, as the Set Folder… button does: the search covers it and its subfolders. `folder` names the folder; left out, the app asks the person for one. The folder is view state: it isn't saved with the set and it isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string or null | no | The folder the Automatic Search's Search Folder names. Left out, the app asks the person for one. |
+
+Result: [`FileManagerState`](#filemanagerstate).
+
+#### `file_manager.state`
+
+**File Manager State**. Permission: `external`. Contexts: `global`.
+
+What the File Manager lists: the files the set uses with their locations and what uses them, the missing files, the files used from outside the project grouped by where they are, the files in the project that nothing uses, and the Automatic Search's switches with the candidates its last search found. It is `external` because it lists files outside the project.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`FileManagerState`](#filemanagerstate).
 
 ### Area `focus`
 
@@ -9145,15 +9371,32 @@ Result: [`LaunchSettings`](#launchsettings).
 
 ### Area `set`
 
-#### `set.collect_all_and_save`
+#### `set.backups`
 
-**Collect All and Save**. Permission: `external`. Contexts: `global`.
+**Beatlayer Set Backups**. Permission: `read`. Contexts: `global`.
 
-Copies every file the open set uses that lives outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, as File ▸ Collect All and Save does in Live, so the set no longer depends on files elsewhere. Fails if the set has never been saved; use `set.save_as` to give it a project folder first. The result's `files` is how many files were copied.
+The open set's backups, in the project folder's `Backup` folder, newest first, each with the time it was made in local time. The list is empty when the set has no backups.
 
 Default keys: none.
 
 Arguments: none (send `{}`).
+
+Result: [`Backups`](#backups).
+
+#### `set.collect_all_and_save`
+
+**Collect All and Save**. Permission: `external`. Contexts: `global`.
+
+Copies the files the open set uses that live outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, as File ▸ Collect All and Save does in Live, so the set no longer depends on files elsewhere. `groups` chooses which places to collect from: "other-project", "user-library" and "elsewhere"; all of them when none are given. Fails if the set has never been saved; use `set.save_as` to give it a project folder first. The result's `files` is how many files were copied.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `groups` | array of [`ExternalGroup`](#externalgroup) | no | The groups to collect from: "other-project", "user-library" or "elsewhere". All of them when none are given. |
+| `project` | string or null | no | The project folder to collect for, when it isn't the open set's: every set in it is rewritten, each keeping the version it replaces in its project's `Backup` folder (R16). |
 
 Result: [`FileReport`](#filereport).
 
@@ -9233,6 +9476,22 @@ Arguments:
 
 Result: [`SetResult`](#setresult).
 
+#### `set.open_backup`
+
+**Open Beatlayer Set Backup**. Permission: `external`. Contexts: `global`.
+
+Opens the backup at `path` as the set itself, as File ▸ Open Beatlayer Set Backups does: the set keeps its own file and name, its song is the backup's, and it opens unsaved with an empty undo history, so `set.save` makes the backup the set's current version. Refuses while the set has unsaved changes, as `set.open` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The backup to open, by its path. |
+
+Result: [`SetResult`](#setresult).
+
 #### `set.recover`
 
 **Recover Set**. Permission: `destructive`. Contexts: `global`.
@@ -9253,7 +9512,7 @@ Result: [`RecoveredSet`](#recoveredset).
 
 **Relink Missing Files**. Permission: `external`. Contexts: `global`.
 
-Searches for the files the open set uses that are missing or changed, and relinks each one to the first file found with the same content, as Live's automatic search does. The search covers the set's project folder, the User Library, the folders the files were last in, and any `folders` given, each with its subfolders. The result's `files` is how many files were relinked. It also runs by itself when a set is opened.
+Searches for the files the open set uses that are missing or changed, and relinks each one to the file found with the same content, as Live's automatic search does. The search covers the set's project folder, the User Library, the folders the files were last in, and any `folders` given, each with its subfolders; `project` and `library` switch the first two off, and `folder` names the folder the Automatic Search's Search Folder chooses. A file with one candidate is relinked to it; a file with several keeps its row, and the candidates are in the result's `candidates`, so the person chooses. The result's `files` is how many files were relinked. It also runs by itself when a set is opened.
 
 Default keys: none.
 
@@ -9261,7 +9520,10 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `folder` | string or null | no | The folder the Automatic Search's Search Folder names. |
 | `folders` | array of string | no | Folders to search, each with its subfolders, absolute or relative to the app's working directory. May be empty. |
+| `library` | boolean or null | no | Whether the User Library is searched. On unless asked otherwise. |
+| `project` | boolean or null | no | Whether the set's project folder is searched. On unless asked otherwise. |
 
 Result: [`FileReport`](#filereport).
 
@@ -9332,6 +9594,22 @@ Arguments:
 | `name` | string or null | no | The template's name, without the `.blset` extension; left out uses the open set's name. |
 
 Result: [`SetResult`](#setresult).
+
+#### `set.save_copy`
+
+**Save a Copy...**. Permission: `external`. Contexts: `global`.
+
+Saves a copy of the open set at `path`, as File ▸ Save a Copy... does: in the folder when it is a project folder, otherwise in a new "<name> Project" folder. The copy names the same media files. The open set keeps its file, its name, its undo history and whether it has unsaved changes.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where to save the copy, as a save dialog gives it: a folder and the set's name, such as `/Music/Tango.blset`. |
+
+Result: [`SavedCopy`](#savedcopy).
 
 ### Area `settings`
 
@@ -9925,6 +10203,47 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.bounce_in_place`
+
+**Bounce Track in Place**. Permission: `destructive`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected tracks to audio and replaces each with an audio track holding it: no devices, the track's name with " (Bounce)" after it, its volume, pan, sends, activator, solo, output routing, and mixer automation, and its clips playing the bounced audio. `tracks` names them (left out, the selected tracks). A group is bounced as one track, after its mixer. The files go into Samples/Processed/Bounce. It is destructive, since it deletes the track's devices and clips, and undoing it gives the source track back exactly.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
+#### `track.bounce_to_new_track`
+
+**Bounce to New Track**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders the selected clips, or the time selection on the selected tracks, to audio on a new track directly after each source track, and switches the source material off. `tracks` names the source tracks (left out, the selected ones), `clips` the clips to bounce (left out, the selected clips, or the time selection), and `start` and `end` the time selection. The new track takes its source's name with " (Bounce)" after it, its colour, and its mixer settings, and the files go into Samples/Processed/Bounce. It is an edit.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-001 | `Cmd+B` | `Ctrl+B` | `global` | Bounce the selection to a new audio track | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `channels` | [`Channels`](#channels) | no | How many channels the bounced files hold. |
+| `clips` | array or null | no | The clips to bounce. Left out, the selected clips, or the time selection on the tracks. |
+| `end` | [`Position`](#position) or null | no | Where the time selection ends. Left out, the Arrangement's time selection. |
+| `start` | [`Position`](#position) or null | no | Where the time selection starts. Left out, the Arrangement's time selection. |
+| `tracks` | array or null | no | The tracks to bounce. Left out, the selected tracks. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.clear_frozen`
 
 **Clear Tracks Frozen**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
@@ -9964,6 +10283,24 @@ Arguments:
 | `name` | string | yes | Its name. |
 | `index` | integer, at least 0 | yes | Where it goes in its list, from 0 to the list's length. |
 | `parent` | [`TrackId`](#trackid) or null | no | The group to put it in, or `null` (or nothing) for the top level. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.create_bounced_track`
+
+**Create Bounced Track**. Permission: `edit`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Makes a new audio track directly after the track that was bounced, holding the bounced audio. `bounced` is what the new track holds. `track.bounce_to_new_track` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `track` | [`TrackId`](#trackid) | yes | The new track's ID. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the new track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10061,6 +10398,29 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `track.paste_bounced_audio`
+
+**Paste Bounced Audio**. Permission: `edit`. Contexts: `arrangement`, `session`, `track-headers`.
+
+Renders what Copy last put on the clipboard as it is at the moment of pasting, and places it as Paste places clips: on the track, or in the slot, named. The destination is an audio track, an empty MIDI track, which becomes an audio track, or a take lane. The audio replaces what it covers. With nothing copied, or with the copied source deleted, the command is unavailable. It is an edit, and destructive when it would replace or shorten a clip.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-BOUNCE-002 | `Cmd+Option+V` | `Ctrl+Alt+V` | `arrangement` | Paste bounced audio into the lane or slot | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the audio goes in the Arrangement. Left out, the time selection's start, or the insert marker. |
+| `channels` | [`Channels`](#channels) | no | How many channels the pasted file holds. |
+| `scene` | [`SceneId`](#sceneid) or null | no | The Session slot to paste into. Left out, the Arrangement. |
+| `track` | [`TrackId`](#trackid) or null | no | The track to paste onto. Left out, the selected track. |
+
+Result: [`BounceResult`](#bounceresult).
+
 #### `track.rename`
 
 **Rename Track**. Permission: `edit`. Contexts: `track-headers`.
@@ -10079,6 +10439,23 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `track.set_bounced`
+
+**Set Track Bounced**. Permission: `destructive`. Contexts: `track-headers`, `arrangement`, `session`.
+
+Replaces a track with the audio track a bounce made: no devices, the track's name with " (Bounce)" after it, its mixer settings, and its clips playing the bounce file. `bounced` is what the new track holds. `track.bounce_in_place` is the command a person and an agent run: it renders the file and applies this one. Used directly, it names a file the caller has already written.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track that was bounced. |
+| `bounced` | [`BouncedTrack`](#bouncedtrack) | yes | What the bounced track holds. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -10689,6 +11066,24 @@ Arguments: none (send `{}`).
 
 Result: [`ClipViewState`](#clipviewstate).
 
+#### `view.toggle_file_manager`
+
+**File Manager**. Permission: `read`. Contexts: `global`.
+
+Shows the File Manager in the detail area's place, or hides it, as File ▸ Manage Files and View ▸ File Manager do. `view` chooses which files it lists: "set" for the open set's, "project" for a project folder's, "user-library" for the User Library's. `project` names the project folder Manage Project works on, when it isn't the open set's. The File Manager's state is view state: it isn't saved in the set and it isn't an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean or null | no | Whether it shows (`true`) or hides (`false`). Left out, it shows when it is hidden and hides when it shows. |
+| `project` | string or null | no | The project folder Manage Project shows, when it isn't the open set's. |
+| `view` | [`Scope`](#scope) or null | no | Which files the File Manager shows: "set", "project" or "user-library". Left out, it keeps the view it shows. |
+
+Result: [`FileManagerState`](#filemanagerstate).
+
 #### `view.toggle_info_view`
 
 **Info**. Permission: `read`. Contexts: `global`.
@@ -10839,6 +11234,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`arrangement.resize_clips`](#arrangementresize_clips) | the query tool's `track` | `clips` |
 | [`arrangement.reverse`](#arrangementreverse) | the query tool's `track` | `clips` |
 | [`arrangement.split`](#arrangementsplit) | the query tool's `track` | `clips` |
+| [`articulation.add`](#articulationadd) | `articulation.list` | `articulations` |
+| [`articulation.delete`](#articulationdelete) | `articulation.list` | `articulations` |
+| [`articulation.move`](#articulationmove) | `articulation.list` | `articulations` |
+| [`articulation.set`](#articulationset) | `articulation.list` | `articulations` |
 | [`assistant.forget_key`](#assistantforget_key) | `settings.state` | `assistant.key_set` |
 | [`assistant.set_base_url`](#assistantset_base_url) | `settings.state` | `assistant.base_url` |
 | [`assistant.set_key`](#assistantset_key) | `settings.state` | `assistant.key_set` |
@@ -11023,6 +11422,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`export.realtime.cancel`](#exportrealtimecancel) | `export.realtime.status` | `phase` |
 | [`export.realtime.restart`](#exportrealtimerestart) | `export.realtime.status` | `phase` |
 | [`export.realtime.skip`](#exportrealtimeskip) | `export.realtime.status` | `phase` |
+| [`file_manager.edit_file`](#file_manageredit_file) | the query tool's `clip` | `data.audio.media` |
+| [`file_manager.replace_file`](#file_managerreplace_file) | the query tool's `clip` | `data.audio.media` |
 | [`keymap.bind`](#keymapbind) | `keymap.state` | `shortcuts` |
 | [`keymap.reset`](#keymapreset) | `keymap.state` | `shortcuts` |
 | [`keymap.unbind`](#keymapunbind) | `keymap.state` | `shortcuts` |
@@ -11137,6 +11538,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
 | [`set.open`](#setopen) | the query tool's `song` | `set.path` |
+| [`set.open_backup`](#setopen_backup) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
@@ -11170,14 +11572,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`stems.install`](#stemsinstall) | `stems.status` | `install` |
 | [`stems.separate`](#stemsseparate) | the query tool's `song` | `tracks` |
 | [`track.add_take_lane`](#trackadd_take_lane) | the query tool's `track` | `take_lanes` |
+| [`track.bounce_in_place`](#trackbounce_in_place) | the query tool's `song` | `tracks` |
+| [`track.bounce_to_new_track`](#trackbounce_to_new_track) | the query tool's `song` | `tracks` |
 | [`track.clear_frozen`](#trackclear_frozen) | the query tool's `track` | `frozen` |
 | [`track.create`](#trackcreate) | the query tool's `song` | `tracks` |
+| [`track.create_bounced_track`](#trackcreate_bounced_track) | the query tool's `song` | `tracks` |
 | [`track.delete`](#trackdelete) | the query tool's `song` | `tracks` |
 | [`track.duplicate_without_clips`](#trackduplicate_without_clips) | the query tool's `song` | `tracks` |
 | [`track.freeze`](#trackfreeze) | the query tool's `track` | `frozen` |
 | [`track.group`](#trackgroup) | the query tool's `song` | `tracks` |
 | [`track.move`](#trackmove) | the query tool's `song` | `tracks` |
+| [`track.paste_bounced_audio`](#trackpaste_bounced_audio) | the query tool's `track` | `clips` |
 | [`track.rename`](#trackrename) | the query tool's `track` | `name` |
+| [`track.set_bounced`](#trackset_bounced) | the query tool's `song` | `tracks` |
 | [`track.set_devices_enabled`](#trackset_devices_enabled) | the query tool's `track` | `devices` |
 | [`track.set_frozen`](#trackset_frozen) | the query tool's `track` | `frozen` |
 | [`track.unfreeze`](#trackunfreeze) | the query tool's `track` | `frozen` |
@@ -11222,6 +11629,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.save_default_preset`](#devicesave_default_preset) | writes a file outside the set; the set doesn't change |
 | [`device.save_preset`](#devicesave_preset) | writes a file outside the set; the set doesn't change |
 | [`export.audio`](#exportaudio) | writes a file outside the set; the set doesn't change |
+| [`file_manager.delete_unused`](#file_managerdelete_unused) | moves files outside the set to the trash; the set doesn't change |
+| [`file_manager.hot_swap`](#file_managerhot_swap) | the File Manager's state is read with `file_manager.state`, which is `external` because it lists files outside the project |
+| [`file_manager.state`](#file_managerstate) | a query of its own: it reads the File Manager, and is `external` for the files it lists |
 | [`midi.export_clip`](#midiexport_clip) | writes a file outside the set; the set doesn't change |
 | [`pad.save_default`](#padsave_default) | the default pad is the shell's, kept in memory and in the User Library, not in the set; the next `pad.drop` on an empty pad makes its chain from it |
 | [`plugin.export_list`](#pluginexport_list) | writes a file outside the set; the set doesn't change |
@@ -11229,6 +11639,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.relink_missing`](#setrelink_missing) | finds files outside the set; the clips that use them read their media |
 | [`set.save_as_default`](#setsave_as_default) | writes a file outside the set; the set doesn't change |
 | [`set.save_as_template`](#setsave_as_template) | writes a file outside the set; the set doesn't change |
+| [`set.save_copy`](#setsave_copy) | writes a file outside the set; the set doesn't change |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | the app doesn't host the autosave service yet, so no read command reports Save Continuously; the command's own result does |
 
 ## Types
@@ -11776,6 +12187,308 @@ What the Arrangement View shows: every view command returns it.
     "automation_arm"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Articulation`
+
+One articulation of an Articulation Map.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, which the panel shows and the Articulation control reads. |
+| `trigger` | [`ArticulationTrigger`](#articulationtrigger) | yes | What makes it current. |
+| `channel` | integer or null | no | The channel its notes go out on, or `None` for the channel they come in on. |
+| `outputs` | array of [`ArticulationOutput`](#articulationoutput) | no | What it sends when it becomes current, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One articulation of an Articulation Map.",
+  "properties": {
+    "channel": {
+      "description": "The channel its notes go out on, or `None` for the channel they come in on.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name, which the panel shows and the Articulation control reads.",
+      "type": "string"
+    },
+    "outputs": {
+      "description": "What it sends when it becomes current, in order.",
+      "items": {
+        "$ref": "#/$defs/ArticulationOutput"
+      },
+      "type": "array"
+    },
+    "trigger": {
+      "$ref": "#/$defs/ArticulationTrigger",
+      "description": "What makes it current."
+    }
+  },
+  "required": [
+    "name",
+    "trigger"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationLearn`
+
+What `articulation.learn` returns: the row that is learning.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `index` | integer or null | yes | The articulation's place in the list, from 0, or `null` when none is learning. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `articulation.learn` returns: the row that is learning.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "index": {
+      "description": "The articulation's place in the list, from 0, or `null` when none is learning.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device",
+    "index"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationList`
+
+What `articulation.list` returns: an Articulation Map's articulations, in order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `articulations` | array of [`Articulation`](#articulation) | yes | Its articulations, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `articulation.list` returns: an Articulation Map's articulations, in order.",
+  "properties": {
+    "articulations": {
+      "description": "Its articulations, in order.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "articulations"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArticulationOutput`
+
+What an articulation sends when it becomes current.
+
+One of:
+
+- an object with `kind` = `"key"`, `key` (integer from 0 to 255), `velocity` (integer from 0 to 255): A key, 0 to 127, with a velocity, 1 to 127.
+- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `value` (integer from 0 to 255): A controller, 0 to 127, with a value, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an articulation sends when it becomes current.",
+  "oneOf": [
+    {
+      "description": "A key, 0 to 127, with a velocity, 1 to 127.",
+      "properties": {
+        "key": {
+          "description": "The key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "key",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The velocity.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "key",
+        "velocity"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A controller, 0 to 127, with a value, 0 to 127.",
+      "properties": {
+        "controller": {
+          "description": "The controller.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "controller",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "controller",
+        "value"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ArticulationTrigger`
+
+What makes an articulation current.
+
+One of:
+
+- an object with `kind` = `"none"`: None: only the Articulation control chooses it.
+- an object with `kind` = `"key"`, `key` (integer from 0 to 255): A key, 0 to 127, matched on any channel at any velocity.
+- an object with `kind` = `"controller"`, `controller` (integer from 0 to 255), `lowest` (integer from 0 to 255), `highest` (integer from 0 to 255): A controller, 0 to 127, with a range of values from a lowest to a highest.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What makes an articulation current.",
+  "oneOf": [
+    {
+      "description": "None: only the Articulation control chooses it.",
+      "properties": {
+        "kind": {
+          "const": "none",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A key, 0 to 127, matched on any channel at any velocity.",
+      "properties": {
+        "key": {
+          "description": "The key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "key"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A controller, 0 to 127, with a range of values from a lowest to a highest.",
+      "properties": {
+        "controller": {
+          "description": "The controller.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "highest": {
+          "description": "The highest value of the range.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "controller",
+          "type": "string"
+        },
+        "lowest": {
+          "description": "The lowest value of the range.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "controller",
+        "lowest",
+        "highest"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -12929,6 +13642,77 @@ What `device.autosample_open` returns.
 
 </details>
 
+### `Backup`
+
+One of the open set's backups (R18).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the backup is. |
+| `name` | string | yes | Its name, with its time in brackets. |
+| `time` | string | yes | When it was made, in local time. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the open set's backups (R18).",
+  "properties": {
+    "name": {
+      "description": "Its name, with its time in brackets.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where the backup is.",
+      "type": "string"
+    },
+    "time": {
+      "description": "When it was made, in local time.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "name",
+    "time"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Backups`
+
+What `set.backups` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backups` | array of [`Backup`](#backup) | yes | The backups, newest first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.backups` returns.",
+  "properties": {
+    "backups": {
+      "description": "The backups, newest first.",
+      "items": {
+        "$ref": "#/$defs/Backup"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "backups"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BandResult`
 
 One octave band.
@@ -13118,6 +13902,194 @@ A plug-in that failed a scan, and why.
 
 </details>
 
+### `BounceResult`
+
+What a bounce did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks the bounce made or changed. |
+| `clips` | array of [`ClipId`](#clipid) | no | The clips it made. |
+| `files` | array of string | no | The files it wrote. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a bounce did.",
+  "properties": {
+    "clips": {
+      "description": "The clips it made.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The files it wrote.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tracks": {
+      "description": "The tracks the bounce made or changed.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedAutomation`
+
+One automated mixer control of a bounced track: the control it drives and its envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The control: a mixer control or a send. |
+| `envelope` | [`Envelope`](#envelope) | yes | Its envelope. |
+| `enabled` | boolean | yes | Whether the envelope drove the control. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One automated mixer control of a bounced track: the control it drives and its envelope.",
+  "properties": {
+    "enabled": {
+      "description": "Whether the envelope drove the control.",
+      "type": "boolean"
+    },
+    "envelope": {
+      "$ref": "#/$defs/Envelope",
+      "description": "Its envelope."
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The control: a mixer control or a send."
+    }
+  },
+  "required": [
+    "target",
+    "envelope",
+    "enabled"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BouncedTrack`
+
+The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The track's name: its source's name with " (Bounce)" after it. |
+| `automation` | array of [`BouncedAutomation`](#bouncedautomation) | no | Its mixer automation: one envelope per automated mixer control. |
+| `clips` | array of [`Clip`](#clip) | no | The clips on its Arrangement lane. |
+| `mixer` | [`Mixer`](#mixer) | no | Its mixer settings: its source's volume, pan, activator, and solo. |
+| `output` | [`Output`](#output) | no | Where its audio goes. |
+| `sends` | array of pair of [`TrackId`](#trackid) and number | no | Its sends, by return track: the level of each send that isn't at −∞ dB. |
+| `slots` | array of pair of [`SceneId`](#sceneid) and [`Clip`](#clip) | no | The clips in its Session slots, by scene. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The audio track a bounce made: its name, its mixer settings, its sends, its output routing, its mixer automation, and its clips.",
+  "properties": {
+    "automation": {
+      "description": "Its mixer automation: one envelope per automated mixer control.",
+      "items": {
+        "$ref": "#/$defs/BouncedAutomation"
+      },
+      "type": "array"
+    },
+    "clips": {
+      "description": "The clips on its Arrangement lane.",
+      "items": {
+        "$ref": "#/$defs/Clip"
+      },
+      "type": "array"
+    },
+    "mixer": {
+      "$ref": "#/$defs/Mixer",
+      "default": {
+        "arm": false,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false,
+        "volume": 1.0
+      },
+      "description": "Its mixer settings: its source's volume, pan, activator, and solo."
+    },
+    "name": {
+      "description": "The track's name: its source's name with \" (Bounce)\" after it.",
+      "type": "string"
+    },
+    "output": {
+      "$ref": "#/$defs/Output",
+      "default": {
+        "type": "default"
+      },
+      "description": "Where its audio goes."
+    },
+    "sends": {
+      "description": "Its sends, by return track: the level of each send that isn't at −∞ dB.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/TrackId"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "slots": {
+      "description": "The clips in its Session slots, by scene.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/SceneId"
+          },
+          {
+            "$ref": "#/$defs/Clip"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Bpm`
 
 A tempo in quarter notes per minute, whatever the time signature.
@@ -13268,6 +14240,49 @@ What the browser shows: most browser commands return it.
     "selected",
     "preview",
     "index"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Candidate`
+
+A file a missing file could be relinked to (R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The missing file's content hash. |
+| `name` | string | yes | The candidate's name. |
+| `paths` | array of string | yes | Where the candidates are. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file a missing file could be relinked to (R14).",
+  "properties": {
+    "hash": {
+      "description": "The missing file's content hash.",
+      "type": "string"
+    },
+    "name": {
+      "description": "The candidate's name.",
+      "type": "string"
+    },
+    "paths": {
+      "description": "Where the candidates are.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash",
+    "name",
+    "paths"
   ],
   "type": "object"
 }
@@ -14255,6 +15270,43 @@ One channel's levels.
     "rms_dbfs"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Channels`
+
+How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.
+
+One of:
+
+- `"auto"`: One channel when the render's two channels are equal at every frame, two otherwise.
+- `"mono"`: One channel: the mean of the two.
+- `"stereo"`: Two channels: a mono render's in both.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How many channels a bounce's files hold: `auto` (the default) one channel when the render's two channels are equal at every frame and two otherwise, `mono` one channel, the mean of the two, and `stereo` two channels, a mono render's in both.",
+  "oneOf": [
+    {
+      "const": "auto",
+      "description": "One channel when the render's two channels are equal at every frame, two otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "mono",
+      "description": "One channel: the mean of the two.",
+      "type": "string"
+    },
+    {
+      "const": "stereo",
+      "description": "Two channels: a mono render's in both.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -15562,6 +16614,37 @@ One of:
 
 </details>
 
+### `DeletedFiles`
+
+What `file_manager.delete_unused` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `files` | array of string | yes | The files that were moved to the trash. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.delete_unused` returns.",
+  "properties": {
+    "files": {
+      "description": "The files that were moved to the trash.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Device`
 
 A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -15573,6 +16656,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `kind` | [`DeviceKind`](#devicekind) | yes | What the device is. |
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
+| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then. |
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `configured` | array or null | no | The plug-in parameters the device's panel holds, in order (clap-hosting R5, configure mode): the list Configure Mode edits, saved with the set. Left out until it's set: until then all of a plug-in's parameters are configured when it has no more than [`CONFIGURE_THRESHOLD`], and none when it has more (manual 24.1). Native devices never set it. |
@@ -15601,6 +16685,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 {
   "description": "A device in a track's chain: a native instrument or effect, or a plug-in.",
   "properties": {
+    "articulations": {
+      "description": "An Articulation Map's articulations, in order (WP-6.47; the articulation map spec, R2): each with a name, a trigger, up to four outputs and a channel. Empty for every device that isn't an articulation map, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
     "b_active": {
       "description": "Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active.",
       "type": "boolean"
@@ -16586,8 +17677,10 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
 | `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
+| `articulations` | array of [`Articulation`](#articulation) | no | An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device. |
 | `configured` | array of [`ConfiguredParam`](#configuredparam) | no | The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device. |
 | `knobs` | array of integer, at least 0 | no | The knob each of the panel's parameters is drawn on, 0 to 7, parallel to `description`'s parameters (clap-hosting R5, WP-5.40): a knob's context menu remaps the knob it is right-clicked on. Empty for a device that isn't a plug-in. |
+| `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -16597,6 +17690,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 {
   "description": "What the generic UI needs to draw a device (WP-2.5): its type's description and its parameters' values now.",
   "properties": {
+    "articulations": {
+      "description": "An Articulation Map's articulations, in order: the list its panel shows. Empty for every other device.",
+      "items": {
+        "$ref": "#/$defs/Articulation"
+      },
+      "type": "array"
+    },
     "configured": {
       "description": "The parameters a plug-in device's panel can show, in configured order (clap-hosting R5, configure mode): a knob's context menu offers them, each over the knob it is right-clicked on. Empty for a native device.",
       "items": {
@@ -16616,6 +17716,16 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
         "type": "integer"
       },
       "type": "array"
+    },
+    "learning": {
+      "description": "The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "loaded_slots": {
       "description": "For a device with sample slots: whether each slot holds a sample.",
@@ -17797,6 +18907,52 @@ What an edit did, and what's selected afterwards.
 
 </details>
 
+### `EditedFile`
+
+What `file_manager.edit_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file that was opened. |
+| `file` | string | yes | Its path. |
+| `editor` | string | yes | The editor it was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor. |
+| `opened` | boolean | yes | Whether the editor was found and started. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.edit_file` returns.",
+  "properties": {
+    "editor": {
+      "description": "The editor it was opened in, or the Settings page that was opened instead, when the File & Folder page names no editor.",
+      "type": "string"
+    },
+    "file": {
+      "description": "Its path.",
+      "type": "string"
+    },
+    "hash": {
+      "description": "The file that was opened.",
+      "type": "string"
+    },
+    "opened": {
+      "description": "Whether the editor was found and started.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hash",
+    "file",
+    "editor",
+    "opened"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EditedSample`
 
 What `clip.edit_sample` returns.
@@ -18215,6 +19371,102 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 
 </details>
 
+### `ExternalFiles`
+
+A group of files outside the project (R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `group` | [`ExternalGroup`](#externalgroup) | yes | Where the group's files are. |
+| `count` | integer, at least 0 | yes | How many files the group has. |
+| `size` | integer, at least 0 | yes | How big they are together, in bytes. |
+| `files` | array of [`FileRow`](#filerow) | yes | The files themselves. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group of files outside the project (R15).",
+  "properties": {
+    "count": {
+      "description": "How many files the group has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "The files themselves.",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "group": {
+      "$ref": "#/$defs/ExternalGroup",
+      "description": "Where the group's files are."
+    },
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "size": {
+      "description": "How big they are together, in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "group",
+    "count",
+    "size",
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExternalGroup`
+
+Where a file outside the project lives (R15): the groups the External Files section lists.
+
+One of:
+
+- `"other-project"`: In another project folder.
+- `"user-library"`: In the User Library.
+- `"elsewhere"`: Somewhere else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a file outside the project lives (R15): the groups the External Files section lists.",
+  "oneOf": [
+    {
+      "const": "other-project",
+      "description": "In another project folder.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "In the User Library.",
+      "type": "string"
+    },
+    {
+      "const": "elsewhere",
+      "description": "Somewhere else.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ExternalPort`
 
 An external device's MIDI To: `none` (No Output), or `port` with the MIDI output port's `name` as the MIDI settings list it.
@@ -18459,6 +19711,113 @@ File & Folder's settings in `settings.state`.
 
 </details>
 
+### `FileManagerState`
+
+What the File Manager shows (R10 to R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the File Manager shows. |
+| `scope` | [`Scope`](#scope) | yes | Which files it shows. |
+| `sections` | array of [`FileSection`](#filesection) | yes | The sections on screen, in order (R21). |
+| `files` | array of [`FileRow`](#filerow) | yes | The files the set uses (R11). |
+| `missing` | array of [`FileRow`](#filerow) | yes | The files that are missing (R13). |
+| `external` | array of [`ExternalFiles`](#externalfiles) | yes | The files used from outside the project (R15). |
+| `unused` | array of [`UnusedFiles`](#unusedfiles) | yes | The files in the project that nothing uses (R17). |
+| `search` | [`Search`](#search) | yes | The Automatic Search (R14). |
+| `packing` | boolean | yes | Whether the Packing section shows (R16). |
+| `hot_swap` | string or null | no | The file armed for hot-swapping, by its content hash, when a row's Hot-Swap button armed it (R11). |
+| `project` | string or null | no | The project folder it works on, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the File Manager shows (R10 to R17).",
+  "properties": {
+    "external": {
+      "description": "The files used from outside the project (R15).",
+      "items": {
+        "$ref": "#/$defs/ExternalFiles"
+      },
+      "type": "array"
+    },
+    "files": {
+      "description": "The files the set uses (R11).",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "hot_swap": {
+      "description": "The file armed for hot-swapping, by its content hash, when a row's Hot-Swap button armed it (R11).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "missing": {
+      "description": "The files that are missing (R13).",
+      "items": {
+        "$ref": "#/$defs/FileRow"
+      },
+      "type": "array"
+    },
+    "open": {
+      "description": "Whether the File Manager shows.",
+      "type": "boolean"
+    },
+    "packing": {
+      "description": "Whether the Packing section shows (R16).",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "The project folder it works on, when it has one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope",
+      "description": "Which files it shows."
+    },
+    "search": {
+      "$ref": "#/$defs/Search",
+      "description": "The Automatic Search (R14)."
+    },
+    "sections": {
+      "description": "The sections on screen, in order (R21).",
+      "items": {
+        "$ref": "#/$defs/FileSection"
+      },
+      "type": "array"
+    },
+    "unused": {
+      "description": "The files in the project that nothing uses (R17).",
+      "items": {
+        "$ref": "#/$defs/UnusedFiles"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open",
+    "scope",
+    "sections",
+    "files",
+    "missing",
+    "external",
+    "unused",
+    "search",
+    "packing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileReport`
 
 What `set.collect_all_and_save` and `set.relink_missing` return.
@@ -18467,6 +19826,7 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
 |---|---|---|---|
 | `path` | string or null | yes | The set's file, if it has one. |
 | `files` | integer, at least 0 | yes | The number of files the command copied (Collect All and Save) or relinked (automatic search). |
+| `candidates` | array of [`Candidate`](#candidate) | no | The files the search found for each missing file, when there was more than one candidate (R14). |
 
 <details><summary>JSON Schema</summary>
 
@@ -18474,6 +19834,13 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
 {
   "description": "What `set.collect_all_and_save` and `set.relink_missing` return.",
   "properties": {
+    "candidates": {
+      "description": "The files the search found for each missing file, when there was more than one candidate (R14).",
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "type": "array"
+    },
     "files": {
       "description": "The number of files the command copied (Collect All and Save) or relinked (automatic search).",
       "format": "uint",
@@ -18491,6 +19858,105 @@ What `set.collect_all_and_save` and `set.relink_missing` return.
   "required": [
     "path",
     "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileRow`
+
+A file the File Manager lists (R11).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file's content hash, which names it. |
+| `name` | string | yes | Its name. |
+| `path` | string | yes | Where it is, or where it was. |
+| `size` | integer, at least 0 | yes | Its length in bytes. |
+| `location` | [`Location`](#location) | yes | Where it is (R11). |
+| `used_by` | array of string | yes | The clips and devices that use it (R11). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file the File Manager lists (R11).",
+  "properties": {
+    "hash": {
+      "description": "The file's content hash, which names it.",
+      "type": "string"
+    },
+    "location": {
+      "$ref": "#/$defs/Location",
+      "description": "Where it is (R11)."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it is, or where it was.",
+      "type": "string"
+    },
+    "size": {
+      "description": "Its length in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "used_by": {
+      "description": "The clips and devices that use it (R11).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash",
+    "name",
+    "path",
+    "size",
+    "location",
+    "used_by"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileSection`
+
+A section of the File Manager (R21).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The section's name. |
+| `count` | integer, at least 0 | yes | How many rows it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A section of the File Manager (R21).",
+  "properties": {
+    "count": {
+      "description": "How many rows it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The section's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "count"
   ],
   "type": "object"
 }
@@ -21371,6 +22837,49 @@ What `device.load_sample` returns.
 
 </details>
 
+### `Location`
+
+Where a file is (R11).
+
+One of:
+
+- `"missing"`: The file isn't where it was, or holds other content now.
+- `"user-library"`: The file is in the User Library.
+- `"project"`: The file is in the project.
+- `"external"`: The file is somewhere else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a file is (R11).",
+  "oneOf": [
+    {
+      "const": "missing",
+      "description": "The file isn't where it was, or holds other content now.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "The file is in the User Library.",
+      "type": "string"
+    },
+    {
+      "const": "project",
+      "description": "The file is in the project.",
+      "type": "string"
+    },
+    {
+      "const": "external",
+      "description": "The file is somewhere else.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `LoopKind`
 
 Which of a layer's loops `device.snap_layer_markers` snaps.
@@ -22605,6 +24114,87 @@ One of:
     }
   ],
   "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
+}
+```
+
+</details>
+
+### `Mixer`
+
+A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `volume` | number | yes | Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative. |
+| `pan` | number | yes | Stereo position from −1.0 (left) to 1.0 (right). |
+| `mute` | boolean | yes | Whether the track is muted: its Track Activator is off. Always off on the Main track. |
+| `solo` | boolean | yes | Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track. |
+| `arm` | boolean | yes | Whether the track is armed for recording. Only audio and MIDI tracks can be armed. |
+| `crossfade` | [`CrossfadeAssign`](#crossfadeassign) | no | Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged. |
+| `pan_mode` | [`PanMode`](#panmode) | no | The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode. |
+| `split_left` | number | no | In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre). |
+| `split_right` | number | no | In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default. |
+| `tap` | [`SendTap`](#sendtap) | no | Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track's mixer settings: its volume, pan, and switches. Its sends are [`Track::sends`]. The rules are in the mixer spec.",
+  "properties": {
+    "arm": {
+      "description": "Whether the track is armed for recording. Only audio and MIDI tracks can be armed.",
+      "type": "boolean"
+    },
+    "crossfade": {
+      "$ref": "#/$defs/CrossfadeAssign",
+      "description": "Which side of the crossfader the track plays on, set by its A and B assign buttons; [`CrossfadeAssign::None`] (the default) plays through at every position. Always `None` on the Main track, which carries the crossfader itself (the mixer spec, R23). Saved only when it's assigned, so a set saved before WP-3.17 loads unchanged."
+    },
+    "mute": {
+      "description": "Whether the track is muted: its Track Activator is off. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "pan": {
+      "description": "Stereo position from −1.0 (left) to 1.0 (right).",
+      "format": "double",
+      "type": "number"
+    },
+    "pan_mode": {
+      "$ref": "#/$defs/PanMode",
+      "description": "The pan mode (the mixer spec, manual 18.1). Saved only where it isn't the default Stereo Pan Mode."
+    },
+    "solo": {
+      "description": "Whether the track is soloed, or, in Cue mode, cue-switched. Always off on the Main track.",
+      "type": "boolean"
+    },
+    "split_left": {
+      "description": "In Split Stereo Pan Mode, the left input channel's position, from −1 (left) to 1 (right), on the constant-power law. Saved only where it differs from the default (centre).",
+      "format": "double",
+      "type": "number"
+    },
+    "split_right": {
+      "description": "In Split Stereo Pan Mode, the right input channel's position, as [`Mixer::split_left`]. Saved only where it differs from the default.",
+      "format": "double",
+      "type": "number"
+    },
+    "tap": {
+      "$ref": "#/$defs/SendTap",
+      "description": "Where sends to this track take their signal from: only a return track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set saved before WP-1.6 loads unchanged."
+    },
+    "volume": {
+      "description": "Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite and never negative.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "volume",
+    "pan",
+    "mute",
+    "solo",
+    "arm"
+  ],
+  "type": "object"
 }
 ```
 
@@ -26872,6 +28462,48 @@ One of:
 
 </details>
 
+### `ReplacedFile`
+
+What `file_manager.replace_file` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes | The file that was replaced. |
+| `path` | string | yes | The file that is used now. |
+| `replaced` | integer, at least 0 | yes | How many clips and devices used it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `file_manager.replace_file` returns.",
+  "properties": {
+    "hash": {
+      "description": "The file that was replaced.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The file that is used now.",
+      "type": "string"
+    },
+    "replaced": {
+      "description": "How many clips and devices used it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "hash",
+    "path",
+    "replaced"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ReplacedSample`
 
 What `clip.replace_sample` returns.
@@ -27691,6 +29323,34 @@ One of:
 
 </details>
 
+### `SavedCopy`
+
+What `set.save_copy` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Where the copy was written. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.save_copy` returns.",
+  "properties": {
+    "path": {
+      "description": "Where the copy was written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SavedDefaults`
 
 What `clip.save_default` and `clip.defaults` return.
@@ -27832,6 +29492,93 @@ Type: integer, at least 1.
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
+}
+```
+
+</details>
+
+### `Scope`
+
+Which files the File Manager shows (R10).
+
+One of:
+
+- `"set"`: The open set's files.
+- `"project"`: A project folder's files.
+- `"user-library"`: The User Library's files.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which files the File Manager shows (R10).",
+  "oneOf": [
+    {
+      "const": "set",
+      "description": "The open set's files.",
+      "type": "string"
+    },
+    {
+      "const": "project",
+      "description": "A project folder's files.",
+      "type": "string"
+    },
+    {
+      "const": "user-library",
+      "description": "The User Library's files.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Search`
+
+The Automatic Search's switches and folder (R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `project` | boolean | yes | Whether the set's project folder is searched. |
+| `library` | boolean | yes | Whether the User Library is searched. |
+| `candidates` | array of [`Candidate`](#candidate) | no | The candidates the last search found, one list for each missing file. |
+| `folder` | string or null | no | The folder Search Folder names. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Automatic Search's switches and folder (R14).",
+  "properties": {
+    "candidates": {
+      "description": "The candidates the last search found, one list for each missing file.",
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "type": "array"
+    },
+    "folder": {
+      "description": "The folder Search Folder names.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "library": {
+      "description": "Whether the User Library is searched.",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "Whether the set's project folder is searched.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "project",
+    "library"
+  ],
+  "type": "object"
 }
 ```
 
@@ -30868,6 +32615,150 @@ What `device.ungroup` returns.
     "devices"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `UnusedFile`
+
+A file in the project that nothing uses (R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `path` | string | yes | Where it is. |
+| `size` | integer, at least 0 | yes | Its length in bytes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file in the project that nothing uses (R17).",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it is.",
+      "type": "string"
+    },
+    "size": {
+      "description": "Its length in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "size"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UnusedFiles`
+
+A group of unused files (R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The group's name. |
+| `group` | [`UnusedKind`](#unusedkind) | yes | What kind of files the group holds. |
+| `count` | integer, at least 0 | yes | How many files the group has. |
+| `size` | integer, at least 0 | yes | How big they are together, in bytes. |
+| `files` | array of [`UnusedFile`](#unusedfile) | yes | The files themselves. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A group of unused files (R17).",
+  "properties": {
+    "count": {
+      "description": "How many files the group has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "The files themselves.",
+      "items": {
+        "$ref": "#/$defs/UnusedFile"
+      },
+      "type": "array"
+    },
+    "group": {
+      "$ref": "#/$defs/UnusedKind",
+      "description": "What kind of files the group holds."
+    },
+    "name": {
+      "description": "The group's name.",
+      "type": "string"
+    },
+    "size": {
+      "description": "How big they are together, in bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "group",
+    "count",
+    "size",
+    "files"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `UnusedKind`
+
+What kind of file an unused file is (R17): the groups the Unused Files section lists.
+
+One of:
+
+- `"recorded"`: Recorded into the project.
+- `"imported"`: Copied into the project.
+- `"processed"`: Written by an edit.
+- `"other"`: Anything else.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What kind of file an unused file is (R17): the groups the Unused Files section lists.",
+  "oneOf": [
+    {
+      "const": "recorded",
+      "description": "Recorded into the project.",
+      "type": "string"
+    },
+    {
+      "const": "imported",
+      "description": "Copied into the project.",
+      "type": "string"
+    },
+    {
+      "const": "processed",
+      "description": "Written by an edit.",
+      "type": "string"
+    },
+    {
+      "const": "other",
+      "description": "Anything else.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

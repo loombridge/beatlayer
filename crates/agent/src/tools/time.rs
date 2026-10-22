@@ -368,6 +368,9 @@ struct Entry {
     command: String,
     args: Value,
     label: String,
+    /// Who made the step the command records, so the history says so
+    /// (undo history R9).
+    maker: bl_model::Maker,
     /// What the engine does on the frame.
     action: Action,
     state: State,
@@ -479,9 +482,10 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
     }
     if is_edit(&entry.command) {
         let label = entry.label.clone();
+        let maker = entry.maker.clone();
         shell.edit(|editor| {
             editor
-                .transact(label, |editor| {
+                .transact_by(maker, label, |editor| {
                     model::run(editor, &entry.command, entry.args.clone())
                 })
                 .map(|_| ())
@@ -491,14 +495,19 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
         // The Arrangement's edits and the browser's drops are the agent's
         // undo steps too.
         shell
-            .run_labelled(entry.label.clone(), &entry.command, entry.args.clone())
+            .run_labelled(
+                entry.maker.clone(),
+                entry.label.clone(),
+                &entry.command,
+                entry.args.clone(),
+            )
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
 }
 
 fn is_edit(id: &str) -> bool {
-    model::handles(id) && id != model::UNDO && id != model::REDO
+    model::handles(id) && id != model::UNDO && id != model::REDO && id != model::GO_TO_STEP
 }
 
 /// What the engine does on the frame: a track mixer or device parameter
@@ -667,6 +676,7 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 question_line(shell, &label, &call, &args)
             )));
             ctx.session.refs = names;
+            let maker = ctx.maker();
             let schedule = &mut ctx.state.schedule;
             schedule.next_id += 1;
             let id = schedule.next_id;
@@ -677,6 +687,7 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 command: command.clone(),
                 args: args.clone(),
                 label: format!("{}: {label} at {position}", ctx.session.client.label()),
+                maker,
                 action,
                 state: State::Waiting,
             };

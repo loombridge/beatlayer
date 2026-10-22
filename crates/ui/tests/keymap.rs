@@ -75,6 +75,7 @@ const SHELL: &[&str] = &[
     "S-BRW-002",
     "S-VIEW-019",
     "S-VIEW-020",
+    "S-VIEW-021",
     "S-FOCUS-001",
     "S-FOCUS-003",
     "S-FOCUS-011",

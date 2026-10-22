@@ -53,6 +53,11 @@ pub const MINIMUM: Vec2 = vec2(1340.0, 640.0);
 /// (L-WIN-009).
 pub const MARGIN: f32 = 9.0;
 
+/// The Undo History panel's width in layout points: the Learn View
+/// column's width (L-WIN-008), which the panel takes the place of
+/// (L-OTH-001).
+pub const UNDO_HISTORY_WIDTH: f32 = 295.0;
+
 /// The Settings window's size with its title bar (L-SET-001).
 pub const SETTINGS_WINDOW: Vec2 = vec2(562.0, 617.0);
 
@@ -479,6 +484,11 @@ pub struct ShellLayout {
     /// Bar's bottom to the window's bottom, and the main view, the detail
     /// area and the Status Bar stop at its left edge.
     pub assistant: Option<Rect>,
+    /// The Undo History panel, in the Learn View's column at the right
+    /// edge (L-OTH-001), while it shows. It sits immediately left of the
+    /// assistant's pane when both show, and the main view, the detail area
+    /// and the Status Bar stop at its left edge.
+    pub undo_history: Option<Rect>,
     /// Every element's rectangle, in [`ELEMENTS`] order.
     pub elements: Vec<(Element, Rect)>,
 }
@@ -501,13 +511,43 @@ impl ShellLayout {
         info_view: bool,
         assistant: Option<f32>,
     ) -> Self {
+        Self::compute_with_panes(size, browser, info_view, assistant, None)
+    }
+
+    /// The same, with the Undo History panel in the Learn View's column
+    /// when `undo_history` gives its width in points. The panel sits
+    /// immediately left of the assistant's pane when both show (L-OTH-001).
+    #[must_use]
+    pub fn compute_with_panes(
+        size: Vec2,
+        browser: bool,
+        info_view: bool,
+        assistant: Option<f32>,
+        undo_history: Option<f32>,
+    ) -> Self {
         let size = size.max(MINIMUM);
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
-        // What the pane takes from the panes and the Status Bar beside it:
-        // its width and the margin between.
-        let taken = assistant.map_or(0.0, |width| width + MARGIN);
-        let right = w - MARGIN - taken;
+        // The panes at the right edge, from the window's margin inwards:
+        // the assistant's, then the Undo History's, 9 points apart.
+        let edge = w - MARGIN;
+        let assistant_left = assistant.map(|width| edge - width);
+        let panel_right = match assistant_left {
+            Some(left) => left - MARGIN,
+            None => edge,
+        };
+        let undo_history = undo_history.map(|width| {
+            Rect::from_min_max(pos2(panel_right - width, y(61.0)), pos2(panel_right, h))
+        });
+        // The main view and the detail area stop 9 points left of the
+        // leftmost pane, and the Status Bar at its left edge (L-WIN-007,
+        // L-WIN-009).
+        let (right, status_right) = match (&undo_history, assistant_left) {
+            (Some(panel), _) => (panel.left() - MARGIN, panel.left()),
+            (None, Some(left)) => (left - MARGIN, left),
+            (None, None) => (edge, w),
+        };
+        let taken = w - status_right;
 
         // Rows measured from the top keep their place; the detail area and
         // the Status Bar keep their distance from the bottom.
@@ -577,6 +617,7 @@ impl ShellLayout {
             device_view,
             status_bar,
             assistant,
+            undo_history,
             elements,
         }
     }
@@ -601,6 +642,9 @@ impl ShellLayout {
         }
         if let Some(assistant) = &mut self.assistant {
             move_rect(assistant);
+        }
+        if let Some(undo_history) = &mut self.undo_history {
+            move_rect(undo_history);
         }
         if let Some(info_view) = &mut self.info_view {
             move_rect(info_view);
@@ -632,6 +676,9 @@ impl ShellLayout {
         if let Some(assistant) = &mut self.assistant {
             scale(assistant);
         }
+        if let Some(undo_history) = &mut self.undo_history {
+            scale(undo_history);
+        }
         if let Some(info_view) = &mut self.info_view {
             scale(info_view);
         }
@@ -660,6 +707,9 @@ impl ShellLayout {
         }
         if let Some(assistant) = self.assistant {
             rows.push(row(D24, "Assistant", assistant));
+        }
+        if let Some(undo_history) = self.undo_history {
+            rows.push(row("L-OTH-001", "Undo History", undo_history));
         }
         rows.extend(
             ELEMENTS

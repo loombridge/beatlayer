@@ -167,6 +167,8 @@ pub enum Area {
     StatusBar,
     /// The assistant's pane at the right edge (D24).
     Assistant,
+    /// The Undo History panel at the right edge (WP-6.28).
+    UndoHistory,
 }
 
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
@@ -467,6 +469,9 @@ pub struct Shell {
     /// The panel's Stop button, which the turn running looks at between
     /// calls.
     assistant_stop_flag: crate::assistant::StopFlag,
+    /// Whether the Undo History panel shows (WP-6.28): view state, never
+    /// part of the set, like the browser's.
+    undo_history_open: bool,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -962,6 +967,7 @@ impl Shell {
             assistant_open: false,
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
+            undo_history_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             file_manager: FileManager::default(),
@@ -1460,6 +1466,42 @@ impl Shell {
         }
     }
 
+    /// Whether the Undo History panel shows (WP-6.28).
+    #[must_use]
+    pub fn undo_history_open(&self) -> bool {
+        self.undo_history_open
+    }
+
+    /// The Undo History panel's state, for the command's result.
+    #[must_use]
+    pub fn undo_history_state(&self) -> bl_shell_spec::commands::UndoHistoryState {
+        let editor = self.editor();
+        bl_shell_spec::commands::UndoHistoryState {
+            open: self.undo_history_open,
+            steps: editor.undo_history().len() + editor.redo_history().len(),
+            current: editor.current_index(),
+        }
+    }
+
+    /// The history's rows, from the top: the steps that can be redone
+    /// first, then the ones that can be undone.
+    #[must_use]
+    pub fn undo_history_rows(&self) -> Vec<bl_model::HistoryStep> {
+        self.editor.history()
+    }
+
+    /// The bottom row of the Undo History panel: the set's start, which no
+    /// step undoes. A set made new reads "New Beatlayer Set", and one
+    /// opened from a file "Open Beatlayer Set".
+    #[must_use]
+    pub fn set_start_label(&self) -> &'static str {
+        if self.set_path().is_some() {
+            "Open Beatlayer Set"
+        } else {
+            "New Beatlayer Set"
+        }
+    }
+
     /// The flag Stop sets, for a host that runs a turn while it also takes
     /// the person's clicks: setting it ends the turn between two calls, as
     /// `assistant.stop` does.
@@ -1496,7 +1538,8 @@ impl Shell {
     /// assistant loop closes with [`Shell::end_assistant_turn`]
     /// (WP-2.23, part 2).
     pub(crate) fn begin_assistant_turn(&mut self, label: &str) {
-        self.editor.begin(label.to_owned());
+        self.editor
+            .begin_by(bl_model::Maker::Assistant, label.to_owned());
     }
 
     /// Closes the turn's undo step, keeping whatever ran.
@@ -4296,20 +4339,22 @@ impl Shell {
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
     /// the set as one undo step named `label`, such as an agent's edit
-    /// labelled with the agent's name. A command that changes nothing in
-    /// the set records nothing. Undo and redo can't be labelled, nor can a
-    /// command that replaces the set (opening or making one).
+    /// labelled with the agent's name, and made by `maker`, so the history
+    /// says who made it. A command that changes nothing in the set records
+    /// nothing. Undo and redo can't be labelled, nor can a command that
+    /// replaces the set (opening or making one).
     ///
     /// # Errors
     ///
     /// As [`Shell::run`]; the set is unchanged.
     pub fn run_labelled(
         &mut self,
+        maker: bl_model::Maker,
         label: impl Into<std::borrow::Cow<'static, str>>,
         id: &str,
         args: Value,
     ) -> Result<Value, ShellError> {
-        let labelled = !matches!(id, model::UNDO | model::REDO)
+        let labelled = !matches!(id, model::UNDO | model::REDO | model::GO_TO_STEP)
             && (model::handles(id)
                 || audio_ids::handles(id)
                 || freeze_ids::handles(id)
@@ -4328,7 +4373,7 @@ impl Shell {
         if !labelled || self.edit_gesture.is_some() {
             return self.run(id, args);
         }
-        self.editor.begin(label);
+        self.editor.begin_by(maker, label);
         let result = self.run(id, args);
         if result.is_ok() {
             if self.editor.commit().unwrap_or(false) {
@@ -5402,7 +5447,7 @@ impl Shell {
                         }
                         contexts.push(Context::DeviceView);
                     }
-                    Area::ControlBar | Area::StatusBar | Area::Assistant => {}
+                    Area::ControlBar | Area::StatusBar | Area::Assistant | Area::UndoHistory => {}
                 }
                 if self.prefs.tab_navigation {
                     contexts.push(Context::TabFocus);
@@ -5442,6 +5487,7 @@ impl Shell {
             ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
+            ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -6619,17 +6665,19 @@ impl Shell {
     /// each with the macro law's follow-ups (macros spec, R6, R7, R11 and
     /// R13), as [`Shell::run`] does for one. The agent's `run` tool calls it
     /// for a batch of edits, so a macro moves the same way through the agent
-    /// API as through a gesture.
+    /// API as through a gesture. The step is made by `maker`, so the history
+    /// says who made it.
     ///
     /// # Errors
     ///
     /// [`ShellError`] saying which step failed and why; the set is unchanged.
     pub fn run_document_edits(
         &mut self,
+        maker: bl_model::Maker,
         label: &str,
         steps: &[(String, Value)],
     ) -> Result<(Vec<Value>, bool), ShellError> {
-        self.editor.begin(label.to_owned());
+        self.editor.begin_by(maker, label.to_owned());
         let start = self.editor.document().clone();
         let mut results = Vec::with_capacity(steps.len());
         for (index, (id, args)) in steps.iter().enumerate() {
@@ -8463,8 +8511,17 @@ impl Shell {
                         .state(self.editor.document(), &self.arrangement),
                     plugin_list: self.plugin_list.state(),
                     assistant: self.assistant_panel_state(),
+                    undo_history: self.undo_history_open,
                     plug_in_windows: self.plug_in_windows,
                 }))
+            }
+            ids::VIEW_TOGGLE_UNDO_HISTORY => {
+                // Spec: undo-history R1, R3. The panel is view state: it
+                // isn't saved with the set and isn't an undo step.
+                Self::args::<NoArgs>(id, args)?;
+                self.undo_history_open = !self.undo_history_open;
+                self.touch();
+                Ok(to_value(&self.undo_history_state()))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

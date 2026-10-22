@@ -1,8 +1,9 @@
-//! Beats', Tones' and Texture's audio-thread work under RealtimeSanitizer
-//! (WP-4.4, WP-4.5): clips played as segments with their loop fills, or as
-//! grains, through a tempo ramp, with the playhead located into them and their
-//! mode and settings changed while they play, each sent as the track's new
-//! clip list. RTSan stops the process at the first allocation, free, lock, or
+//! Every warp mode's audio-thread work under RealtimeSanitizer (WP-4.4,
+//! WP-4.5, WP-4.6): clips played as segments with their loop fills, as grains,
+//! or through Signalsmith Stretch, through a tempo ramp, with the playhead
+//! located into them and their mode and settings changed while they play, each
+//! sent as the track's new clip list. RTSan stops the process at the first
+//! allocation, free, lock, or
 //! blocking call in any of it, and the allocation trap, installed as in every
 //! Beatlayer test binary, fails the test at any heap use it sees.
 
@@ -14,8 +15,8 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
 use bl_engine::{Collector, Compiler, EngineConfig, MediaMap, Registry, TransportCommand, channel};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, BeatsUpdate, Clip, ClipData, Command, ContentHash, Editor, TextureUpdate,
-    TonesUpdate, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
+    AudioData, BeatsUpdate, Clip, ClipData, Command, ComplexProUpdate, ContentHash, Editor,
+    TextureUpdate, TonesUpdate, TrackKind, TransientLoopMode, WarpMarker, WarpMode,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -124,11 +125,13 @@ fn beats_playback_passes_under_rtsan() {
         let command = match round % 24 {
             0 => Some(Command::SetClipWarpMode {
                 clip,
-                mode: match (round / 24) % 4 {
+                mode: match (round / 24) % 6 {
                     0 => WarpMode::Beats,
                     1 => WarpMode::Tones,
                     2 => WarpMode::Texture,
-                    _ => WarpMode::RePitch,
+                    3 => WarpMode::RePitch,
+                    4 => WarpMode::Complex,
+                    _ => WarpMode::ComplexPro,
                 },
             }),
             6 => Some(Command::SetClipWarpSettings {
@@ -149,7 +152,10 @@ fn beats_playback_passes_under_rtsan() {
                     grain_size: Some(10.0 + (round % 490) as f64),
                     flux: Some((round % 100) as f64),
                 }),
-                complex_pro: None,
+                complex_pro: Some(ComplexProUpdate {
+                    formants: Some((round % 101) as f64),
+                    envelope: Some(8 + (round % 505) as u32),
+                }),
             }),
             // Now and then a tempo change: a program swap.
             12 if round % 240 == 12 => Some(Command::SetTempo {

@@ -17,10 +17,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use bl_core::time::Ticks;
 use bl_model::{
-    Change, ChangeSet, Clip, ClipData, ClipId, Command, Document, Editor, TakeLaneId, TrackId,
-    TrackKind,
+    AutomationTarget, Breakpoint, Change, ChangeSet, Clip, ClipData, ClipId, Command, Document,
+    Editor, TakeLaneId, TrackId, TrackKind,
 };
-use bl_shell_spec::arrangement::TimeRange;
+use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
     self as ids, ClipboardState, Direction, Edge, EditResult, LoopSelectionArgs, MoveClipsArgs,
     NudgeArgs, PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode, SplitArgs,
@@ -29,6 +29,7 @@ use bl_shell_spec::editing::{
 use serde::Serialize;
 use serde_json::Value;
 
+use super::automation;
 use super::placing::{clear, clear_on, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
@@ -59,6 +60,23 @@ impl From<bl_model::EditError> for EditFailure {
     }
 }
 
+/// The envelopes over one piece of copied material: a clip's span, or a
+/// track's span of a copied time selection.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvelopeMaterial {
+    /// The track the piece was on.
+    pub source: TrackId,
+    /// The track's distance from the first track of the material.
+    pub distance: usize,
+    /// Where the piece starts, counted from the material's start.
+    pub start: Ticks,
+    /// How long it is.
+    pub length: Ticks,
+    /// Each parameter's shape over the piece, with its positions from the
+    /// piece's start.
+    pub shapes: Vec<(AutomationTarget, Vec<Breakpoint>)>,
+}
+
 /// Material copied from the Arrangement, for pasting: each track's clips,
 /// placed from the material's start.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -75,6 +93,9 @@ pub struct Clipboard {
     /// The tracks it was copied from, in order, to paste onto when no
     /// track is selected.
     pub source: Vec<TrackId>,
+    /// The envelopes over the material's pieces, so a paste carries them
+    /// (the automation editing spec, R9).
+    pub envelopes: Vec<EnvelopeMaterial>,
 }
 
 impl Clipboard {
@@ -162,8 +183,8 @@ fn clear_moved(
     moves: &[(ClipId, TrackId, Ticks, Ticks)],
 ) -> Result<(), EditFailure> {
     let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-    type Lane = (TrackId, Option<TakeLaneId>);
-    let mut spans: BTreeMap<Lane, Vec<(Ticks, Ticks)>> = BTreeMap::new();
+    type Place = (TrackId, Option<TakeLaneId>);
+    let mut spans: BTreeMap<Place, Vec<(Ticks, Ticks)>> = BTreeMap::new();
     for (clip, track, start, end) in moves {
         // A moved clip keeps its take lane, and so clears on it.
         let lane = editor.document().clip_lane(*clip);
@@ -479,26 +500,243 @@ fn clipboard_of(doc: &Document, target: &Target) -> Clipboard {
             (distance, clips)
         })
         .collect();
+    // Spec: automation-editing R9. The material's envelopes go with it.
+    let envelopes = envelope_material(doc, target, &by_track, start, end);
     Clipboard {
         tracks,
         length: end - start,
         start,
         source: by_track.iter().map(|(track, _)| *track).collect(),
+        envelopes,
     }
 }
 
-/// Deletes a target's material.
+/// The envelopes over a track's span: each parameter's shape, with its
+/// positions from the span's start.
+fn envelopes_over(
+    doc: &Document,
+    track: TrackId,
+    start: Ticks,
+    end: Ticks,
+) -> Vec<(AutomationTarget, Vec<Breakpoint>)> {
+    doc.track(track)
+        .map(|track| {
+            track
+                .automation()
+                .map(|(target, automation)| (*target, automation.envelope.shape_in(start, end)))
+                .filter(|(_, shape)| !shape.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The material's tracks, by their distance from the first of them.
+fn tracks_by_distance(
+    doc: &Document,
+    by_track: &[(TrackId, Vec<Clip>)],
+) -> BTreeMap<usize, TrackId> {
+    let lanes = lanes(doc);
+    let first = by_track
+        .first()
+        .and_then(|(track, _)| lane_index(&lanes, *track))
+        .unwrap_or(0);
+    by_track
+        .iter()
+        .map(|(track, _)| (lane_index(&lanes, *track).unwrap_or(first) - first, *track))
+        .collect()
+}
+
+/// The envelopes over the pieces of a target's material, so a copy and a
+/// paste carry them (the automation editing spec, R9).
+fn envelope_material(
+    doc: &Document,
+    target: &Target,
+    by_track: &[(TrackId, Vec<Clip>)],
+    start: Ticks,
+    end: Ticks,
+) -> Vec<EnvelopeMaterial> {
+    let lanes = lanes(doc);
+    let first = by_track
+        .first()
+        .and_then(|(track, _)| lane_index(&lanes, *track))
+        .unwrap_or(0);
+    let distance = |track: &TrackId| lane_index(&lanes, *track).unwrap_or(first) - first;
+    match target {
+        Target::Clips(_) => by_track
+            .iter()
+            .flat_map(|(track, clips)| {
+                clips.iter().map(|clip| EnvelopeMaterial {
+                    source: *track,
+                    distance: distance(track),
+                    start: clip.start - start,
+                    length: clip.length,
+                    shapes: envelopes_over(doc, *track, clip.start, clip.end()),
+                })
+            })
+            .collect(),
+        Target::Time { .. } => by_track
+            .iter()
+            .map(|(track, _)| EnvelopeMaterial {
+                source: *track,
+                distance: distance(track),
+                start: Ticks::ZERO,
+                length: end - start,
+                shapes: envelopes_over(doc, *track, start, end),
+            })
+            .collect(),
+    }
+}
+
+/// Writes the envelopes of `materials` into the tracks they name, each
+/// piece at its own place from `at`.
+///
+/// A piece that lands on another track keeps only the envelopes that go
+/// with a clip to another track: the mixer controls and the sends that
+/// track also has. A device's parameters stay on the track they're on (the
+/// automation editing spec, R9).
+fn write_envelopes(
+    editor: &mut Editor,
+    materials: &[EnvelopeMaterial],
+    tracks: &BTreeMap<usize, TrackId>,
+    at: Ticks,
+) -> Result<(), EditFailure> {
+    for material in materials {
+        let Some(track) = tracks.get(&material.distance) else {
+            continue;
+        };
+        let start = at + material.start;
+        let end = start + material.length;
+        for (target, shape) in &material.shapes {
+            if material.source != *track {
+                let doc = editor.document();
+                if !travels_with(target, doc, *track) {
+                    continue;
+                }
+            }
+            let mut envelope = automation::envelope_of(editor.document(), *track, *target)
+                .cloned()
+                .unwrap_or_default();
+            envelope.write_span(start, end, shape);
+            apply(
+                editor,
+                Command::SetAutomationEnvelope {
+                    track: *track,
+                    target: *target,
+                    points: envelope.points().collect(),
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes the envelopes of `materials` over their spans, as Delete leaves
+/// a span (the automation editing spec, R9).
+fn remove_envelopes(
+    editor: &mut Editor,
+    materials: &[EnvelopeMaterial],
+    tracks: &BTreeMap<usize, TrackId>,
+    at: Ticks,
+) -> Result<(), EditFailure> {
+    for material in materials {
+        let Some(track) = tracks.get(&material.distance) else {
+            continue;
+        };
+        let start = at + material.start;
+        let end = start + material.length;
+        for (target, _) in &material.shapes {
+            automation::remove_shape(editor, *track, *target, start, end)?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether a parameter's envelope goes with a clip to another track: the
+/// mixer controls and the sends that track also has. A device's parameters
+/// stay on the track they're on (the automation editing spec, R9).
+fn travels_with(target: &AutomationTarget, doc: &Document, destination: TrackId) -> bool {
+    match target {
+        AutomationTarget::Mixer { .. } => true,
+        AutomationTarget::Send { to: return_track } => doc
+            .track(destination)
+            .is_some_and(|track| track.sends().any(|(to, _)| to == *return_track)),
+        _ => false,
+    }
+}
+
+/// Moves the envelopes over a moved clip's span with it: the shape over
+/// the old span goes to the new one, and the old span is left as Delete
+/// leaves a span. A copy leaves the old span as it is.
+fn carry_envelopes(
+    editor: &mut Editor,
+    from: TrackId,
+    to: TrackId,
+    old: (Ticks, Ticks),
+    new: (Ticks, Ticks),
+    copy: bool,
+) -> Result<(), EditFailure> {
+    let doc = editor.document().clone();
+    let Some(source) = doc.track(from) else {
+        return Ok(());
+    };
+    let targets: Vec<AutomationTarget> = source.automation().map(|(target, _)| *target).collect();
+    for target in targets {
+        if from != to && !travels_with(&target, &doc, to) {
+            continue;
+        }
+        let Some(automation) = source.automation_for(&target) else {
+            continue;
+        };
+        let shape = automation.envelope.shape_in(old.0, old.1);
+        if shape.is_empty() {
+            continue;
+        }
+        if !copy {
+            automation::remove_shape(editor, from, target, old.0, old.1)?;
+        }
+        let mut envelope = automation::envelope_of(editor.document(), to, target)
+            .cloned()
+            .unwrap_or_default();
+        envelope.write_span(new.0, new.1, &shape);
+        apply(
+            editor,
+            Command::SetAutomationEnvelope {
+                track: to,
+                target,
+                points: envelope.points().collect(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Deletes a target's material, and the envelopes over it when Lock
+/// Envelopes is off (the automation editing spec, R9).
 fn delete_target(editor: &mut Editor, target: &Target) -> Result<(), EditFailure> {
+    let doc = editor.document().clone();
+    let locked = doc.settings().lock_envelopes;
     match target {
         Target::Clips(clips) => {
             for clip in clips {
                 apply(editor, Command::DeleteClip { clip: *clip })?;
+            }
+            if !locked {
+                let (by_track, start, end) = material(&doc, target);
+                let materials = envelope_material(&doc, target, &by_track, start, end);
+                let tracks = tracks_by_distance(&doc, &by_track);
+                remove_envelopes(editor, &materials, &tracks, start)?;
             }
             Ok(())
         }
         Target::Time { tracks, start, end } => {
             for track in tracks {
                 clear(editor, *track, *start, *end, &BTreeSet::new())?;
+            }
+            if !locked {
+                let (by_track, _, _) = material(&doc, target);
+                let materials = envelope_material(&doc, target, &by_track, *start, *end);
+                let tracks = tracks_by_distance(&doc, &by_track);
+                remove_envelopes(editor, &materials, &tracks, *start)?;
             }
             Ok(())
         }
@@ -543,17 +781,39 @@ impl ArrangementView {
             self.selected = tracks;
             self.title_bars = false;
             self.follow_paused = false;
+            // Spec: automation-editing R1. The selection is on the tracks'
+            // own lanes.
+            self.time_selection_lanes = self
+                .selected
+                .iter()
+                .copied()
+                .map(|track| Lane::Track { track })
+                .collect();
         }
     }
 
     /// Selects time on tracks, with no clips, as dragging across the lanes
     /// does.
     pub(crate) fn select_span(&mut self, tracks: Vec<TrackId>, start: Ticks, end: Ticks) {
+        let lanes = tracks
+            .iter()
+            .copied()
+            .map(|track| Lane::Track { track })
+            .collect();
+        self.select_span_on(lanes, start, end);
+    }
+
+    /// Selects time on lanes, with no clips: the lanes' tracks become the
+    /// selected tracks.
+    pub(crate) fn select_span_on(&mut self, lanes: Vec<Lane>, start: Ticks, end: Ticks) {
         self.selected_clips.clear();
-        self.selected = tracks;
+        self.selected = lanes.iter().map(Lane::track).collect();
         self.time_selection = (end > start).then_some((start, end));
         self.insert_marker = start;
         self.title_bars = false;
+        // Spec: automation-editing R1. The selection names the lanes it
+        // covers.
+        self.time_selection_lanes = lanes;
     }
 
     /// Takes the selection from another view: the clips, tracks, time, and
@@ -563,6 +823,8 @@ impl ArrangementView {
         self.selected_clips.clone_from(&from.selected_clips);
         self.selected.clone_from(&from.selected);
         self.time_selection = from.time_selection;
+        self.time_selection_lanes
+            .clone_from(&from.time_selection_lanes);
         self.insert_marker = from.insert_marker;
         self.title_bars = from.title_bars;
     }
@@ -873,7 +1135,16 @@ pub fn run(
                     to as isize - from as isize
                 }
             };
-            // Where each clip goes, checked before anything changes.
+            // Where each clip goes, checked before anything changes, and
+            // where it was, so its envelopes can go with it (the automation
+            // editing spec, R9).
+            let sources: Vec<Option<(TrackId, Ticks, Ticks)>> = clips
+                .iter()
+                .map(|clip| {
+                    let value = doc.clip(*clip).expect("the clips exist");
+                    Some((doc.clip_track(*clip)?, value.start, value.end()))
+                })
+                .collect();
             let positions = lane_positions(doc);
             let mut moves = Vec::with_capacity(clips.len());
             for clip in &clips {
@@ -900,8 +1171,9 @@ pub fn run(
                 moves.push((*clip, destination, start, start + value.length));
             }
             let label = if copy { "Copy clips" } else { "Move clips" };
+            let locked = doc.settings().lock_envelopes;
             let (moved, recorded) = transaction(editor, label, |editor| {
-                if copy {
+                let moved = if copy {
                     let placements = moves
                         .iter()
                         .map(|(clip, track, start, _)| {
@@ -915,7 +1187,7 @@ pub fn run(
                             )
                         })
                         .collect();
-                    place(editor, placements)
+                    place(editor, placements)?
                 } else if shift == 0 {
                     // In time only: one command, however many clips.
                     if by != Ticks::ZERO {
@@ -928,7 +1200,7 @@ pub fn run(
                         )?;
                     }
                     clear_moved(editor, &clips, &moves)?;
-                    Ok(clips.clone())
+                    clips.clone()
                 } else {
                     for (clip, track, start, _) in &moves {
                         apply(
@@ -941,9 +1213,28 @@ pub fn run(
                         )?;
                     }
                     clear_moved(editor, &clips, &moves)?;
-                    Ok(clips.clone())
+                    clips.clone()
+                };
+                // Spec: automation-editing R9. The tracks' envelopes go
+                // over the clips' spans, in the same undo step.
+                if !locked {
+                    for ((_, to, start, end), source) in moves.iter().zip(&sources) {
+                        let Some((from, old_start, old_end)) = source else {
+                            continue;
+                        };
+                        carry_envelopes(
+                            editor,
+                            *from,
+                            *to,
+                            (*old_start, *old_end),
+                            (*start, *end),
+                            copy,
+                        )?;
+                    }
                 }
+                Ok(moved)
             })?;
+
             view.select_clips(editor.document(), moved);
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
@@ -1123,6 +1414,11 @@ pub fn run(
             let target = target(doc, view, parse(args)?)?;
             let (by_track, start, end) = material(doc, &target);
             let length = end - start;
+            // Spec: automation-editing R9. The copy carries the envelopes
+            // over the same spans.
+            let materials = envelope_material(doc, &target, &by_track, start, end);
+            let tracks = tracks_by_distance(doc, &by_track);
+            let locked = doc.settings().lock_envelopes;
             let placements = by_track
                 .into_iter()
                 .map(|(track, clips)| {
@@ -1136,8 +1432,13 @@ pub fn run(
                     (track, clips)
                 })
                 .collect();
-            let (created, recorded) =
-                transaction(editor, "Duplicate", |editor| place(editor, placements))?;
+            let (created, recorded) = transaction(editor, "Duplicate", |editor| {
+                let created = place(editor, placements)?;
+                if !locked {
+                    write_envelopes(editor, &materials, &tracks, start + length)?;
+                }
+                Ok(created)
+            })?;
             match target {
                 Target::Clips(_) => view.select_clips(editor.document(), created),
                 Target::Time { tracks, .. } => view.select_span(tracks, end, end + length),
@@ -1198,12 +1499,14 @@ pub fn run(
                 .ok_or_else(|| refused("clips can't go on a return track or the Main track"))?;
             let mut placements = Vec::with_capacity(copied.tracks.len());
             let mut destinations = Vec::with_capacity(copied.tracks.len());
+            let mut landed: BTreeMap<usize, TrackId> = BTreeMap::new();
             for (distance, clips) in &copied.tracks {
                 let track = lanes
                     .get(base + distance)
                     .copied()
                     .ok_or_else(|| refused("there aren't enough tracks below to paste onto"))?;
                 destinations.push(track);
+                landed.insert(*distance, track);
                 let clips = clips
                     .iter()
                     .map(|c| Clip {
@@ -1214,8 +1517,17 @@ pub fn run(
                 placements.push((track, clips));
             }
             let length = copied.length;
-            let (created, recorded) =
-                transaction(editor, "Paste", |editor| place(editor, placements))?;
+            // Spec: automation-editing R9. The pasted material carries the
+            // envelopes over the same spans.
+            let materials = copied.envelopes.clone();
+            let locked = doc.settings().lock_envelopes;
+            let (created, recorded) = transaction(editor, "Paste", |editor| {
+                let created = place(editor, placements)?;
+                if !locked {
+                    write_envelopes(editor, &materials, &landed, at)?;
+                }
+                Ok(created)
+            })?;
             view.select_span(destinations, at, at + length);
             if !created.is_empty() {
                 view.selected_clips = created;
@@ -1234,6 +1546,7 @@ pub fn run(
                 let at = (view.insert_marker + by).max(Ticks::ZERO);
                 view.insert_marker = at;
                 view.time_selection = None;
+                view.time_selection_lanes.clear();
                 return Ok(to_value(&result(doc, editor, view, false)));
             }
             let clips = clips_or_selected(doc, view, clips)?;

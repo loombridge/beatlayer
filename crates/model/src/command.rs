@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::auto_warp::{ClipEdge, FileBeats, LOOP_BARS, WarpFrom, WarpPoint, nearest_bars};
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device,
+    AutomationTarget, Breakpoint, Envelope, MixerParam, PointError, check_bend, entry,
+    override_device,
 };
 use crate::clip::{
     AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, Note, TakeLane,
@@ -552,6 +553,19 @@ pub enum Command {
         /// The parameter.
         target: AutomationTarget,
     },
+    /// Replaces one of a track's parameter's envelope with the breakpoints
+    /// given, as the automation editing commands do when they write a shape
+    /// over a span (the automation editing spec, R5). The envelope keeps
+    /// driving the parameter, or goes on driving it if it was overridden.
+    SetAutomationEnvelope {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// The envelope's breakpoints, in position order. Empty takes the
+        /// parameter's automation with it.
+        points: Vec<Breakpoint>,
+    },
     /// Turns every overridden envelope in the song back on, as the Control
     /// Bar's Re-Enable Automation button does: every automated control a
     /// hand move turned off follows its envelope again.
@@ -567,6 +581,13 @@ pub enum Command {
     /// Switches Solo in Place on or off.
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
+        enabled: bool,
+    },
+    /// Switches Lock Envelopes on or off: while it's on, editing the
+    /// Arrangement's clips leaves the tracks' envelopes where they are in the
+    /// song (the automation editing spec, R8).
+    SetLockEnvelopes {
+        /// Whether the envelopes stay where they are.
         enabled: bool,
     },
     /// Switches Cue mode: the tracks' Solo switches become Cue switches
@@ -2462,6 +2483,7 @@ impl Command {
             Self::SetAutomationCurve { .. } => "Curve Automation Segment",
             Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
+            Self::SetAutomationEnvelope { .. } => "Set Automation Envelope",
             Self::DeleteAutomation { .. } => "Delete Automation",
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
@@ -2475,6 +2497,7 @@ impl Command {
             Self::SetReducedLatencyMonitoring { .. } => "Switch Reduced Latency When Monitoring",
             Self::SetKeepMonitoringLatency { .. } => "Switch Keep Monitoring Latency",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
+            Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetCueMode { .. } => "Switch Cue mode",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
@@ -3168,6 +3191,21 @@ impl Document {
                 self.track_mut(*track)?.automation.remove(target);
                 Ok(())
             }
+            Command::SetAutomationEnvelope {
+                track,
+                target,
+                points,
+            } => {
+                self.check_automation_target(*track, *target)?;
+                let envelope = Envelope::from_points(points.clone())?;
+                if envelope.is_empty() {
+                    self.track_mut(*track)?.automation.remove(target);
+                    return Ok(());
+                }
+                let automation = entry(&mut self.track_mut(*track)?.automation, *target);
+                automation.envelope = envelope;
+                Ok(())
+            }
             Command::ReEnableAutomation {} => {
                 for id in self.track_order() {
                     let track = self.track_mut(id)?;
@@ -3205,6 +3243,10 @@ impl Document {
             }
             Command::SetSoloInPlace { enabled } => {
                 self.settings.solo_in_place = *enabled;
+                Ok(())
+            }
+            Command::SetLockEnvelopes { enabled } => {
+                self.settings.lock_envelopes = *enabled;
                 Ok(())
             }
             Command::SetCueMode { enabled } => {

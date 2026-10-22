@@ -236,7 +236,7 @@ fn a_switch_and_a_chooser_change_their_parameter() {
 // Spec: device-framework R20 (observed: off, highlights turn grey)
 #[test]
 fn a_switched_off_device_greys_its_highlights_but_not_its_text() {
-    let theme = Theme::builtin(bl_shell::settings::ThemeChoice::Dark);
+    let theme = Theme::bundled(true);
     assert_eq!(highlight(&theme, true), theme.colors.accent.0);
     assert_eq!(highlight(&theme, false), theme.colors.inactive.0);
     assert_ne!(theme.colors.inactive.0, theme.colors.text.0);

@@ -1351,3 +1351,22 @@ fn cmd_u_quantises_the_sample_editors_selection() {
         "transient at 0.5s got a marker"
     );
 }
+
+// Spec: view-options R1.
+#[test]
+fn the_middle_button_pans_the_waveform() {
+    let mut s = sample("middle-pan", false);
+    let g = s.geometry();
+    let over = g.wave.center();
+    let steps = s.steps();
+    let moved = 100.0 / f64::from(g.axis.width.max(1.0)) * g.axis.length;
+    // A middle-button drag of 100 points left pans the waveform with the
+    // pointer: we see later in the file.
+    s.h.middle_drag(over, over - egui::vec2(100.0, 0.0));
+    let after = s.h.shell.clip_view().sample().span().expect("a span");
+    assert!(
+        (after.0 - moved).abs() < 1e-6,
+        "the waveform moved 100 points: {after:?}"
+    );
+    assert_eq!(s.steps(), steps, "not an undo step");
+}

@@ -11,6 +11,7 @@
 mod common;
 
 use bl_model::{SceneId, TrackId};
+use bl_shell::mixer_view::MixerOf;
 use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout, TrackColumn};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::session_view::slot_id;
@@ -743,4 +744,42 @@ fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {
     let nodes = common::Harness::nodes(&h.settle());
     let follow = common::Harness::node(&nodes, "Enable Follow Actions Globally");
     assert_eq!(follow.toggled, Some(false));
+}
+
+// Spec: view-options R1, session-view R35.
+#[test]
+fn the_middle_button_pans_the_grid() {
+    let mut h = harness();
+    // Room to pan: the grid is scrolled down and to the right first.
+    h.shell
+        .run("session.scroll", json!({ "y": 100.0 }))
+        .unwrap();
+    h.shell
+        .run(
+            "mixer_view.scroll",
+            json!({ "view": "session", "x": 200.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let g = Grid::new(&h);
+    let over = g.session.slots.center();
+    let before = state(&h);
+    // A middle-button drag of 100 points right and 50 down pans the grid
+    // with the pointer.
+    h.middle_drag(over, over + vec2(100.0, 50.0));
+    let after = state(&h);
+    assert!(
+        (after.scroll_y - before.scroll_y + 50.0).abs() < 0.5,
+        "the scenes moved 50 points down: {}",
+        after.scroll_y - before.scroll_y
+    );
+    let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
+    assert!(
+        (scroll - 100.0).abs() < 0.5,
+        "the columns moved 100 points right: {scroll}"
+    );
+    // Nothing else changed: no selection, no launch, no undo step.
+    assert_eq!(before.slots, after.slots);
+    assert_eq!(before.scenes, after.scenes);
+    assert!(!h.shell.editor().can_undo(), "not an undo step");
 }

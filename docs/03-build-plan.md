@@ -663,7 +663,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.23 | todo |  |  |
 | 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
 | 6.24b | todo |  |  |
-| 6.25 | todo |  |  |
+| 6.25 | done | 22 October 2026 | [#305](https://github.com/loombridge/beatlayer/pull/305); a time selection in the Arrangement's automation lanes names the lanes it covers, the breakpoints it covers and a segment drag move as one undo step each, Cut, Copy, Paste, Duplicate and Delete act on the selected lanes' envelopes and a copied shape pastes onto another parameter, and Lock Envelopes keeps the tracks' envelopes where they are while clip edits carry them over the clips' spans when it's off ([automation editing](specs/automation-editing.md) R1 to R10) |
 | 6.25b | todo |  |  |
 | 6.25c | todo |  |  |
 | 6.26 | todo |  |  |
@@ -671,7 +671,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.28 | done | 22 October 2026 | [#296](https://github.com/loombridge/beatlayer/pull/296); the Undo History panel lists the set's steps newest first in the Learn View's column, and a click or Enter on a row returns the set to that point in one jump that is no step of its own, with an agent's step marked with the agent's name ([undo history](specs/undo-history.md)) |
 | 6.29 | todo |  |  |
 | 6.29b | todo |  |  |
-| 6.30 | todo |  |  |
+| 6.30 | done | 22 October 2026 | [#316](https://github.com/loombridge/beatlayer/pull/316); the Theme & Colors page's Theme, Appearance (with Follow System), Tone and High Contrast rows and its four Customization number boxes, the colour pipeline every window draws, and theme files in the User Library's `Themes` folder ([themes](specs/themes.md) R1 to R13) |
 | 6.30b | todo |  |  |
 | 6.31 | done | 22 October 2026 | [#300](https://github.com/loombridge/beatlayer/pull/300); the browser's database on disk holds the index, the tags and the tag groups, the Tag Editor (Cmd+Shift+E) and Quick Tags put tags on the selected items, and `#` searches by tag ([browser tags](specs/browser-tags.md) R1 to R17) |
 | 6.32 | todo |  |  |
@@ -689,7 +689,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.39 | todo |  |  |
 | 6.40 | todo |  |  |
 | 6.41 | done | 21 October 2026 | [#288](https://github.com/loombridge/beatlayer/pull/288); the set's plug-ins listed in the detail area's place, with each device's preset name, the tracks it is on, the missing ones marked, and a tab-separated text export ([plug-in list](specs/plugin-list.md) R1 to R11); IMP-29's acceptance is still open |
-| 6.42 | todo |  | Waits on IMP-16 and IMP-18's acceptance |
+| 6.42 | done | 22 October 2026 | [#321](https://github.com/loombridge/beatlayer/pull/321); one search field over the main view with a Commands scope built from the menus, context menus and keymap and a Tracks scope that outlines matches and hides the rest with Show Only Matches ([command search](specs/command-palette.md) R1 to R16); IMP-16 and IMP-18's acceptance is still open |
 | 6.43 | done | 21 October 2026 | [#290](https://github.com/loombridge/beatlayer/pull/290); a person gives commands their own keys in `keymap.toml` beside the preferences, layered over Live's, and the Shortcuts page in Settings records them, asks before taking a key from another command, and gives Live's keys back ([custom shortcuts](specs/custom-shortcuts.md)) |
 | 6.44 | todo |  | Waits on IMP-21's acceptance |
 | 6.45 | todo |  | Waits on IMP-22's acceptance |
@@ -697,7 +697,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.47 | done | 22 October 2026 | [#292](https://github.com/loombridge/beatlayer/pull/292); the Articulation Map, a MIDI effect, holds up to 32 named articulations, each with a trigger and the keyswitches, controllers and channel it sends, and the list is edited by command, saved with the set and in the device's presets, and read back ([articulation map](specs/articulation-map.md) R1 to R20); IMP-32's acceptance is still open |
 | 6.48 | todo |  | Waits on IMP-33's acceptance |
 | 6.49 | todo |  | Waits on IMP-34, IMP-35 and IMP-36's acceptance |
-| 6.49b | todo |  |  |
+| 6.49b | done | 22 October 2026 | [#315](https://github.com/loombridge/beatlayer/pull/315); holding the middle mouse button and dragging pans the area under the pointer in the Arrangement's lanes, the Session View's grid, both mixers, the MIDI Note Editor, the Sample Editor, the Device View's chain and the browser's lists, selecting and moving nothing, and a note is drawn in its clip's colour, paler the softer its velocity and grey while deactivated ([view options](specs/view-options.md) R1, [the piano roll](specs/piano-roll.md) R43 and R44) |
 | 6.50 | todo |  | Waits on IMP-37's acceptance |
 | 6.51 | todo |  |  |
 | 6.52 | todo |  |  |

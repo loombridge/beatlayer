@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-652 commands in 42 areas.
+678 commands in 43 areas.
 
 ## Permission classes
 
@@ -108,13 +108,21 @@ Each command has:
 | [`audio.set_test_tone`](#audioset_test_tone) | Test Tone | `external` |  |  |
 | [`audio.status`](#audiostatus) | Audio Status | `read` |  |  |
 | [`audio.toggle_engine`](#audiotoggle_engine) | Audio Engine On | `external` | `Cmd+Option+Shift+E` | `Ctrl+Alt+Shift+E` |
+| [`automation.copy`](#automationcopy) | Copy Automation | `read` |  |  |
+| [`automation.cut`](#automationcut) | Cut Automation | `destructive` |  |  |
 | [`automation.delete`](#automationdelete) | Delete Automation | `destructive` |  |  |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | Delete Automation Breakpoint | `edit` |  |  |
+| [`automation.delete_range`](#automationdelete_range) | Delete Automation Range | `destructive` |  |  |
+| [`automation.duplicate`](#automationduplicate) | Duplicate Automation | `edit` |  |  |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | Move Automation Breakpoint | `edit` |  |  |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | Move Automation Breakpoints | `edit` |  |  |
+| [`automation.paste`](#automationpaste) | Paste Automation | `edit` |  |  |
 | [`automation.re_enable`](#automationre_enable) | Re-Enable Automation | `edit` |  |  |
 | [`automation.re_enable_for`](#automationre_enable_for) | Re-Enable Automation for a Parameter | `edit` |  |  |
+| [`automation.select_segment`](#automationselect_segment) | Select Automation Segment | `read` |  |  |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | Set Automation Breakpoint | `edit` |  |  |
 | [`automation.set_curve`](#automationset_curve) | Curve Automation Segment | `edit` |  |  |
+| [`automation.set_envelope`](#automationset_envelope) | Set Automation Envelope | `edit` |  |  |
 | [`browser.add_folder`](#browseradd_folder) | Add Folder to Browser... | `external` |  |  |
 | [`browser.add_tag`](#browseradd_tag) | Add Browser Tag | `edit` |  |  |
 | [`browser.add_tag_group`](#browseradd_tag_group) | Add Browser Tag Group | `edit` |  |  |
@@ -509,6 +517,16 @@ Each command has:
 | [`scene.set_follow_actions`](#sceneset_follow_actions) | Set Scene Follow Actions | `edit` |  |  |
 | [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
 | [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
+| [`search.close`](#searchclose) | Close Search | `read` |  |  |
+| [`search.commands`](#searchcommands) | Find Commands | `read` |  |  |
+| [`search.next`](#searchnext) | Search Next | `read` |  |  |
+| [`search.open`](#searchopen) | Search Commands | `read` | `Cmd+Shift+P`; `Cmd+Shift+O` | `Ctrl+Shift+P`; `Ctrl+Shift+O` |
+| [`search.previous`](#searchprevious) | Search Previous | `read` |  |  |
+| [`search.set_only_matches`](#searchset_only_matches) | Show Only Matches | `read` |  |  |
+| [`search.set_scope`](#searchset_scope) | Set Search Scope | `read` |  |  |
+| [`search.set_text`](#searchset_text) | Type in Search | `read` |  |  |
+| [`search.state`](#searchstate) | Search State | `read` |  |  |
+| [`search.tracks`](#searchtracks) | Find Tracks | `read` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
@@ -563,13 +581,19 @@ Each command has:
 | [`set.save_copy`](#setsave_copy) | Save a Copy... | `external` |  |  |
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
+| [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
+| [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
+| [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | Grid Line Intensity | `edit` |  |  |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | High Contrast | `edit` |  |  |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
@@ -579,6 +603,7 @@ Each command has:
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
+| [`settings.set_tone`](#settingsset_tone) | Tone | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
 | [`slot.set_stop_button`](#slotset_stop_button) | Add Stop Button | `edit` | `Cmd+E` | `Ctrl+E` |
@@ -593,6 +618,7 @@ Each command has:
 | [`song.rename_locator`](#songrename_locator) | Rename Locator | `edit` |  |  |
 | [`song.scales`](#songscales) | Scale List | `read` |  |  |
 | [`song.set_locator_info_text`](#songset_locator_info_text) | Set Locator Info Text | `edit` |  |  |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | Lock Envelopes | `edit` |  |  |
 | [`song.set_scale`](#songset_scale) | Set Scale | `edit` |  |  |
 | [`song.set_start`](#songset_start) | Set Song Start Time | `edit` |  |  |
 | [`song.set_start_time`](#songset_start_time) | Set Song Start Time | `edit` |  |  |
@@ -1407,7 +1433,7 @@ Result: [`ArrangementState`](#arrangementstate).
 
 **Select Time**. Permission: `read`. Contexts: `arrangement`.
 
-Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
+Selects the span from `start` to `end` on `tracks` (or the selected tracks), as dragging across track lanes does. `lanes` names the lanes the selection covers, each a track's own lane or its automation lane; left out, the tracks' own lanes. `arrangement.zoom_to_selection` zooms to it. Changes only the view.
 
 Default keys: none.
 
@@ -1417,6 +1443,7 @@ Arguments:
 |---|---|---|---|
 | `start` | [`Ticks`](#ticks) | yes | Where the selection starts. |
 | `end` | [`Ticks`](#ticks) | yes | Where it ends. Before `start` is fine: the two are swapped. |
+| `lanes` | array or null | no | The lanes it covers: each a track's own lane or its automation lane (the automation editing spec, R1). Left out, the tracks' own lanes. |
 | `tracks` | array or null | no | The tracks it covers. Left out, the selected tracks. |
 
 Result: [`ArrangementState`](#arrangementstate).
@@ -2090,6 +2117,42 @@ Result: [`SwitchResult`](#switchresult).
 
 ### Area `automation`
 
+#### `automation.copy`
+
+**Copy Automation**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers to the Arrangement's clipboard, for `automation.paste`: the shape over the span, with its positions from the span's start, its values as positions on each parameter's travel, and its bends. The clipboard isn't part of the set, and copying changes nothing in it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`EnvelopeClipboardState`](#envelopeclipboardstate).
+
+#### `automation.cut`
+
+**Cut Automation**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Copies the shape of the envelopes the time selection covers, as `automation.copy` does, then deletes it, as `automation.delete_range` does: the breakpoints inside the span go, and the envelope's values at the span's edges are kept, so it runs straight across the span. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.delete`
 
 **Delete Automation**. Permission: `destructive`. Contexts: `global`.
@@ -2125,6 +2188,42 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `automation.delete_range`
+
+**Delete Automation Range**. Permission: `destructive`. Contexts: `arrangement`, `envelope`.
+
+Deletes the shape of the envelopes the time selection covers over the span: the breakpoints inside it go, and the envelope's values at the span's edges are kept with a breakpoint at each, so the envelope runs straight across the span and is unchanged outside it. The clips and the other envelopes stay as they are. Because it removes the person's work, an agent asks first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.duplicate`
+
+**Duplicate Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Writes a copy of the shape the time selection covers straight after the span, and makes the copy the time selection, so running it again repeats the shape. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `end` | [`Position`](#position) or null | no | Where the span ends, after `start`. Left out, the time selection's end. |
+| `lanes` | array or null | no | The lanes the shape is in: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+| `start` | [`Position`](#position) or null | no | Where the span starts. Left out, the time selection's start. |
+
+Result: [`AutomationResult`](#automationresult).
+
 #### `automation.move_breakpoint`
 
 **Move Automation Breakpoint**. Permission: `edit`. Contexts: `global`.
@@ -2144,6 +2243,43 @@ Arguments:
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.move_breakpoints`
+
+**Move Automation Breakpoints**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Moves several breakpoints of one track's parameter at once, as dragging a selected breakpoint on an automation lane does: each moves `by` ticks in time and `share` of the parameter's travel in value, staying within the parameter's range, and a breakpoint the moved ones pass over is removed. `at` names the breakpoints to move, where they are now. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device parameter. |
+| `at` | array of [`Ticks`](#ticks) | yes | The breakpoints to move, where they are now. |
+| `by` | [`Ticks`](#ticks) | yes | How far to move them in time, in ticks; negative is earlier. |
+| `share` | number | yes | How far to move their values, as a share of the parameter's travel: 0.1 is a tenth of the way up the control, and −0.1 a tenth down. |
+
+Result: [`AutomationResult`](#automationresult).
+
+#### `automation.paste`
+
+**Paste Automation**. Permission: `edit`. Contexts: `arrangement`, `envelope`.
+
+Pastes the clipboard's shape into the envelopes the time selection covers, starting at `at` (left out, the time selection's start or the insert marker) and replacing each envelope over the shape's length. Each value lands at the same position on the target parameter's travel, so a shape pastes onto another parameter. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `at` | [`Position`](#position) or null | no | Where the shape starts. Left out, the time selection's start, or the insert marker. |
+| `lanes` | array or null | no | The lanes the shape is pasted into: each a track and the parameter its automation lane shows. Left out, the automation lanes the time selection covers. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.re_enable`
 
@@ -2173,6 +2309,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `automation.select_segment`
+
+**Select Automation Segment**. Permission: `read`. Contexts: `arrangement`, `envelope`.
+
+Selects a segment in a track's automation lane, as clicking near it does: its two breakpoints are drawn in the selection colour and move together when it is dragged. `at` is the breakpoint the segment starts at, or `null` to select no segment. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose automation lane holds the segment. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter the lane shows. |
+| `at` | [`Ticks`](#ticks) or null | no | The breakpoint the segment starts at, or `null` to select no segment. |
+
+Result: [`AutomationResult`](#automationresult).
 
 #### `automation.set_breakpoint`
 
@@ -2209,6 +2363,24 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
 | `at` | [`Ticks`](#ticks) | yes | Where the segment starts: the breakpoint there. |
 | `bend` | number | yes | The bend, from −1 to 1: 0 is the straight line, and the sign chooses which side the segment bows to. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `automation.set_envelope`
+
+**Set Automation Envelope**. Permission: `edit`. Contexts: `global`.
+
+Replaces one of a track's parameter's envelope with the breakpoints given, as the automation editing commands do when they write a shape over a span of time. `track` and `target` name the parameter as `automation.set_breakpoint` does, and `points` are the envelope's breakpoints in position order, each with its position in ticks, its value in the parameter's own units, and the bend of the segment starting at it. The breakpoints must be in order, no two at one position, and no position before 1.1.1; an empty list takes the parameter's automation with it. The envelope keeps driving the parameter.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track the parameter belongs to. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter. |
+| `points` | array of [`Breakpoint`](#breakpoint) | yes | The envelope's breakpoints, in position order. Empty takes the parameter's automation with it. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -9245,6 +9417,157 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+### Area `search`
+
+#### `search.close`
+
+**Close Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Closes the search field, removes the track outlines and shows every track again. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.commands`
+
+**Find Commands**. Permission: `read`. Contexts: `global`.
+
+The rows the Commands scope lists for `text`, in the order it lists them: every command a menu item, a context-menu item or a shortcut runs, once, with the arguments that item fixes, its label, the menu or context it belongs to, the keys bound to it now and whether it can run now. A word matches when it starts a word of the label or the menu, or appears in the command's description; rows that can't run now come last. Works with the field closed, and runs nothing: run a row by running its `command` with its `args`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`CommandRows`](#commandrows).
+
+#### `search.next`
+
+**Search Next**. Permission: `read`. Contexts: `global`, `text-field`.
+
+In the Tracks scope, selects the next matching track after the selected one in display order (the first when none is selected, wrapping from the last), as clicking its title bar would, and scrolls the view in front to it, unfolding any group that holds it: Return in the field. In the Commands scope, moves the highlight down a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.open`
+
+**Search Commands**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Opens the search field over the main view with the text empty, on the Commands scope (`commands`: the commands a menu item, a context-menu item or a shortcut runs) or the Tracks scope (`tracks`: tracks found by their name or by the name of a device on them). Help > Search Commands... and Cmd-Shift-P (Ctrl-Shift-P) open the first; Navigate > Find Track and Cmd-Shift-O (Ctrl-Shift-O) the second. With the field open it switches the scope and keeps the text. The field is view state: it isn't saved in the set and it isn't an undo step.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-MENU-007 | `Cmd+Shift+P` | `Ctrl+Shift+P` | `global` | Open the command search | fixes `scope` = `"commands"` |
+| S-FOCUS-015 | `Cmd+Shift+O` | `Ctrl+Shift+O` | `global` | Open the track search | fixes `scope` = `"tracks"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.previous`
+
+**Search Previous**. Permission: `read`. Contexts: `global`, `text-field`.
+
+The reverse of `search.next`: in the Tracks scope, selects the previous matching track (Shift-Return in the field); in the Commands scope, moves the highlight up a row, wrapping. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_only_matches`
+
+**Show Only Matches**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches Show Only Matches in the Tracks scope. While it's on and the text matches a track, the Arrangement's lanes, the Session View's columns and both mixers show only the matching tracks, the groups that hold them unfolded, and Main. The other tracks play, record and take edits as before. It's view state that ends with the search: it is off each time the field opens.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_scope`
+
+**Set Search Scope**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Switches the open search field to the Commands or the Tracks scope and keeps its text. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scope` | [`SearchScope`](#searchscope) | yes | `commands` or `tracks`. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.set_text`
+
+**Type in Search**. Permission: `read`. Contexts: `global`, `text-field`.
+
+Sets the text of the open search field, as typing does. The Commands scope then lists the rows `search.commands` gives for it, with the first highlighted; the Tracks scope outlines the tracks `search.tracks` gives. Changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.state`
+
+**Search State**. Permission: `read`. Contexts: `global`.
+
+What the search field shows: whether it is open, its scope, its text, the highlighted row, whether Show Only Matches is on, and the rows it lists, each with its command ID and the arguments it fixes, or its track ID.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`SearchState`](#searchstate).
+
+#### `search.tracks`
+
+**Find Tracks**. Permission: `read`. Contexts: `global`.
+
+The tracks the Tracks scope lists for `text`, in display order: those with the text, ignoring case, in their name or in the name or own name of a device on them at any depth, plug-ins included. Each row says whether the track's name matched and which device did. Works with the field closed, and changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | What was typed. |
+
+Result: [`TrackRows`](#trackrows).
+
 ### Area `session`
 
 #### `session.back_to_arrangement`
@@ -10134,6 +10457,22 @@ Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 
+#### `settings.set_appearance`
+
+**Appearance**. Permission: `edit`. Contexts: `settings`.
+
+Draws the theme in its light or dark colours, or follows the operating system's mode while Beatlayer runs (`follow-system`); a new install draws dark. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `appearance` | [`Appearance`](#appearance) | yes | `light`, `dark` or `follow-system`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_auto_hide_plug_in_windows`
 
 **Auto-Hide Plug-In Windows**. Permission: `edit`. Contexts: `settings`.
@@ -10165,6 +10504,54 @@ Arguments:
 | `on` | boolean | yes | Whether the setting is on. |
 
 Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_brightness`
+
+**Brightness**. Permission: `edit`. Contexts: `settings`.
+
+Adds points of lightness to every background colour, from -50 to 50; 0 is the default. Chromatic colours and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `value` | integer from -50 to 50 | yes | Points of lightness added to the backgrounds, from -50 to 50. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_hue`
+
+**Color Hue**. Permission: `edit`. Contexts: `settings`.
+
+Turns the hue of the interface's chromatic colours by this many degrees, from -180 to 180 in steps of 5; 0 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `degrees` | integer from -180 to 180 | yes | Degrees the interface's colours are turned, from -180 to 180. |
+
+Result: nothing (`null`).
+
+#### `settings.set_color_intensity`
+
+**Color Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Multiplies the chroma of the interface's chromatic colours, from 0 to 200 percent in steps of 5; 100 is the default. Backgrounds and the track palette don't change. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
 
 #### `settings.set_continuous_save`
 
@@ -10243,6 +10630,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_grid_line_intensity`
+
+**Grid Line Intensity**. Permission: `edit`. Contexts: `settings`.
+
+Sets how strong the grid lines of the Arrangement, the Clip View's editors and the automation lanes are, from 0 to 200 percent in steps of 5; 100, the default, draws the theme's grid colour, 0 shows no line. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `percent` | integer from 0 to 200 | yes | A whole percentage from 0 to 200, in steps of 5. |
+
+Result: nothing (`null`).
+
+#### `settings.set_high_contrast`
+
+**High Contrast**. Permission: `edit`. Contexts: `settings`.
+
+Switches High Contrast, off in a new install. On, text stands at a contrast ratio of at least 7:1 against its background, dimmed text at 4.5:1, and separators, outlines and the focus ring at 3:1, whatever the other Theme & Colors settings are. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
 
 Result: nothing (`null`).
 
@@ -10378,7 +10797,7 @@ Result: [`TemporaryFolderResult`](#temporaryfolderresult).
 
 **Theme**. Permission: `edit`. Contexts: `settings`.
 
-Chooses Beatlayer's dark or light theme, which every window uses straight away. The choice is kept for the next start. Changes nothing in the set.
+Chooses the theme every window draws, by its name: Beatlayer, or a theme from the User Library's Themes folder; `settings.state` lists them in `theme_colors.themes`. `dark` and `light`, which earlier versions took, set the Appearance instead. The choice is kept for the next start, and a theme that can't be read is drawn as Beatlayer. Changes nothing in the set.
 
 Default keys: none.
 
@@ -10386,7 +10805,23 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `theme` | [`ThemeChoice`](#themechoice) | yes | The theme. |
+| `theme` | string | yes | A theme's name, as `settings.state`'s `theme_colors.themes` lists it. `dark` and `light`, which earlier versions took, set the Appearance instead. |
+
+Result: nothing (`null`).
+
+#### `settings.set_tone`
+
+**Tone**. Permission: `edit`. Contexts: `settings`.
+
+Tints the theme's neutral colours warm or cool, or leaves them as the theme gives them (`neutral`, the default); the chromatic colours aren't toned. Kept for the next start; changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tone` | [`Tone`](#tone) | yes | `neutral`, `warm` or `cool`. |
 
 Result: nothing (`null`).
 
@@ -10410,7 +10845,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -10618,6 +11053,22 @@ Arguments:
 |---|---|---|---|
 | `locator` | [`LocatorId`](#locatorid) | yes | The locator. |
 | `info_text` | string | yes | The new info text. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `song.set_lock_envelopes`
+
+**Lock Envelopes**. Permission: `edit`. Contexts: `global`.
+
+Switches Lock Envelopes, the switch above the track headers and the Options menu item. Off (the default in a new set), editing the Arrangement's clips carries their tracks' envelopes over the clips' spans with them: moving, copying, cutting, deleting, duplicating and pasting clips take the envelopes over the same spans. On, the envelopes stay where they are in the song and the clips move on their own. The setting is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether the envelopes stay where they are. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -12140,13 +12591,19 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`audio.configure`](#audioconfigure) | `audio.status` | `settings` |
 | [`audio.set_test_tone`](#audioset_test_tone) | `audio.status` | `test_tone` |
 | [`audio.toggle_engine`](#audiotoggle_engine) | `audio.status` | `engine_on` |
+| [`automation.cut`](#automationcut) | the query tool's `track` | `automation` |
 | [`automation.delete`](#automationdelete) | the query tool's `track` | `automation` |
 | [`automation.delete_breakpoint`](#automationdelete_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.delete_range`](#automationdelete_range) | the query tool's `track` | `automation` |
+| [`automation.duplicate`](#automationduplicate) | the query tool's `track` | `automation` |
 | [`automation.move_breakpoint`](#automationmove_breakpoint) | the query tool's `track` | `automation` |
+| [`automation.move_breakpoints`](#automationmove_breakpoints) | the query tool's `track` | `automation` |
+| [`automation.paste`](#automationpaste) | the query tool's `track` | `automation` |
 | [`automation.re_enable`](#automationre_enable) | the query tool's `track` | `automation` |
 | [`automation.re_enable_for`](#automationre_enable_for) | the query tool's `track` | `automation` |
 | [`automation.set_breakpoint`](#automationset_breakpoint) | the query tool's `track` | `automation` |
 | [`automation.set_curve`](#automationset_curve) | the query tool's `track` | `automation` |
+| [`automation.set_envelope`](#automationset_envelope) | the query tool's `track` | `automation` |
 | [`browser.add_to_arrangement`](#browseradd_to_arrangement) | the query tool's `track` | `clips` |
 | [`browser.load_selected`](#browserload_selected) | the query tool's `track` | `clips` |
 | [`chain.add`](#chainadd) | the query tool's `device` | `chains` |
@@ -12445,12 +12902,18 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.recover`](#setrecover) | the query tool's `song` | `set.path` |
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
+| [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
+| [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
+| [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
+| [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_grid_line_intensity`](#settingsset_grid_line_intensity) | `settings.state` | `theme_colors.grid_line_intensity` |
+| [`settings.set_high_contrast`](#settingsset_high_contrast) | `settings.state` | `theme_colors.high_contrast` |
 | [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
@@ -12459,7 +12922,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
 | [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
-| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
+| [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme_colors.theme` |
+| [`settings.set_tone`](#settingsset_tone) | `settings.state` | `theme_colors.tone` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
 | [`song.add_locator`](#songadd_locator) | the query tool's `song` | `settings.locators` |
@@ -12472,6 +12936,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`song.move_time_signature_change`](#songmove_time_signature_change) | the query tool's `song` | `settings.time_signatures` |
 | [`song.rename_locator`](#songrename_locator) | the query tool's `song` | `settings.locators` |
 | [`song.set_locator_info_text`](#songset_locator_info_text) | the query tool's `song` | `settings.locators` |
+| [`song.set_lock_envelopes`](#songset_lock_envelopes) | the query tool's `song` | `settings.lock_envelopes` |
 | [`song.set_scale`](#songset_scale) | the query tool's `song` | `scale` |
 | [`song.set_start`](#songset_start) | the query tool's `song` | `settings.song_start` |
 | [`song.set_start_time`](#songset_start_time) | the query tool's `song` | `settings.song_start` |
@@ -12926,6 +13391,43 @@ What `perception.analyze` returns. A measure not asked for is null.
 
 </details>
 
+### `Appearance`
+
+Which of a theme's two sets of colours is drawn (themes R3).
+
+One of:
+
+- `"light"`: Dark text on light panels.
+- `"dark"`: Light text on dark panels, the default.
+- `"follow-system"`: The operating system's mode, light or dark, as it changes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a theme's two sets of colours is drawn (themes R3).",
+  "oneOf": [
+    {
+      "const": "light",
+      "description": "Dark text on light panels.",
+      "type": "string"
+    },
+    {
+      "const": "dark",
+      "description": "Light text on dark panels, the default.",
+      "type": "string"
+    },
+    {
+      "const": "follow-system",
+      "description": "The operating system's mode, light or dark, as it changes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ArmedMap`
 
 A lit Map button.
@@ -12992,6 +13494,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
 | `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13104,6 +13607,13 @@ What the Arrangement View shows: every view command returns it.
         }
       ],
       "description": "The selected span of time on the selected tracks, if any."
+    },
+    "time_selection_lanes": {
+      "description": "The lanes the time selection covers: each a track's own lane or its automation lane (the automation editing spec, R1). Empty when the selection names no lane.",
+      "items": {
+        "$ref": "#/$defs/Lane"
+      },
+      "type": "array"
     },
     "visible": {
       "$ref": "#/$defs/TimeRange",
@@ -14209,6 +14719,53 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
   "required": [
     "track",
     "target"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AutomationResult`
+
+What an automation editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected afterwards, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an automation editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected afterwards, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -16953,6 +17510,97 @@ What `view.close_plug_in_windows` returns: how many editor windows it closed.
   },
   "required": [
     "closed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CommandRow`
+
+A row the Commands scope lists (R4 and R5).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `command` | string | yes | The command the row runs, by its ID. |
+| `label` | string | yes | The item's label as the menu shows it, or the shortcut's action. |
+| `menu` | string | yes | The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`. |
+| `available` | boolean | yes | Whether it can run now (R7). |
+| `args` | object | no | The arguments the row fixes. |
+| `keys` | array of string | no | The keys the keymap binds to it now, as the shortcut reference writes them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A row the Commands scope lists (R4 and R5).",
+  "properties": {
+    "args": {
+      "additionalProperties": true,
+      "description": "The arguments the row fixes.",
+      "type": "object"
+    },
+    "available": {
+      "description": "Whether it can run now (R7).",
+      "type": "boolean"
+    },
+    "command": {
+      "description": "The command the row runs, by its ID.",
+      "type": "string"
+    },
+    "keys": {
+      "description": "The keys the keymap binds to it now, as the shortcut reference writes them.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "label": {
+      "description": "The item's label as the menu shows it, or the shortcut's action.",
+      "type": "string"
+    },
+    "menu": {
+      "description": "The menu or context the row belongs to, such as `Edit` or `View ▸ Mixer Controls`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "label",
+    "menu",
+    "available"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CommandRows`
+
+What `search.commands` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`CommandRow`](#commandrow) | yes | The rows, in the order the list shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.commands` returns.",
+  "properties": {
+    "rows": {
+      "description": "The rows, in the order the list shows them.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
   ],
   "type": "object"
 }
@@ -20122,6 +20770,42 @@ A parameter's envelope: breakpoints joined by straight or curved segments, in po
 
 </details>
 
+### `EnvelopeClipboardState`
+
+What `automation.copy` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lanes` | integer, at least 0 | yes | How many lanes' shapes it holds. |
+| `length` | [`Ticks`](#ticks) | yes | How long the shape is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `automation.copy` put on the clipboard.",
+  "properties": {
+    "lanes": {
+      "description": "How many lanes' shapes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the shape is."
+    }
+  },
+  "required": [
+    "lanes",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `EnvelopeKind`
 
 What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.
@@ -22959,6 +23643,68 @@ A label as the sidebar lists it.
     "available"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Lane`
+
+Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.
+
+One of:
+
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)): A track's own lane, where its clips are.
+- an object with `type` = `"automation"`, `track` ([`TrackId`](#trackid)), `target` ([`AutomationTarget`](#automationtarget)): A track's automation lane, which shows a parameter.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which lane a selection covers: `track` for a track's own lane, where its clips are, and `automation` for the automation lane under it, which shows a parameter.",
+  "oneOf": [
+    {
+      "description": "A track's own lane, where its clips are.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's automation lane, which shows a parameter.",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/AutomationTarget",
+          "description": "The parameter the lane shows."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "automation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "target"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -31201,6 +31947,111 @@ The Automatic Search's switches and folder (R14).
 
 </details>
 
+### `SearchScope`
+
+What the search field looks for (R2).
+
+One of:
+
+- `"commands"`: The commands a menu item, a context-menu item or a shortcut runs.
+- `"tracks"`: The tracks whose name, or a device's name, matches.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field looks for (R2).",
+  "oneOf": [
+    {
+      "const": "commands",
+      "description": "The commands a menu item, a context-menu item or a shortcut runs.",
+      "type": "string"
+    },
+    {
+      "const": "tracks",
+      "description": "The tracks whose name, or a device's name, matches.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SearchState`
+
+What the search field shows (R15).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the field is open. |
+| `scope` | [`SearchScope`](#searchscope) | yes | Its scope. |
+| `text` | string | yes | The text in it. |
+| `only_matches` | boolean | yes | Whether Show Only Matches is on. |
+| `commands` | array of [`CommandRow`](#commandrow) | yes | The rows of the Commands scope, empty in the other. |
+| `tracks` | array of [`TrackRow`](#trackrow) | yes | The rows of the Tracks scope, empty in the other. |
+| `highlight` | integer or null | no | The index of the highlighted row in `commands`, or of the selected track in `tracks`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the search field shows (R15).",
+  "properties": {
+    "commands": {
+      "description": "The rows of the Commands scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/CommandRow"
+      },
+      "type": "array"
+    },
+    "highlight": {
+      "description": "The index of the highlighted row in `commands`, or of the selected track in `tracks`.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "only_matches": {
+      "description": "Whether Show Only Matches is on.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether the field is open.",
+      "type": "boolean"
+    },
+    "scope": {
+      "$ref": "#/$defs/SearchScope",
+      "description": "Its scope."
+    },
+    "text": {
+      "description": "The text in it.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "The rows of the Tracks scope, empty in the other.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "open",
+    "scope",
+    "text",
+    "only_matches",
+    "commands",
+    "tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Section`
 
 A sidebar section.
@@ -31744,7 +32595,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 |---|---|---|---|
 | `page` | [`SettingsPage`](#settingspage) | yes | The page the Settings window shows, or showed last. |
 | `display_input` | [`DisplayInputSettings`](#displayinputsettings) | yes | Display & Input. |
-| `theme` | [`ThemeChoice`](#themechoice) | yes | Theme & Colors: the theme, as `settings.set_theme` takes it. |
+| `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
@@ -31812,9 +32663,9 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
     },
-    "theme": {
-      "$ref": "#/$defs/ThemeChoice",
-      "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
+    "theme_colors": {
+      "$ref": "#/$defs/ThemeColorsSettings",
+      "description": "Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them."
     },
     "warp": {
       "$ref": "#/$defs/WarpPrefs",
@@ -31828,7 +32679,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
   "required": [
     "page",
     "display_input",
-    "theme",
+    "theme_colors",
     "audio",
     "tempo_midi",
     "create_fades_on_clip_edges",
@@ -33549,32 +34400,105 @@ Changes to Texture's controls.
 
 </details>
 
-### `ThemeChoice`
+### `ThemeColorsSettings`
 
-Beatlayer's two themes.
+Theme & Colors in `settings.state` (themes R12).
 
-One of:
-
-- `"dark"`: Light text on dark panels, the default.
-- `"light"`: Dark text on light panels.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | yes | The chosen theme's name. |
+| `tone` | [`Tone`](#tone) | yes | Tone. |
+| `high_contrast` | boolean | yes | High Contrast. |
+| `grid_line_intensity` | integer from -32768 to 32767 | yes | Grid Line Intensity, in percent. |
+| `brightness` | integer from -32768 to 32767 | yes | Brightness. |
+| `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
+| `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
+| `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
+| `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Beatlayer's two themes.",
-  "oneOf": [
-    {
-      "const": "dark",
-      "description": "Light text on dark panels, the default.",
+  "description": "Theme & Colors in `settings.state` (themes R12).",
+  "properties": {
+    "appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The Appearance chosen."
+    },
+    "brightness": {
+      "default": 0,
+      "description": "Brightness.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_hue": {
+      "default": 0,
+      "description": "Color Hue, in degrees.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "color_intensity": {
+      "default": 100,
+      "description": "Color Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "drawn_appearance": {
+      "$ref": "#/$defs/Appearance",
+      "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
+    },
+    "grid_line_intensity": {
+      "default": 100,
+      "description": "Grid Line Intensity, in percent.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
+    "high_contrast": {
+      "default": false,
+      "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "theme": {
+      "default": "Beatlayer",
+      "description": "The chosen theme's name.",
       "type": "string"
     },
-    {
-      "const": "light",
-      "description": "Dark text on light panels.",
-      "type": "string"
+    "themes": {
+      "description": "The themes the Theme chooser offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tone": {
+      "$ref": "#/$defs/Tone",
+      "default": "neutral",
+      "description": "Tone."
     }
-  ]
+  },
+  "required": [
+    "theme",
+    "tone",
+    "high_contrast",
+    "grid_line_intensity",
+    "brightness",
+    "color_intensity",
+    "color_hue",
+    "appearance",
+    "drawn_appearance",
+    "themes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -33724,6 +34648,43 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
   },
   "minItems": 1,
   "type": "array"
+}
+```
+
+</details>
+
+### `Tone`
+
+How a theme's neutral colours are tinted (themes R4).
+
+One of:
+
+- `"neutral"`: The theme's neutral colours as its file gives them.
+- `"warm"`: Tinted towards the hue 60°.
+- `"cool"`: Tinted towards the hue 250°.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a theme's neutral colours are tinted (themes R4).",
+  "oneOf": [
+    {
+      "const": "neutral",
+      "description": "The theme's neutral colours as its file gives them.",
+      "type": "string"
+    },
+    {
+      "const": "warm",
+      "description": "Tinted towards the hue 60°.",
+      "type": "string"
+    },
+    {
+      "const": "cool",
+      "description": "Tinted towards the hue 250°.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -34060,6 +35021,85 @@ A track, by ID and name.
   "required": [
     "id",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TrackRow`
+
+A track the Tracks scope lists (R9).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `name` | string | yes | Its name. |
+| `by_name` | boolean | yes | Whether the track's own name matched. |
+| `device` | string or null | no | The name of a device on it that matched, when one did. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A track the Tracks scope lists (R9).",
+  "properties": {
+    "by_name": {
+      "description": "Whether the track's own name matched.",
+      "type": "boolean"
+    },
+    "device": {
+      "description": "The name of a device on it that matched, when one did.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "name",
+    "by_name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TrackRows`
+
+What `search.tracks` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`TrackRow`](#trackrow) | yes | The matching tracks, in display order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `search.tracks` returns.",
+  "properties": {
+    "rows": {
+      "description": "The matching tracks, in display order.",
+      "items": {
+        "$ref": "#/$defs/TrackRow"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
   ],
   "type": "object"
 }

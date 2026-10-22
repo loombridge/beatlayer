@@ -65,7 +65,7 @@ This spec covers these four. The views they change are their own specs'; where a
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.49b | |
+| R1 | `crates/ui/tests/arrangement.rs`, `the_middle_button_pans_the_lanes`; `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid`; `crates/ui/tests/mixer.rs`, `the_middle_button_pans_the_mixer`; `crates/ui/tests/clip_view.rs`, `the_middle_button_pans_the_note_area`; `crates/ui/tests/sample_editor.rs`, `the_middle_button_pans_the_waveform`; `crates/ui/tests/device_view.rs`, `the_middle_button_pans_the_device_chain`; `crates/ui/tests/browser.rs`, `the_middle_button_pans_the_browsers_lists` | UI script |
 | R2 | to be written in WP-6.49 | |
 | R3 | to be written in WP-6.49 | |
 | R4 | to be written in WP-6.49 | |

@@ -5679,7 +5679,7 @@ fn an_agent_saves_a_clip_file_places_it_and_reads_both_back() {
     );
     assert_eq!(saved["ran"], 1, "{saved}");
     let file = saved["results"][0]["result"]["path"].as_str().unwrap();
-    assert!(file.ends_with("Clips/Idea.blclip"), "{saved}");
+    assert!(Path::new(file).ends_with("Clips/Idea.blclip"), "{saved}");
     assert_eq!(saved["results"][0]["result"]["kind"], "midi");
 
     // The settings and the new row read back.

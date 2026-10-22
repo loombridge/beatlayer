@@ -661,7 +661,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.22 | todo |  |  |
 | 6.22b | todo |  |  |
 | 6.23 | todo |  |  |
-| 6.24 | todo |  |  |
+| 6.24 | done | 22 October 2026 | [#314](https://github.com/loombridge/beatlayer/pull/314); locators in the Arrangement's scrub area, the song start time, and playing from the scrub area on the global launch quantisation ([time editing](specs/time-editing.md) R1 to R13) |
 | 6.24b | todo |  |  |
 | 6.25 | todo |  |  |
 | 6.25b | todo |  |  |

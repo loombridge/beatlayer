@@ -1152,6 +1152,15 @@ impl Shell {
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell.load_user_keymap();
+        // Spec: mixer-view R21. The return tracks scroll with the tracks as
+        // the application setting says, in the mixers and in the
+        // Arrangement's lanes.
+        shell
+            .mixer
+            .set_return_tracks_scroll(shell.prefs.return_tracks_scroll);
+        shell
+            .arrangement
+            .set_returns_scroll(shell.prefs.return_tracks_scroll);
         shell
     }
 
@@ -8151,6 +8160,15 @@ impl Shell {
                 self.focused_window = WindowKind::Main;
                 self.focused_area = Area::MainView;
                 self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if result.is_ok() && id == mixer_ids::RETURN_TRACKS_SCROLL {
+                // Spec: mixer-view R21. The switch is an application
+                // setting, kept between launches, and the Arrangement's
+                // lanes follow it.
+                let on = self.mixer.return_tracks_scroll();
+                self.prefs.return_tracks_scroll = on;
+                self.arrangement.set_returns_scroll(on);
+                self.save_preferences();
             }
             if id != mixer_ids::STATE {
                 self.touch();

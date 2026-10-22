@@ -32,6 +32,9 @@ pub const CROSSFADER: &str = "mixer_view.crossfader";
 pub const SCENE_TEMPO: &str = "mixer_view.scene_tempo";
 /// `mixer_view.return_tracks`: show or hide the return tracks' columns.
 pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
+/// `mixer_view.return_tracks_scroll`: scroll the return tracks with the
+/// tracks (IMP-01).
+pub const RETURN_TRACKS_SCROLL: &str = "mixer_view.return_tracks_scroll";
 /// `mixer_view.track_options`: show or hide the tracks' Track Options
 /// sections.
 pub const TRACK_OPTIONS: &str = "mixer_view.track_options";
@@ -57,6 +60,7 @@ pub const IDS: &[&str] = &[
     CROSSFADER,
     SCENE_TEMPO,
     RETURN_TRACKS,
+    RETURN_TRACKS_SCROLL,
     TRACK_OPTIONS,
     PERFORMANCE_IMPACT,
     SCROLL,
@@ -130,6 +134,11 @@ pub struct MixerViewState {
     pub scene_tempo: bool,
     /// Whether the return tracks' columns show.
     pub return_tracks: bool,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the
+    /// mixer view spec R21): they come after the drop area and only Main
+    /// stays pinned. Off in a new install, so the returns stay pinned, as
+    /// in Live.
+    pub return_tracks_scroll: bool,
     /// Whether the tracks' Track Options sections show (track delay and
     /// Keep Monitoring Latency). Shown only while this shows; hidden in a
     /// new set.
@@ -252,6 +261,16 @@ pub struct SectionArgs {
     /// Show it (true) or hide it (false); switches it if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+}
+
+/// Arguments of `mixer_view.return_tracks_scroll`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollReturnsArgs {
+    /// Scroll the return tracks with the tracks (true) or pin them (false);
+    /// switches it if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Arguments of `mixer_view.scroll`.
@@ -386,6 +405,18 @@ fn specs() -> Vec<CommandSpec> {
         .context(Global)
         .binding(Binding::new("S-TRACK-011"))
         .args::<SectionArgs>(),
+        view(
+            RETURN_TRACKS_SCROLL,
+            "Return Tracks Scroll with Tracks",
+            "Scrolls the return tracks with the other tracks, in the Session View's grid, in the \
+             Arrangement View's lanes and in both mixers, as View > Mixer Controls > Return Tracks \
+             Scroll with Tracks does: the returns come after the drop area and only Main stays \
+             pinned at the right. Off in a new install, so the returns stay pinned, as in Live. It \
+             is an application setting, kept between launches and not saved with the set. \
+             Switches unless `on` says which. Changes only the view.",
+        )
+        .context(Global)
+        .args::<ScrollReturnsArgs>(),
         view(
             TRACK_OPTIONS,
             "Track Options",

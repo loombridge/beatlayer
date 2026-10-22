@@ -478,3 +478,48 @@ fn a_racks_chains_fold_out_as_strips_and_the_state_reports_them() {
         "a rack of one chain has no chains to fold out"
     );
 }
+
+/// A shell keeping its preferences in `dir`, as the app keeps them.
+fn shell_saving_to(dir: &std::path::Path) -> Shell {
+    let prefs = bl_shell::settings::Preferences::load(dir).unwrap();
+    Shell::new(
+        prefs,
+        Some(dir.to_owned()),
+        bl_shell::audio::AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    )
+}
+
+// Spec: mixer-view R21.
+#[test]
+fn the_return_tracks_scroll_with_the_tracks_and_are_kept_between_launches() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-returns-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut shell = shell_saving_to(&dir);
+    // Off in a new install, so the returns stay pinned, as in Live.
+    assert!(!state(&mut shell).return_tracks_scroll);
+    assert_eq!(shell.switch_state(ids::RETURN_TRACKS_SCROLL), Some(false));
+    let before = undo_steps(&shell);
+    shell.invoke(ids::RETURN_TRACKS_SCROLL, json!({})).unwrap();
+    assert!(state(&mut shell).return_tracks_scroll);
+    assert_eq!(shell.switch_state(ids::RETURN_TRACKS_SCROLL), Some(true));
+    // View state, not an undo step, and not in the set.
+    assert_eq!(undo_steps(&shell), before);
+    shell
+        .invoke(ids::RETURN_TRACKS_SCROLL, json!({ "on": false }))
+        .unwrap();
+    assert!(!state(&mut shell).return_tracks_scroll);
+    shell
+        .invoke(ids::RETURN_TRACKS_SCROLL, json!({ "on": true }))
+        .unwrap();
+    assert!(state(&mut shell).return_tracks_scroll);
+    // It is an application setting, kept between launches.
+    let prefs = bl_shell::settings::Preferences::load(&dir).unwrap();
+    assert!(prefs.return_tracks_scroll);
+    let mut again = shell_saving_to(&dir);
+    assert!(state(&mut again).return_tracks_scroll);
+    // A new set keeps it, as a new set keeps the other view settings.
+    again.run("set.new", json!({})).unwrap();
+    assert!(state(&mut again).return_tracks_scroll);
+    let _ = std::fs::remove_dir_all(&dir);
+}

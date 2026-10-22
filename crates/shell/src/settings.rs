@@ -142,6 +142,11 @@ pub struct Preferences {
     /// Collect Files on Export (Library, L-SET-016): what saving a clip to
     /// the browser does with the audio files it plays (file-management R7).
     pub collect_files_on_export: CollectFiles,
+    /// Save Continuously (File & Folder, L-SET-015): whether every finished
+    /// edit of a set that has a file is saved within a second (WP-6.62, the
+    /// crash-recovery spec, R8 and R24). Off in a new install, as Live has
+    /// no such mode.
+    pub save_continuously: bool,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

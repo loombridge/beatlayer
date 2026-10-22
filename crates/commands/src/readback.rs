@@ -127,9 +127,6 @@ const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `e
 /// gives.
 const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
                              is `external` because it lists files outside the project";
-/// Why Save Continuously has nothing to read.
-const CONTINUOUS: &str = "the app doesn't host the autosave service yet, so no read command \
-                          reports Save Continuously; the command's own result does";
 /// Why a command that writes a file has nothing to read.
 const FILE: &str = "writes a file outside the set; the set doesn't change";
 /// Why a token has nothing to read.
@@ -561,7 +558,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("set.save_copy", nothing(FILE)),
     ("set.save_as_template", nothing(FILE)),
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
-    ("settings.set_continuous_save", nothing(CONTINUOUS)),
+    ("settings.set_continuous_save", read("settings.state", "file_folder.save_continuously")),
     ("settings.set_auto_warp_long_samples", read("settings.state", "warp.auto_warp_long_samples")),
     ("settings.set_default_warp_mode", read("settings.state", "warp.default_warp_mode")),
     ("settings.set_loop_warp_short_samples", read("settings.state", "warp.loop_warp_short_samples")),

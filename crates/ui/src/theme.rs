@@ -215,6 +215,20 @@ impl Theme {
     }
 }
 
+/// How far the theme's palest shade of a colour is from it: the palette's
+/// third row, mixed towards white (the themes spec, R15).
+const PALEST_MIX: f32 = 0.6;
+
+/// The colour a note of `velocity` is drawn in, in its clip's `colour`:
+/// the softer the note, the paler (the piano roll spec, R43). At velocity
+/// 1 the note is the theme's palest shade of the colour, at 127 the colour
+/// itself, and the mix between them is linear in the velocity.
+#[must_use]
+pub fn note_colour(colour: Color32, velocity: u8) -> Color32 {
+    let t = f32::from(velocity.clamp(1, 127) - 1) / 126.0;
+    colour.lerp_to_gamma(Color32::WHITE, PALEST_MIX * (1.0 - t))
+}
+
 /// Font definitions with only the bundled typeface, for every family.
 #[must_use]
 pub fn fonts() -> FontDefinitions {

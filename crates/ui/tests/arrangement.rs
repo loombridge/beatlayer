@@ -25,8 +25,8 @@ use bl_ui::mixer::{Place, pan_id, send_id, switch_id, volume_field_id};
 use common::{Harness, Node, Window, command};
 use egui::accesskit::Role;
 use egui::{
-    Color32, Event, FullOutput, Id, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect,
-    TouchPhase, pos2, vec2,
+    Event, FullOutput, Id, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase,
+    pos2, vec2,
 };
 use serde_json::json;
 
@@ -374,6 +374,59 @@ fn the_wheel_rulers_and_trackpad_scroll_and_zoom() {
 }
 
 #[test]
+fn the_middle_button_pans_the_lanes() {
+    // Spec: view-options R1, arrangement-view R19 (I-DRAG-058).
+    let mut h = with_scene(benchmark::scene(30, 4, 1));
+    let l = layout(&h);
+    let middle = l.lanes.center();
+    // Room to pan: the lanes are scrolled down and to the right first, by
+    // the same drag Cmd-Option makes.
+    let pan = command() | Modifiers::ALT;
+    drag(&mut h, middle, middle - vec2(0.0, 200.0), pan);
+    drag(&mut h, middle, middle - vec2(200.0, 0.0), pan);
+    let before = state(&mut h);
+    assert!(before.scroll_y > 50.0, "the lanes are scrolled down");
+    assert!(
+        before.visible.start > Ticks::ZERO,
+        "the lanes are scrolled right"
+    );
+    // A middle-button drag of 100 points right and 50 down pans the lanes
+    // with the pointer.
+    h.middle_drag(middle, middle + vec2(100.0, 50.0));
+    let after = state(&mut h);
+    let right = (before.visible.start.get() as f64 - after.visible.start.get() as f64)
+        / before.ticks_per_point;
+    assert!(
+        (right - 100.0).abs() < 0.5,
+        "the lanes moved 100 points right: {right}"
+    );
+    assert!(
+        (before.scroll_y - after.scroll_y - 50.0).abs() < 0.5,
+        "the lanes moved 50 points down: {}",
+        before.scroll_y - after.scroll_y
+    );
+    // Nothing else changed: no selection, no clip, no undo step.
+    assert_eq!(before.selected_clips, after.selected_clips);
+    assert_eq!(before.selected_tracks, after.selected_tracks);
+    assert_eq!(before.time_selection, after.time_selection);
+    assert!(!h.shell.editor().can_undo(), "not an undo step");
+
+    // The same drag with Cmd-Option (Ctrl-Alt) held gives the same view.
+    let mut h = with_scene(benchmark::scene(30, 4, 1));
+    let l = layout(&h);
+    let middle = l.lanes.center();
+    drag(&mut h, middle, middle - vec2(0.0, 200.0), pan);
+    drag(&mut h, middle, middle - vec2(200.0, 0.0), pan);
+    drag(&mut h, middle, middle + vec2(100.0, 50.0), pan);
+    let keys = state(&mut h);
+    assert!(
+        (keys.visible.start.get() as f64 - after.visible.start.get() as f64).abs() < 0.5,
+        "the middle button pans as Cmd-Option does"
+    );
+    assert!((keys.scroll_y - after.scroll_y).abs() < 0.5);
+}
+
+#[test]
 fn keys_run_the_view_commands() {
     // Spec: arrangement-view R6, R8, R9, R11, R14, R15; shortcuts S-ZOOM-003
     // to 005, S-GRID-002 to 006, S-VIEW-011, S-ARR-020 to 026, 030, 031,
@@ -633,27 +686,6 @@ fn the_follow_switch_and_the_optimize_buttons_work() {
     assert_eq!(state(&mut h).visible.start, Ticks(600 * BAR));
 }
 
-/// Every rectangle a frame paints, and the colour it fills it with, walking
-/// the frame's shapes the way `accessibility.rs` walks its focus strokes.
-fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
-    fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
-        match shape {
-            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
-            egui::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut out = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, &mut out);
-    }
-    out
-}
-
 /// The rectangle the beat-time ruler paints the loop brace in, from the
 /// view and the set's loop, as `rulers::beat_ruler` computes it.
 fn brace(h: &mut Harness, ruler: Rect) -> Rect {
@@ -683,7 +715,7 @@ fn the_loop_brace_is_painted_in_its_on_and_off_colours() {
     // The fill of the rectangle painted where the brace sits, found by its
     // rectangle, the way `accessibility.rs` finds the focus strokes.
     let the_brace = |output: &FullOutput, want: Rect| {
-        painted_rects(output)
+        common::painted_rects(output)
             .into_iter()
             .find(|(r, _)| {
                 near(r.min.x, want.min.x)

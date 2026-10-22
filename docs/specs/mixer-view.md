@@ -124,7 +124,7 @@ This spec covers the mixer's placement in both views, the controls in a strip an
 | R19 | `crates/ui/tests/mixer.rs`, `mixer_rows_keep_their_places_at_every_zoom`, `every_cited_row_exists` | unit |
 | R20 | `crates/shell/tests/mixer_view.rs`, `a_click_on_solo_or_arm_is_exclusive_and_cmd_adds` | unit |
 | R21, R22 | to be written in WP-6.38 | |
-| R23 | to be written in WP-6.49b | |
+| R23 | `crates/ui/tests/mixer.rs`, `the_middle_button_pans_the_mixer` | UI script |
 | R24 | to be written in WP-6.40 | |
 | R25 | to be written in WP-6.40 | |
 | R26 | to be written in WP-6.40 | |

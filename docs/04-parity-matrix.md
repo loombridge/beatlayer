@@ -22,7 +22,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live feature | Milestone | Notes |
 |---|---|---|
-| Placement of every view, panel, and control | M1 onwards | Each UI package matches the rows of `docs/ui-parity/layout.md` it implements (D16). Built in WP-1.7, WP-1.8a, WP-1.9, WP-1.10, WP-6.72 (the Clip View's panel arrangement) |
+| Placement of every view, panel, and control | M1 onwards | Each UI package matches the rows of `docs/ui-parity/layout.md` it implements (D16). Built in WP-1.7, WP-1.8a, WP-1.9, WP-1.10, WP-6.72 (the Clip View's panel arrangement), WP-6.49b (panning with the middle mouse button) |
 | Menu bar and context menus: structure, order, and wording of generic commands | M1 onwards | `docs/ui-parity/menus.md`. Built in WP-1.7, WP-1.8b, WP-4.22 (the track header's), WP-6.56 (the Session View's and the Clip View title bar's) |
 | Keyboard shortcuts, macOS and Windows, including held (momentary) shortcuts | M1 onwards | `docs/ui-parity/shortcuts.md`; the keymap test fails on a missing binding. Built in WP-1.7, WP-1.8a, WP-1.8b, WP-1.9, WP-1.10, WP-6.70 (the sweep of pending M1 to M3 shortcuts) |
 | Mouse gestures and modifier-key behaviours | M1 onwards | `docs/ui-parity/interactions.md`. Built in WP-1.8a, WP-1.8b, WP-1.9, WP-1.10, WP-6.59, WP-6.60 |

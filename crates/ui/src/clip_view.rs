@@ -1359,7 +1359,14 @@ impl ClipViewUi {
                 continue;
             }
             let corner = theme.sizes.corner.min(2.0);
-            painter.rect_filled(rect, corner, face);
+            // Spec: piano-roll R43. The note is drawn in its clip's colour,
+            // paler the softer its velocity; a deactivated note is grey.
+            let colour = if note.mute {
+                colours.clip_muted.0
+            } else {
+                crate::theme::note_colour(face, note.velocity)
+            };
+            painter.rect_filled(rect, corner, colour);
             if selected.contains(&u32::try_from(place).unwrap_or(u32::MAX)) {
                 // Spec: arrangement-editing R15's selection colour, as the
                 // Arrangement's selected clips wear.
@@ -1959,6 +1966,15 @@ impl ClipViewUi {
                 } else {
                     self.top = (self.top + scroll / KEY_HEIGHT).clamp(0.0, 127.0);
                 }
+            }
+        }
+        // Spec: view-options R1, piano-roll R44. A middle-button drag pans
+        // the note area, the key track following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, grid) {
+            if rows.folded {
+                self.first = (self.first - delta.y / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
+            } else {
+                self.top = (self.top - delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
             }
         }
         // Spec: piano-roll. S-A11Y-008 and S-A11Y-009, the note-selection

@@ -1316,6 +1316,20 @@ impl SampleEditorUi {
                 );
             }
         }
+        // Spec: view-options R1. A middle-button drag pans the waveform,
+        // the content following the pointer.
+        if let Some(delta) = crate::middle::pan(ui, g.wave)
+            && delta.x != 0.0
+        {
+            let delta = -f64::from(delta.x) / f64::from(g.axis.width.max(1.0)) * g.axis.length;
+            self.show_span(
+                frame,
+                g.axis.start + delta,
+                g.axis.end() + delta,
+                true,
+                events,
+            );
+        }
         self.context_menu(ui, &response, frame, events);
         self.keys(ui, frame, events);
     }

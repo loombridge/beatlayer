@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::midi_io_commands as midi_ids;
+use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, commands::DetailView,
     transport_commands,
@@ -903,6 +904,13 @@ impl MainWindowUi {
                     Self::metronome_menu_content(ui, shell, events);
                 });
             }
+            if *el == Element::AutomationArm {
+                // Spec: automation R18. The Automation Arm button's context
+                // menu chooses the recording's mode.
+                response.context_menu(|ui| {
+                    Self::automation_arm_menu_content(ui, shell, events);
+                });
+            }
             if *el == Element::MetronomeMenu {
                 Self::metronome_menu(&response, shell, events);
             }
@@ -959,6 +967,25 @@ impl MainWindowUi {
                 control_bar::UNFOLLOW_TEMPO_AUTOMATION,
                 serde_json::json!({}),
             )));
+        }
+    }
+
+    /// The Automation Arm button's context menu (automation R18): the
+    /// recording's mode, the current one ticked.
+    fn automation_arm_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let mode = shell.automation_record_mode();
+        for choice in AutomationRecordMode::ALL {
+            let mut text = choice.label().to_owned();
+            if choice == mode {
+                text = format!("✔ {text}");
+            }
+            if ui.button(text).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SETTINGS_SET_AUTOMATION_RECORD_MODE,
+                    json!({ "mode": choice }),
+                )));
+                ui.close();
+            }
         }
     }
 

@@ -11,10 +11,10 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    Appearance, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY, DefaultWarpMode,
-    GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
-    ThemeLook, Tone, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
+    DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples,
+    SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs, ZOOM_MAX_PERCENT,
+    ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -76,6 +76,11 @@ pub struct Preferences {
     pub export: crate::ExportPrefs,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
+    /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
+    /// view spec R21): an application setting, kept between launches and
+    /// not saved with the set. Off in a new install, so the returns stay
+    /// pinned, as in Live.
+    pub return_tracks_scroll: bool,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
@@ -97,6 +102,10 @@ pub struct Preferences {
     /// Record Session automation in (Record, Warp & Launch, L-SET-018;
     /// WP-3.12): Armed Tracks, as observed in Live 12.4.3.
     pub record_session_automation_in: SessionAutomationTracks,
+    /// The mode an Arrangement recording writes control moves in (the
+    /// automation spec, R18): Touch, Latch or Write. It's kept between
+    /// launches, and isn't part of the set.
+    pub automation_record_mode: AutomationRecordMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

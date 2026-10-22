@@ -2399,7 +2399,7 @@ impl BrowserUi {
         }
         let view = shell.arrangement();
         let doc = shell.editor().document();
-        let pinned = bl_shell::arrangement::rows::pinned_tracks(doc, view).count();
+        let pinned = view.pinned_tracks(doc).count();
         let lanes = ArrangementLayout::compute(main_view, view.overview(), pinned).lanes;
         // Cmd (macOS) or Alt (Windows) ignores the grid (I-DRAG-021).
         let ignore_snap = if cfg!(target_os = "macos") {

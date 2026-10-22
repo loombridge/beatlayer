@@ -40,7 +40,7 @@ use crate::auto_warp;
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
+    self as ids, AutomationRecordModeArgs, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, DefaultWarpModeArgs, FileReport, FoldNotesArgs,
     LaneArgs, LoopWarpShortSamplesArgs, PathArgs, RecordSessionAutomationInArgs, SampleEditorArgs,
     SampleEditorResult, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
@@ -1155,6 +1155,15 @@ impl Shell {
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell.load_user_keymap();
+        // Spec: mixer-view R21. The return tracks scroll with the tracks as
+        // the application setting says, in the mixers and in the
+        // Arrangement's lanes.
+        shell
+            .mixer
+            .set_return_tracks_scroll(shell.prefs.return_tracks_scroll);
+        shell
+            .arrangement
+            .set_returns_scroll(shell.prefs.return_tracks_scroll);
         shell
     }
 
@@ -2313,6 +2322,13 @@ impl Shell {
         self.prefs.record_session_automation_in
     }
 
+    /// The mode an Arrangement recording writes control moves in (the
+    /// automation spec, R18): Touch, Latch or Write.
+    #[must_use]
+    pub fn automation_record_mode(&self) -> crate::settings::AutomationRecordMode {
+        self.prefs.automation_record_mode
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -2379,6 +2395,7 @@ impl Shell {
             },
             launch: self.prefs.launch,
             record_session_automation_in: self.prefs.record_session_automation_in,
+            automation_record_mode: self.prefs.automation_record_mode,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -5512,7 +5529,22 @@ impl Shell {
     fn poll_automation_record(&mut self, engine: &EngineTransport) {
         let recording = engine.recording && engine.playing;
         let was = std::mem::replace(&mut self.automation_recording, recording);
-        if recording || !was {
+        if recording {
+            if !was {
+                // The recording starts: the take learns the mode and where
+                // it began (automation R18 to R21).
+                let document = self.editor.document();
+                let settings = document.settings();
+                self.automation_take.start(
+                    self.prefs.automation_record_mode,
+                    crate::automation_record::take_start(document, engine.position),
+                    settings.arrangement_loop.start,
+                );
+            }
+            self.automation_take.advance(engine.position);
+            return;
+        }
+        if !was {
             return;
         }
         let take = std::mem::take(&mut self.automation_take);
@@ -7919,6 +7951,20 @@ impl Shell {
                 .flatten()
                 .map(|command| {
                     crate::automation_record::moved_all(self.editor.document(), &command)
+                        .into_iter()
+                        .map(|(track, target, value)| {
+                            // The value the control had before the move, which
+                            // Write starts the envelope from (automation R20).
+                            let before = crate::modulation::control_value(
+                                self.editor.document(),
+                                &self.devices,
+                                track,
+                                &target,
+                            )
+                            .unwrap_or(value);
+                            (track, target, before, value)
+                        })
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             // Spec: session-automation R1. With Automation Arm on and a
@@ -7949,12 +7995,13 @@ impl Shell {
             if sample_edit_command(id) {
                 self.clip_view.sample_follow(true);
             }
-            for (track, target, value) in moved {
+            for (track, target, before, value) in moved {
                 self.automation_take.write(
                     track,
                     target,
                     self.arrangement.transport().position,
                     value,
+                    before,
                 );
             }
             for (track, target, before, value) in session_moved {
@@ -8128,6 +8175,15 @@ impl Shell {
                 self.focused_window = WindowKind::Main;
                 self.focused_area = Area::MainView;
                 self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if result.is_ok() && id == mixer_ids::RETURN_TRACKS_SCROLL {
+                // Spec: mixer-view R21. The switch is an application
+                // setting, kept between launches, and the Arrangement's
+                // lanes follow it.
+                let on = self.mixer.return_tracks_scroll();
+                self.prefs.return_tracks_scroll = on;
+                self.arrangement.set_returns_scroll(on);
+                self.save_preferences();
             }
             if id != mixer_ids::STATE {
                 self.touch();
@@ -9805,6 +9861,12 @@ impl Shell {
             ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
                 let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
                 self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_AUTOMATION_RECORD_MODE => {
+                let AutomationRecordModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.automation_record_mode = mode;
                 self.save_preferences();
                 Ok(Value::Null)
             }

@@ -1,6 +1,6 @@
 # The Mixer view: faders, pan, meters, the activator, Solo, and Arm, in both views
 
-- **Status:** partial (R1 to R20 and R40 each have a passing test, and the pieces listed under "Pending" are drawn in place and say what brings them; R21 to R39 are Phase 6's)
+- **Status:** partial (R1 to R23 and R40 each have a passing test, and the pieces listed under "Pending" are drawn in place and say what brings them; R24 to R39 are Phase 6's)
 - **Work packages:** WP-1.9 (this spec); the gain-reduction meter is WP-5.29 (IMP-25, R40). The engine and the document under it are WP-1.6's ([mixer](mixer.md)); sends, the returns' Pre/Post switches, and the In/Out section are drawn here and came to life in WP-2.19 ([routing](routing.md)), except the audio interface's channels (WP-2.13) and the returns' own sends (with the track context menu); the Crossfader section since WP-3.17 ([mixer](mixer.md) R23); Track Options since WP-5.36, Performance Impact with Phase 5; the Session View's clip slots, scenes, and status row with M3; the extended meters and dragging the mixer taller with M6; the Exclusive Solo and Exclusive Arm settings with the Record, Warp & Launch page; the keyboard baseline across every M1 view with WP-1.14. In Phase 6: WP-6.38 (R21, R22: the return tracks scrolling with the tracks, IMP-01), WP-6.49b (R23: panning with the middle button), WP-6.40 (R24 to R31: the Devices section, IMP-25), and WP-6.65 (R32 to R39: the extended meters, the mixer's height, column widths, and each view's own sections)
 - **Parity-matrix row:** Mixing and routing: Mixer, with sections you can show or hide; Views and workflow: Interface placement and key bindings; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks) and IMP-25 (the Mixer's device section)
 - **Checked against:** Live 12.4.6 on macOS, observed on 11 October 2026, the UI parity reference recorded in Live 12.4.3 on 10 October 2026, and the Live 12 reference manual as published on 11 October 2026; for R21 to R39, the manual (online edition) and the Live 12 release notes, read 20 October 2026
@@ -123,7 +123,7 @@ This spec covers the mixer's placement in both views, the controls in a strip an
 | R18 | `crates/ui/tests/mixer.rs`, `a_fader_drag_runs_the_recorded_gesture`; `crates/cli/tests/mixer_goldens.rs`, `a_fader_dragged_in_the_mixer_glides_with_no_zipper_noise`; the `fader-gesture` golden reference | UI script, golden render |
 | R19 | `crates/ui/tests/mixer.rs`, `mixer_rows_keep_their_places_at_every_zoom`, `every_cited_row_exists` | unit |
 | R20 | `crates/shell/tests/mixer_view.rs`, `a_click_on_solo_or_arm_is_exclusive_and_cmd_adds` | unit |
-| R21, R22 | to be written in WP-6.38 | |
+| R21, R22 | `crates/ui/src/layout/mixer.rs`, `the_return_tracks_scroll_with_the_tracks_when_the_switch_is_on`; `crates/ui/tests/mixer.rs`, `the_return_tracks_scroll_with_the_tracks_when_the_switch_is_on`; `crates/ui/tests/session_view.rs`, `the_return_tracks_scroll_with_the_tracks_in_the_grid`; `crates/ui/tests/arrangement.rs`, `the_return_tracks_rows_scroll_with_the_tracks_when_the_switch_is_on`; `crates/shell/tests/mixer_view.rs`, `the_return_tracks_scroll_with_the_tracks_and_are_kept_between_launches` | unit, UI script |
 | R23 | `crates/ui/tests/mixer.rs`, `the_middle_button_pans_the_mixer` | UI script |
 | R24 | to be written in WP-6.40 | |
 | R25 | to be written in WP-6.40 | |
@@ -132,7 +132,7 @@ This spec covers the mixer's placement in both views, the controls in a strip an
 | R28 | to be written in WP-6.40 | |
 | R29 | to be written in WP-6.40 | |
 | R30 | to be written in WP-6.40 | |
-| R31 | to be written in WP-6.38 and WP-6.40 | |
+| R31 | `crates/shell/tests/mixer_view.rs`, `the_return_tracks_scroll_with_the_tracks_and_are_kept_between_launches`; `crates/cli/tests/agent.rs`, `an_agent_scrolls_the_return_tracks_with_the_tracks_and_reads_it_back` (the return tracks' part; the Devices section's comes with WP-6.40) | unit |
 | R32 | to be written in WP-6.65 | |
 | R33 | to be written in WP-6.65 | |
 | R34 | to be written in WP-6.65 | |

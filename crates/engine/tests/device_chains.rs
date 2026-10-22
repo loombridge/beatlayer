@@ -112,6 +112,7 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
             value: 0.5,
         },
         Command::SetDeviceState {
+            articulations: None,
             device: second,
             params: [(GAIN_PARAM, 0.25)].into_iter().collect(),
             name: "Quiet".to_owned(),

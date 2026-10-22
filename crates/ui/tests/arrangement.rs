@@ -554,6 +554,51 @@ fn the_track_controls_hide_their_parts() {
         near(l.lanes.bottom(), 725.0),
         "the lanes take the returns' height"
     );
+
+    // Switching back gives the layout of a new set exactly.
+    for id in [ids::SHOW_IN_OUT, ids::SHOW_VOLUME, ids::SHOW_RETURN_TRACKS] {
+        h.shell.run(id, json!({ "on": true })).unwrap();
+    }
+    let nodes = Harness::nodes(&h.settle());
+    assert!(nodes.iter().any(|n| n.label == "Input Type"));
+    assert!(has(&nodes, volume_field_id(Place::Header, midi)));
+    assert!(has(&nodes, pan_id(Place::Header, midi)));
+    assert!(has(&nodes, send_id(Place::Header, audio, returns[0])));
+    let headers: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(headers.contains(&"A Return") && headers.contains(&"Main"));
+    let l = layout(&h);
+    assert!(near(l.lanes.bottom(), 688.0), "the lanes are as they were");
+    let first = nodes
+        .iter()
+        .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+        .expect("the first track's title");
+    let bounds = first.bounds.unwrap();
+    assert!(near(bounds.x1 as f32, 1400.0), "{bounds:?}");
+
+    // At every interface zoom, the parts that show keep their places (R24,
+    // interface-zoom R1).
+    h.shell
+        .run(ids::SHOW_IN_OUT, json!({ "on": false }))
+        .unwrap();
+    for percent in [50, 75, 100, 150, 200] {
+        h.shell
+            .run("view.set_zoom", json!({ "percent": percent }))
+            .unwrap();
+        let nodes = Harness::nodes(&h.settle());
+        let first = nodes
+            .iter()
+            .find(|n| n.role == Role::RowHeader && n.label == "1 MIDI")
+            .expect("the first track's title");
+        let bounds = first.bounds.unwrap();
+        assert!(
+            near((bounds.x1 - bounds.x0) as f32, 179.0),
+            "at {percent}%: {bounds:?}"
+        );
+    }
 }
 
 #[test]

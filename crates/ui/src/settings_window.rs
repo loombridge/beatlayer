@@ -11,6 +11,7 @@
 //! are the other way another program drives the app.
 
 use bl_model::{LaunchMode, LaunchQuantization};
+use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
     AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
@@ -371,7 +372,9 @@ impl SettingsUi {
                 SettingsPage::TempoMidi => {
                     tempo_midi_page(ui, shell, theme, &mut rows, &mut events);
                 }
-                SettingsPage::FileFolder => file_folder_page(ui, shell, &mut rows, &mut events),
+                SettingsPage::FileFolder => {
+                    file_folder_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 other => rows.note(
                     ui,
                     &format!(
@@ -1639,9 +1642,16 @@ fn theme_page(
 }
 
 /// File & Folder (L-SET-015): the Sample Editor and Temporary Folder rows,
-/// with their Browse buttons and paths (WP-4.10b and WP-4.20). The page's
+/// with their Browse buttons and paths (WP-4.10b and WP-4.20), and the Save
+/// Continuously switch (WP-6.62, the crash-recovery spec, R24). The page's
 /// other rows come with later packages.
-fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mut Vec<UiEvent>) {
+fn file_folder_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
     rows.heading(ui, "Temporary Folder");
     let rect = rows.row(ui, "Temporary Folder", SettingsLayout::CHOOSER);
     if ui.put(rect, egui::Button::new("Browse")).clicked() {
@@ -1665,6 +1675,22 @@ fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mu
     }
     let path = shell.sample_editor().unwrap_or_default();
     rows.copyable_row(ui, "Path", "sample-editor", &path);
+
+    rows.heading(ui, "Saving");
+    let rect = rows.row(ui, "Save Continuously", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "save-continuously",
+        "Save Continuously",
+        rect,
+        shell.save_continuously(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            recovery_ids::SET_CONTINUOUS_SAVE,
+            json!({ "on": on }),
+        )));
+    }
 }
 
 /// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and

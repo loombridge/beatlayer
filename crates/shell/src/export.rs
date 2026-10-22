@@ -107,6 +107,38 @@ pub struct Job {
     pub render_as_loop: bool,
     /// The engine's block size, from 1 to 8,192 frames.
     pub block: usize,
+    /// Convert to Mono: one channel, the average of the render's channels,
+    /// taken before Normalize and dither (the export spec, R33).
+    pub mono: bool,
+    /// Also write an MP3 of the same render beside the file, with its name
+    /// and `.mp3` (the export spec, R37). Ignored when the file is an MP3.
+    pub mp3: bool,
+}
+
+impl Job {
+    /// The MP3 written beside the file, if the job writes one.
+    #[must_use]
+    pub fn companion(&self) -> Option<PathBuf> {
+        (self.mp3 && self.file_type != FileType::Mp3).then(|| self.path.with_extension("mp3"))
+    }
+
+    /// Every file the job writes: the file, then its MP3.
+    #[must_use]
+    pub fn destinations(&self) -> Vec<PathBuf> {
+        let mut files = vec![self.path.clone()];
+        files.extend(self.companion());
+        files
+    }
+
+    /// The hidden file each of its files is written to first, in the order
+    /// of [`Job::destinations`].
+    #[must_use]
+    pub fn partials(&self) -> Vec<PathBuf> {
+        self.destinations()
+            .iter()
+            .map(|path| hidden_beside(path, "partial"))
+            .collect()
+    }
 }
 
 /// What an export did.
@@ -296,7 +328,10 @@ pub fn export_multi(
     progress: &mut dyn FnMut(f64),
 ) -> Result<Vec<Report>, ExportError> {
     let (reports, partials) = render_multi(renders, media, plugins, cancel, progress)?;
-    let destinations: Vec<PathBuf> = renders.iter().map(|(_, job)| job.path.clone()).collect();
+    let destinations: Vec<PathBuf> = renders
+        .iter()
+        .flat_map(|(_, job)| job.destinations())
+        .collect();
     promote(&partials, &destinations)?;
     progress(1.0);
     Ok(reports)
@@ -339,7 +374,7 @@ pub fn render_multi(
     let mut partials: Vec<PathBuf> = Vec::with_capacity(renders.len());
     let mut scratches: Vec<PathBuf> = Vec::with_capacity(renders.len());
     for (_, job) in renders {
-        partials.push(hidden_beside(&job.path, "partial"));
+        partials.extend(job.partials());
         scratches.push(hidden_beside(&job.path, "render"));
     }
 
@@ -347,9 +382,9 @@ pub fn render_multi(
     let mut reports = Vec::with_capacity(renders.len());
     let mut render_result = Ok(());
 
-    for (i, ((document, job), partial)) in renders.iter().zip(&partials).enumerate() {
+    for (i, (document, job)) in renders.iter().enumerate() {
         let scratch = &scratches[i];
-        let files = (partial.as_path(), scratch.as_path());
+        let files = scratch.as_path();
         let mut job_progress = |fraction: f64| {
             let overall = (i as f64 + fraction) / total;
             progress(overall);
@@ -408,7 +443,7 @@ fn check(job: &Job) -> Result<(), ExportError> {
     }
     // Spec: export R23 (WP-2.26). MP3 holds its own rates; anything else is
     // refused before the render. Its bit depth and dither don't apply.
-    if job.file_type == FileType::Mp3 && !MP3_RATES.contains(&job.sample_rate) {
+    if (job.file_type == FileType::Mp3 || job.mp3) && !MP3_RATES.contains(&job.sample_rate) {
         let rates: Vec<String> = MP3_RATES.iter().map(u32::to_string).collect();
         return invalid(format!(
             "a sample rate of {} Hz; MP3 holds {} Hz",
@@ -426,8 +461,10 @@ fn check(job: &Job) -> Result<(), ExportError> {
     if !folder.is_dir() {
         return invalid(format!("there's no folder {}", folder.display()));
     }
-    if !job.replace && job.path.exists() {
-        return Err(ExportError::Exists(job.path.clone()));
+    if !job.replace
+        && let Some(existing) = job.destinations().into_iter().find(|path| path.exists())
+    {
+        return Err(ExportError::Exists(existing));
     }
     Ok(())
 }
@@ -706,16 +743,43 @@ fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
 }
 
 pub(crate) enum Out {
-    /// The file itself: the writer that encodes and rounds.
-    Writer(AudioWriter),
+    /// The files themselves: a writer for each (the file, and its MP3),
+    /// which encode and round.
+    Writers(Vec<AudioWriter>),
     /// The scratch file the normalise pass reads: the raw samples.
     Scratch(BufWriter<File>, Vec<u8>),
 }
 
-/// How a file is encoded: its type, its bits, its dither, its rate, and
-/// its channels.
-pub(crate) fn encode_spec(job: &Job) -> Result<EncodeSpec, ExportError> {
-    Ok(EncodeSpec {
+/// A file a job writes: the hidden file it goes to first, and how it is
+/// encoded.
+pub(crate) type Target = (PathBuf, EncodeSpec);
+
+/// Convert to Mono (the export spec, R33): each frame of `samples` becomes
+/// one sample, the average of its `channels`.
+pub(crate) fn downmix(samples: &[f32], channels: usize) -> Vec<f32> {
+    samples
+        .chunks_exact(channels)
+        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .collect()
+}
+
+/// How each file of a job is encoded, with the hidden file it goes to
+/// first: the file's type, its bits, its dither, its rate, and its
+/// channels, then its MP3's (the export spec, R33, R37).
+pub(crate) fn targets(job: &Job) -> Result<Vec<Target>, ExportError> {
+    // The channels the engine renders, which `render` makes the same way,
+    // or one with Convert to Mono.
+    let channels = if job.mono {
+        1
+    } else {
+        EngineConfig::new(
+            SampleRate::new(job.sample_rate.max(job.engine_rate))
+                .ok_or_else(|| ExportError::Invalid(format!("a rate of {} Hz", job.engine_rate)))?,
+            job.block,
+        )
+        .channels as u16
+    };
+    let file = EncodeSpec {
         file_type: job.file_type,
         bit_depth: job.bit_depth,
         dither: if job.bit_depth.is_integer() {
@@ -724,24 +788,20 @@ pub(crate) fn encode_spec(job: &Job) -> Result<EncodeSpec, ExportError> {
             Dither::None
         },
         sample_rate: job.sample_rate,
-        // The channels the engine renders, which `render` makes the same
-        // way.
-        channels: EngineConfig::new(
-            SampleRate::new(job.sample_rate.max(job.engine_rate))
-                .ok_or_else(|| ExportError::Invalid(format!("a rate of {} Hz", job.engine_rate)))?,
-            job.block,
-        )
-        .channels as u16,
-    })
+        channels,
+    };
+    let mp3 = EncodeSpec {
+        file_type: FileType::Mp3,
+        dither: Dither::None,
+        ..file
+    };
+    let specs = std::iter::once(file).chain(job.companion().map(|_| mp3));
+    Ok(job.partials().into_iter().zip(specs).collect())
 }
 
-/// Opens the file a job writes: the writer for the finished file, or the
+/// Opens the files a job writes: the writers for the finished files, or the
 /// scratch file the normalise pass reads.
-pub(crate) fn open(
-    job: &Job,
-    (partial, scratch): (&Path, &Path),
-    spec: EncodeSpec,
-) -> Result<Out, ExportError> {
+pub(crate) fn open(job: &Job, scratch: &Path, targets: &[Target]) -> Result<Out, ExportError> {
     let failed = |what: &Path, error: &dyn std::fmt::Display| {
         ExportError::Failed(format!("{}: {error}", what.display()))
     };
@@ -752,17 +812,24 @@ pub(crate) fn open(
             Vec::new(),
         ))
     } else {
-        let writer = AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
-        Ok(Out::Writer(writer))
+        let writers = targets
+            .iter()
+            .map(|(partial, spec)| {
+                AudioWriter::create(partial, *spec).map_err(|error| failed(partial, &error))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Out::Writers(writers))
     }
 }
 
-/// Writes samples into the file: the writer, or the scratch file.
+/// Writes samples into the files: the writers, or the scratch file.
 pub(crate) fn write(out: &mut Out, samples: &[f32]) -> Result<(), ExportError> {
     match out {
-        Out::Writer(writer) => writer
-            .write(samples)
-            .map_err(|error| ExportError::Failed(error.to_string())),
+        Out::Writers(writers) => writers.iter_mut().try_for_each(|writer| {
+            writer
+                .write(samples)
+                .map_err(|error| ExportError::Failed(error.to_string()))
+        }),
         Out::Scratch(file, bytes) => {
             bytes.clear();
             for sample in samples {
@@ -774,16 +841,15 @@ pub(crate) fn write(out: &mut Out, samples: &[f32]) -> Result<(), ExportError> {
     }
 }
 
-/// Finishes a render's file: with Normalize, the scratch file through the
-/// gain to a new writer for the finished file (the export spec, R8);
-/// without it, the writer itself. `head` is the loop render's head, in
+/// Finishes a render's files: with Normalize, the scratch file through the
+/// gain to new writers for the finished files (the export spec, R8);
+/// without it, the writers themselves. `head` is the loop render's head, in
 /// the file's rate, and `total` the frames the scratch file holds.
-/// Returns the writer, the gain, and the peak of what was written.
+/// Returns the writers, the gain, and the peak of what was written.
 #[expect(clippy::too_many_arguments, reason = "the finish's inputs")]
 pub(crate) fn finish(
     out: Out,
-    spec: EncodeSpec,
-    partial: &Path,
+    targets: &[Target],
     scratch: &Path,
     head: &mut [f32],
     total: u64,
@@ -791,7 +857,7 @@ pub(crate) fn finish(
     normalize: bool,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
-) -> Result<(AudioWriter, f64, f32), ExportError> {
+) -> Result<(Vec<AudioWriter>, f64, f32), ExportError> {
     let failed = |what: &Path, error: &dyn std::fmt::Display| {
         ExportError::Failed(format!("{}: {error}", what.display()))
     };
@@ -806,8 +872,13 @@ pub(crate) fn finish(
     }
     file.into_inner()
         .map_err(|error| failed(scratch, &error.error().to_string()))?;
-    let mut writer = AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?;
-    let channels = usize::from(spec.channels);
+    let mut writers = targets
+        .iter()
+        .map(|(partial, spec)| {
+            AudioWriter::create(partial, *spec).map_err(|error| failed(partial, &error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let channels = usize::from(targets[0].1.channels);
     let mut reader = BufReader::with_capacity(
         1 << 16,
         File::open(scratch).map_err(|error| failed(scratch, &error))?,
@@ -821,9 +892,11 @@ pub(crate) fn finish(
         *sample = (f64::from(*sample) * gain) as f32;
         peak = peak.max(sample.abs());
     }
-    writer
-        .write(head)
-        .map_err(|error| failed(partial, &error))?;
+    for (writer, (partial, _)) in writers.iter_mut().zip(targets) {
+        writer
+            .write(head)
+            .map_err(|error| failed(partial, &error))?;
+    }
     while read < total {
         if cancel.load(Ordering::Relaxed) {
             return Err(ExportError::Cancelled);
@@ -844,13 +917,15 @@ pub(crate) fn finish(
         for sample in &chunk {
             peak = peak.max(sample.abs());
         }
-        writer
-            .write(&chunk)
-            .map_err(|error| failed(partial, &error))?;
+        for (writer, (partial, _)) in writers.iter_mut().zip(targets) {
+            writer
+                .write(&chunk)
+                .map_err(|error| failed(partial, &error))?;
+        }
         read += take as u64;
         progress(read as f64 / total.max(1) as f64);
     }
-    Ok((writer, gain, peak))
+    Ok((writers, gain, peak))
 }
 
 fn run(
@@ -858,7 +933,7 @@ fn run(
     media: Arc<dyn MediaLibrary>,
     plugins: Hosts<'_>,
     job: &Job,
-    (partial, scratch): (&Path, &Path),
+    scratch: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Report, ExportError> {
@@ -866,12 +941,12 @@ fn run(
     let failed = |what: &Path, error: &dyn std::fmt::Display| {
         ExportError::Failed(format!("{}: {error}", what.display()))
     };
-    let spec = encode_spec(job)?;
+    let targets = targets(job)?;
     // Spec: export R26. A loop's head can't be written before the tail is
     // known, so it waits in memory, the first TAIL_SECONDS of the file at
     // most (the tail is no longer); the rest goes to the scratch file.
     let staged = job.normalize || job.render_as_loop;
-    let channels = usize::from(spec.channels);
+    let channels = usize::from(targets[0].1.channels);
     let head_room = if job.render_as_loop {
         TAIL_SECONDS as usize * job.sample_rate as usize * channels
     } else {
@@ -883,12 +958,33 @@ fn run(
         let file = File::create(scratch).map_err(|error| failed(scratch, &error))?;
         Out::Scratch(BufWriter::with_capacity(1 << 16, file), Vec::new())
     } else {
-        Out::Writer(AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?)
+        open(
+            &Job {
+                normalize: false,
+                ..job.clone()
+            },
+            scratch,
+            &targets,
+        )?
     };
 
     // Pass one: the render.
+    let render_channels = EngineConfig::new(
+        SampleRate::new(job.sample_rate.max(job.engine_rate))
+            .ok_or_else(|| ExportError::Invalid(format!("a rate of {} Hz", job.engine_rate)))?,
+        job.block,
+    )
+    .channels;
+    // Spec: export R33. Convert to Mono averages the render's channels
+    // before anything else is done to them.
+    let mono = |samples: &[f32]| -> Option<Vec<f32>> {
+        job.mono.then(|| downmix(samples, render_channels))
+    };
     let mut add_tail = |samples: &[f32]| {
-        tail.extend_from_slice(samples);
+        match mono(samples) {
+            Some(mixed) => tail.extend_from_slice(&mixed),
+            None => tail.extend_from_slice(samples),
+        }
         Ok(())
     };
     let passes = if staged { 2.0 } else { 1.0 };
@@ -908,6 +1004,8 @@ fn run(
         cancel,
         &mut |share| progress(share / passes),
         &mut |samples| {
+            let mixed = mono(samples);
+            let samples = mixed.as_deref().unwrap_or(samples);
             let (first, samples) = samples.split_at((head_room - head.len()).min(samples.len()));
             head.extend_from_slice(first);
             for &sample in samples {
@@ -915,19 +1013,7 @@ fn run(
                     peak = peak.max(sample.abs());
                 }
             }
-            match &mut out {
-                Out::Writer(writer) => writer
-                    .write(samples)
-                    .map_err(|error| ExportError::Failed(error.to_string())),
-                Out::Scratch(file, bytes) => {
-                    bytes.clear();
-                    for sample in samples {
-                        bytes.extend_from_slice(&sample.to_le_bytes());
-                    }
-                    file.write_all(bytes)
-                        .map_err(|error| ExportError::Failed(format!("the scratch file: {error}")))
-                }
-            }
+            write(&mut out, samples)
         },
         job.render_as_loop.then_some(&mut add_tail as &mut Sink<'_>),
     )?;
@@ -946,14 +1032,13 @@ fn run(
         .fold(peak, |peak, sample| peak.max(sample.abs()));
 
     // Pass two, with Normalize or Render as Loop: the head and the scratch
-    // file through the gain to the writer. Spec: export R8.
+    // file through the gain to the writers. Spec: export R8.
     let total = rendered.frames - (head.len() / channels) as u64;
-    let (writer, gain, peak) = match out {
-        Out::Writer(writer) => (writer, 1.0, peak),
+    let (writers, gain, peak) = match out {
+        Out::Writers(writers) => (writers, 1.0, peak),
         out @ Out::Scratch(_, _) => finish(
             out,
-            spec,
-            partial,
+            &targets,
             scratch,
             &mut head,
             total,
@@ -966,11 +1051,14 @@ fn run(
     if cancel.load(Ordering::Relaxed) {
         return Err(ExportError::Cancelled);
     }
-    let written = writer.finish().map_err(|error| failed(partial, &error))?;
+    let mut written = 0;
+    for (writer, (partial, _)) in writers.into_iter().zip(&targets) {
+        written = writer.finish().map_err(|error| failed(partial, &error))?;
+    }
     progress(1.0);
     Ok(Report {
         frames: written,
-        channels: rendered.channels,
+        channels: targets[0].1.channels,
         render_rate: rendered.render_rate,
         rendered_frames: rendered.rendered_frames,
         peak,
@@ -1155,27 +1243,30 @@ pub(crate) fn prepare_document_for_track(
     Ok(doc)
 }
 
-/// Runs `export.audio` with its arguments: the set in `document`, its
-/// clips' audio from `media`, its plug-ins lent by `plugins`, the
-/// Arrangement's time `selection`, the Arrangement's `selected_tracks`,
-/// and the engine's rate.
-///
-/// # Errors
-///
-/// [`ShellError`] for arguments that can't be exported, an existing file,
-/// or an export that failed.
-#[expect(clippy::too_many_arguments, reason = "the export's inputs")]
-pub fn run_command(
+/// What an `export.audio` call renders and where it writes (the export spec,
+/// R15, R17 to R20, R37).
+struct Plan {
+    path: PathBuf,
+    file_type: FileType,
+    bit_depth: BitDepth,
+    sample_rate: u32,
+    start: Ticks,
+    end: Ticks,
+    source: RangeSource,
+    /// Each file's render, with the track it is of, if one: a set for the
+    /// Main output, or for each track.
+    renders: Vec<(Option<TrackId>, Document, Job)>,
+}
+
+/// Works out what `export.audio` renders and the files it writes, as
+/// [`run_command`] does before it renders anything.
+fn plan(
     document: &Document,
-    media: Arc<dyn MediaLibrary>,
-    plugins: Hosts<'_>,
     selection: Option<(Ticks, Ticks)>,
     selected_tracks: &[TrackId],
     engine_rate: u32,
     args: &ExportArgs,
-    audio: Option<&mut crate::audio::AudioHost>,
-    session: &crate::realtime::Session,
-) -> Result<ExportResult, ShellError> {
+) -> Result<Plan, ShellError> {
     let invalid = |message: String| ShellError::InvalidArgs {
         command: AUDIO.to_owned(),
         message,
@@ -1208,8 +1299,12 @@ pub fn run_command(
             asked
         }
     };
-    let bit_depth = BitDepth::from_bits(u32::from(args.bit_depth))
-        .ok_or_else(|| invalid(format!("{} bits; give 16, 24, or 32", args.bit_depth)))?;
+    // Spec: export R44. A left-out bit depth is 24, and a left-out rate
+    // the engine's.
+    let bits = args.bit_depth.unwrap_or(24);
+    let bit_depth = BitDepth::from_bits(u32::from(bits))
+        .ok_or_else(|| invalid(format!("{bits} bits; give 16, 24, or 32")))?;
+    let sample_rate = args.sample_rate.unwrap_or(engine_rate);
     let dither = match args.dither.unwrap_or_default() {
         SpecDither::None => Dither::None,
         SpecDither::Rectangular => Dither::Rectangular,
@@ -1233,7 +1328,7 @@ pub fn run_command(
         file_type,
         bit_depth,
         dither,
-        sample_rate: args.sample_rate,
+        sample_rate,
         engine_rate,
         normalize: args.normalize,
         start,
@@ -1241,87 +1336,164 @@ pub fn run_command(
         replace: args.replace,
         render_as_loop: args.render_as_loop,
         block: BLOCK,
+        mono: args.convert_to_mono,
+        mp3: args.encode_mp3,
     };
 
-    #[expect(clippy::type_complexity, reason = "the renders and their paths")]
-    let (renders, written_paths): (Vec<(Option<TrackId>, Document, Job)>, Vec<PathBuf>) =
-        match rendered_choice {
-            RenderedTrack::Main => {
-                let job = make_job(path.clone());
-                (vec![(None, document.clone(), job)], vec![path.clone()])
+    let renders: Vec<(Option<TrackId>, Document, Job)> = match rendered_choice {
+        RenderedTrack::Main => {
+            let job = make_job(path.clone());
+            vec![(None, document.clone(), job)]
+        }
+        RenderedTrack::Track(id) => {
+            if id == document.main_id() {
+                return Err(invalid(
+                    "the Main track is the whole mix: choose `main` to render it".to_owned(),
+                ));
             }
-            RenderedTrack::Track(id) => {
-                if id == document.main_id() {
-                    return Err(invalid(
-                        "the Main track is the whole mix: choose `main` to render it".to_owned(),
-                    ));
-                }
-                if document.track(id).is_none() {
-                    return Err(invalid(format!("no track has the ID {}", id.0)));
-                }
-                let transformed =
-                    prepare_document_for_track(document, id, args.include_return_and_main_effects)
-                        .map_err(invalid)?;
-                let job = make_job(path.clone());
-                (vec![(Some(id), transformed, job)], vec![path.clone()])
+            if document.track(id).is_none() {
+                return Err(invalid(format!("no track has the ID {}", id.0)));
             }
-            RenderedTrack::AllTracks => {
-                let tracks: Vec<&bl_model::Track> = document
-                    .track_order()
-                    .into_iter()
-                    .filter_map(|id| document.track(id))
-                    .filter(|t| track_makes_audio(t))
-                    .collect();
-                if tracks.is_empty() {
-                    return Err(invalid(
-                        "the set has no tracks to export; add a track or choose Main".to_owned(),
-                    ));
-                }
-                let dest_paths = track_paths(&path, file_type.extension(), &tracks);
-                let mut renders = Vec::with_capacity(tracks.len());
-                for (track, dest) in tracks.iter().zip(&dest_paths) {
-                    let transformed = prepare_document_for_track(
-                        document,
-                        track.id(),
-                        args.include_return_and_main_effects,
-                    )
+            let transformed =
+                prepare_document_for_track(document, id, args.include_return_and_main_effects)
                     .map_err(invalid)?;
-                    renders.push((Some(track.id()), transformed, make_job(dest.clone())));
-                }
-                (renders, dest_paths)
+            let job = make_job(path.clone());
+            vec![(Some(id), transformed, job)]
+        }
+        RenderedTrack::AllTracks => {
+            let tracks: Vec<&bl_model::Track> = document
+                .track_order()
+                .into_iter()
+                .filter_map(|id| document.track(id))
+                .filter(|t| track_makes_audio(t))
+                .collect();
+            if tracks.is_empty() {
+                return Err(invalid(
+                    "the set has no tracks to export; add a track or choose Main".to_owned(),
+                ));
             }
-            RenderedTrack::SelectedTracks => {
-                if selected_tracks.is_empty() {
-                    return Err(invalid(
+            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+            let mut renders = Vec::with_capacity(tracks.len());
+            for (track, dest) in tracks.iter().zip(&dest_paths) {
+                let transformed = prepare_document_for_track(
+                    document,
+                    track.id(),
+                    args.include_return_and_main_effects,
+                )
+                .map_err(invalid)?;
+                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
+            }
+            renders
+        }
+        RenderedTrack::SelectedTracks => {
+            if selected_tracks.is_empty() {
+                return Err(invalid(
                     "no tracks are selected in the Arrangement: select tracks, or choose all tracks or Main".to_owned(),
                 ));
-                }
-                let tracks: Vec<&bl_model::Track> = document
-                    .track_order()
-                    .into_iter()
-                    .filter(|id| selected_tracks.contains(id))
-                    .filter_map(|id| document.track(id))
-                    .filter(|t| track_makes_audio(t))
-                    .collect();
-                if tracks.is_empty() {
-                    return Err(invalid(
+            }
+            let tracks: Vec<&bl_model::Track> = document
+                .track_order()
+                .into_iter()
+                .filter(|id| selected_tracks.contains(id))
+                .filter_map(|id| document.track(id))
+                .filter(|t| track_makes_audio(t))
+                .collect();
+            if tracks.is_empty() {
+                return Err(invalid(
                     "the selected tracks make no audio: add an instrument or audio effect, or choose Main".to_owned(),
                 ));
-                }
-                let dest_paths = track_paths(&path, file_type.extension(), &tracks);
-                let mut renders = Vec::with_capacity(tracks.len());
-                for (track, dest) in tracks.iter().zip(&dest_paths) {
-                    let transformed = prepare_document_for_track(
-                        document,
-                        track.id(),
-                        args.include_return_and_main_effects,
-                    )
-                    .map_err(invalid)?;
-                    renders.push((Some(track.id()), transformed, make_job(dest.clone())));
-                }
-                (renders, dest_paths)
             }
-        };
+            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+            let mut renders = Vec::with_capacity(tracks.len());
+            for (track, dest) in tracks.iter().zip(&dest_paths) {
+                let transformed = prepare_document_for_track(
+                    document,
+                    track.id(),
+                    args.include_return_and_main_effects,
+                )
+                .map_err(invalid)?;
+                renders.push((Some(track.id()), transformed, make_job(dest.clone())));
+            }
+            renders
+        }
+    };
+    Ok(Plan {
+        path,
+        file_type,
+        bit_depth,
+        sample_rate,
+        start,
+        end,
+        source,
+        renders,
+    })
+}
+
+/// The files `export.audio` with `args` would write: the file or each
+/// track's, and each one's MP3 (the export spec, R20, R37). The Export
+/// dialog asks about those that exist before it starts.
+///
+/// # Errors
+///
+/// [`ShellError`] for arguments that can't be exported.
+pub fn planned_files(
+    document: &Document,
+    selection: Option<(Ticks, Ticks)>,
+    selected_tracks: &[TrackId],
+    engine_rate: u32,
+    args: &ExportArgs,
+) -> Result<Vec<PathBuf>, ShellError> {
+    let plan = plan(document, selection, selected_tracks, engine_rate, args)?;
+    Ok(plan
+        .renders
+        .iter()
+        .flat_map(|(_, _, job)| job.destinations())
+        .collect())
+}
+
+/// Runs `export.audio` with its arguments: the set in `document`, its
+/// clips' audio from `media`, its plug-ins lent by `plugins`, the
+/// Arrangement's time `selection`, the Arrangement's `selected_tracks`,
+/// and the engine's rate. `progress` is told the files it writes and the
+/// share rendered across them, from 0 to 1. The caller resets `session`
+/// first, and stops the export with its cancel.
+///
+/// # Errors
+///
+/// [`ShellError`] for arguments that can't be exported, an existing file,
+/// or an export that failed.
+#[expect(clippy::too_many_arguments, reason = "the export's inputs")]
+pub fn run_command(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    plugins: Hosts<'_>,
+    selection: Option<(Ticks, Ticks)>,
+    selected_tracks: &[TrackId],
+    engine_rate: u32,
+    args: &ExportArgs,
+    audio: Option<&mut crate::audio::AudioHost>,
+    session: &crate::realtime::Session,
+    progress: &mut dyn FnMut(&[PathBuf], f64),
+) -> Result<ExportResult, ShellError> {
+    let invalid = |message: String| ShellError::InvalidArgs {
+        command: AUDIO.to_owned(),
+        message,
+    };
+    let Plan {
+        path,
+        file_type,
+        bit_depth,
+        sample_rate,
+        start,
+        end,
+        source,
+        renders,
+    } = plan(document, selection, selected_tracks, engine_rate, args)?;
+    let written_paths: Vec<PathBuf> = renders
+        .iter()
+        .flat_map(|(_, _, job)| job.destinations())
+        .collect();
+    progress(&written_paths, 0.0);
 
     // Spec: external-devices R22. The outputs whose path runs through
     // external hardware render in real time; the others render offline, as
@@ -1346,12 +1518,14 @@ pub fn run_command(
             message: error.to_string(),
         },
     };
-    // A render that ran before leaves nothing behind: the session forgets
-    // its cancel, its skip and its restart.
-    session.reset();
     let cancel = session.cancel_flag();
-    let (mut reports, partials) =
-        render_multi(&offline, media, plugins, &cancel, &mut |_| {}).map_err(failed)?;
+    // The offline renders are the first share of the progress, the real-time
+    // ones the rest.
+    let offline_share = offline.len() as f64 / renders.len() as f64;
+    let (mut reports, partials) = render_multi(&offline, media, plugins, &cancel, &mut |share| {
+        progress(&written_paths, share * offline_share);
+    })
+    .map_err(failed)?;
     let mut outcome = crate::realtime::Outcome::default();
     if !live.is_empty() {
         // Spec: external-devices R22, R26. Without a running audio device,
@@ -1375,14 +1549,21 @@ pub fn run_command(
             args.auto_restart.unwrap_or(true),
             args.max_attempts,
             session,
-            &mut |_| {},
+            &mut |share| {
+                progress(
+                    &written_paths,
+                    offline_share + share * (1.0 - offline_share),
+                )
+            },
         ) {
             Ok(rendered) => rendered,
             Err(error) => {
                 // The outputs that rendered offline leave no file behind
                 // either: the export failed.
                 for (_, job) in &offline {
-                    let _ = fs::remove_file(hidden_beside(&job.path, "partial"));
+                    for partial in job.partials() {
+                        let _ = fs::remove_file(partial);
+                    }
                     let _ = fs::remove_file(hidden_beside(&job.path, "render"));
                 }
                 return Err(failed(error));
@@ -1390,16 +1571,20 @@ pub fn run_command(
         };
         reports.extend(live_reports);
         outcome = live_outcome;
-        let live_partials: Vec<PathBuf> = jobs
+        let live_partials: Vec<PathBuf> = jobs.iter().flat_map(|(_, job)| job.partials()).collect();
+        let destinations: Vec<PathBuf> = jobs
             .iter()
-            .map(|(_, job)| hidden_beside(&job.path, "partial"))
+            .flat_map(|(_, job)| job.destinations())
             .collect();
-        let destinations: Vec<PathBuf> = jobs.iter().map(|(_, job)| job.path.clone()).collect();
         promote(&live_partials, &destinations).map_err(failed)?;
     }
     // The outputs that rendered offline are moved into place as well.
-    let destinations: Vec<PathBuf> = offline.iter().map(|(_, job)| job.path.clone()).collect();
+    let destinations: Vec<PathBuf> = offline
+        .iter()
+        .flat_map(|(_, job)| job.destinations())
+        .collect();
     promote(&partials, &destinations).map_err(failed)?;
+    progress(&written_paths, 1.0);
 
     let canonical_path = fs::canonicalize(&path).unwrap_or(path);
     let files: Vec<String> = written_paths
@@ -1427,7 +1612,7 @@ pub fn run_command(
     }
 
     let speed = if total_took.as_secs_f64() > 0.0 {
-        (total_frames as f64 / f64::from(args.sample_rate.max(1))) / total_took.as_secs_f64()
+        (total_frames as f64 / f64::from(sample_rate.max(1))) / total_took.as_secs_f64()
     } else {
         0.0
     };
@@ -1441,11 +1626,11 @@ pub fn run_command(
             FileType::Flac => SpecFileType::Flac,
             FileType::Mp3 => SpecFileType::Mp3,
         },
-        bit_depth: args.bit_depth,
-        sample_rate: args.sample_rate,
+        bit_depth: args.bit_depth.unwrap_or(24),
+        sample_rate,
         channels: first_report.channels,
         frames: first_report.frames,
-        seconds: first_report.frames as f64 / f64::from(args.sample_rate),
+        seconds: first_report.frames as f64 / f64::from(sample_rate),
         start,
         end,
         range: source,

@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::midi_io_commands as midi_ids;
+use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, transport_commands,
 };
@@ -585,14 +586,23 @@ impl MainWindowUi {
         // over the window while a render that runs through external
         // hardware is under way.
         crate::realtime_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: export R28, R41. The Export Audio/Video dialog sits over the
+        // window while it's open, and the progress window while an export
+        // runs.
+        crate::export_dialog::show(ctx, shell, theme, &mut events);
         // Spec: multisampler R64. The autosampler's dialog sits over the
         // window while it's open.
         crate::autosampler::show(ctx, shell, theme, &mut events);
         crate::slice_dialog::show(ctx, shell, theme, &mut events);
+        // Spec: crash-recovery R22. The recovery prompt sits over the
+        // window while there are sets a crash left to offer.
+        crate::recovery_dialog::show(ctx, shell, theme, &mut events);
         self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         // An open menu, or a dialog, keeps the keys.
         self.menu_open = egui::Popup::is_any_open(ctx)
             || shell.stems_dialog().is_some()
+            || shell.export_dialog().is_some()
+            || shell.export_running()
             || shell.autosampler_dialog().is_some()
             || shell.slice_dialog().is_some();
         // The track whose control has the focus, for the neighbour items'
@@ -873,6 +883,13 @@ impl MainWindowUi {
                     Self::metronome_menu_content(ui, shell, events);
                 });
             }
+            if *el == Element::AutomationArm {
+                // Spec: automation R18. The Automation Arm button's context
+                // menu chooses the recording's mode.
+                response.context_menu(|ui| {
+                    Self::automation_arm_menu_content(ui, shell, events);
+                });
+            }
             if *el == Element::MetronomeMenu {
                 Self::metronome_menu(&response, shell, events);
             }
@@ -929,6 +946,25 @@ impl MainWindowUi {
                 control_bar::UNFOLLOW_TEMPO_AUTOMATION,
                 serde_json::json!({}),
             )));
+        }
+    }
+
+    /// The Automation Arm button's context menu (automation R18): the
+    /// recording's mode, the current one ticked.
+    fn automation_arm_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let mode = shell.automation_record_mode();
+        for choice in AutomationRecordMode::ALL {
+            let mut text = choice.label().to_owned();
+            if choice == mode {
+                text = format!("✔ {text}");
+            }
+            if ui.button(text).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SETTINGS_SET_AUTOMATION_RECORD_MODE,
+                    json!({ "mode": choice }),
+                )));
+                ui.close();
+            }
         }
     }
 

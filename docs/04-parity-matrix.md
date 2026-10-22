@@ -265,7 +265,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Pack a project into one archive, export Session clips as a new set, merge sets | M6 | Beatlayer's own pack format ([spec](specs/set-exchange.md)). Built in WP-6.35, WP-6.35b |
 | Standard MIDI Files, import and export | M2 | Built in WP-2.21 |
 | Audio import: WAV, AIFF, AIFF-C, FLAC, Ogg Vorbis, MP3, M4A (AAC, ALAC), RF64 and BWF over 4 GB | M1 | M4A on every platform, not only macOS. Built in WP-1.1, WP-1.10 |
-| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop), M6 (the dialog, mono) | The Export Audio/Video dialog and Convert to Mono: WP-6.71 ([spec](specs/export.md) R28 to R45). Built in WP-1.12, WP-2.26, WP-4.17, WP-6.71 |
+| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop), M6 (the dialog, mono) | The Export Audio/Video dialog, Convert to Mono and Create Analysis File: WP-6.71 ([spec](specs/export.md) R28 to R45). Built in WP-1.12, WP-2.26, WP-4.17, WP-6.71 |
 | Export formats: WAV, AIFF, FLAC at 16, 24, or 32 bits; MP3 at 320 kbps | M1 (WAV, AIFF, FLAC), M2 (MP3) | Built in WP-1.12, WP-2.26 |
 | Dither: rectangular, triangular | M1 | Built in WP-1.12 |
 | Dither: POW-r 1, 2, 3 | Out | A licensed proprietary algorithm; Beatlayer's own noise-shaped dither takes its place, built in WP-2.27 |

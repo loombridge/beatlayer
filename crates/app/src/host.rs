@@ -27,6 +27,7 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 
@@ -414,6 +415,17 @@ struct PendingCapture {
     redrawn: Instant,
 }
 
+/// Where the app keeps the journal of the open set's edits, so a crash
+/// can be recovered from (WP-6.62, the crash-recovery spec, R21): the
+/// recovery folder in the user's application data, or one in the config
+/// directory the app was given.
+fn recovery_dir(args: &Args) -> Option<PathBuf> {
+    match &args.config_dir {
+        Some(dir) => Some(dir.join("Recovery")),
+        None => bl_project::autosave::default_recovery_dir(),
+    }
+}
+
 /// Runs the app until it quits.
 pub fn run(args: Args) -> Result<(), String> {
     let config_dir = args.config_dir.clone().or_else(default_config_dir);
@@ -452,11 +464,20 @@ pub fn run(args: Args) -> Result<(), String> {
     }
     // The files' analyses are kept beside the peaks (WP-4.3).
     shell.use_platform_analysis_cache();
+    shell.use_platform_peak_cache();
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
     }
     if !args.benchmark_scene {
+        // Spec: crash-recovery R21. The app journals the open set's edits
+        // in the recovery folder in the user's application data, and offers
+        // the sets a crash left.
+        if let Some(dir) = recovery_dir(&args)
+            && let Err(error) = shell.use_recovery(dir)
+        {
+            shell.set_message(format!("Crash recovery isn't running: {error}"), true);
+        }
         open_user_library(&mut shell, &args);
     }
     if let Some(set) = &args.set {
@@ -1298,6 +1319,9 @@ impl Host {
         self.sync_agent_server();
         self.take_captures();
         self.take_renders();
+        // Spec: export R44. An agent's `export.audio` waits for the export on
+        // its thread, and gets its answer once it ends.
+        self.agent.sync_export(&mut self.shell);
         self.resume_agents();
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
@@ -1314,6 +1338,58 @@ impl Host {
             if let Some(main) = &self.main {
                 main.window.set_title(&self.shell.set_name());
             }
+        }
+    }
+
+    /// Export's save dialog (the export spec, R40): the person chooses where
+    /// the file goes, and one question lists the other files the export
+    /// writes that exist already (declining returns to the save dialog).
+    /// Cancelling goes back to the Export dialog with its choices.
+    fn pick_export_path(&mut self, file_name: &str, folder: Option<&std::path::Path>) {
+        loop {
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Export Audio/Video")
+                .set_file_name(file_name);
+            if let Some(folder) = folder {
+                dialog = dialog.set_directory(folder);
+            }
+            if let Some(main) = &self.main {
+                dialog = dialog.set_parent(main.window.as_ref());
+            }
+            let Some(path) = dialog.save_file() else {
+                self.invoke(&Invocation::new(
+                    bl_shell::export_commands::OPEN_DIALOG,
+                    json!({}),
+                ));
+                return;
+            };
+            let others = self.shell.export_conflicts(&path);
+            if !others.is_empty() {
+                let list: Vec<String> = others
+                    .iter()
+                    .filter_map(|file| file.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .collect();
+                let answer = rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title("Beatlayer")
+                    .set_description(format!(
+                        "These files exist already:\n{}\n\nReplace them?",
+                        list.join("\n")
+                    ))
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show();
+                if answer != rfd::MessageDialogResult::Yes {
+                    continue;
+                }
+            }
+            // The save dialog asked about the file itself.
+            let replace = path.exists() || !others.is_empty();
+            self.invoke(&Invocation::new(
+                bl_shell::export_commands::START,
+                json!({ "path": path.to_string_lossy(), "replace": replace }),
+            ));
+            return;
         }
     }
 
@@ -1371,6 +1447,8 @@ impl Host {
                 }
                 self.shell.save_preferences();
                 self.cancel_renders();
+                // An export under way removes its partial files first.
+                self.shell.stop_export();
                 self.agent.set_view_capture(false);
                 self.quitting = true;
                 event_loop.exit();
@@ -1463,6 +1541,9 @@ impl Host {
                         json!({ "path": path.to_string_lossy() }),
                     ));
                 }
+            }
+            Effect::PickExportPath { file_name, folder } => {
+                self.pick_export_path(&file_name, folder.as_deref());
             }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {

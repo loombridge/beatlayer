@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-676 commands in 42 areas.
+678 commands in 42 areas.
 
 ## Permission classes
 
@@ -428,6 +428,7 @@ Each command has:
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.performance_impact`](#mixer_viewperformance_impact) | Performance Impact | `read` |  |  |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
+| [`mixer_view.return_tracks_scroll`](#mixer_viewreturn_tracks_scroll) | Return Tracks Scroll with Tracks | `read` |  |  |
 | [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
 | [`mixer_view.scroll`](#mixer_viewscroll) | Scroll Mixer | `read` |  |  |
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
@@ -594,6 +595,7 @@ Each command has:
 | [`settings.set_appearance`](#settingsset_appearance) | Appearance | `edit` |  |  |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
+| [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | Automation Record Mode | `edit` |  |  |
 | [`settings.set_brightness`](#settingsset_brightness) | Brightness | `edit` |  |  |
 | [`settings.set_color_hue`](#settingsset_color_hue) | Color Hue | `edit` |  |  |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | Color Intensity | `edit` |  |  |
@@ -7796,6 +7798,22 @@ Arguments:
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.return_tracks_scroll`
+
+**Return Tracks Scroll with Tracks**. Permission: `read`. Contexts: `global`.
+
+Scrolls the return tracks with the other tracks, in the Session View's grid, in the Arrangement View's lanes and in both mixers, as View > Mixer Controls > Return Tracks Scroll with Tracks does: the returns come after the drop area and only Main stays pinned at the right. Off in a new install, so the returns stay pinned, as in Live. It is an application setting, kept between launches and not saved with the set. Switches unless `on` says which. Changes only the view.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Scroll the return tracks with the tracks (true) or pin them (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.scene_tempo`
 
 **Scene Tempo and Time Signature**. Permission: `read`. Contexts: `global`.
@@ -10678,6 +10696,22 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_automation_record_mode`
+
+**Automation Record Mode**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the mode an Arrangement recording writes control moves in, the one the Control Bar's Automation Arm button's context menu chooses: `touch` (the default, Live's) writes a control's values while it is held, `latch` holds the last value a control was moved to until the recording stops, and `write` writes a moved control's envelope from where the recording started. A Session recording is unaffected. The mode is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | `touch`, `latch` or `write`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_brightness`
 
 **Brightness**. Permission: `edit`. Contexts: `settings`.
@@ -11018,7 +11052,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the automation recording mode (`settings.set_automation_record_mode`), the File & Folder page's Temporary Folder, sample editor and Save Continuously (`settings.set_temporary_folder`, `settings.set_sample_editor` and `settings.set_continuous_save`), Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -12100,7 +12134,7 @@ Result: nothing (`null`).
 
 **Transport Status**. Permission: `read`. Contexts: `global`.
 
-Reports what the Control Bar's transport section shows: whether the song plays, the play position and the insert marker (in ticks from 1.1.1, and the Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, length, and switch, the tempo, and the time signature, the metronome, Arrangement Record and whether a take is running or the count-in is sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm, the recording under way (its armed tracks and dropped frames) and what the last recording came to, and whether the audio engine runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where the song is before and after `transport.play`, `transport.stop`, `transport.locate`, or `transport.set_loop`.
+Reports what the Control Bar's transport section shows: whether the song plays, the play position and the insert marker (in ticks from 1.1.1, and the Arrangement Position fields' bar.beat.sixteenth), the Arrangement loop's start, length, and switch, the tempo, and the time signature, the metronome, Arrangement Record and whether a take is running or the count-in is sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm and the mode an Arrangement recording writes control moves in, the recording under way (its armed tracks and dropped frames) and what the last recording came to, and whether the audio engine runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where the song is before and after `transport.play`, `transport.stop`, `transport.locate`, or `transport.set_loop`.
 
 Default keys: none.
 
@@ -12877,6 +12911,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_appearance`](#settingsset_appearance) | `settings.state` | `theme_colors.appearance` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
+| [`settings.set_automation_record_mode`](#settingsset_automation_record_mode) | `settings.state` | `automation_record_mode` |
 | [`settings.set_brightness`](#settingsset_brightness) | `settings.state` | `theme_colors.brightness` |
 | [`settings.set_color_hue`](#settingsset_color_hue) | `settings.state` | `theme_colors.color_hue` |
 | [`settings.set_color_intensity`](#settingsset_color_intensity) | `settings.state` | `theme_colors.color_intensity` |
@@ -14681,6 +14716,43 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
     "target"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `AutomationRecordMode`
+
+The mode an Arrangement recording writes its control moves in (the automation spec, R18): Touch, Live's; Latch; and Write (IMP-23). The names are Beatlayer's own.
+
+One of:
+
+- `"touch"`: Touch, Live's mode: a control writes its values while it is held.
+- `"latch"`: Latch: the last value a control was moved to holds until the recording stops.
+- `"write"`: Write: a control's envelope is written from where the recording started.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The mode an Arrangement recording writes its control moves in (the automation spec, R18): Touch, Live's; Latch; and Write (IMP-23). The names are Beatlayer's own.",
+  "oneOf": [
+    {
+      "const": "touch",
+      "description": "Touch, Live's mode: a control writes its values while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "latch",
+      "description": "Latch: the last value a control was moved to holds until the recording stops.",
+      "type": "string"
+    },
+    {
+      "const": "write",
+      "description": "Write: a control's envelope is written from where the recording started.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -26517,6 +26589,7 @@ What `mixer_view.state` and the other view commands return.
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
+| `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
 | `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
@@ -26580,6 +26653,10 @@ What `mixer_view.state` and the other view commands return.
       "description": "Whether the return tracks' columns show.",
       "type": "boolean"
     },
+    "return_tracks_scroll": {
+      "description": "Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live.",
+      "type": "boolean"
+    },
     "scene_tempo": {
       "description": "Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set.",
       "type": "boolean"
@@ -26610,6 +26687,7 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks",
+    "return_tracks_scroll",
     "track_options",
     "performance_impact",
     "performance_impact_values",
@@ -32807,6 +32885,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
+| `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
@@ -32834,6 +32913,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "auto_hide_plug_in_windows": {
       "description": "Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it.",
       "type": "boolean"
+    },
+    "automation_record_mode": {
+      "$ref": "#/$defs/AutomationRecordMode",
+      "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
     },
     "create_fades_on_clip_edges": {
       "description": "Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it.",
@@ -32891,6 +32974,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "warp",
     "launch",
     "record_session_automation_in",
+    "automation_record_mode",
     "file_folder",
     "auto_hide_plug_in_windows",
     "plug_ins",
@@ -35505,6 +35589,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `punch_out` | boolean | yes | Whether Punch-Out is on. |
 | `midi_overdub` | boolean | yes | Whether MIDI Arrangement Overdub is on. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
+| `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
 | `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
@@ -35526,6 +35611,10 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
       "type": "boolean"
+    },
+    "automation_record_mode": {
+      "$ref": "#/$defs/AutomationRecordMode",
+      "description": "The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18)."
     },
     "capture_midi_ready": {
       "default": false,
@@ -35655,6 +35744,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_out",
     "midi_overdub",
     "automation_arm",
+    "automation_record_mode",
     "recording",
     "last_recording",
     "capture_midi_ready"

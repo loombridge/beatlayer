@@ -1972,6 +1972,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("transport.set_metronome_sound", Exception(metronome_menu)),
         ("transport.set_metronome_rhythm", Exception(metronome_menu)),
+        // The Automation Arm button's context menu (the automation spec,
+        // R18), opened from the focused button as the tempo field's is.
+        (
+            "settings.set_automation_record_mode",
+            Exception(Equivalent(
+                "the Automation Arm button's context menu (the Context Menu key or \
+                 Shift-F10 with the button focused)",
+            )),
+        ),
         // The Control Bar's scale controls (scales R9, R12, R14): the
         // switch changes the selected clips' scales, or the set's current
         // scale when no clip is selected.

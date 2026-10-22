@@ -184,6 +184,9 @@ pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
 /// recordings write automation for (WP-3.12).
 pub const SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN: &str =
     "settings.set_record_session_automation_in";
+/// `settings.set_automation_record_mode`: choose the mode an Arrangement
+/// recording writes control moves in (WP-6.46).
+pub const SETTINGS_SET_AUTOMATION_RECORD_MODE: &str = "settings.set_automation_record_mode";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -277,6 +280,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
     SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
     SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
+    SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -486,6 +490,14 @@ pub struct DefaultLaunchModeArgs {
 pub struct RecordSessionAutomationInArgs {
     /// `armed_tracks` or `all_tracks`.
     pub tracks: crate::settings::SessionAutomationTracks,
+}
+
+/// Arguments of `settings.set_automation_record_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AutomationRecordModeArgs {
+    /// `touch`, `latch` or `write`.
+    pub mode: crate::settings::AutomationRecordMode,
 }
 
 /// Arguments of `settings.set_default_launch_quantization`.
@@ -1604,6 +1616,23 @@ fn specs() -> Vec<CommandSpec> {
         .permission(Permission::Edit)
         .context(Settings)
         .args::<RecordSessionAutomationInArgs>()
+        .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_AUTOMATION_RECORD_MODE,
+            "Automation Record Mode",
+        )
+        .description(
+            "Chooses the mode an Arrangement recording writes control moves in, the one \
+                 the Control Bar's Automation Arm button's context menu chooses: `touch` \
+                 (the default, Live's) writes a control's values while it is held, `latch` \
+                 holds the last value a control was moved to until the recording stops, and \
+                 `write` writes a moved control's envelope from where the recording started. \
+                 A Session recording is unaffected. The mode is kept for the next start, and \
+                 isn't part of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<AutomationRecordModeArgs>()
         .result::<()>(),
         CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
             .description(

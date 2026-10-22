@@ -712,7 +712,7 @@ Total to 1.0: 256 packages planned in Phases 0 to 6, and about 110 estimated in 
 | 6.61 | todo |  |  |
 | 6.62 | todo |  |  |
 | 6.63 | done | 22 October 2026 | [#294](https://github.com/loombridge/beatlayer/pull/294); the File Manager in the detail area's place, listing the set's files, the missing ones, the external ones and the unused ones, with the search's switches, Collect and Save, the set's backups and Save a Copy... ([file management](specs/file-management.md) R10 to R21) |
-| 6.64 | todo |  |  |
+| 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | todo |  |  |
 | 6.66 | todo |  |  |
 | 6.67 | todo |  |  |

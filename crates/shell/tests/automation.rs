@@ -420,6 +420,35 @@ fn with_lock_envelopes_on_a_time_selection_leaves_the_envelopes() {
     );
 }
 
+// Spec: automation-editing R9, R10. With Lock Envelopes on, duplicating,
+// copying, pasting and deleting clips leave every envelope where it is.
+#[test]
+fn with_lock_envelopes_on_the_clip_edits_leave_the_envelopes() {
+    let mut song = song();
+    song.run("song.set_lock_envelopes", json!({ "enabled": true }));
+    let before = song.envelope();
+    song.run(edit_ids::DUPLICATE, json!({ "clips": [song.clip] }));
+    assert_eq!(song.envelope(), before, "duplicate leaves the envelope");
+    song.run(edit_ids::COPY, json!({ "clips": [song.clip] }));
+    song.run(edit_ids::PASTE, json!({ "at": Ticks(BAR * 4) }));
+    assert_eq!(song.envelope(), before, "paste leaves the envelope");
+    song.run(edit_ids::DELETE, json!({ "clips": [song.clip] }));
+    assert_eq!(song.envelope(), before, "delete leaves the envelope");
+}
+
+// Spec: automation-editing R9. Cutting a clip carries its automation with
+// it, as deleting it does.
+#[test]
+fn cutting_a_clip_carries_its_automation_with_it() {
+    let mut song = song();
+    song.run(edit_ids::CUT, json!({ "clips": [song.clip] }));
+    assert_eq!(
+        song.envelope(),
+        vec![(0, 0.0), (2, 0.5)],
+        "the span runs straight across"
+    );
+}
+
 // The golden render (automation-editing R9): a clip moved with Lock
 // Envelopes off plays its automation at its new place. Every block of a
 // render runs under the allocation trap.

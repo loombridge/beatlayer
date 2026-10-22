@@ -80,10 +80,10 @@ This spec covers these edits in the Arrangement's automation lanes, the keys in 
 |---|---|---|
 | R1 | `a_selection_names_the_lanes_it_covers` | `bl-shell` |
 | R2 | `moving_several_breakpoints_moves_them_all_as_one` | `bl-shell` |
-| R3 | `a_span_keeps_the_values_at_its_edges_and_runs_straight_across_it` | `bl-model` |
-| R4 | `a_shape_over_a_span_holds_the_edges_the_values_there_and_the_bends_inside` | `bl-model` |
-| R5 | `deleting_an_envelopes_range_leaves_it_straight_across_and_the_rest_alone`, `copying_an_envelope_and_pasting_it_onto_another_parameter_keeps_its_shape` | `bl-shell` |
-| R6 | `the_edit_keys_in_an_automation_lane_act_on_the_envelopes` | `bl-ui` |
+| R3 | `shift_keeps_a_breakpoint_drag_to_one_axis` | `bl-ui` |
+| R4 | `dragging_a_segment_inside_a_time_selection_adds_breakpoints_at_its_edges`, `dragging_a_selected_segment_moves_it_in_one_undo_step` | `bl-ui` |
+| R5 | `a_span_keeps_the_values_at_its_edges_and_runs_straight_across_it`, `a_shape_over_a_span_holds_the_edges_the_values_there_and_the_bends_inside` (`bl-model`); `deleting_an_envelopes_range_leaves_it_straight_across_and_the_rest_alone`, `copying_an_envelope_and_pasting_it_onto_another_parameter_keeps_its_shape` | `bl-model`, `bl-shell` |
+| R6 | `the_edit_keys_in_an_automation_lane_act_on_the_envelopes`, `option_with_an_edit_key_acts_on_the_shown_automation_lanes` | `bl-ui` |
 | R7 | `every_listed_id_is_registered_and_complete` | `bl-shell-spec` |
 | R8 | `lock_envelopes_is_off_in_a_new_set_and_saved_with_the_set`, `an_older_set_loads_with_lock_envelopes_off` | `bl-shell`, `bl-cli` |
 | R9 | `moving_a_clip_carries_its_automation_with_it` | `bl-shell` |

@@ -60,20 +60,35 @@ pub struct Request<'a> {
     pub beats: &'a Plan,
     /// The pitch ratio (R20). 1.0 where untransposed.
     pub pitch: f64,
+    /// The clip whose frames these are, by its ID: a mode that keeps state
+    /// uses it to start afresh when another clip takes its instance over,
+    /// since one instance may serve several clips that never sound at once
+    /// (R5, R7).
+    pub clip: u64,
 }
 
 /// The frames of the run a window must hold besides what the mode reaches
 /// for: a block, with room.
 const RUN_FRAMES: usize = 8_192;
 
-/// The most file frames any mode reads around a run at `rate` (R18, R19):
-/// Texture's largest Grain Size and Flux reach each way, through the widest
-/// interpolator, with the run's own frames. The player reads a clip through a
-/// window this wide, and a clip's source keeps this much ready. A mode whose
-/// reach can exceed it must widen it here.
+/// The most file frames a grain mode (Tones, Texture) reads around a run at
+/// `rate` (R18, R19): Texture's largest Grain Size and Flux reach each way,
+/// through the widest interpolator, with the run's own frames. The player
+/// reads such a clip through a window this wide, and its source keeps this
+/// much ready.
 #[must_use]
-pub fn window_frames(rate: f64) -> usize {
+pub fn grain_window_frames(rate: f64) -> usize {
     RUN_FRAMES + 2 * crate::texture::max_reach(rate)
+}
+
+/// The most file frames a frequency-domain mode (Complex, Complex Pro) reads
+/// around a run at `rate` (R21, R24): the stretcher's own read-ahead either
+/// side, with the run's own frames. Kept apart from
+/// [`grain_window_frames`] so a grain mode's window pays only for its own
+/// reach.
+#[must_use]
+pub fn stretch_window_frames(rate: f64) -> usize {
+    RUN_FRAMES + 2 * crate::complex::max_reach(rate)
 }
 
 /// A warp mode.
@@ -214,6 +229,7 @@ mod tests {
             high_quality: false,
             beats: &Plan::default(),
             pitch: 1.0,
+            clip: 1,
         };
         let mut out = vec![0.0; 20];
         RePitch.render(&request, &window, &mut out, 20);
@@ -230,6 +246,7 @@ mod tests {
                 high_quality,
                 beats: &Plan::default(),
                 pitch: 1.0,
+                clip: 1,
             };
             RePitch.render(&request, &window, &mut out, 20);
             for (got, p) in out.iter().zip(&positions) {
@@ -258,6 +275,7 @@ mod tests {
             high_quality: true,
             beats: &Plan::default(),
             pitch: 1.0,
+            clip: 1,
         };
         assert_eq!(RePitch.reach(&request), (0, 0));
         let mut out = vec![0.0; 10];

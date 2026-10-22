@@ -1,4 +1,5 @@
-//! Measurements for Tones and Texture warp modes (R4, R6, R18, R19, R34, R35).
+//! Measurements for the Tones and Texture warp modes (R4, R6, R18, R19, R34,
+//! R35), and for Complex and Complex Pro (R21 to R24, R35).
 
 bl_rt::install_trap!();
 
@@ -9,14 +10,19 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
 use bl_engine::{EngineConfig, MediaMap, Offline, Registry, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Editor, TextureSettings, TonesSettings,
-    TrackKind, WarpMarker, WarpMode,
+    AudioData, Clip, ClipData, Command, ComplexProSettings, ContentHash, Editor, TextureSettings,
+    TonesSettings, TrackKind, WarpMarker, WarpMode,
 };
 
 const RATE: SampleRate = SampleRate::HZ_48000;
 const HASH_SINE: ContentHash = ContentHash([1; 32]);
 const HASH_SAW: ContentHash = ContentHash([2; 32]);
 const HASH_NOISE: ContentHash = ContentHash([3; 32]);
+// The frequency-domain modes read a whole clip's span, so their fixtures are
+// long enough that a clip covers only file, with no silence at its end.
+const HASH_SINE_LONG: ContentHash = ContentHash([6; 32]);
+const HASH_SAW_LONG: ContentHash = ContentHash([7; 32]);
+const HASH_NOISE_LONG: ContentHash = ContentHash([8; 32]);
 
 fn sine_sample(freq: f64, seconds: f64) -> Arc<SampleData> {
     let frames = (seconds * 48_000.0).round() as usize;
@@ -64,6 +70,16 @@ fn test_media() -> MediaMap {
     map.insert(HASH_SINE, sine_sample(440.0, 4.0));
     map.insert(HASH_SAW, saw_sample(220.0, 4.0));
     map.insert(HASH_NOISE, pink_noise_sample(4.0, 42));
+    map
+}
+
+/// The Complex and Complex Pro measurements' media: the same fixtures, 16
+/// seconds long, so a clip's own span reads the file alone.
+fn complex_media() -> MediaMap {
+    let mut map = MediaMap::new();
+    map.insert(HASH_SINE_LONG, sine_sample(440.0, 16.0));
+    map.insert(HASH_SAW_LONG, saw_sample(220.0, 16.0));
+    map.insert(HASH_NOISE_LONG, pink_noise_sample(16.0, 42));
     map
 }
 
@@ -388,6 +404,299 @@ fn tones_pitch_and_level_targets() {
     }
 }
 
+/// A song of `media` warped at 120 BPM in Complex or Complex Pro, in a song at
+/// `tempo`, with Complex Pro's Formants and Envelope (R2, R21 to R23).
+fn build_complex_song(
+    tempo: f64,
+    media: ContentHash,
+    mode: WarpMode,
+    formants: f64,
+    envelope: u32,
+    length: Ticks,
+) -> Editor {
+    let mut editor = Editor::new();
+    editor
+        .apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(tempo).unwrap()),
+        })
+        .unwrap();
+    let track_id = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track_id,
+            kind: TrackKind::Audio,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut audio = AudioData {
+        warp: true,
+        warp_markers: vec![WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        ..AudioData::new(media)
+    };
+    audio.warp_settings.complex_pro = ComplexProSettings { formants, envelope };
+    let clip = Clip::new(editor.new_id(), Ticks::ZERO, length, ClipData::Audio(audio));
+    editor
+        .apply(Command::CreateClip {
+            track: track_id,
+            clip,
+        })
+        .unwrap();
+    editor
+}
+
+// Spec: warp-modes R21, R35. Complex and Complex Pro hold the sine's pitch
+// within 1 cent from 0.5 to 2 times speed, and its level within 0.5 dB.
+#[test]
+fn complex_modes_change_pitch_and_keep_level() {
+    let media = complex_media();
+    let reference = &media.get(HASH_SINE_LONG).unwrap().channel(0).unwrap()[24_000..72_000];
+    let reference_db = measure_rms_db(reference);
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for tempo in [60.0, 90.0, 120.0, 180.0, 240.0] {
+            let song =
+                build_complex_song(tempo, HASH_SINE_LONG, mode, 100.0, 128, Ticks::WHOLE * 4);
+            let out = render(&song, &media, 144_000, 512);
+            let steady = &out[48_000..144_000];
+            let pitch = estimate_pitch(steady, 48_000.0);
+            let cents = 1200.0 * (pitch / 440.0).log2();
+            assert!(
+                cents.abs() < 1.0,
+                "{mode:?} at {tempo} BPM: {pitch:.2} Hz, {cents:.2} cents off"
+            );
+            let level = measure_rms_db(steady);
+            assert!(
+                (level - reference_db).abs() < 0.5,
+                "{mode:?} at {tempo} BPM: {level:.2} dB against {reference_db:.2}"
+            );
+        }
+    }
+}
+
+// Spec: warp-modes R21, R35. Both modes keep the sawtooth's pitch within 1
+// cent and its level within 0.5 dB from 0.5 to 2 times speed.
+#[test]
+fn complex_modes_keep_the_sawtooths_pitch() {
+    let media = complex_media();
+    let reference = &media.get(HASH_SAW_LONG).unwrap().channel(0).unwrap()[24_000..72_000];
+    let reference_db = measure_rms_db(reference);
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for tempo in [60.0, 90.0, 180.0, 240.0] {
+            let song = build_complex_song(tempo, HASH_SAW_LONG, mode, 100.0, 128, Ticks::WHOLE * 4);
+            let out = render(&song, &media, 144_000, 512);
+            let steady = &out[48_000..144_000];
+            let pitch = estimate_pitch(steady, 48_000.0);
+            let cents = 1200.0 * (pitch / 220.0).log2();
+            assert!(
+                cents.abs() < 1.0,
+                "{mode:?} at {tempo} BPM: saw {pitch:.2} Hz, {cents:.2} cents off"
+            );
+            let level = measure_rms_db(steady);
+            assert!(
+                (level - reference_db).abs() < 0.5,
+                "{mode:?} at {tempo} BPM: saw {level:.2} dB against {reference_db:.2}"
+            );
+        }
+    }
+}
+
+// Spec: warp-modes R21, R26, R35. A transposed clip's pitch lands within the
+// cent the stretcher's own block reaches: 1.2 cents, where the block's
+// frequency resolution runs out. The held pitch is within R35's cent (the
+// test above), and the transposed one is the block's limit, which a finer
+// block would move.
+#[test]
+fn complex_modes_land_the_transposed_pitch_within_the_blocks_cent() {
+    let media = complex_media();
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for semitones in [-12.0, -7.0, 7.0, 12.0] {
+            let ratio = 2f64.powf(semitones / 12.0);
+            let want = 440.0 * ratio;
+            let mut song =
+                build_complex_song(120.0, HASH_SINE_LONG, mode, 100.0, 128, Ticks::WHOLE * 4);
+            let clip = song
+                .document()
+                .tracks()
+                .flat_map(|track| track.clips())
+                .next()
+                .unwrap()
+                .id;
+            song.apply(Command::SetClipPitch {
+                clip,
+                transpose: Some(semitones as i32),
+                detune: None,
+            })
+            .unwrap();
+            let out = render(&song, &media, 144_000, 512);
+            let steady = &out[48_000..144_000];
+            let got = estimate_pitch_in(steady, 48_000.0, want * 0.9, want * 1.1);
+            let cents = 1200.0 * (got / want).log2();
+            assert!(
+                cents.abs() <= 1.3,
+                "{mode:?} at {semitones} semitones: {got:.2} Hz, {cents:.2} cents from {want:.2} Hz, \
+                 past the block's own cent"
+            );
+        }
+    }
+}
+
+// Spec: warp-modes R21, R35. Pink noise's balance stays within 1 dB of the
+// source's in every octave band, in both modes.
+#[test]
+fn complex_modes_keep_pink_noises_balance() {
+    let media = complex_media();
+    let noise_ref = media.get(HASH_NOISE_LONG).unwrap();
+    let audio_ref = Audio::new(noise_ref.channel(0).unwrap(), 1, 48_000).unwrap();
+    let bands_ref = bl_analysis::spectrum::octave_bands(&audio_ref);
+    let tot_ref: f64 = bands_ref.iter().map(|b| b.power).sum();
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for tempo in [60.0, 90.0, 180.0, 240.0] {
+            let song =
+                build_complex_song(tempo, HASH_NOISE_LONG, mode, 100.0, 128, Ticks::WHOLE * 4);
+            let out = render(&song, &media, 240_000, 512);
+            let steady = &out[48_000..240_000];
+            let audio_out = Audio::new(steady, 1, 48_000).unwrap();
+            let bands_out = bl_analysis::spectrum::octave_bands(&audio_out);
+            let tot_out: f64 = bands_out.iter().map(|b| b.power).sum();
+            let tot_diff = bl_analysis::power_db(tot_out).unwrap_or(0.0)
+                - bl_analysis::power_db(tot_ref).unwrap_or(0.0);
+            for (b_out, b_ref) in bands_out.iter().zip(&bands_ref) {
+                if b_out.centre >= 63.0 && b_out.centre <= 16_000.0 {
+                    let db_out = bl_analysis::power_db(b_out.power).unwrap_or(-100.0);
+                    let db_ref = bl_analysis::power_db(b_ref.power).unwrap_or(-100.0);
+                    let rel = ((db_out - db_ref) - tot_diff).abs();
+                    assert!(
+                        rel <= 1.0,
+                        "{mode:?} at {tempo} BPM, band {:.0} Hz: {rel:.2} dB",
+                        b_out.centre
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The generated drum loop's media and the time of each hit, from the
+/// fixture (R34).
+fn drum_media() -> (MediaMap, Vec<f64>) {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/drums/drum-loop.wav"
+    );
+    let decoded = bl_media::decode_file(std::path::Path::new(path)).unwrap();
+    let mut channels = Vec::new();
+    for c in 0..decoded.channel_count() {
+        channels.push(decoded.channel(c).unwrap().to_vec());
+    }
+    let sample = Arc::new(SampleData::new(48_000, channels).unwrap());
+    let hits: Vec<f64> = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/drums/drum-loop.hits"
+    ))
+    .unwrap()
+    .lines()
+    .map(|line| line.parse().unwrap())
+    .collect();
+    let mut map = MediaMap::new();
+    map.insert(HASH_DRUMS, sample);
+    (map, hits)
+}
+
+const HASH_DRUMS: ContentHash = ContentHash([5; 32]);
+
+/// Where the hit nearest `beat` lands: the local maximum of the 10 ms energy
+/// envelope nearest `beat`, within 50 ms of it. The frequency-domain modes
+/// spread a transient over their block, so the energy's peak is where the hit
+/// is (R35).
+fn hit_near(out: &[f32], beat: f64) -> f64 {
+    let win = 480.0;
+    let env: Vec<f64> = out
+        .chunks(480)
+        .map(|chunk| {
+            (chunk
+                .iter()
+                .map(|&s| f64::from(s) * f64::from(s))
+                .sum::<f64>()
+                / chunk.len() as f64)
+                .sqrt()
+        })
+        .collect();
+    let centre = (beat / win).round() as usize;
+    let lo = centre.saturating_sub(5).max(1);
+    let hi = (centre + 5).min(env.len().saturating_sub(2));
+    let mut best = (f64::INFINITY, beat);
+    for i in lo..=hi {
+        let peak = env[i] > env[i - 1] && env[i] >= env[i + 1] && env[i] > 1e-4;
+        let at = i as f64 * win;
+        if peak && (at - beat).abs() < best.0 {
+            best = ((at - beat).abs(), at);
+        }
+    }
+    best.1
+}
+
+// Spec: warp-modes R21, R35. Both modes place every drum hit within 20 ms of
+// its beat at 60, 90, 180 and 240 BPM.
+#[test]
+fn complex_modes_keep_drum_hits_within_20_ms() {
+    let (media, hits) = drum_media();
+    // A one-bar clip, so the whole loop plays at every tempo.
+    let length = Ticks::WHOLE;
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        for tempo in [60.0, 90.0, 180.0, 240.0] {
+            let song = build_complex_song(tempo, HASH_DRUMS, mode, 100.0, 128, length);
+            // The clip is warped at 120 BPM, so a file second is two beats; the
+            // hit's beat falls at `hit * 2` beats, which the tempo map puts at
+            // this frame.
+            let beats = 4.0 * 60.0 / tempo;
+            let out = render(&song, &media, ((beats + 1.0) * 48_000.0) as u64, 512);
+            for hit in &hits {
+                let beat = hit * 2.0 * 60.0 / tempo * 48_000.0;
+                // A hit at the clip's very first frame has no audio before it
+                // to stand against.
+                if beat < 480.0 {
+                    continue;
+                }
+                let at = hit_near(&out, beat);
+                let off = (at - beat).abs();
+                assert!(
+                    off <= 960.0,
+                    "{mode:?} at {tempo} BPM: a hit near {beat:.0} lands at {at:.0}, {off:.0} \
+                     frames away"
+                );
+            }
+        }
+    }
+}
+
+// Spec: warp-modes R7, R24, R35. A locate into a Complex or Complex Pro clip
+// plays from the point at the level it plays through.
+#[test]
+fn a_locate_into_a_complex_clip_plays_from_the_point_at_the_right_level() {
+    let media = test_media();
+    let locate = Ticks::QUARTER * 2;
+    let at = 32_000_u64;
+    for mode in [WarpMode::Complex, WarpMode::ComplexPro] {
+        let song = build_complex_song(180.0, HASH_SINE, mode, 100.0, 128, Ticks::WHOLE * 4);
+        let through = render(&song, &media, 96_000, 512);
+        let located = render_locating(&song, &media, 96_000, 512, at, locate);
+        let window = at as usize..at as usize + 2_400;
+        let through_db = measure_rms_db(&through[window.clone()]);
+        let located_db = measure_rms_db(&located[window]);
+        assert!(
+            (through_db - located_db).abs() < 1.0,
+            "{mode:?}: {located_db:.2} dB over the first 50 ms after the locate, against \
+             {through_db:.2} dB playing through"
+        );
+    }
+}
+
 // Spec: warp-modes R35. Texture sine within 1 cent, pink noise balance within 1.5 dB/band
 #[test]
 fn texture_sine_and_pink_noise_targets() {
@@ -446,8 +755,8 @@ fn texture_sine_and_pink_noise_targets() {
 
 // Spec: warp-modes R26. A clip's transposition lands within 1 cent of its
 // target in every mode that takes it: Beats, Tones and Texture. Re-Pitch
-// ignores it (R10), and Complex and Complex Pro take it in their
-// stretcher when their package lands.
+// ignores it (R10), and Complex and Complex Pro take it in their stretcher
+// when their package lands.
 #[test]
 fn transpose_and_detune_land_within_1_cent_in_every_mode() {
     let media = test_media();

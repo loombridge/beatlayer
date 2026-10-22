@@ -374,29 +374,34 @@ impl Shell {
         } else {
             (audio.start, audio.end)
         };
-        let ticks_of: Box<dyn Fn(f64) -> f64>;
-        let (from_seconds, to_seconds);
-        if audio.warp {
+        let (from_seconds, to_seconds, ticks_of): (f64, f64, Box<dyn Fn(f64) -> f64>) = if audio
+            .warp
+        {
             let map = audio.warp_map().map_err(|error| failed(id, error))?;
             let to = match (to, file_end) {
                 (Some(to), _) => to,
                 (None, Some(end)) => map.time_to_beat(end),
                 (None, None) => from + value.length.get() as f64,
             };
-            (from_seconds, to_seconds) = (map.beat_to_time(from), map.beat_to_time(to));
-            ticks_of = Box::new(move |time| map.time_to_beat(time) - from);
+            (
+                map.beat_to_time(from),
+                map.beat_to_time(to),
+                Box::new(move |time| map.time_to_beat(time) - from),
+            )
         } else {
             let to = to
                 .or(file_end)
                 .ok_or_else(|| failed(id, "the media store doesn't have the clip's file"))?;
-            (from_seconds, to_seconds) = (from, to);
             // An unwarped clip's seconds fall at the set's tempo where the
             // clip starts.
             let start = tempo.ticks_to_seconds(value.start);
             let origin = value.start.get() as f64;
-            ticks_of =
-                Box::new(move |time| tempo.seconds_to_ticks_exact(start + (time - from)) - origin);
-        }
+            (
+                from,
+                to,
+                Box::new(move |time| tempo.seconds_to_ticks_exact(start + (time - from)) - origin),
+            )
+        };
         let length = Ticks(ticks_of(to_seconds).round() as i64);
         let hits: Vec<f64> = transients
             .into_iter()

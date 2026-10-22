@@ -86,9 +86,9 @@ pub struct PreviewOutcome {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderOutcome {
     /// A preview outcome.
-    Preview(PreviewOutcome),
+    Preview(Box<PreviewOutcome>),
     /// An analysis result.
-    Analyze(AnalyzeResult),
+    Analyze(Box<AnalyzeResult>),
 }
 
 /// What a perception tool asks of the host when deferring an audio render (WP-2.28).
@@ -161,18 +161,18 @@ impl RenderRequest {
                     outcome.rendered.sample_rate,
                     args.bit_depth,
                 )?;
-                Ok(RenderOutcome::Preview(PreviewOutcome {
+                Ok(RenderOutcome::Preview(Box::new(PreviewOutcome {
                     document: self.render.document,
                     args,
                     outcome,
                     wav,
-                }))
+                })))
             }
             RenderKind::Analyze(args) => {
                 let previews = bl_shell::perception::Previews::default();
                 let result = bl_shell::perception::analyze(&previews, &source, &args)
                     .map_err(|error| error.to_string())?;
-                Ok(RenderOutcome::Analyze(result))
+                Ok(RenderOutcome::Analyze(Box::new(result)))
             }
         }
     }

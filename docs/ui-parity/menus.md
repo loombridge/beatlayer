@@ -353,7 +353,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-OPT-024 | Cue Switches | | | disabled | |
 | M-OPT-025 | Solo in Place | | | | |
 | | — | | | | |
-| M-OPT-026 | Lock Envelopes | | | disabled | Same as the Arrangement's Lock Envelopes switch |
+| M-OPT-026 | Lock Envelopes | | | | Same as the Arrangement's Lock Envelopes switch |
 | M-OPT-027 | MIDI Arrangement Overdub | | | | Same as the Control Bar's overdub switch |
 | | — | | | | |
 | M-OPT-028 | Max for Live Developer Mode | | | | Max-specific; see M-VIEW-030. Left out of Beatlayer's menu (D21) |

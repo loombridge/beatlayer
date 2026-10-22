@@ -26,6 +26,7 @@ use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
     SetServerArgs,
 };
+use crate::arrangement::automation::{self as automation, EnvelopeClipboard};
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::assistant::{
@@ -44,6 +45,7 @@ use crate::commands::{
     TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState,
     ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
+use crate::commands::{AppearanceArgs, BrightnessArgs, HueArgs, PercentArgs, ToneArgs};
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::midi::MidiHost;
@@ -53,8 +55,8 @@ use crate::permission::CallPermission;
 use crate::sample_editor;
 use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
-    OnByDefault, Preferences, SettingsPage, ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT,
-    ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
+    Appearance, BUNDLED_THEME, OnByDefault, Preferences, SettingsPage, ThemeLook, WarpPrefs,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
 use bl_plugin_host::au::AuHost;
@@ -63,6 +65,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::audio_editing as audio_ids;
+use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::autosampler as autosampler_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
@@ -89,7 +92,7 @@ use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
-    STATE as SETTINGS_STATE, SettingsState,
+    STATE as SETTINGS_STATE, SettingsState, ThemeColorsSettings,
 };
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
@@ -185,6 +188,9 @@ const DELAY_COMPENSATION: &str = "mixer.set_delay_compensation";
 /// `mixer.set_reduced_latency_monitoring`, which Options ▸ Reduced Latency
 /// When Monitoring runs as a switch (M-OPT-009).
 const REDUCED_LATENCY_MONITORING: &str = "mixer.set_reduced_latency_monitoring";
+/// `song.set_lock_envelopes`, which Options ▸ Lock Envelopes runs as a
+/// switch (M-OPT-026).
+const LOCK_ENVELOPES: &str = "song.set_lock_envelopes";
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -436,6 +442,11 @@ pub struct Shell {
     info_view: bool,
     full_screen: bool,
     settings_open: bool,
+    /// The themes the Theme chooser offers, which the host reads from the
+    /// theme files (themes R2, R9), and whether the operating system is in
+    /// its dark mode, which Follow System draws (themes R3).
+    themes: Vec<String>,
+    system_dark: bool,
     focused_window: WindowKind,
     focused_area: Area,
     /// The track whose control has the keyboard focus (WP-1.14).
@@ -536,6 +547,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
+    /// as Live keeps it, and never part of a set.
+    envelope_clipboard: Option<EnvelopeClipboard>,
     /// A gesture that edits the set, under way (WP-1.8b).
     edit_gesture: Option<Gesture>,
     /// The engine's insert marker when the shell last looked, so a move of
@@ -681,6 +695,27 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             command: id.to_owned(),
             message,
         },
+    }
+}
+
+/// The automation editing command an Arrangement editing command runs as,
+/// when the time selection is in automation lanes (the automation editing
+/// spec, R5).
+fn automation_command(id: &str, view: &ArrangementView) -> Option<&'static str> {
+    let in_lanes = view
+        .time_selection_lanes()
+        .iter()
+        .any(|lane| lane.target().is_some());
+    if !in_lanes {
+        return None;
+    }
+    match id {
+        edit_ids::COPY => Some(automation_ids::COPY),
+        edit_ids::CUT => Some(automation_ids::CUT),
+        edit_ids::PASTE => Some(automation_ids::PASTE),
+        edit_ids::DUPLICATE => Some(automation_ids::DUPLICATE),
+        edit_ids::DELETE => Some(automation_ids::DELETE_RANGE),
+        _ => None,
     }
 }
 
@@ -975,6 +1010,8 @@ impl Shell {
             user_keymap: crate::keymap::UserKeymap::default(),
             keymap_revision: 0,
             settings_open: false,
+            themes: vec![BUNDLED_THEME.to_owned()],
+            system_dark: true,
             prefs,
             config_dir,
             main_view: MainView::Arrangement,
@@ -1008,6 +1045,7 @@ impl Shell {
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
             clipboard: None,
+            envelope_clipboard: None,
             edit_gesture: None,
             au,
             seen_insert_marker: None,
@@ -2025,7 +2063,16 @@ impl Shell {
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
             },
-            theme: self.prefs.theme,
+            theme_colors: ThemeColorsSettings {
+                look: self.prefs.look.clone(),
+                appearance: self.prefs.appearance,
+                drawn_appearance: if self.theme_dark() {
+                    Appearance::Dark
+                } else {
+                    Appearance::Light
+                },
+                themes: self.themes.clone(),
+            },
             audio: AudioPageSettings {
                 device: self.audio.settings().clone(),
                 tone: self.audio.tone(),
@@ -2053,10 +2100,55 @@ impl Shell {
         }
     }
 
-    /// The theme in use.
+    /// The Appearance chosen (themes R3).
     #[must_use]
-    pub fn theme(&self) -> ThemeChoice {
-        self.prefs.theme
+    pub fn appearance(&self) -> Appearance {
+        self.prefs.appearance
+    }
+
+    /// The theme, tone, high contrast and Customization chosen (themes R1).
+    #[must_use]
+    pub fn look(&self) -> &ThemeLook {
+        &self.prefs.look
+    }
+
+    /// Whether the dark colours are drawn now: Follow System resolved
+    /// (themes R3).
+    #[must_use]
+    pub fn theme_dark(&self) -> bool {
+        match self.prefs.appearance {
+            Appearance::Light => false,
+            Appearance::Dark => true,
+            Appearance::FollowSystem => self.system_dark,
+        }
+    }
+
+    /// Tells the shell the operating system's mode changed; the host calls
+    /// it at start and on winit's theme event (themes R3).
+    pub fn set_system_dark(&mut self, dark: bool) {
+        self.system_dark = dark;
+    }
+
+    /// The User Library's `Themes` folder, where theme files are read
+    /// from (themes R9), if the User Library is known.
+    #[must_use]
+    pub fn themes_folder(&self) -> Option<PathBuf> {
+        self.browser_view
+            .user_library()
+            .map(|library| library.join("Themes"))
+    }
+
+    /// The themes the Theme chooser offers, Beatlayer first.
+    #[must_use]
+    pub fn themes(&self) -> &[String] {
+        &self.themes
+    }
+
+    /// Replaces the list of themes the chooser offers (themes R2); the
+    /// host calls it after reading the theme files.
+    pub fn set_themes(&mut self, names: Vec<String>) {
+        self.themes = names;
+        self.touch();
     }
 
     /// Whether Tab moves the keyboard focus in the main window.
@@ -4373,6 +4465,13 @@ impl Shell {
         self.clipboard.as_ref()
     }
 
+    /// The clipboard of copied envelope shapes, if anything has been
+    /// copied (WP-6.25).
+    #[must_use]
+    pub fn envelope_clipboard(&self) -> Option<&EnvelopeClipboard> {
+        self.envelope_clipboard.as_ref()
+    }
+
     /// Whether a gesture that edits the set is under way.
     #[must_use]
     pub fn gesture_open(&self) -> bool {
@@ -4504,6 +4603,7 @@ impl Shell {
                 && !locator_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
+                && !automation_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
             {
@@ -4530,6 +4630,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if automation_ids::handles(&invocation.id) {
+            automation::label(&invocation.id)
         } else if locator_ids::handles(&invocation.id) {
             crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
@@ -4572,6 +4674,8 @@ impl Shell {
                    arrangement: &mut ArrangementView,
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
+                   envelope_clipboard: &mut Option<EnvelopeClipboard>,
+                   devices: &DeviceView,
                    invocation: &Invocation| {
             if clip_marker_command(&invocation.id) || arrangement_clip_command(&invocation.id) {
                 // The document's own clip commands, run per frame like the
@@ -4586,6 +4690,17 @@ impl Shell {
                     editor,
                     clip_view,
                     arrangement,
+                )
+            } else if automation_ids::handles(&invocation.id) {
+                // Spec: automation-editing R2. A drag that moves several
+                // breakpoints of an envelope at once.
+                automation::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    envelope_clipboard,
+                    devices,
                 )
             } else if is_automation_edit(&invocation.id) {
                 // WP-2.12: a drag on an automation lane moves, curves, or
@@ -4635,6 +4750,8 @@ impl Shell {
                 &mut self.arrangement,
                 &mut self.clip_view,
                 &mut self.clipboard,
+                &mut self.envelope_clipboard,
+                &self.devices,
                 step,
             );
             if result.is_err() {
@@ -5614,6 +5731,7 @@ impl Shell {
             REDUCED_LATENCY_MONITORING => {
                 Some(self.editor.document().settings().reduced_latency_monitoring)
             }
+            LOCK_ENVELOPES => Some(self.editor.document().settings().lock_envelopes),
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
@@ -5871,8 +5989,13 @@ impl Shell {
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
             ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
-            // A person's Zoom setting always names a percentage in range.
-            ids::VIEW_SET_ZOOM => {
+            // A person's Zoom setting always names a percentage in range, as
+            // the Customization settings do (themes R7).
+            ids::VIEW_SET_ZOOM
+            | ids::SETTINGS_SET_GRID_LINE_INTENSITY
+            | ids::SETTINGS_SET_BRIGHTNESS
+            | ids::SETTINGS_SET_COLOR_INTENSITY
+            | ids::SETTINGS_SET_COLOR_HUE => {
                 return spec
                     .args
                     .as_ref()
@@ -6306,6 +6429,12 @@ impl Shell {
             let on = self.editor.document().settings().midi_overdub;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == LOCK_ENVELOPES && !fields.contains_key("enabled") {
+            // Spec: automation-editing R8. Options ▸ Lock Envelopes switches
+            // the setting to the other state.
+            let on = self.editor.document().settings().lock_envelopes;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
             // setting to the other state.
@@ -6678,7 +6807,7 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
-            SOLO_IN_PLACE if !has("enabled") => {
+            SOLO_IN_PLACE | LOCK_ENVELOPES if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
@@ -7270,6 +7399,27 @@ impl Shell {
         Ok(())
     }
 
+    /// Runs an automation editing command, on the lanes the selection
+    /// covers (the automation editing spec, R5, R7).
+    fn run_automation(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let before = self.editor.document().clone();
+        let result = automation::run(
+            id,
+            args,
+            &mut self.editor,
+            &mut self.arrangement,
+            &mut self.envelope_clipboard,
+            &self.devices,
+        )
+        .map_err(|failure| edit_error(id, failure));
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if let Some(track) = self.frozen_blocks(id, &args) {
             return Err(ShellError::Unavailable {
@@ -7313,6 +7463,12 @@ impl Shell {
             return self.run_bounce(id, args);
         }
         if edit_ids::handles(id) {
+            // Spec: automation-editing R5. With the time selection in
+            // automation lanes, the edit commands act on the envelopes
+            // alone, and the clips stay as they are.
+            if let Some(automation_id) = automation_command(id, &self.arrangement) {
+                return self.run_automation(automation_id, args);
+            }
             let before = self.editor.document().clone();
             let result = editing::run(
                 id,
@@ -7329,6 +7485,9 @@ impl Shell {
             }
             self.touch();
             return result;
+        }
+        if automation_ids::handles(id) {
+            return self.run_automation(id, args);
         }
         if locator_ids::handles(id) {
             // Spec: time-editing R1 to R13. The locators are part of the
@@ -9062,7 +9221,65 @@ impl Shell {
             }
             ids::SETTINGS_SET_THEME => {
                 let ThemeArgs { theme } = Self::args(id, args)?;
-                self.prefs.theme = theme;
+                match theme.as_str() {
+                    // What earlier versions took (themes R12).
+                    "dark" => self.prefs.appearance = Appearance::Dark,
+                    "light" => self.prefs.appearance = Appearance::Light,
+                    name if self.themes.iter().any(|t| t == name) => {
+                        self.prefs.look.theme = theme;
+                    }
+                    _ => {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!(
+                                "there is no theme `{theme}`; the themes are {}",
+                                self.themes.join(", ")
+                            ),
+                        });
+                    }
+                }
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_APPEARANCE => {
+                let AppearanceArgs { appearance } = Self::args(id, args)?;
+                self.prefs.appearance = appearance;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_TONE => {
+                let ToneArgs { tone } = Self::args(id, args)?;
+                self.prefs.look.tone = tone;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_HIGH_CONTRAST => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.high_contrast = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_GRID_LINE_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.grid_line_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_BRIGHTNESS => {
+                let BrightnessArgs { value } = Self::args(id, args)?;
+                self.prefs.look.brightness = value.clamp(-50, 50);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_INTENSITY => {
+                let PercentArgs { percent } = Self::args(id, args)?;
+                self.prefs.look.color_intensity = percent.clamp(0, 200);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_COLOR_HUE => {
+                let HueArgs { degrees } = Self::args(id, args)?;
+                self.prefs.look.color_hue = degrees.clamp(-180, 180);
                 self.save_preferences();
                 Ok(Value::Null)
             }

@@ -56,6 +56,19 @@ const SYSTEM: &[(&str, &str)] = &[
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-EDIT-016",
+        "the Arrangement's automation lane: the edit keys with Option (Alt on Windows) held \
+         apply to the envelopes (the automation editing spec, R6)",
+    ),
+    (
+        "S-ENV-002",
+        "the drag on an automation lane moves the breakpoint's value in finer steps",
+    ),
+    (
+        "S-ENV-006",
+        "the drag on an automation lane ignores the grid while the key is held",
+    ),
+    (
         "S-SET-003",
         "the focused Settings chooser steps to the next or previous choice",
     ),

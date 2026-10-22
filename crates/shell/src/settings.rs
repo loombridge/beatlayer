@@ -11,8 +11,9 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    DefaultWarpMode, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
-    ThemeChoice, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
+    Appearance, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY, DefaultWarpMode,
+    GRID_LINE_INTENSITY, LaunchPrefs, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage,
+    ThemeLook, Tone, WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
     zoom_percent, zoom_step,
 };
 
@@ -31,8 +32,12 @@ pub struct Preferences {
     /// The test tone's level and frequency (the Audio page's Tone Volume and
     /// Tone Frequency, D23).
     pub tone: ToneSettings,
-    /// The theme.
-    pub theme: ThemeChoice,
+    /// Appearance (themes R3). Preferences saved before the Theme & Colors
+    /// page called it `theme` and held `dark` or `light` (R11).
+    #[serde(alias = "theme")]
+    pub appearance: Appearance,
+    /// The theme, tone, high contrast and Customization (themes R1).
+    pub look: ThemeLook,
     /// Whether Tab moves the keyboard focus in the main window.
     pub tab_navigation: bool,
     /// Wrap Tab Navigation (Navigate ▸ Wrap Keyboard Navigation): Tab and
@@ -305,7 +310,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(Preferences::load(&dir).unwrap(), Preferences::default());
         let mut prefs = Preferences {
-            theme: ThemeChoice::Light,
+            appearance: Appearance::Light,
             tab_navigation: true,
             zoom: Some(1.25),
             window_size: Some((1600.0, 977.0)),

@@ -476,7 +476,7 @@ fn main() -> Result<(), String> {
         if args.accesskit {
             ctx.enable_accesskit();
         }
-        let theme = Theme::builtin(shell.theme());
+        let theme = Theme::of(&shell);
         theme.apply(&ctx);
         let mut cpu = Vec::with_capacity(args.frames);
         let mut gpu_times = Vec::with_capacity(args.frames);

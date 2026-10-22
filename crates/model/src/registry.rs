@@ -779,6 +779,20 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "song.set_lock_envelopes",
+        action: Action::Apply("set_lock_envelopes"),
+        label: "Lock Envelopes",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Lock Envelopes, the switch above the track headers and the \
+            Options menu item. Off (the default in a new set), editing the Arrangement's clips \
+            carries their tracks' envelopes over the clips' spans with them: moving, copying, \
+            cutting, deleting, duplicating and pasting clips take the envelopes over the same \
+            spans. On, the envelopes stay where they are in the song and the clips move on \
+            their own. The setting is saved with the set, and each change is one undo step.",
+    },
+    Entry {
         id: "mixer.set_cue_mode",
         action: Action::Apply("set_cue_mode"),
         label: "Cue Switches",
@@ -1000,6 +1014,22 @@ const ENTRIES: &[Entry] = &[
             breakpoint on an automation lane does. Deleting the last one takes the parameter's \
             envelope with it, so the parameter follows its control again. A position with no \
             breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.set_envelope",
+        action: Action::Apply("set_automation_envelope"),
+        label: "Set Automation Envelope",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Replaces one of a track's parameter's envelope with the breakpoints \
+            given, as the automation editing commands do when they write a shape over a span \
+            of time. `track` and `target` name the parameter as `automation.set_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks, its value in the parameter's own units, and the bend of the \
+            segment starting at it. The breakpoints must be in order, no two at one position, \
+            and no position before 1.1.1; an empty list takes the parameter's automation with \
+            it. The envelope keeps driving the parameter.",
     },
     Entry {
         id: "automation.delete",

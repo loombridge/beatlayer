@@ -370,6 +370,11 @@ pub struct ArrangementState {
     pub selected_fade: Option<FadeHandleState>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
+    /// The lanes the time selection covers: each a track's own lane or its
+    /// automation lane (the automation editing spec, R1). Empty when the
+    /// selection names no lane.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_selection_lanes: Vec<Lane>,
     /// The folded tracks.
     pub folded_tracks: Vec<TrackId>,
     /// How many views `arrangement.zoom_back` can go back to.
@@ -401,6 +406,50 @@ pub struct AutomationLane {
     pub track: TrackId,
     /// The parameter the lane shows, or `null` while it draws no envelope.
     pub target: Option<AutomationTarget>,
+}
+
+/// Which lane a selection covers: a track's own lane, where its clips are,
+/// or the automation lane under it, which shows a parameter (the automation
+/// editing spec, R1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(
+    description = "Which lane a selection covers: `track` for a track's own lane, where its \
+                   clips are, and `automation` for the automation lane under it, which shows a \
+                   parameter."
+)]
+pub enum Lane {
+    /// A track's own lane, where its clips are.
+    Track {
+        /// The track.
+        track: TrackId,
+    },
+    /// A track's automation lane, which shows a parameter.
+    Automation {
+        /// The track.
+        track: TrackId,
+        /// The parameter the lane shows.
+        target: AutomationTarget,
+    },
+}
+
+impl Lane {
+    /// The track the lane belongs to.
+    #[must_use]
+    pub const fn track(&self) -> TrackId {
+        match *self {
+            Self::Track { track } | Self::Automation { track, .. } => track,
+        }
+    }
+
+    /// The parameter the lane shows, for an automation lane.
+    #[must_use]
+    pub const fn target(&self) -> Option<AutomationTarget> {
+        match *self {
+            Self::Track { .. } => None,
+            Self::Automation { target, .. } => Some(target),
+        }
+    }
 }
 
 /// Arguments of `arrangement.zoom`.
@@ -532,6 +581,10 @@ pub struct SelectTimeArgs {
     /// The tracks it covers. Left out, the selected tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<TrackId>>,
+    /// The lanes it covers: each a track's own lane or its automation lane
+    /// (the automation editing spec, R1). Left out, the tracks' own lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lanes: Option<Vec<Lane>>,
 }
 
 /// Which of a fade's handles (the audio clips spec, R27).
@@ -854,8 +907,9 @@ fn specs() -> Vec<CommandSpec> {
             SELECT_TIME,
             "Select Time",
             "Selects the span from `start` to `end` on `tracks` (or the selected tracks), as \
-             dragging across track lanes does. `arrangement.zoom_to_selection` zooms to it. \
-             Changes only the view.",
+             dragging across track lanes does. `lanes` names the lanes the selection covers, \
+             each a track's own lane or its automation lane; left out, the tracks' own lanes. \
+             `arrangement.zoom_to_selection` zooms to it. Changes only the view.",
         )
         .context(Arrangement)
         .args::<SelectTimeArgs>(),

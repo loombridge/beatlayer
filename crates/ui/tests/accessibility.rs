@@ -570,6 +570,9 @@ fn the_hidden_track_controls_leave_the_tab_order() {
         header(Switch::Activator),
         header(Switch::Solo),
         header(Switch::Arm),
+        // The Lock Envelopes switch, the control above the headers
+        // (accessibility R10), is a Tab stop whatever the header shows.
+        bl_ui::arrangement::lock_envelopes_id(),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];

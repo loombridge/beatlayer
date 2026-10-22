@@ -105,7 +105,7 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R32 | `crates/ui/tests/session_view.rs`, `enter_launches_the_selected_clip_and_scene`; `crates/shell/tests/session_launch.rs`, `launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id` | UI script, shell test |
 | R33 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
 | R34 | to be written in WP-6.38 | |
-| R35 | to be written in WP-6.49b | |
+| R35 | `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid` | UI script |
 ## Not built yet
 
 - The Arrangement's per-track and scrub-area Back to Arrangement buttons (L-ARR-007, L-ARR-019) aren't drawn yet; F10, both commands and the Main column's button (R25) work, and `Shell::session_over` gives the buttons their state.

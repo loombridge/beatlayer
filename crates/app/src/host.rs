@@ -37,7 +37,7 @@ use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::perception_commands::View;
-use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
+use bl_shell::settings::{Preferences, SettingsPage, ThemeLook, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::assistant_panel::AssistantPanelUi;
 use bl_ui::device_view::DeviceViewUi;
@@ -47,6 +47,7 @@ use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, setting
 use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
+use bl_ui::theme_library::ThemeLibrary;
 use egui::{ViewportId, ViewportInfo};
 use egui_wgpu::winit::Painter;
 use egui_wgpu::{
@@ -327,8 +328,14 @@ struct Surface {
 struct Host {
     args: Args,
     shell: Shell,
-    theme_choice: ThemeChoice,
+    /// The themes found, and the theme drawn with the settings (and the
+    /// appearance, `true` for dark) it was made from (themes R8).
+    library: ThemeLibrary,
     theme: Theme,
+    drawn: (ThemeLook, bool),
+    /// Whether the Theme & Colors page was showing, so opening it reads the
+    /// theme files again (themes R9).
+    on_theme_page: bool,
     keymap: Keymap,
     /// The shell's keymap revision the keymap was built at, so a change
     /// rebuilds it and the native menu (the custom-shortcuts spec, R10).
@@ -497,7 +504,9 @@ pub fn run(args: Args) -> Result<(), String> {
         }));
     }
 
-    let theme_choice = shell.theme();
+    let mut library = ThemeLibrary::bundled();
+    library.refresh(&mut shell);
+    let drawn = (shell.look().clone(), shell.theme_dark());
     let platform = Platform::current();
     let menus = menu_bar(MenuPlatform::current());
     let (job_sender, job_receiver) = mpsc::channel::<RenderJob>();
@@ -526,8 +535,10 @@ pub fn run(args: Args) -> Result<(), String> {
     let mut host = Host {
         args,
         shell,
-        theme_choice,
-        theme: Theme::builtin(theme_choice),
+        theme: library.resolve(&drawn.0, drawn.1),
+        library,
+        drawn,
+        on_theme_page: false,
         keymap,
         keymap_revision,
         platform,
@@ -861,6 +872,18 @@ impl Host {
         }
     }
 
+    /// Makes the theme again if the Theme & Colors settings or the system's
+    /// mode changed since it was made. Returns whether it did.
+    fn sync_theme(&mut self) -> bool {
+        let drawn = (self.shell.look().clone(), self.shell.theme_dark());
+        if drawn == self.drawn {
+            return false;
+        }
+        self.theme = self.library.resolve(&drawn.0, drawn.1);
+        self.drawn = drawn;
+        true
+    }
+
     /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
         [&self.main, &self.settings, &self.assistant]
@@ -1043,6 +1066,10 @@ impl Host {
         }
         egui_winit::update_viewport_info(&mut surface.info, &surface.ctx, &surface.window, false);
         let mut input = surface.state.take_egui_input(&surface.window);
+        // Spec: view-options R1. The middle button pans the area under the
+        // pointer, so egui never sees it: it clicks nothing and selects
+        // nothing.
+        bl_ui::middle::take(&mut input, &surface.ctx);
         input
             .viewports
             .insert(ViewportId::ROOT, surface.info.clone());
@@ -1213,11 +1240,19 @@ impl Host {
                 self.effect(effect, event_loop);
             }
         }
-        if self.shell.theme() != self.theme_choice {
-            self.theme_choice = self.shell.theme();
-            self.theme = Theme::builtin(self.theme_choice);
+        let on_theme_page =
+            self.shell.settings_open() && self.shell.settings_page() == SettingsPage::ThemeColors;
+        if on_theme_page && !self.on_theme_page {
+            self.library.refresh(&mut self.shell);
+            // A theme file may have changed under the same name: make the
+            // theme again.
+            self.drawn.0.theme.clear();
+        }
+        self.on_theme_page = on_theme_page;
+        if self.sync_theme() {
             for surface in self.surfaces() {
                 self.theme.apply(&surface.ctx);
+                surface.window.request_redraw();
             }
         }
         // The interface zoom (interface-zoom R1, R4, R7, R8): the main
@@ -1446,7 +1481,8 @@ impl Host {
             | Effect::RenameChain(_)
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
-            | Effect::RenameTrack(_) => {
+            | Effect::RenameTrack(_)
+            | Effect::RenameLocator(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
                     main.window.request_redraw();
@@ -1864,6 +1900,12 @@ impl ApplicationHandler<UserEvent> for Host {
             event_loop.exit();
             return;
         }
+        // Follow System starts from the system's mode (themes R3).
+        if let Some(theme) = self.main.as_ref().and_then(|main| main.window.theme()) {
+            self.shell
+                .set_system_dark(theme == winit::window::Theme::Dark);
+            self.after_commands(event_loop);
+        }
         // Agents can capture views now there's a window (WP-1.16).
         self.agent.set_view_capture(true);
         if self.args.open_settings {
@@ -1935,6 +1977,12 @@ impl ApplicationHandler<UserEvent> for Host {
                         self.record_device_frame(device, &window);
                     }
                 }
+            }
+            // Follow System (themes R3).
+            WindowEvent::ThemeChanged(theme) => {
+                self.shell
+                    .set_system_dark(theme == winit::window::Theme::Dark);
+                self.after_commands(event_loop);
             }
             WindowEvent::Focused(true) => {
                 self.shell.set_focused_window(kind);

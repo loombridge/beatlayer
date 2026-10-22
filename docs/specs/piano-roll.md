@@ -146,5 +146,5 @@ This spec covers drawing, selecting, moving, resizing, Fold, quantise, transpose
 | R40 | to be written in WP-6.54 | |
 | R41 | [midi-transformations.md](midi-transformations.md) R21's tests, written in WP-6.12 | |
 | R42 | to be written in WP-6.54 | |
-| R43 | to be written in WP-6.49b | |
-| R44 | to be written in WP-6.49b | |
+| R43 | `crates/ui/tests/clip_view.rs`, `the_notes_are_paler_the_softer_their_velocity` | UI script |
+| R44 | `crates/ui/tests/clip_view.rs`, `the_middle_button_pans_the_note_area` | UI script |

@@ -8,11 +8,12 @@
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Visuals};
 use serde::Deserialize;
 
-use bl_shell::settings::ThemeChoice;
-
 /// The bundled UI typeface: Inter Regular 3.019, under OFL-1.1
 /// (`fonts/README.md`).
 pub const UI_FONT: &[u8] = include_bytes!("../fonts/inter/Inter-Regular.ttf");
+
+/// The colours in a theme's track palette (themes R9).
+const TRACK_COLOURS: usize = 14;
 
 const DARK: &str = include_str!("../themes/dark.toml");
 const LIGHT: &str = include_str!("../themes/light.toml");
@@ -75,6 +76,8 @@ pub struct Colours {
     pub insert_marker: Colour,
     pub loop_on: Colour,
     pub loop_off: Colour,
+    /// The locator that holds the song start time (WP-6.24).
+    pub song_start: Colour,
     pub time_selection: Colour,
     pub clip_text: Colour,
     pub waveform: Colour,
@@ -135,17 +138,27 @@ impl Theme {
     ///
     /// A message if the file isn't a valid theme.
     pub fn parse(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))
+        let theme: Self = toml::from_str(text).map_err(|e| format!("not a valid theme: {e}"))?;
+        match theme.colors.track_palette.len() {
+            TRACK_COLOURS => Ok(theme),
+            n => Err(format!(
+                "not a valid theme: the track palette has {n} colours, not {TRACK_COLOURS}"
+            )),
+        }
     }
 
-    /// The built-in theme for a choice.
+    /// The bundled theme, Beatlayer, in its dark or light colours.
     #[must_use]
-    pub fn builtin(choice: ThemeChoice) -> Self {
-        let text = match choice {
-            ThemeChoice::Dark => DARK,
-            ThemeChoice::Light => LIGHT,
-        };
-        Self::parse(text).expect("the built-in themes are valid")
+    pub fn bundled(dark: bool) -> Self {
+        Self::parse(if dark { DARK } else { LIGHT }).expect("the bundled themes are valid")
+    }
+
+    /// What the shell's Theme & Colors settings draw, from the bundled
+    /// theme alone; the app reads the User Library's themes too
+    /// ([`crate::theme_library::ThemeLibrary`]).
+    #[must_use]
+    pub fn of(shell: &bl_shell::Shell) -> Self {
+        crate::theme_library::ThemeLibrary::bundled().resolve(shell.look(), shell.theme_dark())
     }
 
     /// A token's colour.
@@ -205,6 +218,13 @@ impl Theme {
 
     /// Applies the theme and the bundled typeface to an egui context.
     pub fn apply(&self, ctx: &egui::Context) {
+        // Pin egui's own theme to this one's, so the system's mode changing
+        // doesn't swap in egui's default colours (themes R3).
+        ctx.set_theme(if self.dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
         ctx.set_visuals(self.visuals());
         ctx.all_styles_mut(|style| {
             for (text_style, font) in &mut style.text_styles {
@@ -216,6 +236,20 @@ impl Theme {
             }
         });
     }
+}
+
+/// How far the theme's palest shade of a colour is from it: the palette's
+/// third row, mixed towards white (the themes spec, R15).
+const PALEST_MIX: f32 = 0.6;
+
+/// The colour a note of `velocity` is drawn in, in its clip's `colour`:
+/// the softer the note, the paler (the piano roll spec, R43). At velocity
+/// 1 the note is the theme's palest shade of the colour, at 127 the colour
+/// itself, and the mix between them is linear in the velocity.
+#[must_use]
+pub fn note_colour(colour: Color32, velocity: u8) -> Color32 {
+    let t = f32::from(velocity.clamp(1, 127) - 1) / 126.0;
+    colour.lerp_to_gamma(Color32::WHITE, PALEST_MIX * (1.0 - t))
 }
 
 /// Font definitions with only the bundled typeface, for every family.
@@ -241,8 +275,8 @@ mod tests {
 
     #[test]
     fn both_themes_parse_and_differ() {
-        let dark = Theme::builtin(ThemeChoice::Dark);
-        let light = Theme::builtin(ThemeChoice::Light);
+        let dark = Theme::bundled(true);
+        let light = Theme::bundled(false);
         assert!(dark.dark && !light.dark);
         assert_ne!(dark.colors.panel, light.colors.panel);
     }

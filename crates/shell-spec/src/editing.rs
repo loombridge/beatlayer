@@ -112,6 +112,13 @@ impl From<Ticks> for Position {
     }
 }
 
+impl Default for Position {
+    /// 1.1.1.
+    fn default() -> Self {
+        Self::Ticks(Ticks::ZERO)
+    }
+}
+
 impl JsonSchema for Position {
     fn schema_name() -> Cow<'static, str> {
         Cow::Borrowed("Position")

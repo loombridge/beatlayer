@@ -15,13 +15,13 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, ParamId,
-    TrackId,
+    AutomationTarget, Breakpoint, Device, DeviceId, Document, Envelope, MixerParam, TrackId,
 };
+use bl_shell::arrangement::automation::{Travel as LaneScale, selected_breakpoints, travel};
 use bl_shell::arrangement::rows::Row;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
-use bl_shell::{GesturePhase, Invocation, Shell, mixer_controls};
+use bl_shell::{GesturePhase, Invocation, Shell};
 use egui::{Modifiers, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
 use serde_json::{Value, json};
 
@@ -49,6 +49,15 @@ pub(crate) const CURVE_PER_POINT: f64 = 0.02;
 /// (shortcuts.toml, S-ENV-002).
 pub(crate) const FINE_VALUE: f64 = 0.2;
 
+/// How close to a neighbouring breakpoint, in points, a dragged breakpoint
+/// snaps to it (the automation editing spec, R3).
+pub(crate) const NEIGHBOUR_GRAB: f64 = 6.0;
+
+/// How close to the envelope's line, in points, a click counts as on it:
+/// on it, it adds a breakpoint; near it, it selects the segment (the
+/// automation editing spec, R4).
+pub(crate) const SEGMENT_ON: f32 = 1.0;
+
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
@@ -63,7 +72,7 @@ fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value
 /// A track's automation lane on screen: its rectangle, the parameter it
 /// shows, and the mapping between the parameter's values and the lane's
 /// vertical axis.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Lane<'a> {
     pub doc: &'a Document,
     pub track: TrackId,
@@ -71,6 +80,11 @@ pub(super) struct Lane<'a> {
     pub rect: Rect,
     pub horizontal: Horizontal,
     pub scale: LaneScale,
+    /// The breakpoints that are selected in this lane (the automation
+    /// editing spec, R2).
+    pub selected: Vec<Ticks>,
+    /// The time selection covering the lane, if any (R4).
+    pub span: Option<(Ticks, Ticks)>,
 }
 
 impl Lane<'_> {
@@ -105,6 +119,12 @@ impl Lane<'_> {
             self.rect.left() + self.horizontal.x(point.at) as f32,
             self.y_of_value(point.value),
         )
+    }
+
+    /// How far a point is from the envelope's line, if it is near it.
+    pub(super) fn segment_distance(&self, pos: Pos2) -> Option<f32> {
+        let value = self.envelope()?.value_at(self.at(pos))?;
+        Some((self.y_of_value(value) - pos.y).abs())
     }
 
     /// What is under a point: a breakpoint, a segment, or the background.
@@ -185,7 +205,14 @@ impl Lanes<'_> {
             target,
             rect: lane_rect(row, self.rect, self.scroll_y),
             horizontal: self.horizontal,
-            scale: lane_scale(shell, self.doc, target),
+            scale: travel(self.doc, shell.devices(), target),
+            selected: selected_breakpoints(self.doc, self.view, row.track, target),
+            span: self.view.time_selection().filter(|_| {
+                self.view
+                    .time_selection_lanes()
+                    .iter()
+                    .any(|lane| lane.track() == row.track && lane.target() == Some(target))
+            }),
         })
     }
 
@@ -209,117 +236,6 @@ impl Lanes<'_> {
         }
         self.lane(row, shell)
     }
-}
-
-/// How a parameter's values map onto its lane's vertical axis: the axis Live
-/// draws it on, so a fader's useful range isn't squashed.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum LaneScale {
-    /// A track's volume fader, which is dB-like: [`mixer_controls`]'s travel.
-    Volume,
-    /// A send level, whose travel matches the faders'.
-    Send,
-    /// Pan, from −1 to 1.
-    Pan,
-    /// A switch or radio button, whose axis is discrete (0 or 1).
-    Switch,
-    /// A stepped macro, whose axis is discrete, its steps (macros spec, R22).
-    Steps { steps: u8 },
-    /// A device parameter, from its descriptor's low value to its high one.
-    Linear { min: f64, max: f64 },
-}
-
-impl LaneScale {
-    /// Where a value sits on the axis, from 0 (the bottom) to 1 (the top).
-    pub(crate) fn position(self, value: f64) -> f64 {
-        let t = match self {
-            Self::Volume => mixer_controls::fader_position(value),
-            Self::Send => mixer_controls::send_position(value),
-            Self::Pan => (value + 1.0) / 2.0,
-            Self::Switch => value,
-            Self::Steps { .. } => value,
-            Self::Linear { min, max } => {
-                if max > min {
-                    (value - min) / (max - min)
-                } else {
-                    0.5
-                }
-            }
-        };
-        t.clamp(0.0, 1.0)
-    }
-
-    /// The value at a place on the axis, from 0 (the bottom) to 1 (the top).
-    pub(crate) fn value(self, t: f64) -> f64 {
-        let t = t.clamp(0.0, 1.0);
-        match self {
-            Self::Volume => mixer_controls::fader_gain(t),
-            Self::Send => mixer_controls::send_level(t),
-            Self::Pan => t * 2.0 - 1.0,
-            Self::Switch => t.round(),
-            // Spec: macros R22. A stepped macro's lane has a stepped axis.
-            Self::Steps { steps } => bl_model::macro_step_position(steps, t),
-            Self::Linear { min, max } => min + (max - min) * t,
-        }
-    }
-}
-
-/// The scale a parameter's lane draws on.
-pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget) -> LaneScale {
-    match target {
-        AutomationTarget::Mixer {
-            param: MixerParam::Volume,
-        }
-        | AutomationTarget::Chain {
-            param: MixerParam::Volume,
-            ..
-        } => LaneScale::Volume,
-        AutomationTarget::Mixer {
-            param: MixerParam::Pan | MixerParam::SplitLeft | MixerParam::SplitRight,
-        }
-        | AutomationTarget::Chain {
-            param: MixerParam::Pan | MixerParam::SplitLeft | MixerParam::SplitRight,
-            ..
-        } => LaneScale::Pan,
-        AutomationTarget::Mixer {
-            param: MixerParam::Mute,
-        }
-        | AutomationTarget::Chain {
-            param: MixerParam::Mute,
-            ..
-        } => LaneScale::Switch,
-        AutomationTarget::Send { .. } | AutomationTarget::ChainSend { .. } => LaneScale::Send,
-        AutomationTarget::Device { device, param } => {
-            // Spec: macros R22. A stepped macro's lane has a stepped axis.
-            if let Some(steps) = macro_steps(doc, device, param) {
-                return LaneScale::Steps { steps };
-            }
-            let range = doc
-                .device(device)
-                .and_then(|device| shell.devices().description(&device.kind))
-                .and_then(|description| description.param(param))
-                .map(|descriptor| (descriptor.min(), descriptor.max()));
-            match range {
-                Some((min, max)) => LaneScale::Linear { min, max },
-                None => LaneScale::Linear { min: 0.0, max: 1.0 },
-            }
-        }
-        AutomationTarget::MidiCc { .. }
-        | AutomationTarget::MidiPitchBend
-        | AutomationTarget::MidiChannelPressure => {
-            let (min, max) = target.midi_range().unwrap_or((0.0, 127.0));
-            LaneScale::Linear { min, max }
-        }
-    }
-}
-
-/// The number of steps a stepped macro of `device` takes, if `param` is one
-/// (macros spec, R22).
-fn macro_steps(doc: &Document, device: DeviceId, param: ParamId) -> Option<u8> {
-    let number = bl_model::macro_number(param)?;
-    let rack = doc.device(device)?;
-    let setting = rack.macros.setting(number);
-    setting.is_stepped().then_some(setting.steps)
 }
 
 /// The device chooser's options: the track mixer, each device in the track's
@@ -558,15 +474,22 @@ pub(crate) fn mark_controls(
 }
 
 /// A drag on an automation lane.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum LaneDrag {
-    /// Dragging a breakpoint to another position and value.
+    /// Dragging breakpoints to another position and value: the ones that
+    /// are selected move together.
     Breakpoint {
         target: AutomationTarget,
-        /// Where it was when the drag began.
-        at: Ticks,
-        /// The value it had then, for finer (Shift) moves.
+        /// The breakpoints that move: the selected ones, or the one that
+        /// was grabbed.
+        at: Vec<Ticks>,
+        /// Where the grabbed one was when the drag began.
+        grabbed: Ticks,
+        /// The value the grabbed one had then, for finer (Shift) moves.
         value: f64,
+        /// The positions of the envelope's other breakpoints, which the
+        /// drag snaps to (S-ENV-006's neighbours).
+        neighbours: Vec<Ticks>,
         /// Where the pointer went down.
         pointer: Pos2,
         rect: Rect,
@@ -591,21 +514,42 @@ pub(super) struct AutomationGestures {
 }
 
 impl AutomationGestures {
-    /// A press at `press` in a lane: on a breakpoint it drags it, and with
-    /// Option/Alt on a segment it curves the segment. Returns whether it
-    /// took the press; anywhere else the lanes' other gestures apply.
+    /// A press at `press` in a lane: on a breakpoint it drags it, with the
+    /// selected breakpoints moving with it, and with Option/Alt on a segment
+    /// it curves the segment. Returns whether it took the press; anywhere
+    /// else the lanes' other gestures apply.
     pub fn begin(&mut self, lane: &Lane<'_>, press: Pos2, modifiers: Modifiers) -> bool {
         match lane.hit(press) {
             LaneHit::Breakpoint(at) => {
+                let grabbed = at;
                 let value = lane
                     .envelope()
                     .and_then(|envelope| envelope.point(at))
                     .map_or(0.0, |point| point.value);
+                // Spec: automation-editing R2. Dragging a selected
+                // breakpoint moves every selected breakpoint with it.
+                let at = if lane.selected.contains(&at) && !lane.selected.is_empty() {
+                    lane.selected.clone()
+                } else {
+                    vec![at]
+                };
+                let neighbours: Vec<Ticks> = lane
+                    .envelope()
+                    .map(|envelope| {
+                        envelope
+                            .points()
+                            .filter(|point| !at.contains(&point.at))
+                            .map(|point| point.at)
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 self.lane = Some(lane.track);
                 self.drag = Some(LaneDrag::Breakpoint {
                     target: lane.target,
                     at,
+                    grabbed,
                     value,
+                    neighbours,
                     pointer: press,
                     rect: lane.rect,
                     scale: lane.scale,
@@ -626,6 +570,55 @@ impl AutomationGestures {
                 });
                 true
             }
+            // Spec: automation-editing R4. Dragging a segment moves its two
+            // breakpoints, or the stretch of envelope the time selection
+            // covers when the segment lies inside it.
+            LaneHit::Segment(at) => {
+                let mut at = if lane.selected.contains(&at) {
+                    lane.selected.clone()
+                } else {
+                    vec![at]
+                };
+                // Spec: automation-editing R4. A segment inside the time
+                // selection gets breakpoints at the selection's edges, which
+                // move with it.
+                if let Some((start, end)) = lane.span
+                    && at.first().is_some_and(|at| *at >= start && *at < end)
+                {
+                    for edge in [start, end] {
+                        if !at.contains(&edge) {
+                            at.push(edge);
+                        }
+                    }
+                }
+                let value = lane
+                    .envelope()
+                    .and_then(|envelope| envelope.point(at[0]))
+                    .map_or(0.0, |point| point.value);
+                let neighbours: Vec<Ticks> = lane
+                    .envelope()
+                    .map(|envelope| {
+                        envelope
+                            .points()
+                            .filter(|point| !at.contains(&point.at))
+                            .map(|point| point.at)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let grabbed = at[0];
+                self.lane = Some(lane.track);
+                self.drag = Some(LaneDrag::Breakpoint {
+                    target: lane.target,
+                    at,
+                    grabbed,
+                    value,
+                    neighbours,
+                    pointer: press,
+                    rect: lane.rect,
+                    scale: lane.scale,
+                });
+                true
+            }
             _ => false,
         }
     }
@@ -640,35 +633,67 @@ impl AutomationGestures {
         modifiers: Modifiers,
     ) -> Option<(&'static str, Value)> {
         let track = self.lane?;
-        match self.drag? {
+        match self.drag.as_ref()? {
             LaneDrag::Breakpoint {
                 target,
                 at,
-                value,
+                grabbed,
+                value: old_value,
+                neighbours,
                 pointer: from,
                 rect,
                 scale,
             } => {
                 let by = horizontal.at(f64::from(pointer.x - rect.left()))
                     - horizontal.at(f64::from(from.x - rect.left()));
+                // Spec: automation-editing R3. Shift keeps the drag to the
+                // axis it started along, and makes a vertical one finer.
+                let vertical =
+                    modifiers.shift && (pointer.y - from.y).abs() > (pointer.x - from.x).abs();
+                let by = if vertical { Ticks::ZERO } else { by };
                 // S-ENV-006: Cmd (Alt on Windows) bypasses grid snapping.
                 let invert = if cfg!(target_os = "macos") {
                     modifiers.mac_cmd
                 } else {
                     modifiers.alt
                 };
-                let to = view.snap_drag(doc, at + by, invert);
+                let snapped = view.snap_drag(doc, *grabbed + by, invert);
+                // Spec: automation-editing R3. The drag snaps to the
+                // positions of the breakpoints next to it.
+                let to = if vertical {
+                    *grabbed
+                } else {
+                    neighbours
+                        .iter()
+                        .map(|at| (*at, (horizontal.x(*at) - horizontal.x(snapped)).abs()))
+                        .filter(|(_, away)| *away <= NEIGHBOUR_GRAB)
+                        .min_by(|(_, away), (_, other)| away.total_cmp(other))
+                        .map_or(snapped, |(at, _)| at)
+                };
                 let t = ((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0);
                 let raw = scale.value(f64::from(t));
-                // S-ENV-002: Shift drags the value in finer steps.
-                let value = if modifiers.shift {
-                    value + (raw - value) * FINE_VALUE
+                // S-ENV-002: Shift drags the value in finer steps. A Shift
+                // drag along the time axis keeps the value where it was.
+                let value = if vertical {
+                    *old_value + (raw - *old_value) * FINE_VALUE
+                } else if modifiers.shift {
+                    *old_value
                 } else {
                     raw
                 };
+                // Spec: automation-editing R2. Every breakpoint that moves
+                // goes by the same time and the same share of the
+                // parameter's travel.
+                let share = scale.position(value) - scale.position(*old_value);
                 Some((
-                    "automation.move_breakpoint",
-                    json!({ "track": track, "target": target, "at": at, "to": to, "value": value }),
+                    "automation.move_breakpoints",
+                    json!({
+                        "track": track,
+                        "target": target,
+                        "at": at,
+                        "by": to - *grabbed,
+                        "share": share,
+                    }),
                 ))
             }
             LaneDrag::Curve {
@@ -757,7 +782,19 @@ impl AutomationGestures {
             }
             // With Option/Alt held the segment is being curved, not clicked.
             LaneHit::Segment(_) if modifiers.alt => false,
-            LaneHit::Segment(_) => {
+            LaneHit::Segment(at) => {
+                // Spec: automation-editing R4. Clicking near a segment but
+                // not on it, or Shift-clicking on it, selects the segment:
+                // its two breakpoints.
+                let on = lane.segment_distance(pos).unwrap_or(0.0) <= SEGMENT_ON;
+                if !on || modifiers.shift {
+                    invoke(
+                        events,
+                        "automation.select_segment",
+                        json!({ "track": lane.track, "target": lane.target, "at": at }),
+                    );
+                    return true;
+                }
                 // Spec: S3. A new breakpoint on the line keeps its shape.
                 let at = click_at(view, doc, lane, pos, modifiers);
                 let value = lane
@@ -865,13 +902,20 @@ pub(super) fn paint_envelope(painter: &Painter, lane: &Lane<'_>, theme: &Theme) 
         ));
     }
     for point in envelope.points() {
+        // Spec: automation-editing R2. A selected breakpoint is drawn in
+        // the selection colour.
+        let selected = lane.selected.contains(&point.at);
         painter.rect_filled(
             Rect::from_center_size(
                 lane.point_pos(point),
                 vec2(BREAKPOINT_SIZE, BREAKPOINT_SIZE),
             ),
             0.0,
-            theme.colors.text.0,
+            if selected {
+                theme.colors.time_selection.0
+            } else {
+                theme.colors.text.0
+            },
         );
     }
 }

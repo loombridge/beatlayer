@@ -296,6 +296,12 @@ impl MainWindowUi {
         &self.browser
     }
 
+    /// The Device View, to read what it drew.
+    #[must_use]
+    pub fn devices(&self) -> &crate::device_view::DeviceViewUi {
+        &self.devices
+    }
+
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
     /// to a text field (the control bar transport spec, R10). The same while
@@ -351,6 +357,11 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameLocator(locator) => {
+                // Spec: time-editing R8. Rename types the name in the
+                // scrub area.
+                crate::arrangement::start_rename(ctx, *locator);
+            }
             Effect::MoveFocus {
                 backwards,
                 neighbor,

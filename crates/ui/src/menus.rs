@@ -67,7 +67,10 @@ pub fn item_state_in(
         invocation: None,
     };
     match item.action {
-        Action::Command(id) => resolved(id, json!({}), keymap.chord_for_command(id, platform)),
+        Action::Command(id) => {
+            let id = shell.menu_command(id);
+            resolved(id, json!({}), keymap.chord_for_command(id, platform))
+        }
         Action::Shortcut(shortcuts) => {
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
             shortcuts
@@ -75,7 +78,10 @@ pub fn item_state_in(
                 .find_map(|shortcut| keymap.command_for(shortcut, contexts))
                 .map_or_else(
                     || inert(chord),
-                    |command| resolved(&command.id, Value::Object(command.args.clone()), chord),
+                    |command| {
+                        let id = shell.menu_command(&command.id);
+                        resolved(id, Value::Object(command.args.clone()), chord)
+                    },
                 )
         }
         Action::Choice(id, args) => {
@@ -357,8 +363,34 @@ pub(crate) fn item(
     )
 }
 
-/// [`item`] with `contexts` as the ones that apply ([`item_state_in`]).
-pub(crate) fn item_in(
+/// [`item`] with the arguments the invocation runs with replaced, for an
+/// item whose arguments depend on where its menu was opened: the scrub
+/// area's Add Locator adds one where the area was right-clicked (the time
+/// editing spec, R3).
+pub(crate) fn item_with_args(
+    ui: &mut Ui,
+    item: &MenuItem,
+    shell: &Shell,
+    keymap: &Keymap,
+    platform: Platform,
+    events: &mut Vec<UiEvent>,
+    args: Value,
+) -> egui::Response {
+    item_in_with_args(
+        ui,
+        item,
+        shell,
+        keymap,
+        platform,
+        &shell.active_contexts(),
+        events,
+        Some(args),
+    )
+}
+
+/// [`item_in`] with the arguments the invocation runs with replaced.
+#[expect(clippy::too_many_arguments, reason = "the item's inputs")]
+pub(crate) fn item_in_with_args(
     ui: &mut Ui,
     item: &MenuItem,
     shell: &Shell,
@@ -366,8 +398,12 @@ pub(crate) fn item_in(
     platform: Platform,
     contexts: &[Context],
     events: &mut Vec<UiEvent>,
+    args: Option<Value>,
 ) -> egui::Response {
-    let state = item_state_in(item, shell, keymap, platform, contexts);
+    let mut state = item_state_in(item, shell, keymap, platform, contexts);
+    if let (Some(args), Some(invocation)) = (args, state.invocation.as_mut()) {
+        invocation.args = args;
+    }
     let mut text = state.label.clone();
     if state.checked == Some(true) {
         text = format!("✔ {text}");
@@ -385,4 +421,17 @@ pub(crate) fn item_in(
         ui.close();
     }
     response
+}
+
+/// [`item`] with `contexts` as the ones that apply ([`item_state_in`]).
+pub(crate) fn item_in(
+    ui: &mut Ui,
+    item: &MenuItem,
+    shell: &Shell,
+    keymap: &Keymap,
+    platform: Platform,
+    contexts: &[Context],
+    events: &mut Vec<UiEvent>,
+) -> egui::Response {
+    item_in_with_args(ui, item, shell, keymap, platform, contexts, events, None)
 }
